@@ -1,0 +1,6 @@
+# The Command Line Tools on this Mac ship the macOS 27 SDK, whose system library stubs their own
+# linker can't read. Link against the 26.5 SDK instead. An SDKROOT already set in the environment
+# (for example once Xcode 26 is installed) takes precedence.
+[env]
+SDKROOT = { value = "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk", force = false }
+MACOSX_DEPLOYMENT_TARGET = { value = "26.0", force = false }

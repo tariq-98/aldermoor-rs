@@ -1,0 +1,9 @@
+[package]
+name = "world"
+description = "The shape of the land: terrain, water, paths and obstacles. Shared by the simulation and the renderer."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+glam.workspace = true

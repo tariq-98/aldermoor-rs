@@ -1,7 +1,12 @@
 [package]
 name = "sim"
+description = "The deterministic game world: units, movement, monsters and fighting, stepped 60 times a second."
 edition.workspace = true
 version.workspace = true
 publish.workspace = true
 
 [dependencies]
+bevy_ecs.workspace = true
+glam.workspace = true
+world.workspace = true
+protocol.workspace = true

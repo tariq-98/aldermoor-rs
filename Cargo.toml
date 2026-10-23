@@ -9,6 +9,17 @@ edition = "2024"
 version = "0.1.0"
 publish = false
 
+[workspace.dependencies]
+glam = { version = "0.34", features = ["serde"] }
+bevy_ecs = { version = "0.20", default-features = false, features = ["std", "multi_threaded"] }
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+crossbeam-channel = "0.5"
+world = { path = "crates/world" }
+sim = { path = "crates/sim" }
+protocol = { path = "crates/protocol" }
+server = { path = "crates/server" }
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
