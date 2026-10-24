@@ -21,7 +21,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import env, export, review, scene as sc, shapes as sh  # noqa: E402
+from aldermoor_art import env, export, golem, review, scene as sc, sdf, shapes as sh  # noqa: E402
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 ONLY = next((a.split("=", 1)[1].split(",") for a in ARGS if a.startswith("--only=")), None)
@@ -594,14 +594,25 @@ def bush(seed):
 # --- Rocks and plants -------------------------------------------------------------------------------
 
 def rock(seed, scale=(1.3, 1.0, 0.8), moss=0.0):
-    rockm = env.surface("rock")[0]
-    ob = lump("rock", (0, 0, 0.45), 1.0, rockm, seed, scale=scale, rough=0.32, subdiv=4, flat_bottom=0.45)
-
-    def fn(co, n):
-        k = 0.85 + 0.15 * max(0.0, n.z)
-        g = moss * max(0.0, n.z - 0.55) / 0.45
-        return k * (1 - 0.55 * g), k * (1 - 0.1 * g), k * (1 - 0.7 * g)
-    env.shade(ob, fn)
+    """A boulder sunk into the ground: hewn faces, weathering and cracks (the golem's stones,
+    bigger), painted with its own mottled stone, lichen and, if `moss`, moss on top."""
+    rx, ry, rz = scale
+    cz = rz * 0.42
+    field, _ = golem.stone((0, -ry, cz), (0, ry, cz), rx, seed, flat=rz / rx, cuts=5, crack=1.0, lump=0.04, warp=0.07,
+                           depth=(0.72, 0.9))
+    field = sdf.Intersect(field, sdf.Plane((0, 0, -0.1), (0, 0, -1)))
+    ob = sdf.mesh(field, 0.012, "rock", relax_iters=3)
+    tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
+    if tris > 3600:
+        dec = ob.modifiers.new("decimate", "DECIMATE")
+        dec.ratio = 3600 / tris
+        sc.activate(ob)
+        bpy.ops.object.modifier_apply(modifier=dec.name)
+    for p in ob.data.polygons:
+        p.use_smooth = True
+    ob.data.set_sharp_from_angle(angle=math.radians(40))
+    golem.paint(ob, [], env.TEX, f"rock_{seed}", size=1024, seed=seed, base=(0.2, 0.193, 0.18), moss_amount=moss, ground=0.0,
+                lichen_amount=0.45, streaks=1.0)
     return [ob]
 
 
@@ -871,7 +882,7 @@ for _k in range(2):
 for _k in range(2):
     prop(f"bush.{_k + 1}", "Bush", "plant", wind=True)(lambda k=_k: bush(21 + k))
 for _k, _scale in enumerate(((1.3, 1.0, 0.8), (1.0, 1.1, 0.7), (1.6, 0.9, 0.5), (0.8, 0.7, 0.9))):
-    prop(f"rock.{_k + 1}", "Rock", "rock")(lambda k=_k, s=_scale: rock(70 + k, s, moss=0.8 if k % 2 == 0 else 0.0))
+    prop(f"rock.{_k + 1}", "Rock", "rock")(lambda k=_k, s=_scale: rock(70 + k, s, moss=0.9 if k % 2 == 0 else 0.25))
 for _k in range(3):
     prop(f"grass.{_k + 1}", "Grass", "grass", wind=True)(lambda k=_k: grass(90 + k, blades=7 + 3 * k))
 for _k, _col in enumerate(((0.9, 0.88, 0.8), (0.85, 0.3, 0.25), (0.55, 0.45, 0.85), (0.95, 0.75, 0.2))):

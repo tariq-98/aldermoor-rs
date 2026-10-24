@@ -208,32 +208,32 @@
    "label": "Rock",
    "kind": "rock",
    "file": "environment/rock.1.gltf",
-   "height": 1.486,
-   "triangles": 1280
+   "height": 1.164,
+   "triangles": 3598
   },
   {
    "id": "rock.2",
    "label": "Rock",
    "kind": "rock",
    "file": "environment/rock.2.gltf",
-   "height": 1.169,
-   "triangles": 1280
+   "height": 1.013,
+   "triangles": 3592
   },
   {
    "id": "rock.3",
    "label": "Rock",
    "kind": "rock",
    "file": "environment/rock.3.gltf",
-   "height": 1.046,
-   "triangles": 1280
+   "height": 0.695,
+   "triangles": 3592
   },
   {
    "id": "rock.4",
    "label": "Rock",
    "kind": "rock",
    "file": "environment/rock.4.gltf",
-   "height": 1.393,
-   "triangles": 1280
+   "height": 1.259,
+   "triangles": 3596
   },
   {
    "id": "shed",

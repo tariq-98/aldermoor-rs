@@ -21,10 +21,7 @@
 	"materials":[
 		{
 			"doubleSided":true,
-			"extras":{
-				"metres":2.5
-			},
-			"name":"env.rock",
+			"name":"stone.rock_71",
 			"normalTexture":{
 				"index":0
 			},
@@ -33,7 +30,7 @@
 					"index":1
 				},
 				"metallicFactor":0,
-				"roughnessFactor":0.8999999761581421
+				"roughnessFactor":0.8799999952316284
 			}
 		}
 	],
@@ -45,10 +42,9 @@
 					"attributes":{
 						"POSITION":0,
 						"NORMAL":1,
-						"TEXCOORD_0":2,
-						"COLOR_0":3
+						"TEXCOORD_0":2
 					},
-					"indices":4,
+					"indices":3,
 					"material":0
 				}
 			]
@@ -66,87 +62,75 @@
 	],
 	"images":[
 		{
-			"mimeType":"image/png",
-			"name":"rock_normal.png",
-			"uri":"textures/rock_normal.png"
+			"mimeType":"image/jpeg",
+			"name":"rock_71_normal.jpg",
+			"uri":"textures/rock_71_normal.jpg"
 		},
 		{
 			"mimeType":"image/jpeg",
-			"name":"rock_color.jpg",
-			"uri":"textures/rock_color.jpg"
+			"name":"rock_71_color.jpg",
+			"uri":"textures/rock_71_color.jpg"
 		}
 	],
 	"accessors":[
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":2036,
+			"count":3970,
 			"max":[
-				1.0258865356445312,
-				1.1686339378356934,
-				1.1774814128875732
+				0.985009491443634,
+				1.0133917331695557,
+				1.0818109512329102
 			],
 			"min":[
-				-1.148736596107483,
-				-0.04047560691833496,
-				-1.1641442775726318
+				-1.0138760805130005,
+				-0.10020648688077927,
+				-1.0057649612426758
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":2036,
+			"count":3970,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":2036,
+			"count":3970,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
-			"componentType":5126,
-			"count":2036,
-			"type":"VEC3"
-		},
-		{
-			"bufferView":4,
 			"componentType":5123,
-			"count":3840,
+			"count":10776,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":24432,
+			"byteLength":47640,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":24432,
-			"byteOffset":24432,
+			"byteLength":47640,
+			"byteOffset":47640,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":16288,
-			"byteOffset":48864,
+			"byteLength":31760,
+			"byteOffset":95280,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":24432,
-			"byteOffset":65152,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":7680,
-			"byteOffset":89584,
+			"byteLength":21552,
+			"byteOffset":127040,
 			"target":34963
 		}
 	],
@@ -158,7 +142,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":97264,
+			"byteLength":148592,
 			"uri":"rock.2.bin"
 		}
 	]

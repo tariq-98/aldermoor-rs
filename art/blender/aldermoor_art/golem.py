@@ -38,7 +38,7 @@ GLYPHS = [
 ]
 
 
-def stone(a, b, r, seed, flat=0.9, cuts=7, crack=1.0, lump=0.045, warp=0.1):
+def stone(a, b, r, seed, flat=0.9, cuts=7, crack=1.0, lump=0.045, warp=0.1, depth=(0.6, 0.82)):
     """A hewn, weathered stone from a to b, about r thick. Returns (field, (centre, frame, radii))."""
     a, b = np.asarray(a, float), np.asarray(b, float)
     axis = b - a
@@ -52,7 +52,7 @@ def stone(a, b, r, seed, flat=0.9, cuts=7, crack=1.0, lump=0.045, warp=0.1):
         n = rng.normal(size=3)
         n /= np.linalg.norm(n)
         ext = math.sqrt(float((((R.T @ n) * rad) ** 2).sum()))
-        shape = sdf.Intersect(shape, sdf.Plane(c + n * ext * rng.uniform(0.6, 0.82), n), k=0.018 * r)
+        shape = sdf.Intersect(shape, sdf.Plane(c + n * ext * rng.uniform(*depth), n), k=0.018 * r)
     s0, s1, s2 = (int(x) for x in rng.integers(1, 9999, size=3))
 
     def detail(p):
@@ -193,13 +193,16 @@ def unwrap(ob):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
-def paint(body, glowing, out_dir, stem, size=2048, seed=4):
-    """UVs and one material for all the stones: colour, a normal map and an emissive map.
+def paint(body, glowing, out_dir, stem, size=2048, seed=4, base=(0.16, 0.152, 0.14), moss_amount=1.0, ground=None,
+          lichen_amount=1.0, streaks=0.0):
+    """UVs and one material for all the stones: colour, a normal map and, if anything glows,
+    an emissive map. Scenery rocks use it too, with no glow and darker, damper stone near
+    `ground` (a height).
 
     `glowing` lists grooves to light: [(a, b, radius, intensity)] in the body's rest pose.
     """
     unwrap(body)
-    m = bpy.data.materials.new(f"golem.{stem}")
+    m = bpy.data.materials.new(f"stone.{stem}")
     m.use_nodes = True
     body.data.materials.clear()
     body.data.materials.append(m)
@@ -211,20 +214,27 @@ def paint(body, glowing, out_dir, stem, size=2048, seed=4):
     strata = np.sin(q @ np.array((0.25, 0.1, 0.96)) / 0.03 + 5 * (fur.fbm(q, 0.2, seed + 2, octaves=2) - 0.5))
     grain = fur.value_noise(q, 0.0035, seed + 3) - 0.5
     grit = fur.value_noise(q, 0.0012, seed + 4) - 0.5
-    col = np.array((0.16, 0.152, 0.14))[None, :] * (1 + 0.5 * mott + 0.08 * strata + 0.25 * grain + 0.14 * grit)[:, None]
+    col = np.array(base)[None, :] * (1 + 0.5 * mott + 0.08 * strata + 0.25 * grain + 0.14 * grit)[:, None]
     col *= 1 + warm[:, None] * np.array((0.16, 0.02, -0.14))[None, :]
     # Lichen: pale crusts on the sides and tops.
-    lichen = fur.ramp(0.62, 0.68, fur.fbm(q, 0.04, seed + 5, octaves=3)) * fur.ramp(-0.4, 0.2, N[:, 2])
+    lichen = fur.ramp(0.62 + 0.08 * (1 - lichen_amount), 0.68 + 0.08 * (1 - lichen_amount), fur.fbm(q, 0.04, seed + 5, octaves=3))
+    lichen = lichen * fur.ramp(-0.4, 0.2, N[:, 2]) * min(1.0, lichen_amount * 1.5)
     col += (np.array((0.36, 0.35, 0.24))[None, :] * (1 + 0.2 * grain)[:, None] - col) * (lichen * 0.85)[:, None]
+    # Rain streaks: darker runs down the steeper faces.
+    if streaks:
+        run = fur.fbm(q * np.array((1.0, 1.0, 0.12)), 0.035, seed + 11, octaves=3)
+        col *= (1 - streaks * 0.3 * fur.ramp(0.52, 0.68, run) * fur.ramp(0.8, 0.35, np.abs(N[:, 2])))[:, None]
     # Moss: on what faces up and in the hollows, broken up.
     up = fur.ramp(0.2, 0.75, N[:, 2] + 0.4 * (fur.fbm(q, 0.07, seed + 6, octaves=3) - 0.5))
     hollow = fur.ramp(0.72, 0.42, ao)
-    moss = np.clip(np.maximum(up, hollow * 0.7) * fur.ramp(0.36, 0.56, fur.fbm(q, 0.11, seed + 7, octaves=3)), 0, 1)
+    moss = np.clip(np.maximum(up, hollow * 0.7) * fur.ramp(0.36, 0.56, fur.fbm(q, 0.11, seed + 7, octaves=3)), 0, 1) * moss_amount
     tint = fur.fbm(q, 0.05, seed + 8, octaves=2)
     mcol = np.array((0.05, 0.1, 0.02))[None, :] * (1 - tint[:, None]) + np.array((0.12, 0.15, 0.035))[None, :] * tint[:, None]
     mcol = mcol * (1 + 0.6 * grit)[:, None]
     col += (mcol - col) * moss[:, None]
     col *= (0.45 + 0.55 * ao)[:, None]
+    if ground is not None:
+        col *= (1 - 0.4 * fur.ramp(ground + 0.25, ground, q[:, 2] + 0.06 * (fur.fbm(q, 0.1, seed + 10, octaves=2) - 0.5)))[:, None]
     # The runes and cracks: dark grooves that glow.
     glow = _glow(q, glowing, max(w for _, _, w, _ in glowing) * 3) if glowing else np.zeros(len(q))
     col *= (1 - 0.85 * np.clip(glow * 1.5, 0, 1))[:, None]
@@ -236,7 +246,6 @@ def paint(body, glowing, out_dir, stem, size=2048, seed=4):
     out_dir = Path(out_dir)
     col_img = fur.save_rgb(mt._linear_to_srgb(np.clip(fur.bleed(gb.image(col), gb.mask, 10), 0, 1)), out_dir / f"{stem}_color.jpg", "sRGB")
     nrm_img = fur.save_rgb(fur.normal_map(gb, height, 0.004), out_dir / f"{stem}_normal.jpg", "Non-Color")
-    emi_img = fur.save_rgb(mt._linear_to_srgb(np.clip(fur.bleed(gb.image(emit), gb.mask, 10), 0, 1)), out_dir / f"{stem}_emissive.jpg", "sRGB")
     nt = m.node_tree
     bsdf = nt.nodes["Principled BSDF"]
     t = nt.nodes.new("ShaderNodeTexImage")
@@ -247,9 +256,11 @@ def paint(body, glowing, out_dir, stem, size=2048, seed=4):
     nm = nt.nodes.new("ShaderNodeNormalMap")
     nt.links.new(tn.outputs["Color"], nm.inputs["Color"])
     nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
-    te = nt.nodes.new("ShaderNodeTexImage")
-    te.image = emi_img
-    nt.links.new(te.outputs["Color"], bsdf.inputs["Emission Color"])
-    bsdf.inputs["Emission Strength"].default_value = 4.0
+    if glowing:
+        emi_img = fur.save_rgb(mt._linear_to_srgb(np.clip(fur.bleed(gb.image(emit), gb.mask, 10), 0, 1)), out_dir / f"{stem}_emissive.jpg", "sRGB")
+        te = nt.nodes.new("ShaderNodeTexImage")
+        te.image = emi_img
+        nt.links.new(te.outputs["Color"], bsdf.inputs["Emission Color"])
+        bsdf.inputs["Emission Strength"].default_value = 4.0
     bsdf.inputs["Roughness"].default_value = 0.88
     return m

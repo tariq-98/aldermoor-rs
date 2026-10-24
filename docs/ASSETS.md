@@ -276,9 +276,12 @@ same kit the Swift village used, remade at the characters' quality.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
 - **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
-  thatch, clay tiles, cobbles, bark, rock, foliage, needles), each a colour map and a normal
-  map, with UVs in metres, so samplers repeat. `COLOR_0` multiplies the base colour, as glTF
-  says: grime at the foot of walls, shade under the eaves, canopies darker inside.
+  thatch, clay tiles, cobbles, bark, foliage, needles), each a colour map and a normal map,
+  with UVs in metres, so samplers repeat. `COLOR_0` multiplies the base colour, as glTF says:
+  grime at the foot of walls, shade under the eaves, canopies darker inside. Rocks are the
+  exception: each boulder is painted on its own (`rock_<n>_color.jpg` and `_normal.jpg`:
+  mottled stone, lichen, moss, rain streaks, damp at the ground), from the stone fields the
+  golem uses.
 - **Wind:** swaying meshes carry `_WIND` (glTF `_WIND`; three.js `_wind`), 0 where the plant
   is rooted and 1 at its tips. The workshop moves each vertex along the wind by
   `_WIND × strength × (gust + flutter) × 0.12 m`, phased by world position (`scenery.js`).

@@ -21,10 +21,7 @@
 	"materials":[
 		{
 			"doubleSided":true,
-			"extras":{
-				"metres":2.5
-			},
-			"name":"env.rock",
+			"name":"stone.rock_70",
 			"normalTexture":{
 				"index":0
 			},
@@ -33,7 +30,7 @@
 					"index":1
 				},
 				"metallicFactor":0,
-				"roughnessFactor":0.8999999761581421
+				"roughnessFactor":0.8799999952316284
 			}
 		}
 	],
@@ -45,10 +42,9 @@
 					"attributes":{
 						"POSITION":0,
 						"NORMAL":1,
-						"TEXCOORD_0":2,
-						"COLOR_0":3
+						"TEXCOORD_0":2
 					},
-					"indices":4,
+					"indices":3,
 					"material":0
 				}
 			]
@@ -66,87 +62,75 @@
 	],
 	"images":[
 		{
-			"mimeType":"image/png",
-			"name":"rock_normal.png",
-			"uri":"textures/rock_normal.png"
+			"mimeType":"image/jpeg",
+			"name":"rock_70_normal.jpg",
+			"uri":"textures/rock_70_normal.jpg"
 		},
 		{
 			"mimeType":"image/jpeg",
-			"name":"rock_color.jpg",
-			"uri":"textures/rock_color.jpg"
+			"name":"rock_70_color.jpg",
+			"uri":"textures/rock_70_color.jpg"
 		}
 	],
 	"accessors":[
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":1397,
+			"count":2966,
 			"max":[
-				1.4584569931030273,
-				1.5008658170700073,
-				1.1052320003509521
+				1.1797070503234863,
+				1.1717928647994995,
+				1.0279494524002075
 			],
 			"min":[
-				-1.3823426961898804,
-				-0.06506246328353882,
-				-1.1110422611236572
+				-1.2307624816894531,
+				-0.09999926388263702,
+				-0.9468214511871338
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":1397,
+			"count":2966,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":1397,
+			"count":2966,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
-			"componentType":5126,
-			"count":1397,
-			"type":"VEC3"
-		},
-		{
-			"bufferView":4,
 			"componentType":5123,
-			"count":1920,
+			"count":5370,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":16764,
+			"byteLength":35592,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":16764,
-			"byteOffset":16764,
+			"byteLength":35592,
+			"byteOffset":35592,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":11176,
-			"byteOffset":33528,
+			"byteLength":23728,
+			"byteOffset":71184,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":16764,
-			"byteOffset":44704,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":3840,
-			"byteOffset":61468,
+			"byteLength":10740,
+			"byteOffset":94912,
 			"target":34963
 		}
 	],
@@ -158,7 +142,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":65308,
+			"byteLength":105652,
 			"uri":"rock.1.lod1.bin"
 		}
 	]
