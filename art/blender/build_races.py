@@ -19,7 +19,7 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import cloth, export, fox, races as rc, regions as rg, review, scene as sc  # noqa: E402
+from aldermoor_art import beard, cloth, export, fox, races as rc, regions as rg, review, scene as sc, shapes as sh  # noqa: E402
 
 OUT = sc.OUT / "humanoid"
 CAT_PATH = sc.OUT / "catalog" / "humanoid.json"
@@ -49,23 +49,6 @@ def gl(v):
 
 def rel(p):
     return str(Path(p).relative_to(sc.OUT))
-
-
-def dwarven_beard(beard):
-    """Stretches a beard below the chin into a long, broad dwarven one."""
-    me = beard.data
-    mw = beard.matrix_world
-    inv = mw.inverted()
-    zs = [(mw @ v.co).z for v in me.vertices]
-    lo, hi = min(zs), max(zs)
-    chin = lo + 0.45 * (hi - lo)
-    for v in me.vertices:
-        p = mw @ v.co
-        if p.z < chin:
-            d = chin - p.z
-            p = Vector((p.x * (1 + 0.6 * d / (chin - lo + 1e-6)), p.y - 0.25 * d, chin - d * 3.2))
-            v.co = inv @ p
-    me.update()
 
 
 def build(race_id, race, frame, cat):
@@ -124,13 +107,16 @@ def build(race_id, race, frame, cat):
         extra["springs"] = dict(FOX_TAIL_SPRINGS, chains=[fox.TAIL])
     extra_hair = []
     if race_id == "dwarf":
-        src = hair["beard.full"][0]
-        beard = src.copy()
-        beard.data = src.data.copy()
-        bpy.context.scene.collection.objects.link(beard)
-        dwarven_beard(beard)
-        beard.name = "beard.dwarven"
-        hair["beard.dwarven"] = [beard]
+        # Grown from this face: locks over the cheeks, chin and lip, two braids with bronze rings.
+        ref = hair["beard.full"][0].data.materials[0].get("reference", [0.28, 0.285, 0.275])
+        field, lines, rings, face = beard.build(body, eyes)
+        ob = beard.mesh(field, face)
+        beard.paint(ob, lines, OUT / "textures", f"beard_dwarven_{frame}", ref)
+        metal = sh.join([beard.ring(c, axis, face.s) for c, axis in rings], "beard_rings")
+        for m in (ob, metal):
+            beard.weights(m, skel, face)
+            sc.bind(m, skel)
+        hair["beard.dwarven"] = [ob, metal]
         extra_hair.append("beard.dwarven")
     # Export: the body, every outfit piece and every hairstyle.
     files = {"body": rel(export.piece(OUT / bt / "body.gltf", [skel, body, eyes] + body_parts, sockets=True))}

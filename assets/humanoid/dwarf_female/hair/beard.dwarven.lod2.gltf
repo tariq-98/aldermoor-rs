@@ -8,7 +8,7 @@
 		{
 			"name":"Scene",
 			"nodes":[
-				66
+				67
 			]
 		}
 	],
@@ -1267,8 +1267,14 @@
 			"skin":0
 		},
 		{
+			"mesh":1,
+			"name":"beard_rings.001",
+			"skin":0
+		},
+		{
 			"children":[
 				65,
+				66,
 				64
 			],
 			"name":"skeleton"
@@ -1285,7 +1291,7 @@
 					0.27488067746162415
 				]
 			},
-			"name":"hair.Hair_Beard.001",
+			"name":"hair.beard_dwarven_female",
 			"normalTexture":{
 				"index":0
 			},
@@ -1293,13 +1299,27 @@
 				"baseColorTexture":{
 					"index":1
 				},
-				"metallicFactor":0
+				"metallicFactor":0,
+				"roughnessFactor":0.6200000047683716
+			}
+		},
+		{
+			"doubleSided":true,
+			"name":"gear.brass",
+			"pbrMetallicRoughness":{
+				"baseColorFactor":[
+					0.7799999713897705,
+					0.550000011920929,
+					0.2199999988079071,
+					1
+				],
+				"roughnessFactor":0.3499999940395355
 			}
 		}
 	],
 	"meshes":[
 		{
-			"name":"Plane.009",
+			"name":"beard.dwarven.002",
 			"primitives":[
 				{
 					"attributes":{
@@ -1311,6 +1331,21 @@
 					},
 					"indices":5,
 					"material":0
+				}
+			]
+		},
+		{
+			"name":"beard_rings.002",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":7,
+						"NORMAL":8,
+						"JOINTS_0":9,
+						"WEIGHTS_0":10
+					},
+					"indices":11,
+					"material":1
 				}
 			]
 		}
@@ -1327,14 +1362,14 @@
 	],
 	"images":[
 		{
-			"mimeType":"image/png",
-			"name":"T_Hair_1_Normal.png",
-			"uri":"../../textures/T_Hair_1_Normal.png"
+			"mimeType":"image/jpeg",
+			"name":"beard_dwarven_female_normal.jpg",
+			"uri":"../../textures/beard_dwarven_female_normal.jpg"
 		},
 		{
 			"mimeType":"image/jpeg",
-			"name":"T_Hair_1_BaseColor_Detail.jpg",
-			"uri":"../../textures/T_Hair_1_BaseColor_Detail.jpg"
+			"name":"beard_dwarven_female_detail.jpg",
+			"uri":"../../textures/beard_dwarven_female_detail.jpg"
 		}
 	],
 	"skins":[
@@ -1414,47 +1449,47 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":182,
+			"count":8438,
 			"max":[
-				0.08595497161149979,
-				1.3282808065414429,
-				0.10564956814050674
+				0.10578049719333649,
+				1.339206337928772,
+				0.1814212203025818
 			],
 			"min":[
-				-0.08359842002391815,
-				1.040230393409729,
-				-0.010910598561167717
+				-0.10145265609025955,
+				0.81663978099823,
+				-0.019298018887639046
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":182,
+			"count":8438,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":182,
+			"count":8438,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5121,
-			"count":182,
+			"count":8438,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":4,
 			"componentType":5126,
-			"count":182,
+			"count":8438,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":5,
 			"componentType":5123,
-			"count":618,
+			"count":14106,
 			"type":"SCALAR"
 		},
 		{
@@ -1462,49 +1497,119 @@
 			"componentType":5126,
 			"count":65,
 			"type":"MAT4"
+		},
+		{
+			"bufferView":7,
+			"componentType":5126,
+			"count":128,
+			"max":[
+				0.03652907907962799,
+				1.093938946723938,
+				0.17887356877326965
+			],
+			"min":[
+				-0.03807038813829422,
+				0.969251275062561,
+				0.13329853117465973
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":8,
+			"componentType":5126,
+			"count":128,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":9,
+			"componentType":5121,
+			"count":128,
+			"type":"VEC4"
+		},
+		{
+			"bufferView":10,
+			"componentType":5126,
+			"count":128,
+			"type":"VEC4"
+		},
+		{
+			"bufferView":11,
+			"componentType":5123,
+			"count":768,
+			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":2184,
+			"byteLength":101256,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2184,
-			"byteOffset":2184,
+			"byteLength":101256,
+			"byteOffset":101256,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1456,
-			"byteOffset":4368,
+			"byteLength":67504,
+			"byteOffset":202512,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":728,
-			"byteOffset":5824,
+			"byteLength":33752,
+			"byteOffset":270016,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2912,
-			"byteOffset":6552,
+			"byteLength":135008,
+			"byteOffset":303768,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1236,
-			"byteOffset":9464,
+			"byteLength":28212,
+			"byteOffset":438776,
 			"target":34963
 		},
 		{
 			"buffer":0,
 			"byteLength":4160,
-			"byteOffset":10700
+			"byteOffset":466988
+		},
+		{
+			"buffer":0,
+			"byteLength":1536,
+			"byteOffset":471148,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":1536,
+			"byteOffset":472684,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":512,
+			"byteOffset":474220,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":2048,
+			"byteOffset":474732,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":1536,
+			"byteOffset":476780,
+			"target":34963
 		}
 	],
 	"samplers":[
@@ -1515,7 +1620,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":14860,
+			"byteLength":478316,
 			"uri":"beard.dwarven.lod2.bin"
 		}
 	]

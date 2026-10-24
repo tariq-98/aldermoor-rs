@@ -356,7 +356,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 |---|---|---|
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
 | `build_clips.py` | The clip library: the 84 vendor clips plus our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
-| `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`) | `humanoid/<race>_<frame>/` |
+| `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`); the dwarven beard, grown as locks from each dwarf's face into two braids with bronze rings (`aldermoor_art/beard.py`) | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig. The golem's hewn stones are fields (`aldermoor_art/golem.py`) painted with lichen, moss and glowing runes | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
 | `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
@@ -385,7 +385,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Area | Contents |
 |---|---|
 | Body types | Human, elf, dwarf, foxfolk and goblin, each on a broad and a slender frame; skeleton warrior, the Barrow King (boss) and stone golem |
-| Appearance | 8 skin tones, 4 goblin greens and 5 fox furs (red fox, ember, sand, silver, arctic), 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard; 16 dyes |
+| Appearance | 8 skin tones, 4 goblin greens and 5 fox furs (red fox, ember, sand, silver, arctic), 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a braided dwarven beard; 16 dyes |
 | Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron (two colourways each); mage's, gravecaller's and sunward robes; belted tunic; traveller's coat; smith's apron; wizard's and straw hats. Each garment has a `dye` mask: R for the main cloth, G for the trim |
 | Plate | Cuirass with faulds, pauldrons, gauntlets, leg plates, nasal helm, kettle hat |
 | Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow and longbow (drawable strings, nocked arrows) and quiver; all with baked surface detail |

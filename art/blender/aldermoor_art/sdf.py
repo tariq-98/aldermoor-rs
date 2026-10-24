@@ -156,7 +156,9 @@ class Union(Node):
         if self._bounds is None:
             bs = [c.bounds() for c in self.children]
             self._child_bounds = bs
-            self._bounds = (np.min([b[0] for b in bs], axis=0), np.max([b[1] for b in bs], axis=0))
+            self._lo = np.array([b[0] for b in bs])
+            self._hi = np.array([b[1] for b in bs])
+            self._bounds = (self._lo.min(axis=0), self._hi.max(axis=0))
         return self._bounds
 
     def __call__(self, p):
@@ -164,10 +166,10 @@ class Union(Node):
         pad = self.k + MARGIN
         self.bounds()
         plo, phi = p.min(axis=0), p.max(axis=0)
-        for c, (lo, hi) in zip(self.children, self._child_bounds):
-            # Children nowhere near these points are skipped without testing each point.
-            if np.any(hi + pad < plo) or np.any(lo - pad > phi):
-                continue
+        # Children nowhere near these points are skipped without testing each point.
+        near = np.nonzero(np.all(self._hi + pad >= plo, axis=1) & np.all(self._lo - pad <= phi, axis=1))[0]
+        for i in near:
+            c, (lo, hi) = self.children[i], self._child_bounds[i]
             m = np.all((p >= lo - pad) & (p <= hi + pad), axis=-1)
             if not m.any():
                 continue
@@ -274,21 +276,44 @@ class Displace(Node):
         return self.child(p) - self.fn(p)
 
 
-MARGIN = 0.03
+# How far past its bounds a part is still evaluated: its blend radius plus this. Values only
+# need to be exact within a voxel or two of the surface; elsewhere the sign is enough.
+MARGIN = 0.012
 
 
-def evaluate(shape, lo, hi, step):
-    """The field on a grid from lo to hi: (values[nx, ny, nz], origin)."""
+def _evaluate_parts(u, lo, n, step):
+    """A union of many small parts, each evaluated only on the patch of grid round it."""
+    out = np.full(tuple(n), BIG, np.float32)
+    pad = u.k + MARGIN
+    u.bounds()
+    for c, (clo, chi) in zip(u.children, u._child_bounds):
+        i0 = np.clip(np.floor((clo - pad - lo) / step).astype(int), 0, n)
+        i1 = np.clip(np.ceil((chi + pad - lo) / step).astype(int) + 1, 0, n)
+        if np.any(i1 <= i0):
+            continue
+        axes = [lo[k] + np.arange(i0[k], i1[k]) * step for k in range(3)]
+        P = np.stack(np.meshgrid(*axes, indexing="ij"), -1)
+        sl = tuple(slice(i0[k], i1[k]) for k in range(3))
+        out[sl] = smin(out[sl], c(P.reshape(-1, 3)).reshape(P.shape[:-1]), u.k)
+    return out
+
+
+def evaluate(shape, lo, hi, step, block=40):
+    """The field on a grid from lo to hi: (values[nx, ny, nz], origin). Taken in cubes of
+    `block` points a side, so each cube only meets the parts of the shape near it; a union of
+    many small parts goes part by part instead."""
     lo, hi = _v(lo), _v(hi)
     n = np.ceil((hi - lo) / step).astype(int) + 1
-    xs = lo[0] + np.arange(n[0]) * step
-    zs = lo[2] + np.arange(n[2]) * step
+    if isinstance(shape, Union) and len(shape.children) > 200:
+        return _evaluate_parts(shape, lo, n, step), lo
+    axes = [lo[k] + np.arange(n[k]) * step for k in range(3)]
     out = np.empty(tuple(n), np.float32)
-    slab = max(1, 400000 // (n[0] * n[2]))
-    for j0 in range(0, n[1], slab):
-        ys = lo[1] + np.arange(j0, min(n[1], j0 + slab)) * step
-        P = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1)
-        out[:, j0:j0 + len(ys), :] = shape(P.reshape(-1, 3)).reshape(P.shape[:-1])
+    for i0 in range(0, n[0], block):
+        for j0 in range(0, n[1], block):
+            for k0 in range(0, n[2], block):
+                xs, ys, zs = axes[0][i0:i0 + block], axes[1][j0:j0 + block], axes[2][k0:k0 + block]
+                P = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1)
+                out[i0:i0 + len(xs), j0:j0 + len(ys), k0:k0 + len(zs)] = shape(P.reshape(-1, 3)).reshape(P.shape[:-1])
     return out, lo
 
 
@@ -359,11 +384,25 @@ def _neighbours(quads):
     return e
 
 
-def sample(shape, pts, chunk=30000):
-    """The field at scattered points, taken in slices along y so unions can skip far children."""
+def _morton(c):
+    """Z-order codes of non-negative integer cells (N, 3), up to 1024 a side."""
+    c = (c - c.min(axis=0)).astype(np.uint64) & np.uint64(0x3FF)
+
+    def spread(v):
+        v = (v | (v << np.uint64(16))) & np.uint64(0x030000FF)
+        v = (v | (v << np.uint64(8))) & np.uint64(0x0300F00F)
+        v = (v | (v << np.uint64(4))) & np.uint64(0x030C30C3)
+        return (v | (v << np.uint64(2))) & np.uint64(0x09249249)
+
+    return spread(c[:, 0]) | (spread(c[:, 1]) << np.uint64(1)) | (spread(c[:, 2]) << np.uint64(2))
+
+
+def sample(shape, pts, chunk=8192, cell=0.02):
+    """The field at scattered points, taken in compact clumps (Z-order) so unions can skip far
+    children."""
     if len(pts) <= chunk:
         return shape(pts)
-    order = np.argsort(pts[:, 1], kind="stable")
+    order = np.argsort(_morton(np.floor(pts / cell).astype(np.int64)), kind="stable")
     out = np.empty(len(pts))
     for i in range(0, len(pts), chunk):
         idx = order[i:i + chunk]
