@@ -168,7 +168,7 @@ relative to `assets/`. Positions are glTF (metres, +Y up, +Z forward).
 | `dyes` | The dye palette: `id`, `label` and `linear` RGB |
 | `body_types.<id>` | `label`, `file` (the body with the skeleton and sockets), `pelvis`, `height`, `skin_reference`, `sockets`, `colliders` (cloth capsules: `bone`, `radius`, and ends `a` and `b` in the bone's node frame) |
 | `defaults.<body type>` | A starting look: pieces, hair, brows, beard, tone and hair colour |
-| `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`; our own clips add `source: "authored"`, and may add `upper_body`, `curves` and `events`: see "Clips, curves and events") |
+| `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`; our own clips add `source: "authored"` and cut ones `source: "cut"`; clips may add `upper_body`, `curves` and `events`: see "Clips, curves and events") |
 | `hair[]` | `id`, `kind` (`hair`, `beard` or `brows`), `label`, and `files.<body type>` |
 | `pieces[]` | `id`, `slot`, `layer`, `label`, `files.<body type>`, `hides.<body type>`, `covers_hair`, `coverage` (diagnostic), and for dyeable pieces `dye` and `dye_channels`. `source` names the build that owns the piece; `idle` names the clip to stand in while it's worn |
 | `texture_variants`, `texture_variant_labels` | Base texture name mapped to its alternatives, and display names for each colourway |
@@ -206,7 +206,8 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 
 ## Clips, curves and events
 
-The library is the Universal Animation Library's 84 clips plus 29 of our own, built by
+The library is the Universal Animation Library's 84 clips, one swing cut from them, and 29 of
+our own, built by
 `art/blender/build_clips.py`. Ours are keyed in code on the broad frame's skeleton: each pose
 places the item and the hands follow their sockets, so on that body every grip is exact.
 
@@ -237,6 +238,14 @@ later key wins. `assets::curve` implements this, and the workshop's `perform.js`
 **Events** mark moments: `grab` (the item moves to the hand), `stow` (it moves back to where it
 rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands) and `cast` (a
 spell leaves).
+
+Every attack clip says when its blow lands, so a clip can be timed to strike when the
+simulation resolves the blow (CONTRACT.md, "Poses to animation"). Ours are authored; the
+vendor's are measured (`art/blender/measure_strikes.py`: a slash lands at the swinging hand's
+fastest, a punch or a shield bash at full stretch) and set in `build_clips.py`'s
+`VENDOR_EVENTS`. Combos land several times (`Sword_Regular_Combo` three, `Sword_Heavy_Combo`
+four), so `Sword_Overhead` is the heavy combo's last blow cut on its own (`source: "cut"`,
+landing at 0.3 s), for a one-handed overhead.
 
 **Off-hand IK.** Clips play on bodies with other proportions, so the off hand drifts off
 two-handed items. While `off_hand` > 0, find where the clip puts that hand's socket, measure
@@ -419,7 +428,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Script | Builds | Writes |
 |---|---|---|
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
-| `build_clips.py` | The clip library: the 84 vendor clips plus our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
+| `build_clips.py` | The clip library: the 84 vendor clips (with their strikes measured), a swing cut from one, and our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
 | `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`); the dwarven beard, grown as locks from each dwarf's face into two braids with bronze rings (`aldermoor_art/beard.py`) | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig. The golem's hewn stones are fields (`aldermoor_art/golem.py`) painted with lichen, moss and glowing runes | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |

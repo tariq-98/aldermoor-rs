@@ -105,7 +105,7 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 | Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed. Charging is Run |
 | Jump, Fall | Rising, then falling. A skill's leap or vault is Jump |
 | Dodge | A roll: 0.45 s, about 5 m |
-| Attack | Holds 0.5 s after a blow or a release. A heavy blow's pose starts with its 0.4 s wind-up and runs on unbroken through the blow (0.9 s in all): time the clip so its strike lands when the wind-up ends (the cast bar gives the wind-up) |
+| Attack | Holds 0.5 s after a blow or a release. A heavy blow's pose starts with its 0.4 s wind-up and runs on unbroken through the blow (0.9 s in all): time the clip so its strike lands when the wind-up ends (the cast bar gives the wind-up). Every attack clip marks its strike with a `hit` event, and spells and throws their release with `cast`; combos have one `hit` per blow |
 | Cast | While casting or channelling |
 | Hit | Holds 0.25 s; while thrown by a knockback; 0.5 s when staggered by a parry |
 | Dead | Until respawn. The downed lie as the dead do: check `downed` in the combat view |
@@ -117,7 +117,7 @@ and the held item's `clips` (docs/ASSETS.md):
 |---|---|
 | Slash, Slash2 | The main-hand item's `attacks`, first and second (`Sword_Regular_A`, `B`; `GreatSword_Slash`, `Swing`) |
 | Thrust | `Spear_Thrust` with a spear; otherwise the last of `attacks` (`Sword_Regular_C`, `Melee_Hook`) |
-| Overhead | `GreatSword_Overhead` with a greatsword; otherwise `Sword_Heavy_Combo` |
+| Overhead | `GreatSword_Overhead` with a greatsword; otherwise `Sword_Overhead` (one blow, cut from `Sword_Heavy_Combo`) |
 | Spin | `Sword_Regular_Combo` (a greatsword's `GreatSword_Swing`, looping while channelled) |
 | Bash | The shield's `bash` (`Shield_OneShot`); bare hands `Punch_Jab` |
 | Block | The item's `block` (`Sword_Block`, or the shield's `Idle_Shield_Loop`) on the upper body, held while `guarding` |

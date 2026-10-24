@@ -8691,6 +8691,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.25,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -8736,6 +8742,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.37,
+      "name": "cast"
+     }
     ]
    },
    {
@@ -8808,6 +8820,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.3,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -8817,6 +8835,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9081,6 +9105,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.6,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9249,6 +9279,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.2,
+      "name": "cast"
+     }
     ]
    },
    {
@@ -9361,6 +9397,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.38,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9379,6 +9421,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.32,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9388,6 +9436,24 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.38,
+      "name": "hit"
+     },
+     {
+      "t": 1.17,
+      "name": "hit"
+     },
+     {
+      "t": 1.82,
+      "name": "hit"
+     },
+     {
+      "t": 2.6,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9400,12 +9466,34 @@
     ]
    },
    {
+    "name": "Sword_Overhead",
+    "seconds": 2.033,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ],
+    "source": "cut",
+    "events": [
+     {
+      "t": 0.3,
+      "name": "hit"
+     }
+    ]
+   },
+   {
     "name": "Sword_Regular_A",
     "seconds": 0.433,
     "loop": false,
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.23,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9424,6 +9512,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.25,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9442,6 +9536,12 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.65,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9451,6 +9551,20 @@
     "group": "combat",
     "tags": [
      "combat"
+    ],
+    "events": [
+     {
+      "t": 0.23,
+      "name": "hit"
+     },
+     {
+      "t": 0.72,
+      "name": "hit"
+     },
+     {
+      "t": 1.55,
+      "name": "hit"
+     }
     ]
    },
    {
@@ -9515,6 +9629,12 @@
     "group": "undead",
     "tags": [
      "undead"
+    ],
+    "events": [
+     {
+      "t": 0.58,
+      "name": "hit"
+     }
     ]
    },
    {

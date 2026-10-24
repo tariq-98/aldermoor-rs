@@ -56,6 +56,53 @@ def clip_tags(name):
     return tags or ["idle"]
 
 
+# When the vendor clips' blows land (`hit`) and their spells or thrown weapons leave (`cast`), in
+# seconds, so the game can line a clip's strike up with the moment the simulation resolves it.
+# Measured by art/blender/measure_strikes.py: a slash lands at the swinging hand's fastest; a
+# punch or a shield bash at full stretch. Combos land several times.
+VENDOR_EVENTS = {
+    "Sword_Regular_A": [("hit", 0.23)],
+    "Sword_Regular_B": [("hit", 0.25)],
+    "Sword_Regular_C": [("hit", 0.65)],
+    "Sword_Regular_Combo": [("hit", 0.23), ("hit", 0.72), ("hit", 1.55)],
+    "Sword_Heavy_Combo": [("hit", 0.38), ("hit", 1.17), ("hit", 1.82), ("hit", 2.6)],
+    "Sword_Attack": [("hit", 0.38)],
+    "Sword_Dash": [("hit", 0.32)],
+    "Melee_Hook": [("hit", 0.25)],
+    "Punch_Jab": [("hit", 0.2)],
+    "Punch_Cross": [("hit", 0.3)],
+    "Shield_OneShot": [("hit", 0.6)],
+    "Zombie_Scratch": [("hit", 0.58)],
+    "Spell_Simple_Shoot": [("cast", 0.2)],
+    "OverhandThrow": [("cast", 0.37)],
+}
+
+# Single swings cut out of longer vendor clips: name: (source, start, end or None, events).
+# The heavy combo's last blow is a clean one-handed overhead on its own.
+CUTS = {
+    "Sword_Overhead": ("Sword_Heavy_Combo", 2.3, None, [("hit", 0.3)]),
+}
+
+
+def cut(src, name, start, end=None):
+    """A new clip from part of another, beginning exactly at `start` seconds (the pose there is
+    keyed) and running to `end` or the source's end. The export slides it to zero."""
+    act = src.copy()
+    act.name = name
+    act.use_fake_user = True
+    first, last = act.frame_range
+    f0 = first + start * sc.FPS
+    f1 = first + end * sc.FPS if end is not None else last
+    for fc in fcurves_of(act):
+        for f in (f0, f1):
+            fc.keyframe_points.insert(f, fc.evaluate(f), options={"FAST"})
+        for kp in reversed(list(fc.keyframe_points)):
+            if kp.co.x < f0 - 1e-3 or kp.co.x > f1 + 1e-3:
+                fc.keyframe_points.remove(kp, fast=True)
+        fc.update()
+    return act, round((f1 - f0) / sc.FPS, 3)
+
+
 def fcurves_of(action):
     if getattr(action, "layers", None) and action.layers:
         bag = action.layers[0].strips[0].channelbags
@@ -85,13 +132,21 @@ def vendor_library():
         start, end = action.frame_range
         action.use_fake_user = True
         tags = clip_tags(action.name)
-        clips.append({
+        entry = {
             "name": action.name,
             "seconds": round((end - start) / sc.FPS, 3),
             "loop": "loop" in action.name.lower(),
             "group": tags[0],
             "tags": tags,
-        })
+        }
+        if action.name in VENDOR_EVENTS:
+            entry["events"] = [{"t": t, "name": kind} for kind, t in VENDOR_EVENTS[action.name]]
+        clips.append(entry)
+    for name, (source, start, end, events) in CUTS.items():
+        _, seconds = cut(bpy.data.actions[source], name, start, end)
+        tags = clip_tags(source)
+        clips.append({"name": name, "seconds": seconds, "loop": False, "group": tags[0], "tags": tags,
+                      "source": "cut", "events": [{"t": t, "name": kind} for kind, t in events]})
     return arm, clips
 
 
