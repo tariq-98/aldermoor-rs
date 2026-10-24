@@ -33,6 +33,24 @@ until a coherent draft is reviewed.
   - Direct movement, attacks, aiming, blocking and dodging, with optional target lock and aim
     assistance.
   - Weapon families handle differently: swords are balanced, spears have reach, daggers are quick.
+- **Progression and player skill** (Tariq, 24 October 2026):
+  - **Perks, not talent trees:** at specialty levels 10, 20, 30 and so on you choose one of three
+    perks. Some are passive boosts; others change how an ability works ("Shield Bash interrupts",
+    "Fire Bolt pierces"), and some reward good play ("a well-timed dodge refunds endurance").
+    Perks swap freely at a trainer and are saved with each loadout. Hybrids take perks only from
+    their main specialty.
+  - **Levels carry most of the power, and skill decides close fights**, especially duels between
+    players of similar level. Fights reward:
+    - dodging telegraphed attacks and projectiles (rolls with a brief invulnerability, on
+      limited endurance);
+    - timed blocks and parries (a perfect block staggers the attacker);
+    - interrupting casts;
+    - aiming projectiles and ground attacks, which can miss;
+    - positioning: flanking and attacking from behind, range, line of sight;
+    - spending cooldowns and crowd control well, and breaking out of it.
+  - **Balance target:** within about five levels, the better-played fighter should usually win;
+    ten or more levels apart, the higher level should. Each level of difference is a modest,
+    capped edge, checked by simulated duels between skilled and unskilled fighters.
 - **Magic gear:** two-handed staves, one-handed wands, and off-hand spellbooks and focuses.
   Necromancers get their own recognisable designs.
 - **Necromancy:** controversial in the world, but a necromancer can still be a hero; reputation

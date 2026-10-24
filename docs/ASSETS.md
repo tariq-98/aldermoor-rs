@@ -3,6 +3,13 @@
 Claude builds the art as well as the game (Tariq, 24 October 2026). The requirements come from the
 design interview with Codex, summarised in [DESIGN.md](DESIGN.md). The headline: **everything is
 equipped correctly.**
+
+**Who makes assets:** Claude designs and creates every asset: models, textures, materials,
+animations, effects, terrain, water and sky materials, scenery placement, HUD art, icons and
+the look settings (sun, sky, fog, exposure and grading values). The renderer draws what this
+document describes and never makes, edits or stands in for assets; when a rendering feature
+needs one, the renderer's docs list it as an asset request and Claude supplies it. Texture
+compression is part of the asset build (the `assets` crate).
 - Capes stay on the shoulders.
 - Weapons sit in the hand and in their sheaths.
 - Nothing pokes through anything else.
@@ -271,8 +278,9 @@ same kit the Swift village used, remade at the characters' quality.
   - `landmarks` and `dressing` are fixed props: `at` is (x, z) on the terrain, plus `yaw` and
     `scale`. The landmarks match `world`'s obstacles (the windmill and the shed); dressing
     (market stall, fences, lamps, well, woodpile…) is walked through;
-  - `scatter` lists, by kind, the props the renderer may scatter itself: rocks, grass, flowers,
-    bushes, riverbank reeds and forest pines.
+  - `scatter` lists, by kind, the props for scattering: rocks, grass, flowers, bushes, riverbank
+    reeds and forest pines. Where each one goes comes from Claude with the valley's dressing
+    data (still to do); the renderer draws what it's given and doesn't place things itself.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
 - **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
@@ -412,7 +420,9 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
    - **The kit:** the Peasant and Ranger outfits, light and heavy armour, a cape, a backpack, a
      sword, a shield, a bow and a staff.
    - **What to watch:** every clip, with weapons drawn and stowed, from every angle.
-   - Tariq judges attachment, fit and clipping there before the catalogue grows.
+   - Tariq judges attachment, fit and clipping there before the catalogue grows. He reviewed and
+     approved the art on 24 October 2026 (foxfolk, wolves, golem, dwarven beard, armour, capes,
+     garments and scenery).
 2. **Races:**
    - elves: taller and slimmer, with their own ears;
    - dwarves: shorter and stockier;

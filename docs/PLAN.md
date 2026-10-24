@@ -39,7 +39,10 @@ rendering technique still decides the frame rate. That's why the engine talks to
 7. **Split of work:** one repo.
    - Claude: simulation, gameplay, AI, server, and since 24 October **the art itself**: characters,
      gear, creatures, animation and the asset pipeline. See [ASSETS.md](ASSETS.md).
-   - Codex: renderer and shaders. It reads the asset contract in ASSETS.md.
+   - Codex: renderer and shaders. It reads the asset contract in ASSETS.md and draws what it
+     describes. It doesn't design or create assets (Tariq, 24 October): models, textures,
+     materials, animations, effects, terrain, water and sky materials, scenery placement, HUD
+     art, icons and look settings all come from Claude, and so does texture compression.
    - Shared: the snapshot contract between simulation and renderer, plus automated checks (tests
      and a frame-time benchmark).
 8. **Disk:** at least 30–40 GB free before heavy building starts. Rust build folders grow to tens
@@ -104,8 +107,7 @@ rendering technique still decides the frame rate. That's why the engine talks to
 
 ## Still to decide
 
-- **Talent trees:** the agreed design (specialties trained through use, with hybrid builds)
-  replaces the classes. Their talent trees are dropped unless Tariq wants them back as specialty
-  perks.
+- **Talent trees (settled 24 October):** replaced by specialty perks, with combat where player
+  skill decides close fights. See DESIGN.md, "Progression and player skill".
 - **The world:** settled as deliberately designed regions (DESIGN.md), starting with the
   Brambleford valley. The generated continent is retired.
