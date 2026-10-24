@@ -296,6 +296,58 @@ same kit the Swift village used, remade at the characters' quality.
   `_WIND × strength × (gust + flutter) × 0.12 m`, phased by world position (`scenery.js`).
   Props with `wind: true` have it on every mesh.
 
+## Ground, water, sky and light: `catalog/surfaces.json` and `catalog/look.json`
+
+`build_world.py` paints the valley's ground, river and sky (`aldermoor_art/ground.py`), and
+writes the two files the renderer takes as `--surface-assets` and `--look-settings`
+(`render::surfaces`, `render::settings`). Paths inside are relative to `assets/`.
+
+- **Ground:** four tiling layers in `terrain/`, each a colour map (sRGB JPEG) and a normal map,
+  all 1024 px so they stack into texture arrays:
+
+  | Layer | Metres per tile | Roughness | What |
+  |---|---|---|---|
+  | `grass` | 4 | 0.9 | Lush turf for the valley floor: dense blades in clumps, the odd clover flower |
+  | `meadow` | 5 | 0.92 | Drier straw-and-olive grass with buttercups, daisies and clover |
+  | `earth` | 3.5 | 0.88 | Packed earth for roads, yards and banks: dusty and damp patches, gravel, pebbles |
+  | `limestone` | 6 | 0.82 | Weathered blocks split along fractures, moss in the cracks, lichen, iron staining |
+
+- **Weights** (`terrain/brambleford_weights.png`, 2048 px, linear): the share of each layer
+  in R, G, B and A, in the order above, over `bounds` [−280, −280, 280, 280]: row 0 is the
+  north edge (z = −280) and column 0 the west edge, about 27 cm a texel. They come from the
+  `world` crate's own fields (`crates/world/examples/ground_fields.rs`: height, slope, road
+  distance, the river, the trees and houses), so the earth runs exactly along the game's roads
+  and the village square, and rock shows exactly where the ground is steep:
+  - limestone on slopes steeper than about 30°, a few outcrops on the high tops, and stones in
+    the riverbed;
+  - earth on the roads, the riverbanks, round the houses, under the trees and in bare patches;
+  - meadow on high ground and slopes facing the sun, in patches, along the roads' verges and
+    under the trees; lush grass by the river and everywhere else.
+  The fourth channel is a weight, not transparency: the file is written byte for byte
+  (`aldermoor_art/png.py`), never through an image library that premultiplies alpha.
+- **River:** `water/river_normal.png` (ripples, 6 m a tile), drifting with `flow` (metres a
+  second along x and z), with deep and shallow colours, absorption per metre, roughness,
+  opacity, reflection strength and index of refraction.
+- **Sky:** `sky/brambleford_day.jpg`, 4096 × 2048, equirectangular as the renderer samples it:
+  direction (x, y, z) at u = atan2(z, x) / 2π + ½ and v = acos(y) / π. Fair weather: blue
+  overhead fading to haze at the horizon, the sun's glow and disc, and cumulus lit from the
+  sun's side. The sun in it sits exactly at the look's `sun_direction`.
+- **Light** (`look.json`, linear colours): a warm late-morning sun from the south-east, about
+  38° up (behind the default camera's right shoulder as it looks north over the village); a
+  cool sky-coloured ambient; haze the colour of the horizon; filmic (ACES) tone mapping and an
+  8% saturation lift.
+- **Normal maps** here follow glTF like every other asset: +Y toward the top of the image.
+
+Asks of the renderer, to make the most of these:
+1. Load `catalog/surfaces.json` and `catalog/look.json` by default when they exist (the flags
+   override them), so the game starts in this light without arguments.
+2. Sample the terrain layers triplanar (or blend in side projections where the ground is
+   steep). Projected straight down, the limestone smears down the ledges' faces into vertical
+   streaks.
+3. The tangent frame built from screen derivatives (for meshes without tangents, which
+   includes the terrain and the river) has its bitangent along +v, the opposite of glTF's
+   convention, so those normal maps' green channel comes out inverted. It should be −∂P/∂v.
+
 ## Materials and file details
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM
@@ -376,6 +428,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks and normal maps (the weave, and folds hanging from the waist; capes' from the shoulders) | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig: anatomy as a signed distance field with sculpted locks of fur (`aldermoor_art/wolf.py`, `sdf.py`), painted coats and generated gaits | `creatures/`, `catalog/creatures.json` |
 | `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
+| `build_world.py` | The valley's ground layers and the weights that blend them (from `world`'s own fields, sampled first by `cargo run -p world --release --example ground_fields`), the river's ripples, the sky, and the light | `terrain/`, `water/`, `sky/`, `catalog/surfaces.json`, `catalog/look.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
   share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
@@ -390,6 +443,12 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - both levels of detail beside every file, on the same skeleton;
   - `_REGION` on every skinned piece;
   - that every dressable body type has a fit for every piece;
+  - that no piece costs more than four draws beyond its materials: parts that share a
+    material are joined into one mesh at export (`export.joined`), so the renderer draws plate
+    a material at a time, not a plate at a time;
+  - that the ground, river and sky files exist, the terrain's layers match in size (they stack
+    into texture arrays), the weights are square, the sky is twice as wide as tall, and the
+    light's numbers make sense;
   - that no id or label mentions spiders, arachnids or webs.
 
 ## What exists (24 October 2026)
@@ -406,12 +465,14 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
 | Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile |
+| Ground, water, sky | Lush grass, meadow, packed earth and limestone, blended across the valley by its roads, slopes, river, trees and houses; river ripples; a fair-weather sky; the valley's light (25 October 2026) |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
 **Gaps, next in line:**
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
 - more beasts the way the wolves are made (boars, bears and deer), and hostile humanoid outfits;
-- terrain materials and the dungeon's kit.
+- scenery scatter: where the rocks, grass tufts, flowers, bushes and reeds go;
+- the dungeon's kit.
 
 ## Milestones
 
