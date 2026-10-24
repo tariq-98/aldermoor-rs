@@ -129,6 +129,12 @@ relative to `assets/`. Positions are glTF (metres, +Y up, +Z forward).
 Each entry in `hides.<body type>` maps either `body` or a lower piece's id to the list of regions
 to drop.
 
+Race and creature body types add `race`, `frame`, `gear_scale` (how much to scale held and
+stowed rigid items), and `creature` / `dress` flags. `races.<id>.frames` maps the frame
+choices to body types. The beast catalogue, `assets/catalog/creatures.json`, lists beasts on
+their own rigs: `file` (one glb with mesh, skeleton and clips), `clips` by role (idle, walk,
+run, attack, hit, death, jump, special), `speeds`, and `sim_body` (the simulation's body name).
+
 The gear catalogue, `assets/catalog/gear.json`, follows the same rules. Each item has:
 - `id`, `label`, `family` and `slot` (`main_hand`, `off_hand`, `two_hand`, `back` or `ammo`);
 - `file`: a rigid glTF in the socket convention; skinned items have `files.<body type>` instead;
@@ -147,26 +153,59 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 ## Pipeline
 
 ```sh
-art/fetch_vendor.sh                                   # once: third-party packs into art/vendor/
-art/blender.sh -P art/blender/build_humanoid.py       # bodies, hair, outfits, clips, catalogue
-art/blender.sh -P art/blender/build_gear.py           # weapons, shields, bows, quiver, staff, wand
-art/blender.sh -P art/blender/build_back.py           # capes and the travel pack, per body type
-art/blender.sh -P art/blender/review_humanoid.py      # renders looks from the exported files
-tools/workshop/serve.sh                               # the interactive workshop
+art/fetch_vendor.sh      # once: third-party packs into art/vendor/
+art/build_all.sh         # everything, in dependency order (add --review for review renders)
+cargo test -p assets     # checks every promise the catalogues make
+tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/tools/workshop/
 ```
 
-Add `-- --review` to the gear and back builds for review renders.
+`art/blender.sh` finds Blender 4.5 (`$BLENDER`, then `/Applications`, then the copy in
+`aldermoor-wild/.tools`). The build order:
 
-- `art/blender.sh` finds Blender 4.5: `$BLENDER`, then `/Applications`, then the copy in
-  `aldermoor-wild/.tools`.
-- **Output:** the build writes `.gltf`, `.bin` and a shared `textures/` folder, so the parts of
-  an outfit share their textures. Colour maps are JPEG and data maps PNG, at 2048 px at most.
-- **Review:** `review_humanoid.py` assembles looks the way the game will, then renders them into
-  `art/out/` (ignored by git):
-  - it loads the exported files;
-  - it drops hidden regions;
-  - it applies tints;
-  - it poses the skeleton with library clips.
+| Script | Builds | Writes |
+|---|---|---|
+| `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits, 84 clips | `humanoid/`, `catalog/humanoid.json` |
+| `build_races.py` | Elves, dwarves and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling | `humanoid/<race>_<frame>/` |
+| `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
+| `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
+| `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
+| `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
+| `build_beasts.py` | Wolves on their own four-legged rig, with generated gaits | `creatures/`, `catalog/creatures.json` |
+
+- **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
+  share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
+  single `.glb` files.
+- **Review:** `review_humanoid.py` and the `--review` flags assemble looks the way the game will,
+  from the exported files, and render them into `art/out/` (ignored by git).
+- **Catalogue checks:** `cargo test -p assets` (the `assets` crate) loads every catalogue and
+  checks that each named thing exists:
+  - every file, bone, socket, collider, region, hide target and clip;
+  - `_REGION` on every skinned piece;
+  - that every dressable body type has a fit for every piece;
+  - that no id or label mentions spiders, arachnids or webs.
+
+## What exists (24 October 2026)
+
+| Area | Contents |
+|---|---|
+| Body types | Human, elf, dwarf and goblin, each on a broad and a slender frame; skeleton warrior, the Barrow King (boss) and stone golem |
+| Appearance | 8 skin tones plus 4 goblin greens, 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard |
+| Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron; two colourways each |
+| Plate | Cuirass with faulds, pauldrons, gauntlets, leg plates, nasal helm, kettle hat |
+| Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow, longbow and quiver |
+| Caster gear | Oak, gravecaller's and sunward staves; wand, spellbook and focus orb |
+| Tools | Smith's hammer, hoe, watering can, lantern |
+| Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
+| Beasts | Grey wolf and dire wolf: idle, walk, run, attack, hit, death, jump, howl |
+| Clips | 84 humanoid clips: locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie |
+
+**Gaps, next in line:**
+- clips for archery, two-handed weapons, spears, staves, and drawing and sheathing;
+- robes and more clothing designs, with dye masks;
+- foxfolk;
+- more beasts and hostile humanoid outfits;
+- a material and texture pass on gear;
+- level-of-detail meshes.
 
 ## Milestones
 

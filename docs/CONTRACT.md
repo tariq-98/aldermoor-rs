@@ -50,17 +50,40 @@ along `velocity`. `pose_time` drives animation without guessing.
 
 ## Poses to animation
 
-| Pose | Player clip | Notes |
-|---|---|---|
-| Idle, Walk, Run | Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed |
-| Jump, Fall | Jump | Rising, then falling |
-| Dodge | (roll) | 0.45 s, about 5 m |
-| Attack | (swing) | Holds 0.5 s |
-| Hit | (flinch) | Holds 0.25 s |
-| Dead | (death) | |
+How long each pose lasts in the simulation (the clips themselves are listed per body below):
 
-The rebuilt player has Idle, Walk, Run, Jump and Turn. Roll, swing, flinch and death clips are
-still needed, plus wolf and goblin models.
+| Pose | Timing |
+|---|---|
+| Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed |
+| Jump, Fall | Rising, then falling |
+| Dodge | 0.45 s, about 5 m |
+| Attack | Holds 0.5 s |
+| Hit | Holds 0.25 s |
+| Dead | Until respawn |
+
+## Art for each unit body
+
+Unit `body` names map to the art catalogue (docs/ASSETS.md):
+- `"player"`: a humanoid body type from `assets/catalog/humanoid.json`, dressed in catalogue
+  pieces.
+- `"wolf"`: `wolf.grey` in `assets/catalog/creatures.json`.
+- `"goblin"`: the `goblin_male` / `goblin_female` body types.
+
+Humanoid clips by pose, from `anims.glb`:
+
+| Pose | Clip |
+|---|---|
+| Idle | `Idle_Loop` |
+| Walk | `Walk_Loop` |
+| Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 6 m/s |
+| Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
+| Dodge | `Roll` |
+| Attack | The weapon's `clips.attacks` (e.g. `Sword_Regular_A`, `B`, `C`) |
+| Cast | `Spell_Simple_Shoot` |
+| Hit | `Hit_Chest` |
+| Dead | `Death01` |
+
+Beasts name their clips by role in `clips`.
 
 ## Input the client sends
 
