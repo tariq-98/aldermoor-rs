@@ -38,7 +38,10 @@ scripts/run_client.sh --offscreen --smoke --frames 660 \
   --capture target/render-review/combat.png
 ```
 
-`--assets PATH` selects a catalogue root. Review animation advances at 60 Hz; normal play uses
+`--assets PATH` selects a catalogue root. Its `catalog/look.json` and `catalog/surfaces.json`
+load automatically when present; `--look-settings` and `--surface-assets` override them. Explicit
+missing/invalid files are errors. Missing optional catalogues retain neutral engine defaults.
+Review animation advances at 60 Hz; normal play uses
 snapshot pose and pose time. Fullscreen selects the monitor closest to `--size`; macOS may
 otherwise use the laptop panel even with an ultrawide attached. Capture reads our output texture.
 
@@ -76,8 +79,12 @@ otherwise use the laptop panel even with an ultrawide attached. Capture reads ou
   the supplied families, the supplied bridge, landmarks and dressing. `_WIND` uses the reference
   sway formula; `parts.spin` animates sails around the supplied pivot/axis/RPM. No decorative
   scatter is generated. Building footprints/heights provide expanded camera collision boxes.
-- The old procedural houses/trees and painted ground have been removed. Terrain, river and sky
-  remain plain neutral placeholders until Claude supplies their materials and look values.
+- Terrain, river, sky and lighting use Claude’s supplied catalogues by default. Terrain layers
+  are triplanar, weighted by the geometric normal, with the supplied horizontal layer-control
+  map retaining road/river placement. Normal-map slopes are blended in world space; flat maps
+  preserve the geometric normal. Texture gradients remain explicit when unused projections
+  are skipped. Derivative tangent frames use the requested negative-v bitangent for image-top
+  green normals; explicitly supplied mesh tangents retain their authored handedness.
 - Shared GPU textures and numeric mesh identities reduce duplicate uploads. Decoded image bytes
   are released after upload. Native ASTC KTX2 loading is implemented; actual compressed asset
   validation awaits Claude's build. PNG/JPEG, including embedded GLB images, remain the fallback.
@@ -130,9 +137,9 @@ look preset is generated here. Data definitions live in `crates/render/src/surfa
 
 Terrain layer arrays must share dimensions, format and mip count within each colour/normal
 array. Weights/normal maps are linear. Colour and sky textures are sRGB. Implemented features
-are normal/colour/roughness layer blending, scrolling water normals, depth absorption, Fresnel
-sky reflection and an equirectangular sky. Their asset-dependent visual acceptance awaits the
-supplied inputs. Foam, refractive scene sampling and atmosphere art are not fabricated here.
+are triplanar normal/colour/roughness layer blending, scrolling water normals, depth absorption,
+Fresnel sky reflection and an equirectangular sky. Claude’s delivered inputs now exercise all
+three surface types and the sky radiance prefilter. Foam, refractive scene sampling and atmosphere art are not fabricated here.
 
 ## Earlier baseline measurements (24 October 2026)
 
@@ -307,8 +314,43 @@ The weapon-swap comparison verifies that swaps no longer reset the entire histor
 is also subject to system load. Missing vendor strike markers and supplied surface/effect art
 remain explicit integration requests below.
 
-The supplied terrain/river/sky/look files have not landed in `assets/catalog` during this run.
-Use `--surface-assets FILE --look-settings FILE` when supplied; no replacement assets were made.
+Those earlier measurements preceded the supplied terrain/river/sky/look files. The integration
+below supersedes the earlier neutral-surface captures; no replacement assets were made.
+
+## Supplied valley integration (25 October 2026)
+
+Claude’s `b843117` surface/look commit and `7d27043` material-packing follow-up were available
+on the local `look` branch, while fetched `origin/main` still ended at `c40f44e`. They were merged
+into this checkout without modifying the supplied assets. All three “Asks of the renderer” in
+ASSETS.md are implemented: optional catalogue defaults with explicit flag precedence, triplanar
+terrain, and the negative-v derivative bitangent. The renderer does not choose new look values.
+
+Validation: 40 checks pass (assets 11, client 8, render unit 9, render asset-backed 12), including
+the 60-armoured-character GPU draw after the material-packing change. The new default-selection
+check covers both catalogues, explicit overrides and absent catalogues. The 180-frame client
+capture at 5120×1440/65% loads both default files and completes with Metal API validation.
+Scoped Clippy passes. Review captures are local in `target/render-review/supplied-surfaces.png`;
+`cargo run --release -p render --example review_surfaces --locked` also captures the river and
+limestone ledge from fixed cameras using only supplied scenery/materials.
+
+The final shader skips exactly-zero material weights as well as negligible axis projections.
+A second 180-frame Metal-validated capture (`supplied-surfaces-final.png`) has pixel-identical
+static ground and limestone regions to the first, while avoiding unused layer reads. The fixed
+river/ledge camera reviews and a 60-frame MetalFX capture at 1800×1100/65% also completed
+with Metal API validation. The locked release build
+passes; source assets and look values remain unchanged.
+
+| Supplied scene, 5120×1440/65%, custom TAA, 1 in flight | GPU median / p95 | Completed work median / p95 |
+|---|---:|---:|
+| Before zero-weight layer skip | 20.073 / 22.120 ms | 25.373 / 28.348 ms |
+| Final | **16.500 / 18.378 ms** | **21.482 / 23.747 ms** |
+
+Both runs use 480 frames / 120 warmup, offscreen with API validation disabled. The final run
+misses the 12 ms GPU and 16.667 ms completed-work p95 budgets; it is not display acceptance.
+These measurements include the new material-packed kit, terrain, river, sky and lighting, so
+they cannot isolate triplanar cost against the earlier neutral scene. Sequential runs still
+have system-load noise. Raw reports are `supplied-surfaces-before-skip.json` and
+`supplied-surfaces-final.json` under [benchmarks/2026-10-25](benchmarks/2026-10-25/README.md).
 
 ## Asset requests
 
@@ -322,15 +364,9 @@ not generate substitute scenery, textures, scatter, effects, icons or visual pre
   the corresponding KTX2 path. Existing image decoding remains the fallback until delivered.
   Mapping format: `catalog/textures.json`, `{"textures":{"creatures/wolf.grey.glb#image0":"packed/wolf-grey-colour.ktx2"}}`.
   Map source paths relative to the asset root, use orientation `rd`, and provide full mip chains.
-- **Terrain:** Claude-authored albedo/normal layers, UV scale per layer, layer-weight/control
-  maps and their world bounds, plus any roughness/ORM data. Ground topology continues to use
-  `world::height`; the temporary surface is uniformly neutral.
-- **River:** normal maps, flow direction/speed, absorption/scattering colours, roughness,
-  opacity/depth/fresnel settings and any foam mask/texture with placement/scale data. The
-  river stays uniformly neutral until these arrive.
-- **Sky and look:** sky texture or model/material and the sun direction/colour/intensity,
-  ambient lighting, fog, exposure and grading settings. Renderer defaults are neutral and
-  settings are data driven; no visual preset is authored here.
+- **Delivered terrain, river, sky and look:** `catalog/surfaces.json` and `catalog/look.json`
+  are consumed unchanged. Any later foam or scene-refraction work still needs supplied masks
+  and look parameters; current water uses the delivered normal/absorption/Fresnel inputs.
 - **Dressing/scatter:** explicit placements for rocks, grass, flowers, bushes and reeds. The
   catalogue currently names candidates in `scatter`; the renderer will not choose locations.
 - **HUD:** frame/bar art, ability icons, fonts and layout/style values. Functional controls

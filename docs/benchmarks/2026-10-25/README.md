@@ -28,3 +28,17 @@ in `target/render-review/v4-{taa,metalfx}-final.png` and `v4-aa-comparison.png`.
 wait with two. `PRESENT` uses native presentation timestamps and is the display evidence.
 The harness requires at least 95% of measured frames to have presentation samples. Offscreen
 throughput is not display acceptance. Missing optional art uses neutral engine defaults.
+
+## Supplied surface integration
+
+`supplied-surfaces-before-skip` and `supplied-surfaces-final` use Claude's delivered surface/look
+catalogues and material-packed kit. Both are offscreen, one frame in flight, 480 / 120 frames,
+API validation disabled. The latter skips terrain layers whose weight is exactly zero.
+Static ground and limestone capture regions matched pixel for pixel with the skip enabled.
+Both reports fail the work budgets; no new display-acceptance claim follows from them.
+The harness now records resolved look/surface paths to distinguish these from earlier neutral
+benchmarks. The fixed-camera river/limestone review is:
+
+```sh
+cargo run --release -p render --example review_surfaces --locked
+```

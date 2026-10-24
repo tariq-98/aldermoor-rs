@@ -31,6 +31,28 @@ vertex Vary shadow_vertex(uint id [[vertex_id]],uint instance [[instance_id]],de
 fragment void shadow_fragment(Vary i [[stage_in]],constant Draw* instances [[buffer(2)]],texture2d<float> base [[texture(0)]]){constant Draw& d=instances[i.instance];if(d.flags.z==1){constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear);if(base.sample(s,i.uv).a*d.base.a*i.color.a<d.params.w)discard_fragment();}}
 float sample_cascade(float3 world,uint layer,float bias,constant Frame& f,depth2d_array<float> shadow){float4 clip=f.shadows[layer]*float4(world,1);float3 p=clip.xyz/clip.w;float2 uv=p.xy*float2(0.5,-0.5)+0.5;if(any(uv<0.)||any(uv>1.)||p.z<0.||p.z>1.)return 1.;constexpr sampler cmp(coord::normalized,address::clamp_to_edge,filter::linear,compare_func::less_equal);float v=0.;for(int y=-1;y<=1;y+=2)for(int x=-1;x<=1;x+=2)v+=shadow.sample_compare(cmp,uv+float2(x,y)*0.5*f.splits.w,layer,p.z-bias);return v*0.25;}
 float shadow_visibility(float3 p,float depth,float nl,constant Frame& f,depth2d_array<float> shadow){uint layer=depth<f.splits.x?0:(depth<f.splits.y?1:2);if(depth>f.splits.z)return 1.;float bias=max(0.0001,0.0006*(1.-nl));float v=sample_cascade(p,layer,bias,f,shadow);float end=f.splits[layer];if(layer<2&&depth>end*0.88){float next=sample_cascade(p,layer+1,bias,f,shadow);v=mix(v,next,smoothstep(end*0.88,end,depth));}return v;}
+// World-space triplanar layers retain the supplied horizontal control-map placement.
+// Explicit gradients keep mip selection valid when a negligible projection is skipped.
+struct TerrainSample {float3 colour;float3 perturbation;};
+TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float> normals,
+    float3 position,float3 dx,float3 dy,float3 weights,uint layer,float mip_bias) {
+    constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
+    float2 uv[3]={position.yz,position.xz,position.xy};
+    float2 gx[3]={dx.yz,dx.xz,dx.xy},gy[3]={dy.yz,dy.xz,dy.xy};
+    TerrainSample result={float3(0),float3(0)};
+    for(uint axis=0;axis<3;axis++) {
+        if(weights[axis]<0.001)continue;
+        gradient2d grad(gx[axis]*exp2(mip_bias),gy[axis]*exp2(mip_bias));
+        result.colour+=colour.sample(s,uv[axis],layer,grad).rgb*weights[axis];
+        float3 nm=normals.sample(s,uv[axis],layer,grad).rgb*2.-1.;
+        float2 slope=nm.xy/max(nm.z,0.1);
+        // Green points towards the image top (-v), matching the supplied normal maps.
+        float3 perturb=axis==0?float3(0,slope.x,-slope.y):
+            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x,-slope.y,0));
+        result.perturbation+=perturb*weights[axis];
+    }
+    return result;
+}
 struct SceneOutput{float4 colour [[color(0)]];float4 motion [[color(1)]];};
 fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facing]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],texture2d<float> base [[texture(0)]],texture2d<float> normal [[texture(1)]],texture2d<float> orm [[texture(2)]],texture2d<float> emission [[texture(3)]],texture2d<float> occlusion [[texture(4)]],depth2d_array<float> shadow [[texture(5)]],texture2d<float> dye_mask [[texture(6)]],constant Surfaces& surfaces [[buffer(3)]],texture2d_array<float> terrain_colour [[texture(7)]],texture2d_array<float> terrain_normal [[texture(8)]],texture2d<float> terrain_weights [[texture(9)]],texture2d<float> water_normal [[texture(10)]],texture2d<float> sky_map [[texture(11)]],texture2d<float> sky_reflection [[texture(12)]]){
     constant Draw& d=instances[i.instance];constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
@@ -39,13 +61,42 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
     albedo.rgb=mix(albedo.rgb,paint*d.dyes[0].rgb/max(d.references[0].rgb,float3(0.01)),mask.r*d.dyes[0].w);
     albedo.rgb=mix(albedo.rgb,paint*d.dyes[1].rgb/max(d.references[1].rgb,float3(0.01)),mask.g*d.dyes[1].w);
     float3 surface_normal=float3(0,0,1);float surface_roughness=d.emission.w;
-    if(d.flags.w==1&&surfaces.flags.x>0){float2 uv=clamp((i.world.xz-surfaces.bounds.xy)/(surfaces.bounds.zw-surfaces.bounds.xy),0.,1.);float4 weights=max(terrain_weights.sample(s,uv),float4(0));for(uint layer=surfaces.flags.x;layer<4;layer++)weights[layer]=0.;float sum=dot(weights,float4(1));weights=sum>0.0001?weights/sum:float4(1,0,0,0);albedo.rgb=0.;surface_normal=0.;surface_roughness=0.;for(uint layer=0;layer<surfaces.flags.x;layer++){float2 sample_uv=i.world.xz*surfaces.scales[layer];albedo.rgb+=terrain_colour.sample(s,sample_uv,layer,bias(f.params.z)).rgb*weights[layer];surface_normal+=(terrain_normal.sample(s,sample_uv,layer,bias(f.params.z)).rgb*2.-1.)*weights[layer];surface_roughness+=surfaces.roughness[layer]*weights[layer];}surface_normal=normalize(surface_normal);}
+    bool terrain=d.flags.w==1&&surfaces.flags.x>0;
+    float3 terrain_perturbation=0.;
+    float3 world_dx=dfdx(i.world),world_dy=dfdy(i.world);
+    if(terrain){
+        constexpr sampler control(coord::normalized,address::clamp_to_edge,filter::linear);
+        float2 uv=clamp((i.world.xz-surfaces.bounds.xy)/(surfaces.bounds.zw-surfaces.bounds.xy),0.,1.);
+        float4 weights=max(terrain_weights.sample(control,uv),float4(0));
+        for(uint layer=surfaces.flags.x;layer<4;layer++)weights[layer]=0.;
+        float sum=dot(weights,float4(1));weights=sum>0.0001?weights/sum:float4(1,0,0,0);
+        float3 projections=pow(abs(normalize(i.normal)),float3(4));
+        projections/=max(dot(projections,float3(1)),0.0001);
+        albedo.rgb=0.;surface_roughness=0.;
+        for(uint layer=0;layer<surfaces.flags.x;layer++){
+            if(weights[layer]==0.)continue;
+            TerrainSample sample=terrain_layer(terrain_colour,terrain_normal,
+                i.world*surfaces.scales[layer],world_dx*surfaces.scales[layer],world_dy*surfaces.scales[layer],
+                projections,layer,f.params.z);
+            albedo.rgb+=sample.colour*weights[layer];
+            terrain_perturbation+=sample.perturbation*weights[layer];
+            surface_roughness+=surfaces.roughness[layer]*weights[layer];
+        }
+    }
     if(d.flags.w==2&&surfaces.flags.y>0){float2 uv=(i.world.xz+f.clock.x*surfaces.water_flow.yz)*surfaces.water_flow.x;surface_normal=water_normal.sample(s,uv,bias(f.params.z)).rgb*2.-1.;surface_normal.xy*=surfaces.water_shallow.w;float3 transmission=exp(-surfaces.water_absorption.rgb*max(i.surface.x,0.));albedo.rgb=mix(surfaces.water_deep.rgb,surfaces.water_shallow.rgb,transmission);albedo.a=surfaces.water_deep.w;surface_roughness=surfaces.water_flow.w;}
     albedo*=i.color;if(d.flags.z==1&&albedo.a<d.params.w)discard_fragment();
     float3 n=normalize(i.normal)*(d.morph.w>0.5&&!front?-1.:1.),t=i.tangent.xyz,b;
-    if(dot(t,t)>0.1){t=normalize(t-n*dot(n,t));b=cross(n,t)*i.tangent.w;}else{float3 dx=dfdx(i.world),dy=dfdy(i.world);float2 du=dfdx(i.uv),dv=dfdy(i.uv);float det=du.x*dv.y-du.y*dv.x;if(abs(det)>1e-6){t=normalize((dx*dv.y-dy*du.y)/det);t=normalize(t-n*dot(t,n));b=normalize((-dx*dv.x+dy*du.x)/det);}else{t=normalize(cross(abs(n.y)<0.99?float3(0,1,0):float3(1,0,0),n));b=cross(n,t);}}
+    if(dot(t,t)>0.1){t=normalize(t-n*dot(n,t));b=cross(n,t)*i.tangent.w;}else{float3 dx=dfdx(i.world),dy=dfdy(i.world);float2 du=dfdx(i.uv),dv=dfdy(i.uv);float det=du.x*dv.y-du.y*dv.x;if(abs(det)>1e-6){t=normalize((dx*dv.y-dy*du.y)/det);t=normalize(t-n*dot(t,n));b=normalize((dx*dv.x-dy*du.x)/det);}else{t=normalize(cross(abs(n.y)<0.99?float3(0,1,0):float3(1,0,0),n));b=cross(n,t);}}
     if(!isfinite(t.x)||!isfinite(b.x)){t=normalize(cross(abs(n.y)<0.99?float3(0,1,0):float3(1,0,0),n));b=cross(n,t);}
-    float3 nm=(d.flags.w==1&&surfaces.flags.x>0)||(d.flags.w==2&&surfaces.flags.y>0)?surface_normal:normal.sample(s,i.uv,bias(f.params.z)).xyz*2.-1.;nm.xy*=d.params.y;n=normalize(t*nm.x+b*nm.y+n*nm.z);
+    if(terrain){
+        // Project blended slopes onto the geometric tangent plane. A flat normal map
+        // leaves the mesh normal unchanged, even between projection axes.
+        terrain_perturbation*=d.params.y;
+        n=normalize(n+terrain_perturbation-n*dot(n,terrain_perturbation));
+    }else{
+        float3 nm=d.flags.w==2&&surfaces.flags.y>0?surface_normal:normal.sample(s,i.uv,bias(f.params.z)).xyz*2.-1.;
+        nm.xy*=d.params.y;n=normalize(t*nm.x+b*nm.y+n*nm.z);
+    }
     float3 mr=orm.sample(s,i.uv,bias(f.params.z)).rgb;float rough=max(0.08,surface_roughness*mr.g),metal=d.params.x*mr.b;
     float ao=mix(1.,occlusion.sample(s,i.uv,bias(f.params.z)).r,d.params.z);float3 l=normalize(f.sun.xyz),v=normalize(f.eye.xyz-i.world),h=normalize(l+v);
     float nl=max(dot(n,l),0.),nv=max(dot(n,v),0.001),nh=max(dot(n,h),0.),vh=max(dot(v,h),0.);

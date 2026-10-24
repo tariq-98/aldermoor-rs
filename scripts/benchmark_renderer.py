@@ -53,6 +53,9 @@ gpu = re.search(r'GPU median=([\d.]+)ms p95=([\d.]+)ms samples=(\d+)', r.stdout)
 frame = re.search(r'FRAME median=([\d.]+)ms p95=([\d.]+)ms samples=(\d+) mode=([\w-]+)', r.stdout)
 if not gpu or not frame: sys.exit('Missing GPU or full frame measurements')
 report = dict(capture=a.capture, output=a.size, scale=a.scale, mode=frame[4], aa=a.aa, in_flight=a.in_flight, paced_fps=a.fps, direct_drawable=not a.output_blit, legacy_cpu=a.legacy_cpu, live=a.live, look_churn=a.look_churn, reset_on_look=a.reset_on_look, frame_measure='completed-work' if a.in_flight==1 else 'cpu-encode-and-slot-wait', shared_constants=a.shared_constants, gpu_median_ms=float(gpu[1]), gpu_p95_ms=float(gpu[2]), frame_median_ms=float(frame[1]), frame_p95_ms=float(frame[2]), samples=int(frame[3]), warmup=a.warmup)
+for field, marker in [('look_settings', 'LOOK'), ('surface_assets', 'SURFACES')]:
+    resolved = re.search(r'^' + marker + r' (.+)$', r.stdout, re.MULTILINE)
+    report[field] = str(pathlib.Path(resolved[1]).resolve()) if resolved else None
 resets = re.search(r'HISTORY resets=(\d+)', r.stdout)
 if resets: report['history_resets'] = int(resets[1])
 interval=re.search(r'INTERVAL mean_fps=([\d.]+) p95=([\d.]+)ms',r.stdout)

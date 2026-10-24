@@ -147,7 +147,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -171,8 +171,16 @@ impl Options {
                 .is_none_or(|fps| fps.is_finite() && (1.0..=240.).contains(&fps)),
             "--fps must be 1..240"
         );
+        o.look_settings = catalog_file(&o.assets, "look.json", o.look_settings);
+        o.surface_assets = catalog_file(&o.assets, "surfaces.json", o.surface_assets);
         Ok(o)
     }
+}
+fn catalog_file(root: &std::path::Path, name: &str, explicit: Option<PathBuf>) -> Option<PathBuf> {
+    explicit.or_else(|| {
+        let path = root.join("catalog").join(name);
+        path.is_file().then_some(path)
+    })
 }
 struct Game {
     options: Options,
@@ -977,9 +985,11 @@ impl ApplicationHandler for App {
             r.enable_metalfx(self.game.options.metalfx)?;
             if let Some(path) = &self.game.options.look_settings {
                 r.look = render::settings::LookSettings::load(path)?;
+                eprintln!("LOOK {}", path.display());
             }
             if let Some(path) = &self.game.options.surface_assets {
                 r.load_surface_assets(path, &self.game.options.assets)?;
+                eprintln!("SURFACES {}", path.display());
             }
             self.egui_state = Some(egui_winit::State::new(
                 self.game.hud_context.clone(),
@@ -1180,9 +1190,11 @@ fn main() -> Result<()> {
         renderer.enable_metalfx(game.options.metalfx)?;
         if let Some(path) = &game.options.look_settings {
             renderer.look = render::settings::LookSettings::load(path)?;
+            eprintln!("LOOK {}", path.display());
         }
         if let Some(path) = &game.options.surface_assets {
             renderer.load_surface_assets(path, &game.options.assets)?;
+            eprintln!("SURFACES {}", path.display());
         }
         let mut deadline = Instant::now();
         loop {
@@ -1238,4 +1250,25 @@ fn slot_key(key: KeyCode) -> Option<u8> {
     .iter()
     .position(|k| *k == key)
     .map(|i| i as u8)
+}
+
+#[cfg(test)]
+mod catalog_defaults_tests {
+    use super::*;
+    #[test]
+    fn optional_catalog_defaults_preserve_explicit_overrides() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        for name in ["look.json", "surfaces.json"] {
+            assert_eq!(
+                catalog_file(&root, name, None),
+                Some(root.join("catalog").join(name))
+            );
+            let explicit = PathBuf::from("explicit-missing-file.json");
+            assert_eq!(
+                catalog_file(&root, name, Some(explicit.clone())),
+                Some(explicit)
+            );
+            assert_eq!(catalog_file(&root.join("absent-root"), name, None), None);
+        }
+    }
 }
