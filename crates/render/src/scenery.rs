@@ -1,4 +1,5 @@
-//! Draw only the catalogue's supplied placements. No decorative scatter is generated here.
+use std::sync::Arc;
+// Draw only the catalogue's supplied placements. No decorative scatter is generated here.
 use crate::{
     Camera,
     character::Draw,
@@ -156,7 +157,7 @@ impl Scenery {
                     model: model.clone(),
                     primitive: pi,
                     transform: instance.transform * model.rest_world[p.node],
-                    palette: Vec::new(),
+                    palette: Arc::from([]),
                     hidden: 0,
                     base: p.material.base,
                     morph: [0.; 2],
@@ -183,7 +184,7 @@ impl Scenery {
                         model: model.clone(),
                         primitive: pi,
                         transform: transform * model.rest_world[p.node],
-                        palette: Vec::new(),
+                        palette: Arc::from([]),
                         hidden: 0,
                         base: p.material.base,
                         morph: [0.; 2],

@@ -519,9 +519,21 @@ impl Model {
 #[derive(Default)]
 pub struct ModelCache {
     models: HashMap<PathBuf, Arc<Model>>,
+    metadata: HashMap<PathBuf, Arc<serde_json::Value>>,
     texture_pool: HashMap<String, Arc<Texture>>,
 }
 impl ModelCache {
+    /// Catalogue extensions are immutable for the lifetime of an asset cache.
+    pub fn metadata(&mut self, path: &Path) -> Result<Arc<serde_json::Value>> {
+        if let Some(value) = self.metadata.get(path) {
+            return Ok(value.clone());
+        }
+        let value: Arc<serde_json::Value> =
+            Arc::new(serde_json::from_slice(&std::fs::read(path)?)?);
+        self.metadata.insert(path.to_owned(), value.clone());
+        Ok(value)
+    }
+
     pub fn texture(&mut self, path: &Path) -> Result<Arc<Texture>> {
         let key = path
             .canonicalize()

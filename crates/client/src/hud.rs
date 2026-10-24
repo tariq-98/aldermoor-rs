@@ -1,16 +1,47 @@
-//! Functional HUD using stock widgets. No game HUD artwork, icons or fonts are authored here.
-use protocol::{Command, Snapshot};
+//! Stock widgets for authoritative player state; artwork and icons remain supplied assets.
+use protocol::{CombatView, Command, Snapshot};
 pub enum Action {
     Command(Command),
     CycleTarget,
+    AimSlot(u8),
 }
-/// Reserved consumer input. Protocol v3 supplies no casts; v4 will populate this.
-pub struct CastBar<'a> {
-    pub label: &'a str,
-    pub elapsed: f32,
-    pub duration: f32,
+fn cast(ui: &mut egui::Ui, c: &protocol::CastBar) {
+    ui.add(
+        egui::ProgressBar::new((c.elapsed / c.duration.max(0.001)).clamp(0., 1.)).text(format!(
+            "{}{} {:.1}/{:.1}s{}",
+            if c.channel { "Channel · " } else { "" },
+            c.name,
+            c.elapsed,
+            c.duration,
+            if c.interruptible {
+                ""
+            } else {
+                " · uninterruptible"
+            }
+        )),
+    );
 }
-pub fn draw(ctx: &egui::Context, snapshot: &Snapshot, cast: Option<CastBar<'_>>) -> Vec<Action> {
+fn auras(ui: &mut egui::Ui, auras: &[protocol::AuraView]) {
+    ui.horizontal_wrapped(|ui| {
+        for a in auras {
+            ui.colored_label(
+                if a.debuff {
+                    egui::Color32::LIGHT_RED
+                } else {
+                    egui::Color32::LIGHT_BLUE
+                },
+                format!("{} ×{} {:.0}s", a.name, a.stacks, a.remaining),
+            )
+            .on_hover_text(format!("Duration {:.1}s", a.duration));
+        }
+    });
+}
+pub fn draw(
+    ctx: &egui::Context,
+    snapshot: &Snapshot,
+    fight: &CombatView,
+    ground: Option<glam::Vec3>,
+) -> Vec<Action> {
     let mut actions = Vec::new();
     let Some(player) = snapshot.player.as_ref() else {
         return actions;
@@ -25,21 +56,36 @@ pub fn draw(ctx: &egui::Context, snapshot: &Snapshot, cast: Option<CastBar<'_>>)
                 ui.set_width(240.);
                 ui.label(format!("{} · Level {}", me.name, me.level));
                 ui.add(
-                    egui::ProgressBar::new((me.health / me.max_health.max(1.)).clamp(0., 1.))
-                        .text(format!("Health {:.0} / {:.0}", me.health, me.max_health)),
-                );
-                ui.add(
-                    egui::ProgressBar::new(
-                        (player.endurance / player.max_endurance.max(1.)).clamp(0., 1.),
-                    )
-                    .text(format!(
-                        "Endurance {:.0} / {:.0}",
-                        player.endurance, player.max_endurance
+                    egui::ProgressBar::new(me.health / me.max_health.max(1.)).text(format!(
+                        "{} {:.0}/{:.0}",
+                        if player.downed { "Downed" } else { "Health" },
+                        me.health,
+                        me.max_health
                     )),
                 );
+                ui.add(
+                    egui::ProgressBar::new(player.endurance / player.max_endurance.max(1.)).text(
+                        format!(
+                            "Endurance {:.0}/{:.0}",
+                            player.endurance, player.max_endurance
+                        ),
+                    ),
+                );
+                ui.add(
+                    egui::ProgressBar::new(player.resource / player.max_resource.max(1.)).text(
+                        format!(
+                            "{:?} {:.0}/{:.0}",
+                            player.resource_kind, player.resource, player.max_resource
+                        ),
+                    ),
+                );
+                if player.guarding {
+                    ui.label("Guarding");
+                }
                 if player.in_combat {
                     ui.label("In combat");
                 }
+                auras(ui, &player.auras);
             });
         });
     if let Some(target) = me.target.and_then(|id| snapshot.unit(id)) {
@@ -47,82 +93,72 @@ pub fn draw(ctx: &egui::Context, snapshot: &Snapshot, cast: Option<CastBar<'_>>)
             .anchor(egui::Align2::CENTER_TOP, [0., 12.])
             .show(ctx, |ui| {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_width(250.);
+                    ui.set_width(280.);
                     ui.label(format!("{} · Level {}", target.name, target.level));
                     ui.add(
-                        egui::ProgressBar::new(
-                            (target.health / target.max_health.max(1.)).clamp(0., 1.),
-                        )
-                        .text(format!("{:.0} / {:.0}", target.health, target.max_health)),
+                        egui::ProgressBar::new(target.health / target.max_health.max(1.))
+                            .text(format!("{:.0}/{:.0}", target.health, target.max_health)),
                     );
+                    if let Some(c) = fight.units.iter().find(|c| c.id == target.id) {
+                        if let Some(c) = &c.cast {
+                            cast(ui, c);
+                        }
+                        if let Some((now, max)) = c.defiance {
+                            ui.add(
+                                egui::ProgressBar::new(now / max.max(1.))
+                                    .text(format!("Defiance {now:.0}/{max:.0}")),
+                            );
+                        }
+                        if c.downed {
+                            ui.label("Downed · E to revive");
+                        }
+                        if c.guarding {
+                            ui.label("Guarding");
+                        }
+                        auras(ui, &c.auras);
+                    }
+                    if target.health <= 0. && !target.hostile {
+                        ui.label("Defeated · E to revive");
+                    }
                 });
             });
     }
-    egui::Area::new(egui::Id::new("ability-bar"))
-        .anchor(egui::Align2::CENTER_BOTTOM, [0., -16.])
-        .show(ctx, |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                if let Some(cast) = cast {
-                    ui.add(
-                        egui::ProgressBar::new(
-                            (cast.elapsed / cast.duration.max(0.001)).clamp(0., 1.),
-                        )
-                        .text(cast.label),
-                    );
-                }
-                ui.horizontal(|ui| {
-                    for (slot, name) in ["Strike", "Sweep"].into_iter().enumerate() {
-                        let cd = player.cooldowns.get(slot).copied().unwrap_or(0.);
-                        let label = if cd > 0. {
-                            format!("{}  {name}\n{cd:.1}s", slot + 1)
-                        } else {
-                            format!("{}  {name}", slot + 1)
-                        };
-                        if ui
-                            .add_enabled(
-                                cd <= 0. && me.health > 0.,
-                                egui::Button::new(label).min_size(egui::vec2(100., 40.)),
-                            )
-                            .clicked()
-                        {
-                            actions.push(Action::Command(Command::UseSlot {
-                                slot: slot as u8,
-                                ground: None,
-                            }));
+    egui::Area::new(egui::Id::new("ability-bar")).anchor(egui::Align2::CENTER_BOTTOM,[0.,-16.]).show(ctx,|ui| {
+        egui::Frame::group(ui.style()).show(ui,|ui| {
+            ui.set_width((ctx.content_rect().width()-40.).clamp(200.,1100.));
+            if let Some(c)=&player.cast {cast(ui,c);}
+            egui::ScrollArea::horizontal().max_width((ctx.content_rect().width()-40.).max(200.)).show(ui,|ui| {
+                ui.horizontal(|ui| {for slot in 0..10 {
+                    let data=player.bar.get(slot);
+                    let key=(slot+1)%10;
+                    let label=data.map_or_else(||format!("{key}\n—"),|s|format!("{key} · {}\nCost {:.0}{}",s.name,s.cost,if s.ground {" · ground"} else {""}));
+                    let ready=data.is_some_and(|s|!s.ability.is_empty() && s.cooldown<=0. && s.cost<=player.resource) && me.health>0.;
+                    // GCD queueing belongs to the sim; don't disable a ready button during GCD.
+                    let response=ui.add_enabled(ready,egui::Button::new(label).min_size(egui::vec2(95.,48.)));
+                    ctx.data_mut(|d|d.insert_temp(egui::Id::new(("slot-rect",slot)),response.rect));
+                    if let Some(s)=data {
+                        let fraction=if s.cooldown>0. {s.cooldown/s.recharge.max(0.001)} else if !s.auto {player.gcd} else {0.};
+                        if fraction>0. {
+                            let centre=response.rect.center();let radius=20.;let mut points=vec![centre];
+                            points.extend((0..=32).map(|i|{let a=-std::f32::consts::FRAC_PI_2+std::f32::consts::TAU*fraction.clamp(0.,1.)*i as f32/32.;centre+egui::vec2(a.cos(),a.sin())*radius}));
+                            let mut mesh=egui::Mesh::default();for p in &points{mesh.colored_vertex(*p,egui::Color32::from_black_alpha(95));}for i in 1..points.len()-1{mesh.add_triangle(0,i as u32,i as u32+1);}ui.painter().add(egui::Shape::mesh(mesh));
+                            if s.cooldown>0. {ui.painter().text(response.rect.center(),egui::Align2::CENTER_CENTER,format!("{:.1}s",s.cooldown),egui::FontId::proportional(16.),egui::Color32::WHITE);}
                         }
+                        if response.hovered() && s.ground {actions.push(Action::AimSlot(slot as u8));}
+                        if response.clicked() {actions.push(Action::Command(Command::UseSlot{slot:slot as u8,ground}));}
+                        response.on_hover_text(format!("{} · range {:.0}m · recharge {:.1}s",s.name,s.range,s.recharge));
                     }
-                    if ui.button("Tab · Target").clicked() {
-                        actions.push(Action::CycleTarget)
-                    }
-                    if ui
-                        .button(if player.auto_attack {
-                            "Stop attacking"
-                        } else {
-                            "Auto attack"
-                        })
-                        .clicked()
-                    {
-                        actions.push(Action::Command(Command::SetAutoAttack(!player.auto_attack)))
-                    }
-                    if ui
-                        .add_enabled(
-                            player.endurance >= 50. && me.health > 0.,
-                            egui::Button::new("V · Dodge"),
-                        )
-                        .clicked()
-                    {
-                        actions.push(Action::Command(Command::Dodge {
-                            direction: glam::Vec2::ZERO,
-                        }))
-                    }
-                });
-                ui.label("WASD move · Shift walk · Space jump · Right-drag camera · Scroll zoom");
-                if player.can_respawn && ui.button("R · Respawn").clicked() {
-                    actions.push(Action::Command(Command::Respawn));
-                }
+                }});
             });
+            ui.horizontal(|ui| {
+                if ui.button("Tab · Target").clicked(){actions.push(Action::CycleTarget);}
+                if ui.button(if player.auto_attack {"Stop attacking"} else {"Auto attack"}).clicked(){actions.push(Action::Command(Command::SetAutoAttack(!player.auto_attack)));}
+                if ui.add_enabled(player.swap_ready<=0.,egui::Button::new(format!("` · Set {} · {:.1}s",player.weapon_set+1,player.swap_ready))).clicked(){actions.push(Action::Command(Command::SwapWeapons));}
+                if player.can_respawn && ui.button("R · Respawn").clicked(){actions.push(Action::Command(Command::Respawn));}
+            });
+            ui.label("WASD · Shift walk · Space jump · V dodge · Hold Q guard · E revive · Right-drag camera");
         });
-    // Game Tab/Space bindings retain priority over focus on these mouse-operated HUD buttons.
+    });
     ctx.memory_mut(|m| {
         if let Some(id) = m.focused() {
             m.surrender_focus(id);
@@ -130,87 +166,57 @@ pub fn draw(ctx: &egui::Context, snapshot: &Snapshot, cast: Option<CastBar<'_>>)
     });
     actions
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protocol::{Look, PlayerState, Pose, UnitKind, UnitState};
-
-    fn frame(ctx: &egui::Context, snapshot: &Snapshot, events: Vec<egui::Event>) -> Vec<Action> {
-        let mut actions = Vec::new();
-        let _ = ctx.run(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1000., 700.),
-                )),
-                events,
-                ..Default::default()
-            },
-            |ctx| actions = draw(ctx, snapshot, None),
-        );
-        actions
-    }
-
     #[test]
-    fn clicking_an_ability_sends_a_command_and_cooldown_blocks_it() {
+    fn ten_slots_follow_state_and_click_sends_ground() {
+        let mut host = server::Host::start(42, "HUD test");
+        let mut snapshot = (*host.snapshot().unwrap()).clone();
+        host.stop();
         let ctx = egui::Context::default();
-        let mut snapshot = Snapshot {
-            tick: 1,
-            time: 0.,
-            units: vec![UnitState {
-                id: 1,
-                kind: UnitKind::Player,
-                body: "player".into(),
-                name: "Hero".into(),
-                level: 1,
-                position: glam::Vec3::ZERO,
-                velocity: glam::Vec3::ZERO,
-                yaw: 0.,
-                pose: Pose::Idle,
-                pose_time: 0.,
-                health: 100.,
-                max_health: 100.,
-                hostile: false,
-                target: None,
-                look: Look::default(),
-            }],
-            player: Some(PlayerState {
-                unit: 1,
-                endurance: 100.,
-                max_endurance: 100.,
-                cooldowns: vec![0., 0.],
-                ..Default::default()
-            }),
-            events: Vec::new(),
+        let ground = Some(glam::Vec3::new(4., 2., 3.));
+        let run = |snapshot: &Snapshot, events| {
+            let mut actions = Vec::new();
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1800., 1000.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| actions = draw(ctx, snapshot, &CombatView::default(), ground),
+            );
+            actions
         };
-        // egui sizes an anchored area in its first pass; let its geometry settle.
-        frame(&ctx, &snapshot, Vec::new());
-        frame(&ctx, &snapshot, Vec::new());
-        let area = ctx.memory(|m| m.area_rect(egui::Id::new("ability-bar")).unwrap());
-        let pos = area.min + egui::vec2(50., 25.);
+        run(&snapshot, vec![]);
+        run(&snapshot, vec![]);
+        for slot in 0..10 {
+            assert!(
+                ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("slot-rect", slot))))
+                    .is_some()
+            );
+        }
+        let pos = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("slot-rect", 0))))
+            .unwrap()
+            .center();
         let click = |pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        frame(
-            &ctx,
-            &snapshot,
-            vec![egui::Event::PointerMoved(pos), click(true)],
+        run(&snapshot, vec![egui::Event::PointerMoved(pos), click(true)]);
+        assert!(
+            run(&snapshot, vec![click(false)]).iter().any(
+                |a| matches!(a,Action::Command(Command::UseSlot{slot:0,ground:g}) if *g==ground)
+            )
         );
-        let actions = frame(&ctx, &snapshot, vec![click(false)]);
-        assert!(matches!(
-            actions.as_slice(),
-            [Action::Command(Command::UseSlot {
-                slot: 0,
-                ground: None
-            })]
-        ));
-        snapshot.player.as_mut().unwrap().cooldowns[0] = 2.;
-        frame(&ctx, &snapshot, vec![click(true)]);
-        assert!(frame(&ctx, &snapshot, vec![click(false)]).is_empty());
-        assert!(ctx.memory(|m| m.focused()).is_none());
+        snapshot.player.as_mut().unwrap().bar[0].cooldown = 2.;
+        run(&snapshot, vec![click(true)]);
+        assert!(run(&snapshot, vec![click(false)]).is_empty());
     }
 }

@@ -1,5 +1,5 @@
 //! Fixed 120 Hz cape chains and capsule collision, following workshop/src/springs.js.
-use crate::{character::Character, model::world_matrices};
+use crate::character::Character;
 use glam::{Mat4, Vec3};
 use serde_json::Value;
 struct Joint {
@@ -111,7 +111,7 @@ impl SpringBones {
         for step in 0..steps.max(1) {
             for j in &mut self.joints {
                 c.local[j.bone].rotation = c.nodes[j.bone].rest.rotation;
-                c.world = world_matrices(&c.nodes, &c.local);
+                c.update_chain(j.bone);
                 let m = root * c.world[j.bone];
                 let head = m.w_axis.truncate();
                 let rest = m.transform_vector3(j.axis).normalize();

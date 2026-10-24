@@ -1,8 +1,8 @@
-# Native renderer: milestone 1
+# Native renderer and protocol-v4 client
 
 The renderer consumes [ASSETS.md](ASSETS.md), [CONTRACT.md](CONTRACT.md) and the workshop
 reference behaviour. Ownership follows PLAN decision 7: renderer/client/scripts here; all art,
-placements, texture compression and look values come from Claude. Protocol is currently v3:
+placements, texture compression and look values come from Claude. Protocol is currently v4:
 `Look.dyes` and `Look.variants` are connected. Foxfolk clothing/armour fits exist and are covered
 by the asset crate's checks.
 
@@ -15,9 +15,11 @@ scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65
 
 WASD moves relative to the camera; Shift walks, Space jumps, V rolls, right-drag rotates and
 fixes facing for strafing. Tab cycles enemies; click selects, right-click starts auto-attacks.
-1/2 use the simulation's current abilities; R respawns; Esc exits. The plain stock-widget HUD
-shows health, endurance, target health and ability cooldowns, with clickable ability/target/
-auto-attack/dodge/respawn controls. A cast-bar consumer is reserved, but v3 supplies no cast data.
+1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
+(screen centre while mouse-looking). Hovering/selecting a ground skill previews its actual radius.
+Hold Q to guard; ` swaps weapon sets; E revives a selected or nearby downed/defeated friend;
+R respawns; Esc exits. The stock-widget HUD shows all ten named slots, costs, cooldowns and GCD
+sweeps, health/endurance/resource, casts, auras, weapon-set recharge and target cast/defiance bars.
 The HUD is composed after temporal AA at output resolution. Claude will supply its artwork,
 icons, fonts and style. `--hud-font FILE` can load the supplied font without changing code.
 
@@ -43,13 +45,17 @@ otherwise use the laptop panel even with an ultrawide attached. Capture reads ou
 ## Rendering and asset behaviour
 
 - Direct Metal, HDR single-sample scene and motion vectors; TAA with camera, skin, morph and
-  wind motion, depth rejection and YCoCg variance clipping. Camera cuts, appearance changes
-  and resizing reset history. `--aa none` and `--aa msaa` are diagnostic comparisons; TAA is
+  wind motion, depth rejection and YCoCg variance clipping. Motion uses unjittered matrices;
+  current colour is unjittered in resolve and history uses nine-tap Catmull–Rom reconstruction.
+  Camera cuts and resizing reset history; an individual appearance/weapon change does not. `--aa none` and `--aa msaa` are diagnostic comparisons; TAA is
   the default. Internal resolution is `--scale` times the output dimensions.
 - Scene and cascade frustum culling, 64 m terrain chunks, screen-height whole-file LODs using
   `assets::lod_path`: full above 300 output pixels, LOD 1 above 100, otherwise LOD 2, with 10%
   hysteresis. Missing optional LOD files fall back to the full file. Creature textures and
-  animation clips swap with the entire creature file; models are preloaded before play.
+  animation clips swap with the entire creature file; models are preloaded before play. Catalogue
+  extension JSON is cached once per asset cache. Each character caches its visited LOD assemblies
+  and swaps their geometry/clip data while preserving the live rig, blends, spring particles,
+  equipment transitions and combat playback state.
 - Three 1024² shadow cascades, 15/50/150 m splits, quantised extents and light-space texel
   snapping. Alpha masks and hidden body regions apply in shadow rendering too. Transparent
   surfaces do not cast solid shadows. Opaque geometry sorts front-to-back; blended geometry
@@ -78,9 +84,30 @@ otherwise use the laptop panel even with an ultrawide attached. Capture reads ou
 - Repeated opaque rigid meshes are instanced in both scene and shadow passes; each instance
   retains current/previous transforms and its supplied material. Transparent objects remain
   individually sorted.
-- One frame in flight is the default, limiting temporal-history latency on M1. `--in-flight 1..3`
-  is diagnostic. `--fps 60` paces the client; `--benchmark` also fences completed GPU work so CPU
-  submission speed cannot be mistaken for full frame time.
+- Two frames in flight is the measured client default. `--in-flight 1..3` is diagnostic.
+  Shared render targets/history are ordered on one Metal command queue; CPU bone/draw/HUD buffers
+  are fenced before reuse. Skin palettes are shared across a skin's primitives. Bone and draw
+  rings grow to the frame's requirement, including packed instance constants, instead of imposing
+  a fixed 4 MB ceiling. The 60-armoured-character test submits real Metal draws for three frames.
+- Composite and HUD rendering target the drawable directly. Captures/offscreen rendering keep
+  the output texture; `--output-blit` retains the old path for comparisons.
+- Springs and arm IK update only the affected node and descendants. A full solve once per
+  animation pose is retained. Character membership and snapshot interpolation use ID maps/sets.
+- `--fps 60` paces the client. `--benchmark --in-flight 1` fences every completed frame.
+  With two or three in flight, CPU encoding overlaps GPU execution: the reported FRAME value is
+  **CPU encoding plus slot wait**, not end-to-end latency. GPU timings are from completed command
+  buffers; PRESENT values are native drawable presentation times. Never compare the two FRAME
+  definitions as a latency improvement.
+- `--aa metalfx` enables `MTLFXTemporalScaler` when supported, with custom TAA fallback on
+  unsupported devices/allocation failure. Its HDR output replaces both custom resolve and the
+  internal-resolution bilinear upscale. It is opt-in because it missed the M1 GPU budget badly.
+  The benchmark refuses to label a fallback run as MetalFX. Input usage flags come from the scaler;
+  our current-minus-previous UV vectors are scaled by negative input dimensions, and jitter is
+  supplied separately in pixel space, with 19 jitter phases at 65% and a negative texture mip bias. See [Apple's motion-vector convention](https://developer.apple.com/documentation/metalfx/mtlfxtemporalscalerbase/motionvectorscalex).
+- Materials receive sky-driven ambient specular. A supplied sky is GGX-prefiltered once into
+  roughness mips, with an analytic split-sum BRDF approximation. Without a sky texture the term
+  uses the supplied sky/ambient values as a sky/ground hemisphere. Metal no longer receives the
+  incorrect diffuse-only ambient term. This derives lighting data; it creates no art assets.
 
 ## Inputs for Claude's materials and look
 
@@ -107,7 +134,7 @@ are normal/colour/roughness layer blending, scrolling water normals, depth absor
 sky reflection and an equirectangular sky. Their asset-dependent visual acceptance awaits the
 supplied inputs. Foam, refractive scene sampling and atmosphere art are not fabricated here.
 
-## Verification and measurements (24 October 2026)
+## Earlier baseline measurements (24 October 2026)
 
 ```sh
 cargo test -p render -p client
@@ -121,7 +148,7 @@ wind data and exact placement counts. Unit tests cover frusta, LOD hysteresis, s
 snapping, KTX2 bounds/layout and camera collision. The smoke run requires authoritative movement,
 jump, dodge and damage events. Metal errors are checked at frame-slot reuse, capture and shutdown.
 
-The current six-character scene with supplied scenery and HUD completed 90 frames with Metal
+The earlier six-character scene with supplied scenery and HUD completed 90 frames with Metal
 API validation enabled at 1800×1100 output / 1440×880 internal, without GPU validation errors.
 The renderer/client suites pass 19 checks; the separate asset suite passes all 10 checks,
 including foxfolk fits. Scoped Clippy passes with warnings denied. Clippy without `--no-deps`
@@ -165,7 +192,7 @@ visible scene triangles stayed unchanged. Raw local report:
 `target/render-review/catalogue-instanced-65-long.json`. Use 65% as the measured ultrawide
 setting pending compressed assets; the normal small-window default remains 80%.
 
-**Display acceptance remains open:** the Mac was locked during the display check; native
+**Earlier handoff: display acceptance remained open:** the Mac was locked during that check; native
 presentation times and physical input validation were unavailable. These offscreen results
 meet the work budgets but do not establish steady onscreen 60 fps or longer thermal behaviour.
 The Odyssey G95SC is connected at 5120×1440/120 Hz. A previous fullscreen attempt used the
@@ -175,15 +202,113 @@ selection is now explicit.
 Historical comparison, before supplied scenery/HUD: 4x MSAA at 5120×1440 / 4096×1152 internal
 measured 12.63 ms GPU median and 13.52 ms p95. This is not the current scene or a final budget pass.
 
-Protocol v4 projectile/area/aura/cast/effect rendering is deliberately deferred until Claude's
-contract and effect assets arrive. The functional cast-bar input is reserved. No snapshot fields,
-combat art or effect timings have been invented.
+## Protocol v4 integration (25 October 2026)
 
-Integration note: Cargo regenerates the root lockfile for the new renderer/client dependencies.
-The root `Cargo.lock` and the pre-existing README changes are outside this ownership scope and
-are excluded from this commit. Claude needs to include the refreshed lockfile in the shared
-integration before using `cargo --locked` in CI. The required checks here use the working-tree
-lockfile.
+Each frame reads `host.combat()` alongside the snapshot; only matching tick pairs replace the
+client's current pair. Combat units are indexed by ID. The Action-to-clip table is applied with
+upper-body guard/parry (respecting the supplied loop flag and combat clock), horizontal-speed sprint selection, held Death01 for downed and LayToIdle
+on rally/revive. Heavy swings retain their cast wind-up across the release and remap a single
+strike to that boundary, then recover over 0.5 s. The vendor `Sword_Heavy_Combo` has several
+swings and no strike marker: the final overhead segment (2.30–4.333 s, downward strike around
+2.67 s) is the playback fallback, derived with `cargo run -p render --example inspect_strikes`.
+Authored clips use their supplied `hit` event. Missing exact vendor markers remain an asset
+request; the fallback is not an authored animation change.
+
+Temporary combat overlays project the sim's live projectile positions/velocity and circle,
+cone and yaw-aligned line areas, with warning progress, hostile red and friendly blue, field
+labels, cast/defiance bars, auras, guard and downed status. They use stock lines, fills and text,
+not substitute art. These diagnostic overlays currently draw above scene occluders; supplied
+world-space effect/decal assets should replace them. Clip events never spawn duplicate missiles.
+Damage/Heal/Avoided events produce bounded, expiring floating text with critical/periodic labels.
+
+Protocol v4's Slot has a ground flag but no radius. `server::ground_skill_radius` is a small
+read-only bridge to the same immutable simulation content table, used only for the local aim
+preview. No wire type or protocol version changed. A future remote client needs that radius
+published as content or in the slot contract. Guard release is sent even if egui consumes the
+release, and on focus loss. Revive only selects a nearby friendly downed/defeated unit.
+
+## Current validation and comparison method
+
+```sh
+cargo test -p render -p client -p server --locked
+cargo clippy -p render -p client --all-targets --no-deps --locked -- -D warnings
+cargo build --release -p client --locked
+python3 scripts/benchmark_renderer.py --windowed --fullscreen --scale 0.65 \
+  --in-flight 2 --frames 3720 --warmup 120 --output target/render-review/v4-display-long.json
+```
+
+The Metal tests require actual GPU access (the desktop sandbox hides the device). Tests include
+60 full-detail armoured characters, growing rings, shared palettes, LOD state preservation,
+action mappings, partial-skeleton/full-solve equality, horizontal sprint threshold, ground-ray
+hits, area yaw/fill, all avoidance labels, HUD clicks with ground targets and zero static-scene
+motion across Halton jitter. The neutral sky fallback also exercises every prefilter mip on GPU.
+The final held-guard regression also passes; non-looping guards hold across locomotion clock changes.
+The new MetalFX dependency and root Cargo.lock are committed together.
+
+Diagnostic comparisons are explicit: `--legacy-cpu` restores full-skeleton turns and linear unit
+lookups; `--look-churn` swaps the first showcase character's weapon set every 60 frames;
+`--reset-on-look` restores the previous global-history-reset behaviour for that comparison.
+`--live` on the benchmark harness selects the live host scene (including snapshot interpolation).
+These flags are not gameplay defaults. The harness requires presentation samples for at least
+95% of measured frames; offscreen results never establish display acceptance.
+
+### Results
+
+The 29 renderer/client/server checks passed (client 7, renderer unit 9, renderer asset-backed
+12, server 1), including the real 60-character GPU stress test, with Metal API validation.
+Scoped Clippy and the locked release build passed. After the final MetalFX shader correction,
+the static-motion/prefilter GPU regression passed again, and both final 480-frame AA capture
+runs completed with Metal API validation. The live smoke completed 780 frames, 50.01 m of
+authoritative movement and 80 events; it required jump, dodge, damage and weapon swap, and
+exercised the 0.4 s heavy wind-up. Captures show all ten HUD slot positions (empty slots remain
+empty). Physical keyboard/mouse interaction and authored effect/lighting appearance are not
+claimed as human acceptance.
+
+All following runs use 5120×1440 output / 3328×936 internal (65%) on the M1 7-core GPU, 16 GB.
+Raw reports and conditions are committed under [benchmarks/2026-10-25](benchmarks/2026-10-25/README.md).
+Short runs discard 120 of 480 frames; the sustained display run discards 120 of 3720.
+
+| Comparison | GPU median / p95 (ms) | FRAME median / p95 (ms) | Native presentation |
+|---|---:|---:|---|
+| Custom TAA, final, offscreen, 1 in flight | 11.139 / 11.921 | 15.911 / 16.827 completed work | Not measured |
+| MetalFX temporal, final, offscreen, 1 in flight | 22.717 / 24.233 | 28.062 / 30.279 completed work | Not measured |
+| Custom TAA, drawable direct, 1 in flight | 12.305 / 13.323 | 16.663 / 17.953 completed work | 58.443 fps; p95 16.668 ms |
+| Custom TAA, drawable direct, 2 in flight | 11.857 / 12.587 | 4.296 / 8.820 CPU + slot wait | 59.910 fps; p95 16.668 ms |
+| Custom TAA, output + blit, 2 in flight | 16.430 / 28.087 | 13.435 / 24.296 CPU + slot wait | 31.231 fps; p95 33.337 ms |
+| **Sustained G95SC, custom TAA, direct, 2 in flight** | **36.251 / 43.944** | **24.062 / 25.127 CPU + slot wait** | **45.678 fps; p95 33.337 ms — FAIL** |
+
+The G95SC was unlocked and selected at its actual 5120×1440/120 Hz mode. The sustained run
+recorded 3,596 native presentation intervals; both work and presentation budgets failed.
+The short two-frame run passed the presentation threshold but missed the 12 ms GPU-p95
+budget. Two frames in flight remains the client default on that short A/B evidence; it is
+not a claim that the sustained 60 fps target is met. Direct drawable composition removes a
+copy, but variable system load means the whole measured blit difference cannot be attributed
+to that copy. Later aggregate system sampling showed zero idle CPU and a 20.29 five-minute
+load average; `pmset` reported no recorded thermal warning. No other applications/settings
+were changed, and this evidence does not establish thermal throttling or isolate its cause.
+
+Final matched capture crops (`target/render-review/v4-aa-comparison.png`, custom TAA above,
+MetalFX below) show sharper fences, roofs and foliage with MetalFX. Its corrected pixel-space
+jitter removes the checker pattern seen in the first integration. Its GPU median is about
+2.04× custom TAA here, so custom TAA remains default and MetalFX is opt-in with fallback.
+Both cost runs disable API validation; validation captures are separate reports. The custom
+path narrowly misses the completed-frame p95 budget despite passing the GPU budget.
+
+| CPU/history diagnostic, 2 in flight, offscreen | GPU median / p95 (ms) | CPU + slot wait median / p95 (ms) | History resets |
+|---|---:|---:|---:|
+| Live, indexed lookups + affected-chain updates | 15.807 / 25.985 | 3.896 / 6.346 | 1 |
+| Live, linear lookups + whole-skeleton turns | 13.383 / 21.415 | 3.667 / 4.496 | 1 |
+| Weapon swaps, retain object history | 20.301 / 27.502 | 8.789 / 19.529 | 1 |
+| Weapon swaps, restore old global reset | 21.485 / 29.353 | 11.921 / 25.625 | 8 |
+
+The small live scene does **not** demonstrate a CPU speedup; the structural scaling change is
+backed by equivalence checks, including 199 reordered/missing units and affected-chain matrices.
+The weapon-swap comparison verifies that swaps no longer reset the entire history; its timing
+is also subject to system load. Missing vendor strike markers and supplied surface/effect art
+remain explicit integration requests below.
+
+The supplied terrain/river/sky/look files have not landed in `assets/catalog` during this run.
+Use `--surface-assets FILE --look-settings FILE` when supplied; no replacement assets were made.
 
 ## Asset requests
 
@@ -210,6 +335,9 @@ not generate substitute scenery, textures, scatter, effects, icons or visual pre
   catalogue currently names candidates in `scatter`; the renderer will not choose locations.
 - **HUD:** frame/bar art, ability icons, fonts and layout/style values. Functional controls
   use plain temporary styling until supplied.
-- **Protocol v4 effects (reserved):** projectile/trail/particle/decal meshes, textures and
-  their visual/timing parameters. Rendering is deferred until the new snapshot contract and
-  Claude's effect assets arrive.
+- **Protocol v4 effects:** projectile/trail/particle/decal meshes, textures and visual/timing
+  parameters keyed by `ProjectileView.visual` and area school/field. The protocol now drives
+  functional projected diagnostics; replace those with supplied depth-aware world effects.
+- **Strike timing:** explicit hit markers and single-swing playback ranges for the vendor
+  sword clips, especially `Sword_Heavy_Combo`; a dedicated single overhead is preferable.
+  Also supply a dedicated roar/shout clip, as already listed in CONTRACT.md.

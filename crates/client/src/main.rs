@@ -1,4 +1,5 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
+mod combat;
 mod hud;
 mod interpolate;
 use anyhow::{Context, Result, ensure};
@@ -46,6 +47,11 @@ struct Options {
     look_settings: Option<PathBuf>,
     surface_assets: Option<PathBuf>,
     hud_font: Option<PathBuf>,
+    metalfx: bool,
+    direct_drawable: bool,
+    legacy_cpu: bool,
+    look_churn: bool,
+    reset_on_look: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -62,7 +68,7 @@ impl Options {
             inspect: None,
             warmup: 120,
             samples: 0,
-            in_flight: 1,
+            in_flight: 2,
             fps: None,
             benchmark: false,
             inline_constants: true,
@@ -70,6 +76,11 @@ impl Options {
             look_settings: None,
             surface_assets: None,
             hud_font: None,
+            metalfx: false,
+            direct_drawable: true,
+            legacy_cpu: false,
+            look_churn: false,
+            reset_on_look: false,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -97,13 +108,21 @@ impl Options {
                         Some("none") => 1,
                         Some("msaa") => 4,
                         Some("taa") => 0,
-                        _ => anyhow::bail!("--aa expects taa, none or msaa"),
+                        Some("metalfx") => {
+                            o.metalfx = true;
+                            0
+                        }
+                        _ => anyhow::bail!("--aa expects taa, metalfx, none or msaa"),
                     }
                 }
                 "--in-flight" => {
                     o.in_flight = args.next().context("--in-flight needs 1..3")?.parse()?
                 }
                 "--fps" => o.fps = Some(args.next().context("--fps needs a number")?.parse()?),
+                "--legacy-cpu" => o.legacy_cpu = true,
+                "--look-churn" => o.look_churn = true,
+                "--reset-on-look" => o.reset_on_look = true,
+                "--output-blit" => o.direct_drawable = false,
                 "--benchmark" => o.benchmark = true,
                 "--shared-constants" => o.inline_constants = false,
                 "--fullscreen" => o.fullscreen = true,
@@ -128,7 +147,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1/2 attacks · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -181,10 +200,16 @@ struct Game {
     smoke_stage: usize,
     events: usize,
     smoke_start: Vec3,
-    smoke_checks: [bool; 3],
+    smoke_checks: [bool; 4],
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
     platform_output: Option<egui::PlatformOutput>,
+    fight: Arc<protocol::CombatView>,
+    feedback: combat::Feedback,
+    cursor: Vec2,
+    viewport: Vec2,
+    aim_slot: Option<u8>,
+    valley: world::Valley,
 }
 impl Game {
     fn new(options: Options) -> Result<Self> {
@@ -218,10 +243,16 @@ impl Game {
             smoke_stage: 0,
             events: 0,
             smoke_start,
-            smoke_checks: [false; 3],
+            smoke_checks: [false; 4],
             hud_context: egui::Context::default(),
             hud_input: None,
             platform_output: None,
+            fight: Arc::new(protocol::CombatView::default()),
+            feedback: combat::Feedback::default(),
+            cursor: Vec2::ZERO,
+            viewport: Vec2::new(1600., 1000.),
+            aim_slot: None,
+            valley: world::Valley::new(),
         };
         g.scenery = Some(render::scenery::Scenery::new(&g.catalog, &mut g.cache)?);
         if g.options.showcase {
@@ -359,7 +390,7 @@ impl Game {
             .current
             .units
             .iter()
-            .filter(|u| u.id != me.id && u.health > 0.)
+            .filter(|u| u.id != me.id)
             .filter_map(|u| {
                 let p = matrix * (u.position + Vec3::Y).extend(1.);
                 if p.w <= 0. {
@@ -374,6 +405,57 @@ impl Game {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|v| v.1)
     }
+    fn aim_point(&self) -> Option<Vec3> {
+        let me = self.snaps.current.unit(self.host.player)?;
+        combat::ground_point(
+            self.camera(me.position)
+                .matrix(self.viewport.x / self.viewport.y),
+            if self.mouse_look {
+                self.viewport * 0.5
+            } else {
+                self.cursor
+            },
+            self.viewport,
+            &self.valley,
+        )
+    }
+    fn use_slot(&mut self, slot: u8) -> Command {
+        self.aim_slot = Some(slot);
+        Command::UseSlot {
+            slot,
+            ground: self.aim_point(),
+        }
+    }
+    fn revive_target(&self) -> Option<u32> {
+        let me = self.snaps.current.unit(self.host.player)?;
+        let downed: HashSet<_> = self
+            .fight
+            .units
+            .iter()
+            .filter(|c| c.downed)
+            .map(|c| c.id)
+            .collect();
+        self.snaps
+            .current
+            .units
+            .iter()
+            .filter(|u| {
+                u.id != me.id
+                    && !u.hostile
+                    && (u.health <= 0. || downed.contains(&u.id))
+                    && u.position.distance(me.position) <= 4.
+            })
+            .min_by(|a, b| {
+                (Some(a.id) != me.target)
+                    .cmp(&(Some(b.id) != me.target))
+                    .then_with(|| {
+                        a.position
+                            .distance_squared(me.position)
+                            .total_cmp(&b.position.distance_squared(me.position))
+                    })
+            })
+            .map(|u| u.id)
+    }
     fn smoke(&mut self) {
         let elapsed = self.start.elapsed().as_secs_f32();
         let schedule = [
@@ -384,6 +466,7 @@ impl Game {
             (6.0, 4),
             (7.0, 5),
             (8.0, 6),
+            (9.0, 7),
         ];
         while self.smoke_stage < schedule.len() && elapsed >= schedule[self.smoke_stage].0 {
             match schedule[self.smoke_stage].1 {
@@ -401,9 +484,10 @@ impl Game {
                     self.host.send(Command::SetAutoAttack(true));
                 }
                 4 | 5 => self.host.send(Command::UseSlot {
-                    slot: 0,
+                    slot: 1,
                     ground: None,
                 }),
+                7 => self.host.send(Command::SwapWeapons),
                 _ => self.host.send(Command::Move {
                     direction: Vec2::ZERO,
                     walk: false,
@@ -417,22 +501,43 @@ impl Game {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
-        if let Some(s) = self.host.snapshot() {
-            self.snaps.push(s)
+        self.viewport = Vec2::new(r.width as f32, r.height as f32);
+        // Host publishes under separate locks; accept a matching pair, otherwise retain the
+        // previous pair for this display frame rather than mix actions from different ticks.
+        for _ in 0..3 {
+            if let (Some(s), Some(c)) = (self.host.snapshot(), self.host.combat())
+                && s.tick == c.tick
+            {
+                self.snaps.push(s);
+                self.fight = c;
+                break;
+            }
         }
+        self.feedback.update(dt);
         if self.options.smoke {
             self.smoke()
         } else {
             self.controls()
         }
+        let unit_index: HashMap<_, _> =
+            self.snaps.current.units.iter().map(|u| (u.id, u)).collect();
         for e in self.host.take_events() {
             self.events += 1;
+            self.feedback.event(&e, &unit_index);
+            if let protocol::Event::Rallied { unit } | protocol::Event::Revived { unit } = &e
+                && let Some(c) = self.characters.get_mut(unit)
+            {
+                c.rallied();
+            }
             match &e {
                 protocol::Event::Jumped { unit } if *unit == self.host.player => {
                     self.smoke_checks[0] = true
                 }
                 protocol::Event::Dodged { unit } if *unit == self.host.player => {
                     self.smoke_checks[1] = true
+                }
+                protocol::Event::WeaponsSwapped { unit } if *unit == self.host.player => {
+                    self.smoke_checks[3] = true;
                 }
                 protocol::Event::Damage { source, .. } if *source == self.host.player => {
                     self.smoke_checks[2] = true
@@ -446,13 +551,23 @@ impl Game {
         let mut units = if self.options.showcase {
             self.review.clone()
         } else {
-            self.snaps.units()
+            self.snaps.units(!self.options.legacy_cpu)
         };
         let time = self.frame as f32 / 60.;
         if self.options.showcase {
             for u in &mut units {
                 u.pose_time = time;
             }
+        }
+        if self.options.look_churn && self.options.showcase {
+            units[0].look.gear = if (self.frame / 60).is_multiple_of(2) {
+                vec![
+                    ("main_hand".into(), "sword.arming".into()),
+                    ("off_hand".into(), "shield.round".into()),
+                ]
+            } else {
+                vec![("main_hand".into(), "sword.great".into())]
+            };
         }
         let me = units
             .iter()
@@ -468,7 +583,7 @@ impl Game {
                 model: self.terrain.clone(),
                 primitive: i,
                 transform: Mat4::IDENTITY,
-                palette: Vec::new(),
+                palette: Arc::from([]),
                 hidden: 0,
                 base: [1.; 4],
                 morph: [0.; 2],
@@ -489,8 +604,15 @@ impl Game {
                 scene_time,
             )?);
         }
-        self.characters
-            .retain(|id, _| units.iter().any(|u| u.id == *id));
+        let live: HashSet<_> = units.iter().map(|u| u.id).collect();
+        self.characters.retain(|id, _| {
+            if self.options.legacy_cpu {
+                units.iter().any(|u| u.id == *id)
+            } else {
+                live.contains(id)
+            }
+        });
+        let combat_index: HashMap<_, _> = self.fight.units.iter().map(|c| (c.id, c)).collect();
         for u in &units {
             let mut look = u.look.clone();
             look.drawn = false;
@@ -515,14 +637,10 @@ impl Game {
             let rebuild = self.characters.get(&u.id).is_none_or(|c| {
                 let mut old = c.look.clone();
                 old.drawn = false;
-                old != look || c.lod != lod
+                old != look
             });
             if rebuild {
-                if self.characters.get(&u.id).is_some_and(|c| {
-                    let mut previous = c.look.clone();
-                    previous.drawn = false;
-                    previous != look
-                }) {
+                if self.options.reset_on_look && self.characters.contains_key(&u.id) {
                     r.reset_temporal_history();
                 }
                 self.characters.insert(
@@ -531,7 +649,17 @@ impl Game {
                 );
             }
             let c = self.characters.get_mut(&u.id).unwrap();
-            c.update(u, if self.options.showcase { 1. / 60. } else { dt });
+            c.partial_updates = !self.options.legacy_cpu;
+            c.set_lod(&self.catalog, &mut self.cache, lod)?;
+            c.update_combat(
+                u,
+                if self.options.showcase {
+                    None
+                } else {
+                    combat_index.get(&u.id).copied()
+                },
+                if self.options.showcase { 1. / 60. } else { dt },
+            );
             draws.extend(c.draws(u.position, u.yaw).into_iter().map(|mut d| {
                 d.instance |= (u.id as u64) << 32;
                 d
@@ -558,12 +686,44 @@ impl Game {
         });
         let ctx = self.hud_context.clone();
         let mut actions = Vec::new();
+        let aim = self.aim_point();
+        let radius = self
+            .aim_slot
+            .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
+            .filter(|s| s.ground)
+            .and_then(|s| server::ground_skill_radius(&s.ability));
+        let projection = combat::Projection {
+            matrix: camera.matrix(r.width as f32 / r.height as f32),
+            size: self.viewport
+                / raw
+                    .viewports
+                    .get(&egui::ViewportId::ROOT)
+                    .and_then(|v| v.native_pixels_per_point)
+                    .unwrap_or(1.),
+        };
         let output = ctx.run(raw, |ctx| {
-            actions = hud::draw(ctx, &self.snaps.current, None);
+            if !self.options.showcase {
+                combat::paint(
+                    ctx,
+                    &projection,
+                    &self.fight,
+                    &units,
+                    &self.feedback,
+                    aim.zip(radius),
+                    &self.valley,
+                );
+            }
+            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim);
         });
         for action in actions {
             match action {
-                hud::Action::Command(c) => self.host.send(c),
+                hud::Action::Command(c) => {
+                    if let Command::UseSlot { slot, .. } = c {
+                        self.aim_slot = Some(slot);
+                    }
+                    self.host.send(c);
+                }
+                hud::Action::AimSlot(slot) => self.aim_slot = Some(slot),
                 hud::Action::CycleTarget => self.host.send(Command::SetTarget(self.target(true))),
             }
         }
@@ -575,9 +735,10 @@ impl Game {
         self.platform_output = Some(output.platform_output);
         r.scene_time = Some(scene_time);
         r.inline_constants = self.options.inline_constants;
+        r.direct_drawable = self.options.direct_drawable;
         r.target_fps = self.options.fps.unwrap_or(60.);
         let mut stats = r.draw(self.camera(player.position), &draws, capture)?;
-        if self.options.benchmark {
+        if self.options.benchmark && self.options.in_flight == 1 {
             r.wait()?;
             stats = r.stats;
         }
@@ -606,6 +767,7 @@ impl Game {
         }
         if done {
             r.wait()?;
+            eprintln!("HISTORY resets={}", r.stats.history_resets);
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
                 let mut intervals: Vec<_> = presentations
@@ -641,7 +803,7 @@ impl Game {
                     self.frame_times[(n * 95 / 100).min(n - 1)],
                     n,
                     if self.options.offscreen {
-                        if self.options.benchmark {
+                        if self.options.benchmark && self.options.in_flight == 1 {
                             "offscreen-synchronized"
                         } else {
                             "offscreen-throughput"
@@ -663,7 +825,7 @@ impl Game {
                 let moved = player.position.distance(self.smoke_start);
                 ensure!(
                     moved > 2. && self.smoke_checks.iter().all(|x| *x),
-                    "smoke did not exercise simulation: moved={moved}, events={}, jump/dodge/damage={:?}",
+                    "smoke did not exercise simulation: moved={moved}, events={}, jump/dodge/damage/swap={:?}",
                     self.events,
                     self.smoke_checks
                 );
@@ -812,6 +974,7 @@ impl ApplicationHandler for App {
                 anyhow::bail!("Aldermoor requires macOS")
             };
             r.set_frames_in_flight(self.game.options.in_flight)?;
+            r.enable_metalfx(self.game.options.metalfx)?;
             if let Some(path) = &self.game.options.look_settings {
                 r.look = render::settings::LookSettings::load(path)?;
             }
@@ -852,6 +1015,9 @@ impl ApplicationHandler for App {
                     && let PhysicalKey::Code(key) = event.physical_key
                 {
                     self.game.keys.remove(&key);
+                    if key == KeyCode::KeyQ {
+                        self.game.host.send(Command::Guard(false));
+                    }
                 }
                 return;
             }
@@ -868,10 +1034,14 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(false) => {
                 self.game.keys.clear();
+                self.game.host.send(Command::Guard(false));
                 self.game.mouse_look = false;
                 self.game.controls();
             }
-            WindowEvent::CursorMoved { position, .. } => self.cursor = (position.x, position.y),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = (position.x, position.y);
+                self.game.cursor = Vec2::new(position.x as f32, position.y as f32);
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -914,14 +1084,15 @@ impl ApplicationHandler for App {
                                     direction: self.game.direction(),
                                 }),
                                 KeyCode::Tab => Some(Command::SetTarget(self.game.target(true))),
-                                KeyCode::Digit1 => Some(Command::UseSlot {
-                                    slot: 0,
-                                    ground: None,
-                                }),
-                                KeyCode::Digit2 => Some(Command::UseSlot {
-                                    slot: 1,
-                                    ground: None,
-                                }),
+                                key if slot_key(key).is_some() => {
+                                    Some(self.game.use_slot(slot_key(key).unwrap()))
+                                }
+                                KeyCode::KeyQ => Some(Command::Guard(true)),
+                                KeyCode::Backquote => Some(Command::SwapWeapons),
+                                KeyCode::KeyE => self
+                                    .game
+                                    .revive_target()
+                                    .map(|target| Command::Revive { target }),
                                 KeyCode::KeyR => Some(Command::Respawn),
                                 _ => None,
                             };
@@ -931,6 +1102,9 @@ impl ApplicationHandler for App {
                         }
                     } else {
                         self.game.keys.remove(&key);
+                        if key == KeyCode::KeyQ {
+                            self.game.host.send(Command::Guard(false));
+                        }
                     }
                 }
             }
@@ -1003,6 +1177,7 @@ fn main() -> Result<()> {
             game.options.samples,
         )?;
         renderer.set_frames_in_flight(game.options.in_flight)?;
+        renderer.enable_metalfx(game.options.metalfx)?;
         if let Some(path) = &game.options.look_settings {
             renderer.look = render::settings::LookSettings::load(path)?;
         }
@@ -1045,4 +1220,22 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn slot_key(key: KeyCode) -> Option<u8> {
+    [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+        KeyCode::Digit6,
+        KeyCode::Digit7,
+        KeyCode::Digit8,
+        KeyCode::Digit9,
+        KeyCode::Digit0,
+    ]
+    .iter()
+    .position(|k| *k == key)
+    .map(|i| i as u8)
 }
