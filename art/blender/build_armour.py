@@ -501,7 +501,9 @@ def review_set(bt):
 def main():
     cat = json.loads(CAT_PATH.read_text())
     merged = {}
-    for bt in cat["body_types"]:
+    for bt, info in cat["body_types"].items():
+        if info.get("dress") is False:
+            continue  # Golems and other creatures that wear nothing.
         ents = build(bt, cat)
         for e in ents:
             m = merged.setdefault(e["id"], {k: v for k, v in e.items() if k not in ("file", "hides", "coverage", "triangles")}

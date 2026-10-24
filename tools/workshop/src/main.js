@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SkeletonHelper } from 'three';
 import { View } from './view.js';
 import { ASSETS, Character } from './character.js';
+import { Beast } from './beast.js';
 import { loadLibrary } from './anim.js';
 import { regionDebug } from './regions.js';
 import { renderPanel } from './ui.js';
@@ -29,6 +30,7 @@ const DEFAULTS = {
   cam: 'three_quarter',
   turn: false,
   debug: [],
+  beast: null,
 };
 
 // --- URL hash ---------------------------------------------------------------------------------
@@ -59,6 +61,7 @@ function parseHash(hash) {
     else if (k === 'cam') s.cam = v;
     else if (k === 'turn') s.turn = v === '1';
     else if (k === 'dbg') s.debug = v ? v.split(',') : [];
+    else if (k === 'beast') s.beast = none(v);
   }
   return s;
 }
@@ -85,6 +88,7 @@ function writeHash(s) {
   p.set('cam', s.cam);
   if (s.turn) p.set('turn', '1');
   if (s.debug.length) p.set('dbg', s.debug.join(','));
+  if (s.beast) p.set('beast', s.beast);
   const hash = `#${p.toString()}`;
   if (location.hash !== hash) history.replaceState(null, '', hash);
 }
@@ -120,6 +124,7 @@ class App {
     this.status('Loading catalogue…');
     this.humanoid = await fetchJson(`${ASSETS}catalog/humanoid.json`);
     this.gear = await optionalCatalog('gear.json');
+    this.creatures = await optionalCatalog('creatures.json');
     this.loader = new GLTFLoader();
     this.library = await loadLibrary(this.loader, ASSETS + this.humanoid.animations.file);
     this.view = new View(document.getElementById('stage'));
@@ -133,7 +138,7 @@ class App {
     this.fps = 0;
     this.actions = this.makeActions();
     await this.build();
-    this.view.preset(this.state.cam, this.character.def.height, this.headY());
+    this.view.preset(this.state.cam, this.frameHeight(), this.headY());
     this.view.turntable = this.state.turn;
     this.renderPanel();
     window.addEventListener('hashchange', () => this.onHash());
@@ -148,8 +153,14 @@ class App {
     this.statusText = text;
   }
 
+  /** The height the camera frames: beasts are long, so frame their length too. */
+  frameHeight() {
+    const c = this.character;
+    return c instanceof Beast ? c.def.height * 1.9 : c.def.height;
+  }
+
   headY() {
-    const head = this.character?.bones.get('Head');
+    const head = this.character?.bones.get('Head') || this.character?.bones.get('head');
     if (!head) return null;
     this.character.root.updateMatrixWorld(true);
     return head.getWorldPosition(new THREE.Vector3()).y + 0.08;
@@ -158,6 +169,7 @@ class App {
   /** Builds the character for the current state from scratch. */
   async build() {
     const s = this.state;
+    if (s.beast && this.creatures) return this.buildBeast();
     this.status('Loading character…');
     const next = await Character.create({ humanoid: this.humanoid, gear: this.gear, loader: this.loader, library: this.library }, s.body);
     next.setTone(this.tone(s.tone));
@@ -190,6 +202,28 @@ class App {
     this.status('');
   }
 
+  /** A beast on its own rig replaces the character. */
+  async buildBeast() {
+    const s = this.state;
+    this.status('Loading creature…');
+    const next = await Beast.create({ creatures: this.creatures, loader: this.loader }, s.beast);
+    if (this.character) this.character.dispose();
+    this.character = next;
+    this.view.scene.add(next.group);
+    this.applyDebug();
+    const names = next.clipNames();
+    if (!next.clips.has(s.clip)) s.clip = names[0];
+    next.player.play(s.clip, 0);
+    if (s.paused && s.t !== null) {
+      next.player.paused = true;
+      next.player.seek(s.t);
+    } else {
+      next.player.paused = s.paused;
+    }
+    next.player.speed = s.speed;
+    this.status('');
+  }
+
   tone(id) {
     return (this.humanoid.skin_tones.find((t) => t.id === id) || this.humanoid.skin_tones[0]).linear;
   }
@@ -200,6 +234,10 @@ class App {
 
   playClip(name, fade = 0.25) {
     const c = this.character;
+    if (c instanceof Beast) {
+      if (!c.player.play(name, fade)) c.player.play(c.clipNames()[0], fade);
+      return;
+    }
     if (!c.player.play(name, fade)) {
       c.player.play('Idle_Loop', fade);
       this.state.clip = 'Idle_Loop';
@@ -233,7 +271,13 @@ class App {
         if (raceTones.length && !raceTones.includes(tone)) s().tone = raceTones[0].id;
         if (!raceTones.length && tone?.races) s().tone = this.humanoid.defaults?.[id]?.tone || 'warm';
         await this.build();
-        this.view.preset(s().cam, this.character.def.height, this.headY());
+        this.view.preset(s().cam, this.frameHeight(), this.headY());
+      }),
+      setBeast: (id) => this.run(async () => {
+        s().beast = id || null;
+        if (!id) s().clip = 'Idle_Loop';
+        await this.build();
+        this.view.preset(s().cam, this.frameHeight(), this.headY());
       }),
       setTone: (id) => this.run(async () => {
         s().tone = id;
@@ -304,7 +348,7 @@ class App {
       },
       setCamera: (name) => this.run(async () => {
         s().cam = name;
-        this.view.preset(name, this.character.def.height, this.headY());
+        this.view.preset(name, this.frameHeight(), this.headY());
       }),
       setTurntable: (on) => this.run(async () => {
         s().turn = on;
@@ -356,6 +400,7 @@ class App {
       state: this.state,
       humanoid: this.humanoid,
       gear: this.gear,
+      creatures: this.creatures,
       character: this.character,
       actions: this.actions,
     });
@@ -368,7 +413,7 @@ class App {
     this.state = next;
     await this.run(async () => {
       await this.build();
-      this.view.preset(this.state.cam, this.character.def.height, this.headY());
+      this.view.preset(this.state.cam, this.frameHeight(), this.headY());
       this.view.turntable = this.state.turn;
     });
   }

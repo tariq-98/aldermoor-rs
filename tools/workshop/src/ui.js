@@ -107,9 +107,25 @@ function toggle(label, value, onChange) {
  * Builds (or rebuilds) the panel. `app` provides: state, humanoid, gear, character, actions.
  */
 export function renderPanel(root, app) {
-  const { state, humanoid, gear, character, actions } = app;
+  const { state, humanoid, gear, creatures, character, actions } = app;
   root.replaceChildren();
   root.append(el('header', { class: 'title' }, el('h1', {}, 'Aldermoor'), el('p', {}, 'Character workshop')));
+
+  // Beasts on their own rigs replace the character entirely.
+  if (creatures?.creatures?.length) {
+    const beasts = section('Beasts');
+    const options = [{ value: '', label: 'None (humanoids)' }, ...creatures.creatures.map((c) => ({ value: c.id, label: c.label }))];
+    beasts.body.append(row('Beast', select(options, state.beast || '', (v) => actions.setBeast(v))));
+    root.append(beasts.sec);
+  }
+  if (state.beast && character?.clipNames) {
+    const anim = section('Animation');
+    anim.body.append(row('Clip', select(character.clipNames().map((n) => ({ value: n, label: n.replace(/_Loop$/, '').replace(/_/g, ' ') })), state.clip, actions.setClip)));
+    root.append(anim.sec);
+    appendView(root, state, actions);
+    root.append(el('footer', { class: 'status', id: 'status' }, ''));
+    return { setTime() {}, setPlaying() {} };
+  }
 
   // Character.
   const who = section('Character');
@@ -216,6 +232,23 @@ export function renderPanel(root, app) {
   );
   root.append(anim.sec);
 
+  appendView(root, state, actions);
+
+  root.append(el('footer', { class: 'status', id: 'status' }, ''));
+  return {
+    setTime(t, duration) {
+      if (document.activeElement !== scrub) scrub.value = duration ? String(t / duration) : '0';
+      timeOut.textContent = `${t.toFixed(2)} / ${duration.toFixed(2)} s`;
+    },
+    setPlaying(paused) {
+      play.textContent = paused ? 'Play' : 'Pause';
+    },
+  };
+}
+
+
+/** The camera, debug and screenshot section, shared by characters and beasts. */
+function appendView(root, state, actions) {
   // View.
   const view = section('View');
   const cams = el('div', { class: 'grid3' });
@@ -236,16 +269,6 @@ export function renderPanel(root, app) {
   view.body.append(el('div', { class: 'row buttons' }, shot));
   root.append(view.sec);
 
-  root.append(el('footer', { class: 'status', id: 'status' }, ''));
-  return {
-    setTime(t, duration) {
-      if (document.activeElement !== scrub) scrub.value = duration ? String(t / duration) : '0';
-      timeOut.textContent = `${t.toFixed(2)} / ${duration.toFixed(2)} s`;
-    },
-    setPlaying(paused) {
-      play.textContent = paused ? 'Play' : 'Pause';
-    },
-  };
 }
 
 function pretty(name) {

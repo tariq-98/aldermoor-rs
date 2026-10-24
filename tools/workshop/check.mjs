@@ -53,6 +53,11 @@ const LOOKS = {
   dwarf_smith: 'body=dwarf_male&tone=tan&hair=hair.buzzed&haircol=auburn&brows=brows.strong&beard=beard.dwarven&p.torso_under=peasant.top&p.legs_under=peasant.trousers&p.feet=peasant.shoes&g.main_hand=tool.hammer&clip=Idle_Loop&paused=1&t=0.5&cam=three_quarter',
   dwarf_knight: 'body=dwarf_female&tone=olive&hair=hair.buns&haircol=copper&brows=brows.fine&beard=none&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&p.torso=plate.cuirass&p.shoulders=plate.pauldrons&p.hands=plate.gauntlets&p.legs=plate.legs&p.head=plate.helm_kettle&g.main_hand=axe.bearded&g.off_hand=shield.round&clip=Sword_Idle&paused=1&t=0.4&cam=three_quarter',
   goblin_raider: 'body=goblin_male&tone=goblin%20green&hair=none&brows=none&beard=none&p.torso_under=ranger.top&p.legs_under=peasant.trousers&p.feet=peasant.shoes&p.head=plate.helm_norman&g.main_hand=dagger.hunting&g.off_hand=shield.round&clip=Sword_Idle&paused=1&t=0.4&cam=three_quarter',
+  wolf: 'beast=wolf.grey&clip=Walk_Loop&paused=1&t=0.4&cam=left',
+  dire_wolf: 'beast=wolf.dire&clip=Attack&paused=1&t=0.42&cam=three_quarter',
+  skeleton: 'body=skeleton&hair=none&brows=none&beard=none&p.torso_under=none&p.head=plate.helm_kettle&g.main_hand=sword.arming&g.off_hand=shield.round&clip=Zombie_Walk_Fwd_Loop&paused=1&t=0.4&cam=three_quarter',
+  barrow_king: 'body=barrow_king&hair=none&brows=none&beard=none&p.torso_under=none&p.torso=plate.cuirass&p.shoulders=plate.pauldrons&g.main_hand=sword.great&g.back=cape.traveller&clip=Sword_Idle&paused=1&t=0.4&cam=three_quarter',
+  golem: 'body=golem&hair=none&brows=none&beard=none&p.torso_under=none&clip=Punch_Cross&paused=1&t=0.3&cam=three_quarter',
   bearded_head: 'body=male&tone=fair&hair=hair.long&haircol=auburn&brows=brows.strong&beard=beard.full&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&clip=Idle_Loop&paused=1&t=0.5&cam=head',
 };
 

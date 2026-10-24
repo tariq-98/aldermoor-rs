@@ -65,7 +65,9 @@ def merge_catalog(entries):
 
 def main():
     entries = {}
-    for bt in HUMANOID["body_types"]:
+    for bt, info in HUMANOID["body_types"].items():
+        if info.get("dress") is False:
+            continue  # Golems and other creatures that wear nothing.
         for style in CAPES:
             skel, body = open_body(bt)
             env, trunk = envelope(body)

@@ -46,9 +46,12 @@ PALETTE = {
     "crystal_violet": ((0.55, 0.25, 0.95), 0.0, 0.08),
     "bone": ((0.78, 0.74, 0.62), 0.0, 0.6),
     "glass": ((0.75, 0.8, 0.78), 0.0, 0.05),
+    "stone": ((0.30, 0.29, 0.27), 0.0, 0.85),
+    "moss": ((0.10, 0.18, 0.05), 0.0, 0.9),
+    "rune": ((0.25, 0.75, 1.0), 0.0, 0.3),
     "flame": ((1.0, 0.62, 0.22), 0.0, 0.5),
 }
-GLOW = {"crystal_blue": 1.5, "crystal_green": 1.5, "crystal_violet": 1.5, "flame": 6.0}
+GLOW = {"crystal_blue": 1.5, "crystal_green": 1.5, "crystal_violet": 1.5, "flame": 6.0, "rune": 5.0}
 TRANSLUCENT = {"glass": 0.25}
 
 
@@ -153,15 +156,18 @@ def sweep(path, radius_fn, n=12, power=2.0, ratio=1.0, up=Vector((0, 0, 1))):
     sections = []
     total = sum((b - a).length for a, b in zip(path, path[1:]))
     acc = 0.0
+    side = None
     for i, p in enumerate(path):
         if i:
             acc += (path[i] - path[i - 1]).length
         t = acc / total if total else 0
         tan = (path[min(i + 1, len(path) - 1)] - path[max(i - 1, 0)]).normalized()
-        side = tan.cross(up)
-        if side.length < 1e-4:
-            side = tan.cross(Vector((1, 0, 0)))
-        side.normalize()
+        # The first frame comes from `up`; later ones are carried along so the tube can't twist.
+        if side is None:
+            side = tan.cross(up)
+            if side.length < 1e-4:
+                side = tan.cross(Vector((1, 0, 0)))
+        side = (side - tan * side.dot(tan)).normalized()
         nrm = side.cross(tan).normalized()
         r = radius_fn(t)
         sections.append(ring(p, side, nrm, r, r * ratio, n, power) if r > 1e-6 else [p])

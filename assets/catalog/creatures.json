@@ -1,0 +1,51 @@
+{
+ "version": 1,
+ "creatures": [
+  {
+   "id": "wolf.grey",
+   "label": "Grey wolf",
+   "family": "beast",
+   "file": "creatures/wolf.grey.glb",
+   "height": 1.18,
+   "triangles": 16111,
+   "clips": {
+    "idle": "Idle_Loop",
+    "walk": "Walk_Loop",
+    "run": "Run_Loop",
+    "attack": "Attack",
+    "hit": "Hit",
+    "death": "Death",
+    "jump": "Jump",
+    "special": "Howl"
+   },
+   "speeds": {
+    "walk": 1.6,
+    "run": 6.4
+   },
+   "sim_body": "wolf"
+  },
+  {
+   "id": "wolf.dire",
+   "label": "Dire wolf",
+   "family": "beast",
+   "file": "creatures/wolf.dire.glb",
+   "height": 1.51,
+   "triangles": 16112,
+   "clips": {
+    "idle": "Idle_Loop",
+    "walk": "Walk_Loop",
+    "run": "Run_Loop",
+    "attack": "Attack",
+    "hit": "Hit",
+    "death": "Death",
+    "jump": "Jump",
+    "special": "Howl"
+   },
+   "speeds": {
+    "walk": 1.8,
+    "run": 7.0
+   },
+   "sim_body": "wolf"
+  }
+ ]
+}

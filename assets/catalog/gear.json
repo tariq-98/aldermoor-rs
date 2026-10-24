@@ -393,7 +393,9 @@
     "dwarf_male": "gear/dwarf_male/cape.traveller.gltf",
     "dwarf_female": "gear/dwarf_female/cape.traveller.gltf",
     "goblin_male": "gear/goblin_male/cape.traveller.gltf",
-    "goblin_female": "gear/goblin_female/cape.traveller.gltf"
+    "goblin_female": "gear/goblin_female/cape.traveller.gltf",
+    "skeleton": "gear/skeleton/cape.traveller.gltf",
+    "barrow_king": "gear/barrow_king/cape.traveller.gltf"
    },
    "hides": {
     "male": {
@@ -418,6 +420,12 @@
      "body": []
     },
     "goblin_female": {
+     "body": []
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
      "body": []
     }
    },
@@ -480,7 +488,9 @@
     "dwarf_male": "gear/dwarf_male/cape.ranger.gltf",
     "dwarf_female": "gear/dwarf_female/cape.ranger.gltf",
     "goblin_male": "gear/goblin_male/cape.ranger.gltf",
-    "goblin_female": "gear/goblin_female/cape.ranger.gltf"
+    "goblin_female": "gear/goblin_female/cape.ranger.gltf",
+    "skeleton": "gear/skeleton/cape.ranger.gltf",
+    "barrow_king": "gear/barrow_king/cape.ranger.gltf"
    },
    "hides": {
     "male": {
@@ -505,6 +515,12 @@
      "body": []
     },
     "goblin_female": {
+     "body": []
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
      "body": []
     }
    },
@@ -567,7 +583,9 @@
     "dwarf_male": "gear/dwarf_male/backpack.travel.gltf",
     "dwarf_female": "gear/dwarf_female/backpack.travel.gltf",
     "goblin_male": "gear/goblin_male/backpack.travel.gltf",
-    "goblin_female": "gear/goblin_female/backpack.travel.gltf"
+    "goblin_female": "gear/goblin_female/backpack.travel.gltf",
+    "skeleton": "gear/skeleton/backpack.travel.gltf",
+    "barrow_king": "gear/barrow_king/backpack.travel.gltf"
    },
    "hides": {
     "male": {
@@ -592,6 +610,12 @@
      "body": []
     },
     "goblin_female": {
+     "body": []
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
      "body": []
     }
    }

@@ -1618,6 +1618,524 @@
     }
    ],
    "gear_scale": 0.8
+  },
+  "skeleton": {
+   "label": "Skeleton warrior",
+   "race": "undead",
+   "frame": "male",
+   "file": "humanoid/skeleton/body.gltf",
+   "pelvis": [
+    0.0,
+    0.9491,
+    -0.043
+   ],
+   "height": 1.799,
+   "skin_reference": null,
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_side",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.1202,
+     "a": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.128,
+      0.0043
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.1124,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1063,
+      -0.0022
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.144,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.1329,
+      0.0072
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.1592,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.2111,
+      -0.0415
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.05,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.4288,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.05,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.4288,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.0477,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4586,
+      0.0147
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.0477,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4586,
+      0.0147
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.042,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.2511,
+      -0.0033
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.042,
+     "a": [
+      -0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.2511,
+      -0.0033
+     ]
+    }
+   ],
+   "gear_scale": 1.0,
+   "creature": true
+  },
+  "barrow_king": {
+   "label": "The Barrow King",
+   "race": "undead",
+   "frame": "male",
+   "file": "humanoid/barrow_king/body.gltf",
+   "pelvis": [
+    0.0,
+    0.9491,
+    -0.043
+   ],
+   "height": 1.923,
+   "skin_reference": null,
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_side",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.1321,
+     "a": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.1664,
+      0.0056
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.1272,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.1382,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.1736,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.1728,
+      0.0094
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.1885,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.2744,
+      -0.0539
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.0543,
+     "a": [
+      -0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.5574,
+      -0.0038
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.0543,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.5574,
+      -0.0038
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.0526,
+     "a": [
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.5961,
+      0.0191
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.0526,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.5961,
+      0.0191
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.0452,
+     "a": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.3264,
+      -0.0043
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.0452,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.3264,
+      -0.0043
+     ]
+    }
+   ],
+   "gear_scale": 1.3,
+   "creature": true,
+   "boss": true
+  },
+  "golem": {
+   "label": "Stone golem",
+   "race": "construct",
+   "frame": "male",
+   "file": "humanoid/golem/body.gltf",
+   "pelvis": [
+    0.0,
+    0.99068,
+    -0.043
+   ],
+   "height": 1.983,
+   "skin_reference": null,
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_side",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.2467,
+     "a": [
+      -0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.1536,
+      0.0081
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.2756,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1276,
+      -0.0043
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.2496,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.1595,
+      0.0138
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.3004,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.2533,
+      -0.0788
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.2283,
+     "a": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4074,
+      -0.0055
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.216,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.4074,
+      -0.0055
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.1548,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4356,
+      0.028
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.1545,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4356,
+      0.028
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.2008,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.339,
+      -0.0069
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.1929,
+     "a": [
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.339,
+      -0.0069
+     ]
+    }
+   ],
+   "gear_scale": 1.8,
+   "creature": true,
+   "dress": false
   }
  },
  "hair": [
@@ -2914,7 +3432,9 @@
     "dwarf_male": "humanoid/dwarf_male/armour/plate.cuirass.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.cuirass.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.cuirass.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.cuirass.gltf"
+    "goblin_female": "humanoid/goblin_female/armour/plate.cuirass.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.cuirass.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.cuirass.gltf"
    },
    "hides": {
     "male": {
@@ -2998,6 +3518,12 @@
      "ranger.top": [
       "belly"
      ]
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
+     "body": []
     }
    },
    "coverage": {
@@ -3050,6 +3576,16 @@
      "belly": 1.0,
      "hips": 0.735,
      "thigh_hi": 0.197
+    },
+    "skeleton": {
+     "belly": 0.37,
+     "chest": 0.319,
+     "hips": 0.307
+    },
+    "barrow_king": {
+     "belly": 0.357,
+     "chest": 0.369,
+     "hips": 0.305
     }
    },
    "source": "armour"
@@ -3068,7 +3604,9 @@
     "dwarf_male": "humanoid/dwarf_male/armour/plate.pauldrons.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.pauldrons.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.pauldrons.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.pauldrons.gltf"
+    "goblin_female": "humanoid/goblin_female/armour/plate.pauldrons.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.pauldrons.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.pauldrons.gltf"
    },
    "hides": {
     "male": {
@@ -3093,6 +3631,12 @@
      "body": []
     },
     "goblin_female": {
+     "body": []
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
      "body": []
     }
    },
@@ -3148,6 +3692,14 @@
      "forearm_hi": 0.197,
      "upperarm_hi": 0.06,
      "face": 0.092
+    },
+    "skeleton": {
+     "upperarm_hi": 0.366,
+     "upperarm_lo": 0.447
+    },
+    "barrow_king": {
+     "upperarm_hi": 0.383,
+     "upperarm_lo": 0.294
     }
    },
    "source": "armour"
@@ -3166,7 +3718,9 @@
     "dwarf_male": "humanoid/dwarf_male/armour/plate.gauntlets.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.gauntlets.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.gauntlets.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.gauntlets.gltf"
+    "goblin_female": "humanoid/goblin_female/armour/plate.gauntlets.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.gauntlets.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.gauntlets.gltf"
    },
    "hides": {
     "male": {
@@ -3277,6 +3831,18 @@
       "hand"
      ],
      "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "barrow_king": {
+     "body": [
       "forearm_lo",
       "hand"
      ]
@@ -3322,6 +3888,16 @@
      "forearm_lo": 1.0,
      "forearm_hi": 0.11,
      "hand": 1.0
+    },
+    "skeleton": {
+     "hand": 0.978,
+     "forearm_hi": 0.109,
+     "forearm_lo": 1.0
+    },
+    "barrow_king": {
+     "hand": 0.984,
+     "forearm_hi": 0.089,
+     "forearm_lo": 1.0
     }
    },
    "source": "armour"
@@ -3340,7 +3916,9 @@
     "dwarf_male": "humanoid/dwarf_male/armour/plate.legs.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.legs.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.legs.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.legs.gltf"
+    "goblin_female": "humanoid/goblin_female/armour/plate.legs.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.legs.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.legs.gltf"
    },
    "hides": {
     "male": {
@@ -3451,6 +4029,18 @@
       "shin_lo"
      ],
      "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "barrow_king": {
+     "body": [
       "shin_hi",
       "shin_lo"
      ]
@@ -3504,6 +4094,18 @@
      "shin_hi": 0.768,
      "thigh_hi": 0.415,
      "thigh_lo": 0.6
+    },
+    "skeleton": {
+     "thigh_hi": 0.261,
+     "thigh_lo": 0.515,
+     "shin_hi": 0.722,
+     "shin_lo": 0.927
+    },
+    "barrow_king": {
+     "thigh_hi": 0.255,
+     "thigh_lo": 0.516,
+     "shin_hi": 0.683,
+     "shin_lo": 0.93
     }
    },
    "source": "armour"
@@ -3522,7 +4124,9 @@
     "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_norman.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_norman.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.helm_norman.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.helm_norman.gltf"
+    "goblin_female": "humanoid/goblin_female/armour/plate.helm_norman.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.helm_norman.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.helm_norman.gltf"
    },
    "hides": {
     "male": {
@@ -3568,6 +4172,18 @@
      ]
     },
     "goblin_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "barrow_king": {
      "body": [
       "scalp",
       "ears"
@@ -3619,6 +4235,16 @@
      "scalp": 0.727,
      "ears": 0.848,
      "face": 0.594
+    },
+    "skeleton": {
+     "face": 0.269,
+     "scalp": 0.421,
+     "ears": 0.995
+    },
+    "barrow_king": {
+     "face": 0.156,
+     "ears": 0.944,
+     "scalp": 0.34
     }
    },
    "source": "armour"
@@ -3637,7 +4263,9 @@
     "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_kettle.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_kettle.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.helm_kettle.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.helm_kettle.gltf"
+    "goblin_female": "humanoid/goblin_female/armour/plate.helm_kettle.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.helm_kettle.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.helm_kettle.gltf"
    },
    "hides": {
     "male": {
@@ -3683,6 +4311,18 @@
      ]
     },
     "goblin_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "barrow_king": {
      "body": [
       "scalp",
       "ears"
@@ -3735,6 +4375,16 @@
      "scalp": 0.727,
      "ears": 0.848,
      "face": 0.607
+    },
+    "skeleton": {
+     "face": 0.275,
+     "scalp": 0.421,
+     "ears": 0.995
+    },
+    "barrow_king": {
+     "face": 0.166,
+     "ears": 0.947,
+     "scalp": 0.34
     }
    },
    "source": "armour"
@@ -4606,6 +5256,30 @@
    "beard": null,
    "tone": "goblin green",
    "hair_colour": "dark brown"
+  },
+  "skeleton": {
+   "pieces": [],
+   "hair": null,
+   "brows": null,
+   "beard": null,
+   "tone": "warm",
+   "hair_colour": "black"
+  },
+  "barrow_king": {
+   "pieces": [],
+   "hair": null,
+   "brows": null,
+   "beard": null,
+   "tone": "warm",
+   "hair_colour": "black"
+  },
+  "golem": {
+   "pieces": [],
+   "hair": null,
+   "brows": null,
+   "beard": null,
+   "tone": "warm",
+   "hair_colour": "black"
   }
  },
  "texture_variant_labels": {
@@ -4653,6 +5327,23 @@
     "female": "goblin_female"
    },
    "npc_only": true
+  },
+  "undead": {
+   "label": "Undead",
+   "frames": {
+    "male": "skeleton",
+    "boss": "barrow_king"
+   },
+   "npc_only": true,
+   "creature": true
+  },
+  "construct": {
+   "label": "Construct",
+   "frames": {
+    "male": "golem"
+   },
+   "npc_only": true,
+   "creature": true
   }
  }
 }
