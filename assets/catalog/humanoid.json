@@ -4732,6 +4732,1163 @@
    ]
   },
   {
+   "id": "plate.cuirass",
+   "label": "Plate cuirass",
+   "slot": "torso",
+   "layer": 2.0,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.cuirass.gltf",
+    "female": "humanoid/female/armour/plate.cuirass.gltf",
+    "elf_male": "humanoid/elf_male/armour/plate.cuirass.gltf",
+    "elf_female": "humanoid/elf_female/armour/plate.cuirass.gltf",
+    "dwarf_male": "humanoid/dwarf_male/armour/plate.cuirass.gltf",
+    "dwarf_female": "humanoid/dwarf_female/armour/plate.cuirass.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.cuirass.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.cuirass.gltf",
+    "goblin_male": "humanoid/goblin_male/armour/plate.cuirass.gltf",
+    "goblin_female": "humanoid/goblin_female/armour/plate.cuirass.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.cuirass.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.cuirass.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
+     "body": []
+    }
+   },
+   "coverage": {
+    "male": {
+     "hips": 0.792,
+     "chest": 0.564,
+     "belly": 1.0,
+     "thigh_hi": 0.132
+    },
+    "female": {
+     "chest": 0.59,
+     "belly": 0.997,
+     "hips": 0.733,
+     "thigh_hi": 0.14
+    },
+    "elf_male": {
+     "hips": 0.818,
+     "chest": 0.553,
+     "belly": 1.0,
+     "thigh_hi": 0.131
+    },
+    "elf_female": {
+     "chest": 0.592,
+     "belly": 1.0,
+     "hips": 0.742,
+     "thigh_hi": 0.131
+    },
+    "dwarf_male": {
+     "hips": 0.789,
+     "chest": 0.562,
+     "belly": 0.997,
+     "upperarm_hi": 0.078,
+     "thigh_hi": 0.202
+    },
+    "dwarf_female": {
+     "chest": 0.591,
+     "belly": 0.998,
+     "hips": 0.73,
+     "thigh_hi": 0.182
+    },
+    "foxfolk_male": {
+     "hips": 0.792,
+     "chest": 0.558,
+     "belly": 1.0,
+     "thigh_hi": 0.131
+    },
+    "foxfolk_female": {
+     "chest": 0.616,
+     "belly": 1.0,
+     "hips": 0.75,
+     "thigh_hi": 0.14
+    },
+    "goblin_male": {
+     "hips": 0.829,
+     "chest": 0.602,
+     "belly": 1.0,
+     "upperarm_hi": 0.069,
+     "thigh_hi": 0.191
+    },
+    "goblin_female": {
+     "chest": 0.684,
+     "belly": 1.0,
+     "hips": 0.735,
+     "thigh_hi": 0.197
+    },
+    "skeleton": {
+     "belly": 0.37,
+     "chest": 0.32,
+     "hips": 0.307
+    },
+    "barrow_king": {
+     "belly": 0.357,
+     "chest": 0.369,
+     "hips": 0.305
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.pauldrons",
+   "label": "Plate pauldrons",
+   "slot": "shoulders",
+   "layer": 3.0,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.pauldrons.gltf",
+    "female": "humanoid/female/armour/plate.pauldrons.gltf",
+    "elf_male": "humanoid/elf_male/armour/plate.pauldrons.gltf",
+    "elf_female": "humanoid/elf_female/armour/plate.pauldrons.gltf",
+    "dwarf_male": "humanoid/dwarf_male/armour/plate.pauldrons.gltf",
+    "dwarf_female": "humanoid/dwarf_female/armour/plate.pauldrons.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.pauldrons.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.pauldrons.gltf",
+    "goblin_male": "humanoid/goblin_male/armour/plate.pauldrons.gltf",
+    "goblin_female": "humanoid/goblin_female/armour/plate.pauldrons.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.pauldrons.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.pauldrons.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": []
+    },
+    "female": {
+     "body": []
+    },
+    "elf_male": {
+     "body": []
+    },
+    "elf_female": {
+     "body": []
+    },
+    "dwarf_male": {
+     "body": []
+    },
+    "dwarf_female": {
+     "body": []
+    },
+    "foxfolk_male": {
+     "body": []
+    },
+    "foxfolk_female": {
+     "body": []
+    },
+    "goblin_male": {
+     "body": []
+    },
+    "goblin_female": {
+     "body": []
+    },
+    "skeleton": {
+     "body": []
+    },
+    "barrow_king": {
+     "body": []
+    }
+   },
+   "coverage": {
+    "male": {
+     "chest": 0.118,
+     "upperarm_hi": 0.261,
+     "upperarm_lo": 0.524,
+     "forearm_hi": 0.122
+    },
+    "female": {
+     "scalp": 0.082,
+     "ears": 0.093,
+     "upperarm_lo": 0.57,
+     "forearm_hi": 0.112,
+     "upperarm_hi": 0.089
+    },
+    "elf_male": {
+     "chest": 0.133,
+     "upperarm_hi": 0.28,
+     "upperarm_lo": 0.527,
+     "forearm_hi": 0.1
+    },
+    "elf_female": {
+     "scalp": 0.085,
+     "upperarm_lo": 0.576,
+     "forearm_hi": 0.053,
+     "upperarm_hi": 0.108
+    },
+    "dwarf_male": {
+     "chest": 0.122,
+     "upperarm_hi": 0.127,
+     "upperarm_lo": 0.38,
+     "forearm_hi": 0.251
+    },
+    "dwarf_female": {
+     "ears": 0.365,
+     "upperarm_lo": 0.567,
+     "forearm_hi": 0.31,
+     "face": 0.052
+    },
+    "foxfolk_male": {
+     "chest": 0.138,
+     "upperarm_hi": 0.285,
+     "upperarm_lo": 0.535,
+     "forearm_hi": 0.128
+    },
+    "foxfolk_female": {
+     "scalp": 0.09,
+     "upperarm_lo": 0.576,
+     "forearm_hi": 0.125,
+     "upperarm_hi": 0.088
+    },
+    "goblin_male": {
+     "chest": 0.155,
+     "upperarm_hi": 0.206,
+     "neck": 0.069,
+     "upperarm_lo": 0.558,
+     "forearm_hi": 0.19
+    },
+    "goblin_female": {
+     "scalp": 0.089,
+     "ears": 0.375,
+     "upperarm_lo": 0.57,
+     "forearm_hi": 0.197,
+     "upperarm_hi": 0.06,
+     "face": 0.092
+    },
+    "skeleton": {
+     "upperarm_hi": 0.366,
+     "upperarm_lo": 0.447
+    },
+    "barrow_king": {
+     "upperarm_hi": 0.383,
+     "upperarm_lo": 0.294
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.gauntlets",
+   "label": "Plate gauntlets",
+   "slot": "hands",
+   "layer": 2.2,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.gauntlets.gltf",
+    "female": "humanoid/female/armour/plate.gauntlets.gltf",
+    "elf_male": "humanoid/elf_male/armour/plate.gauntlets.gltf",
+    "elf_female": "humanoid/elf_female/armour/plate.gauntlets.gltf",
+    "dwarf_male": "humanoid/dwarf_male/armour/plate.gauntlets.gltf",
+    "dwarf_female": "humanoid/dwarf_female/armour/plate.gauntlets.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.gauntlets.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.gauntlets.gltf",
+    "goblin_male": "humanoid/goblin_male/armour/plate.gauntlets.gltf",
+    "goblin_female": "humanoid/goblin_female/armour/plate.gauntlets.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.gauntlets.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.gauntlets.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "barrow_king": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.122,
+     "hand": 1.0
+    },
+    "female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.11,
+     "hand": 1.0
+    },
+    "elf_male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.122,
+     "hand": 1.0
+    },
+    "elf_female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.11,
+     "hand": 1.0
+    },
+    "dwarf_male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.157,
+     "hand": 1.0
+    },
+    "dwarf_female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.194,
+     "hand": 1.0
+    },
+    "foxfolk_male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.122,
+     "hand": 1.0
+    },
+    "foxfolk_female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.11,
+     "hand": 1.0
+    },
+    "goblin_male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.123,
+     "hand": 1.0
+    },
+    "goblin_female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.11,
+     "hand": 1.0
+    },
+    "skeleton": {
+     "hand": 0.978,
+     "forearm_hi": 0.109,
+     "forearm_lo": 1.0
+    },
+    "barrow_king": {
+     "hand": 0.984,
+     "forearm_hi": 0.089,
+     "forearm_lo": 1.0
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.legs",
+   "label": "Plate legs",
+   "slot": "legs",
+   "layer": 2.1,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.legs.gltf",
+    "female": "humanoid/female/armour/plate.legs.gltf",
+    "elf_male": "humanoid/elf_male/armour/plate.legs.gltf",
+    "elf_female": "humanoid/elf_female/armour/plate.legs.gltf",
+    "dwarf_male": "humanoid/dwarf_male/armour/plate.legs.gltf",
+    "dwarf_female": "humanoid/dwarf_female/armour/plate.legs.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.legs.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.legs.gltf",
+    "goblin_male": "humanoid/goblin_male/armour/plate.legs.gltf",
+    "goblin_female": "humanoid/goblin_female/armour/plate.legs.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.legs.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.legs.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "barrow_king": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "shin_lo": 0.937,
+     "shin_hi": 0.79,
+     "thigh_hi": 0.377,
+     "thigh_lo": 0.568
+    },
+    "female": {
+     "shin_lo": 0.921,
+     "shin_hi": 0.781,
+     "thigh_hi": 0.402,
+     "thigh_lo": 0.597
+    },
+    "elf_male": {
+     "shin_lo": 0.934,
+     "shin_hi": 0.789,
+     "thigh_hi": 0.379,
+     "thigh_lo": 0.567
+    },
+    "elf_female": {
+     "shin_lo": 0.917,
+     "shin_hi": 0.794,
+     "thigh_hi": 0.385,
+     "thigh_lo": 0.595
+    },
+    "dwarf_male": {
+     "shin_lo": 0.926,
+     "shin_hi": 0.809,
+     "thigh_hi": 0.357,
+     "thigh_lo": 0.562
+    },
+    "dwarf_female": {
+     "shin_lo": 0.918,
+     "shin_hi": 0.767,
+     "thigh_hi": 0.417,
+     "thigh_lo": 0.605
+    },
+    "foxfolk_male": {
+     "shin_lo": 0.935,
+     "shin_hi": 0.789,
+     "thigh_hi": 0.378,
+     "thigh_lo": 0.568
+    },
+    "foxfolk_female": {
+     "shin_lo": 0.919,
+     "shin_hi": 0.789,
+     "thigh_hi": 0.4,
+     "thigh_lo": 0.601
+    },
+    "goblin_male": {
+     "shin_lo": 0.928,
+     "shin_hi": 0.811,
+     "thigh_hi": 0.387,
+     "thigh_lo": 0.567
+    },
+    "goblin_female": {
+     "shin_lo": 0.916,
+     "shin_hi": 0.768,
+     "thigh_hi": 0.415,
+     "thigh_lo": 0.6
+    },
+    "skeleton": {
+     "thigh_hi": 0.261,
+     "thigh_lo": 0.515,
+     "shin_hi": 0.723,
+     "shin_lo": 0.926
+    },
+    "barrow_king": {
+     "thigh_hi": 0.255,
+     "thigh_lo": 0.516,
+     "shin_hi": 0.683,
+     "shin_lo": 0.93
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.helm_norman",
+   "label": "Nasal helm",
+   "slot": "head",
+   "layer": 2.5,
+   "covers_hair": true,
+   "files": {
+    "male": "humanoid/male/armour/plate.helm_norman.gltf",
+    "female": "humanoid/female/armour/plate.helm_norman.gltf",
+    "elf_male": "humanoid/elf_male/armour/plate.helm_norman.gltf",
+    "elf_female": "humanoid/elf_female/armour/plate.helm_norman.gltf",
+    "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_norman.gltf",
+    "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_norman.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.helm_norman.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.helm_norman.gltf",
+    "goblin_male": "humanoid/goblin_male/armour/plate.helm_norman.gltf",
+    "goblin_female": "humanoid/goblin_female/armour/plate.helm_norman.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.helm_norman.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.helm_norman.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "barrow_king": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "neck": 0.13,
+     "scalp": 0.889,
+     "face": 0.594,
+     "ears": 0.811
+    },
+    "female": {
+     "scalp": 0.844,
+     "ears": 0.875,
+     "face": 0.62
+    },
+    "elf_male": {
+     "neck": 0.075,
+     "scalp": 0.858,
+     "face": 0.604,
+     "ears": 0.861
+    },
+    "elf_female": {
+     "scalp": 0.797,
+     "ears": 0.928,
+     "face": 0.62
+    },
+    "dwarf_male": {
+     "neck": 0.262,
+     "scalp": 0.865,
+     "face": 0.585,
+     "ears": 0.789
+    },
+    "dwarf_female": {
+     "neck": 0.054,
+     "scalp": 0.864,
+     "ears": 0.867,
+     "face": 0.614
+    },
+    "foxfolk_male": {
+     "scalp": 0.58,
+     "face": 0.451,
+     "ears": 0.364
+    },
+    "foxfolk_female": {
+     "scalp": 0.601,
+     "face": 0.465,
+     "ears": 0.393
+    },
+    "goblin_male": {
+     "neck": 0.07,
+     "scalp": 0.597,
+     "face": 0.57,
+     "ears": 0.572
+    },
+    "goblin_female": {
+     "scalp": 0.736,
+     "ears": 0.642,
+     "face": 0.607
+    },
+    "skeleton": {
+     "face": 0.266,
+     "scalp": 0.421,
+     "ears": 0.995
+    },
+    "barrow_king": {
+     "face": 0.156,
+     "ears": 0.944,
+     "scalp": 0.34
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.helm_kettle",
+   "label": "Kettle hat",
+   "slot": "head",
+   "layer": 2.5,
+   "covers_hair": true,
+   "files": {
+    "male": "humanoid/male/armour/plate.helm_kettle.gltf",
+    "female": "humanoid/female/armour/plate.helm_kettle.gltf",
+    "elf_male": "humanoid/elf_male/armour/plate.helm_kettle.gltf",
+    "elf_female": "humanoid/elf_female/armour/plate.helm_kettle.gltf",
+    "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_kettle.gltf",
+    "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_kettle.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.helm_kettle.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.helm_kettle.gltf",
+    "goblin_male": "humanoid/goblin_male/armour/plate.helm_kettle.gltf",
+    "goblin_female": "humanoid/goblin_female/armour/plate.helm_kettle.gltf",
+    "skeleton": "humanoid/skeleton/armour/plate.helm_kettle.gltf",
+    "barrow_king": "humanoid/barrow_king/armour/plate.helm_kettle.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "skeleton": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "barrow_king": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "neck": 0.381,
+     "scalp": 0.889,
+     "face": 0.625,
+     "ears": 0.811
+    },
+    "female": {
+     "scalp": 0.86,
+     "ears": 0.875,
+     "face": 0.652
+    },
+    "elf_male": {
+     "neck": 0.253,
+     "scalp": 0.858,
+     "face": 0.629,
+     "ears": 0.861
+    },
+    "elf_female": {
+     "scalp": 0.809,
+     "ears": 0.928,
+     "face": 0.656
+    },
+    "dwarf_male": {
+     "chest": 0.081,
+     "neck": 0.513,
+     "scalp": 0.865,
+     "face": 0.618,
+     "ears": 0.789
+    },
+    "dwarf_female": {
+     "neck": 0.237,
+     "scalp": 0.869,
+     "ears": 0.867,
+     "face": 0.643
+    },
+    "foxfolk_male": {
+     "scalp": 0.58,
+     "face": 0.51,
+     "ears": 0.387
+    },
+    "foxfolk_female": {
+     "scalp": 0.601,
+     "face": 0.539,
+     "ears": 0.3
+    },
+    "goblin_male": {
+     "neck": 0.07,
+     "scalp": 0.597,
+     "face": 0.6,
+     "ears": 0.572
+    },
+    "goblin_female": {
+     "scalp": 0.736,
+     "ears": 0.642,
+     "face": 0.628
+    },
+    "skeleton": {
+     "face": 0.276,
+     "scalp": 0.421,
+     "ears": 0.995
+    },
+    "barrow_king": {
+     "face": 0.166,
+     "ears": 0.947,
+     "scalp": 0.34
+    }
+   },
+   "source": "armour"
+  },
+  {
    "id": "robe.mage",
    "label": "Mage's robe",
    "slot": "torso_under",
@@ -6736,1163 +7893,6 @@
      ]
     }
    ]
-  },
-  {
-   "id": "plate.cuirass",
-   "label": "Plate cuirass",
-   "slot": "torso",
-   "layer": 2.0,
-   "covers_hair": false,
-   "files": {
-    "male": "humanoid/male/armour/plate.cuirass.gltf",
-    "female": "humanoid/female/armour/plate.cuirass.gltf",
-    "elf_male": "humanoid/elf_male/armour/plate.cuirass.gltf",
-    "elf_female": "humanoid/elf_female/armour/plate.cuirass.gltf",
-    "dwarf_male": "humanoid/dwarf_male/armour/plate.cuirass.gltf",
-    "dwarf_female": "humanoid/dwarf_female/armour/plate.cuirass.gltf",
-    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.cuirass.gltf",
-    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.cuirass.gltf",
-    "goblin_male": "humanoid/goblin_male/armour/plate.cuirass.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.cuirass.gltf",
-    "skeleton": "humanoid/skeleton/armour/plate.cuirass.gltf",
-    "barrow_king": "humanoid/barrow_king/armour/plate.cuirass.gltf"
-   },
-   "hides": {
-    "male": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "female": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "elf_male": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "elf_female": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "dwarf_male": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ]
-    },
-    "dwarf_female": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ]
-    },
-    "foxfolk_male": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "foxfolk_female": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "goblin_male": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "goblin_female": {
-     "body": [
-      "belly"
-     ],
-     "peasant.trousers": [
-      "belly"
-     ],
-     "ranger.top": [
-      "belly"
-     ]
-    },
-    "skeleton": {
-     "body": []
-    },
-    "barrow_king": {
-     "body": []
-    }
-   },
-   "coverage": {
-    "male": {
-     "hips": 0.792,
-     "chest": 0.564,
-     "belly": 1.0,
-     "thigh_hi": 0.132
-    },
-    "female": {
-     "chest": 0.59,
-     "belly": 0.997,
-     "hips": 0.733,
-     "thigh_hi": 0.14
-    },
-    "elf_male": {
-     "hips": 0.818,
-     "chest": 0.553,
-     "belly": 1.0,
-     "thigh_hi": 0.131
-    },
-    "elf_female": {
-     "chest": 0.592,
-     "belly": 1.0,
-     "hips": 0.742,
-     "thigh_hi": 0.131
-    },
-    "dwarf_male": {
-     "hips": 0.789,
-     "chest": 0.562,
-     "belly": 0.997,
-     "upperarm_hi": 0.078,
-     "thigh_hi": 0.202
-    },
-    "dwarf_female": {
-     "chest": 0.591,
-     "belly": 0.998,
-     "hips": 0.73,
-     "thigh_hi": 0.182
-    },
-    "foxfolk_male": {
-     "hips": 0.792,
-     "chest": 0.558,
-     "belly": 1.0,
-     "thigh_hi": 0.131
-    },
-    "foxfolk_female": {
-     "chest": 0.616,
-     "belly": 1.0,
-     "hips": 0.75,
-     "thigh_hi": 0.14
-    },
-    "goblin_male": {
-     "hips": 0.829,
-     "chest": 0.602,
-     "belly": 1.0,
-     "upperarm_hi": 0.069,
-     "thigh_hi": 0.191
-    },
-    "goblin_female": {
-     "chest": 0.684,
-     "belly": 1.0,
-     "hips": 0.735,
-     "thigh_hi": 0.197
-    },
-    "skeleton": {
-     "belly": 0.37,
-     "chest": 0.32,
-     "hips": 0.307
-    },
-    "barrow_king": {
-     "belly": 0.357,
-     "chest": 0.369,
-     "hips": 0.305
-    }
-   },
-   "source": "armour"
-  },
-  {
-   "id": "plate.pauldrons",
-   "label": "Plate pauldrons",
-   "slot": "shoulders",
-   "layer": 3.0,
-   "covers_hair": false,
-   "files": {
-    "male": "humanoid/male/armour/plate.pauldrons.gltf",
-    "female": "humanoid/female/armour/plate.pauldrons.gltf",
-    "elf_male": "humanoid/elf_male/armour/plate.pauldrons.gltf",
-    "elf_female": "humanoid/elf_female/armour/plate.pauldrons.gltf",
-    "dwarf_male": "humanoid/dwarf_male/armour/plate.pauldrons.gltf",
-    "dwarf_female": "humanoid/dwarf_female/armour/plate.pauldrons.gltf",
-    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.pauldrons.gltf",
-    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.pauldrons.gltf",
-    "goblin_male": "humanoid/goblin_male/armour/plate.pauldrons.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.pauldrons.gltf",
-    "skeleton": "humanoid/skeleton/armour/plate.pauldrons.gltf",
-    "barrow_king": "humanoid/barrow_king/armour/plate.pauldrons.gltf"
-   },
-   "hides": {
-    "male": {
-     "body": []
-    },
-    "female": {
-     "body": []
-    },
-    "elf_male": {
-     "body": []
-    },
-    "elf_female": {
-     "body": []
-    },
-    "dwarf_male": {
-     "body": []
-    },
-    "dwarf_female": {
-     "body": []
-    },
-    "foxfolk_male": {
-     "body": []
-    },
-    "foxfolk_female": {
-     "body": []
-    },
-    "goblin_male": {
-     "body": []
-    },
-    "goblin_female": {
-     "body": []
-    },
-    "skeleton": {
-     "body": []
-    },
-    "barrow_king": {
-     "body": []
-    }
-   },
-   "coverage": {
-    "male": {
-     "chest": 0.118,
-     "upperarm_hi": 0.261,
-     "upperarm_lo": 0.524,
-     "forearm_hi": 0.122
-    },
-    "female": {
-     "scalp": 0.082,
-     "ears": 0.093,
-     "upperarm_lo": 0.57,
-     "forearm_hi": 0.112,
-     "upperarm_hi": 0.089
-    },
-    "elf_male": {
-     "chest": 0.133,
-     "upperarm_hi": 0.28,
-     "upperarm_lo": 0.527,
-     "forearm_hi": 0.1
-    },
-    "elf_female": {
-     "scalp": 0.085,
-     "upperarm_lo": 0.576,
-     "forearm_hi": 0.053,
-     "upperarm_hi": 0.108
-    },
-    "dwarf_male": {
-     "chest": 0.122,
-     "upperarm_hi": 0.127,
-     "upperarm_lo": 0.38,
-     "forearm_hi": 0.251
-    },
-    "dwarf_female": {
-     "ears": 0.365,
-     "upperarm_lo": 0.567,
-     "forearm_hi": 0.31,
-     "face": 0.052
-    },
-    "foxfolk_male": {
-     "chest": 0.138,
-     "upperarm_hi": 0.285,
-     "upperarm_lo": 0.535,
-     "forearm_hi": 0.128
-    },
-    "foxfolk_female": {
-     "scalp": 0.09,
-     "upperarm_lo": 0.576,
-     "forearm_hi": 0.125,
-     "upperarm_hi": 0.088
-    },
-    "goblin_male": {
-     "chest": 0.155,
-     "upperarm_hi": 0.206,
-     "neck": 0.069,
-     "upperarm_lo": 0.558,
-     "forearm_hi": 0.19
-    },
-    "goblin_female": {
-     "scalp": 0.089,
-     "ears": 0.375,
-     "upperarm_lo": 0.57,
-     "forearm_hi": 0.197,
-     "upperarm_hi": 0.06,
-     "face": 0.092
-    },
-    "skeleton": {
-     "upperarm_hi": 0.366,
-     "upperarm_lo": 0.447
-    },
-    "barrow_king": {
-     "upperarm_hi": 0.383,
-     "upperarm_lo": 0.294
-    }
-   },
-   "source": "armour"
-  },
-  {
-   "id": "plate.gauntlets",
-   "label": "Plate gauntlets",
-   "slot": "hands",
-   "layer": 2.2,
-   "covers_hair": false,
-   "files": {
-    "male": "humanoid/male/armour/plate.gauntlets.gltf",
-    "female": "humanoid/female/armour/plate.gauntlets.gltf",
-    "elf_male": "humanoid/elf_male/armour/plate.gauntlets.gltf",
-    "elf_female": "humanoid/elf_female/armour/plate.gauntlets.gltf",
-    "dwarf_male": "humanoid/dwarf_male/armour/plate.gauntlets.gltf",
-    "dwarf_female": "humanoid/dwarf_female/armour/plate.gauntlets.gltf",
-    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.gauntlets.gltf",
-    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.gauntlets.gltf",
-    "goblin_male": "humanoid/goblin_male/armour/plate.gauntlets.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.gauntlets.gltf",
-    "skeleton": "humanoid/skeleton/armour/plate.gauntlets.gltf",
-    "barrow_king": "humanoid/barrow_king/armour/plate.gauntlets.gltf"
-   },
-   "hides": {
-    "male": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "female": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "elf_male": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "elf_female": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "dwarf_male": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "dwarf_female": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "foxfolk_male": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "foxfolk_female": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "goblin_male": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "goblin_female": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ],
-     "peasant.top": [
-      "forearm_lo",
-      "hand"
-     ],
-     "ranger.top": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "skeleton": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ]
-    },
-    "barrow_king": {
-     "body": [
-      "forearm_lo",
-      "hand"
-     ]
-    }
-   },
-   "coverage": {
-    "male": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.122,
-     "hand": 1.0
-    },
-    "female": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.11,
-     "hand": 1.0
-    },
-    "elf_male": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.122,
-     "hand": 1.0
-    },
-    "elf_female": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.11,
-     "hand": 1.0
-    },
-    "dwarf_male": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.157,
-     "hand": 1.0
-    },
-    "dwarf_female": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.194,
-     "hand": 1.0
-    },
-    "foxfolk_male": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.122,
-     "hand": 1.0
-    },
-    "foxfolk_female": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.11,
-     "hand": 1.0
-    },
-    "goblin_male": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.123,
-     "hand": 1.0
-    },
-    "goblin_female": {
-     "forearm_lo": 1.0,
-     "forearm_hi": 0.11,
-     "hand": 1.0
-    },
-    "skeleton": {
-     "hand": 0.978,
-     "forearm_hi": 0.109,
-     "forearm_lo": 1.0
-    },
-    "barrow_king": {
-     "hand": 0.984,
-     "forearm_hi": 0.089,
-     "forearm_lo": 1.0
-    }
-   },
-   "source": "armour"
-  },
-  {
-   "id": "plate.legs",
-   "label": "Plate legs",
-   "slot": "legs",
-   "layer": 2.1,
-   "covers_hair": false,
-   "files": {
-    "male": "humanoid/male/armour/plate.legs.gltf",
-    "female": "humanoid/female/armour/plate.legs.gltf",
-    "elf_male": "humanoid/elf_male/armour/plate.legs.gltf",
-    "elf_female": "humanoid/elf_female/armour/plate.legs.gltf",
-    "dwarf_male": "humanoid/dwarf_male/armour/plate.legs.gltf",
-    "dwarf_female": "humanoid/dwarf_female/armour/plate.legs.gltf",
-    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.legs.gltf",
-    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.legs.gltf",
-    "goblin_male": "humanoid/goblin_male/armour/plate.legs.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.legs.gltf",
-    "skeleton": "humanoid/skeleton/armour/plate.legs.gltf",
-    "barrow_king": "humanoid/barrow_king/armour/plate.legs.gltf"
-   },
-   "hides": {
-    "male": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "female": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "elf_male": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "elf_female": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "dwarf_male": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "dwarf_female": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "foxfolk_male": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "foxfolk_female": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "goblin_male": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "goblin_female": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "peasant.shoes": [
-      "shin_hi",
-      "shin_lo"
-     ],
-     "ranger.boots": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "skeleton": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    },
-    "barrow_king": {
-     "body": [
-      "shin_hi",
-      "shin_lo"
-     ]
-    }
-   },
-   "coverage": {
-    "male": {
-     "shin_lo": 0.937,
-     "shin_hi": 0.79,
-     "thigh_hi": 0.377,
-     "thigh_lo": 0.568
-    },
-    "female": {
-     "shin_lo": 0.921,
-     "shin_hi": 0.781,
-     "thigh_hi": 0.402,
-     "thigh_lo": 0.597
-    },
-    "elf_male": {
-     "shin_lo": 0.934,
-     "shin_hi": 0.789,
-     "thigh_hi": 0.379,
-     "thigh_lo": 0.567
-    },
-    "elf_female": {
-     "shin_lo": 0.917,
-     "shin_hi": 0.794,
-     "thigh_hi": 0.385,
-     "thigh_lo": 0.595
-    },
-    "dwarf_male": {
-     "shin_lo": 0.926,
-     "shin_hi": 0.809,
-     "thigh_hi": 0.357,
-     "thigh_lo": 0.562
-    },
-    "dwarf_female": {
-     "shin_lo": 0.918,
-     "shin_hi": 0.767,
-     "thigh_hi": 0.417,
-     "thigh_lo": 0.605
-    },
-    "foxfolk_male": {
-     "shin_lo": 0.935,
-     "shin_hi": 0.789,
-     "thigh_hi": 0.378,
-     "thigh_lo": 0.568
-    },
-    "foxfolk_female": {
-     "shin_lo": 0.919,
-     "shin_hi": 0.789,
-     "thigh_hi": 0.4,
-     "thigh_lo": 0.601
-    },
-    "goblin_male": {
-     "shin_lo": 0.928,
-     "shin_hi": 0.811,
-     "thigh_hi": 0.387,
-     "thigh_lo": 0.567
-    },
-    "goblin_female": {
-     "shin_lo": 0.916,
-     "shin_hi": 0.768,
-     "thigh_hi": 0.415,
-     "thigh_lo": 0.6
-    },
-    "skeleton": {
-     "thigh_hi": 0.261,
-     "thigh_lo": 0.515,
-     "shin_hi": 0.723,
-     "shin_lo": 0.926
-    },
-    "barrow_king": {
-     "thigh_hi": 0.255,
-     "thigh_lo": 0.516,
-     "shin_hi": 0.683,
-     "shin_lo": 0.93
-    }
-   },
-   "source": "armour"
-  },
-  {
-   "id": "plate.helm_norman",
-   "label": "Nasal helm",
-   "slot": "head",
-   "layer": 2.5,
-   "covers_hair": true,
-   "files": {
-    "male": "humanoid/male/armour/plate.helm_norman.gltf",
-    "female": "humanoid/female/armour/plate.helm_norman.gltf",
-    "elf_male": "humanoid/elf_male/armour/plate.helm_norman.gltf",
-    "elf_female": "humanoid/elf_female/armour/plate.helm_norman.gltf",
-    "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_norman.gltf",
-    "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_norman.gltf",
-    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.helm_norman.gltf",
-    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.helm_norman.gltf",
-    "goblin_male": "humanoid/goblin_male/armour/plate.helm_norman.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.helm_norman.gltf",
-    "skeleton": "humanoid/skeleton/armour/plate.helm_norman.gltf",
-    "barrow_king": "humanoid/barrow_king/armour/plate.helm_norman.gltf"
-   },
-   "hides": {
-    "male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "elf_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "elf_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "dwarf_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "dwarf_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "foxfolk_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "foxfolk_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "goblin_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "goblin_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "skeleton": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "barrow_king": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    }
-   },
-   "coverage": {
-    "male": {
-     "neck": 0.13,
-     "scalp": 0.889,
-     "face": 0.594,
-     "ears": 0.811
-    },
-    "female": {
-     "scalp": 0.844,
-     "ears": 0.875,
-     "face": 0.62
-    },
-    "elf_male": {
-     "neck": 0.075,
-     "scalp": 0.858,
-     "face": 0.604,
-     "ears": 0.861
-    },
-    "elf_female": {
-     "scalp": 0.797,
-     "ears": 0.928,
-     "face": 0.62
-    },
-    "dwarf_male": {
-     "neck": 0.262,
-     "scalp": 0.865,
-     "face": 0.585,
-     "ears": 0.789
-    },
-    "dwarf_female": {
-     "neck": 0.054,
-     "scalp": 0.864,
-     "ears": 0.867,
-     "face": 0.614
-    },
-    "foxfolk_male": {
-     "scalp": 0.58,
-     "face": 0.451,
-     "ears": 0.364
-    },
-    "foxfolk_female": {
-     "scalp": 0.601,
-     "face": 0.465,
-     "ears": 0.393
-    },
-    "goblin_male": {
-     "neck": 0.07,
-     "scalp": 0.597,
-     "face": 0.57,
-     "ears": 0.572
-    },
-    "goblin_female": {
-     "scalp": 0.736,
-     "ears": 0.642,
-     "face": 0.607
-    },
-    "skeleton": {
-     "face": 0.266,
-     "scalp": 0.421,
-     "ears": 0.995
-    },
-    "barrow_king": {
-     "face": 0.156,
-     "ears": 0.944,
-     "scalp": 0.34
-    }
-   },
-   "source": "armour"
-  },
-  {
-   "id": "plate.helm_kettle",
-   "label": "Kettle hat",
-   "slot": "head",
-   "layer": 2.5,
-   "covers_hair": true,
-   "files": {
-    "male": "humanoid/male/armour/plate.helm_kettle.gltf",
-    "female": "humanoid/female/armour/plate.helm_kettle.gltf",
-    "elf_male": "humanoid/elf_male/armour/plate.helm_kettle.gltf",
-    "elf_female": "humanoid/elf_female/armour/plate.helm_kettle.gltf",
-    "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_kettle.gltf",
-    "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_kettle.gltf",
-    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.helm_kettle.gltf",
-    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.helm_kettle.gltf",
-    "goblin_male": "humanoid/goblin_male/armour/plate.helm_kettle.gltf",
-    "goblin_female": "humanoid/goblin_female/armour/plate.helm_kettle.gltf",
-    "skeleton": "humanoid/skeleton/armour/plate.helm_kettle.gltf",
-    "barrow_king": "humanoid/barrow_king/armour/plate.helm_kettle.gltf"
-   },
-   "hides": {
-    "male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "elf_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "elf_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "dwarf_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "dwarf_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "foxfolk_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "foxfolk_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "goblin_male": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "goblin_female": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "skeleton": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    },
-    "barrow_king": {
-     "body": [
-      "scalp",
-      "ears"
-     ]
-    }
-   },
-   "coverage": {
-    "male": {
-     "neck": 0.381,
-     "scalp": 0.889,
-     "face": 0.625,
-     "ears": 0.811
-    },
-    "female": {
-     "scalp": 0.86,
-     "ears": 0.875,
-     "face": 0.652
-    },
-    "elf_male": {
-     "neck": 0.253,
-     "scalp": 0.858,
-     "face": 0.629,
-     "ears": 0.861
-    },
-    "elf_female": {
-     "scalp": 0.809,
-     "ears": 0.928,
-     "face": 0.656
-    },
-    "dwarf_male": {
-     "chest": 0.081,
-     "neck": 0.513,
-     "scalp": 0.865,
-     "face": 0.618,
-     "ears": 0.789
-    },
-    "dwarf_female": {
-     "neck": 0.237,
-     "scalp": 0.869,
-     "ears": 0.867,
-     "face": 0.643
-    },
-    "foxfolk_male": {
-     "scalp": 0.58,
-     "face": 0.51,
-     "ears": 0.387
-    },
-    "foxfolk_female": {
-     "scalp": 0.601,
-     "face": 0.539,
-     "ears": 0.3
-    },
-    "goblin_male": {
-     "neck": 0.07,
-     "scalp": 0.597,
-     "face": 0.6,
-     "ears": 0.572
-    },
-    "goblin_female": {
-     "scalp": 0.736,
-     "ears": 0.642,
-     "face": 0.628
-    },
-    "skeleton": {
-     "face": 0.276,
-     "scalp": 0.421,
-     "ears": 0.995
-    },
-    "barrow_king": {
-     "face": 0.166,
-     "ears": 0.947,
-     "scalp": 0.34
-    }
-   },
-   "source": "armour"
   }
  ],
  "animations": {

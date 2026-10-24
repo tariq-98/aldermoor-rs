@@ -1676,7 +1676,7 @@
 					"emissiveStrength":4
 				}
 			},
-			"name":"golem.golem_stone",
+			"name":"stone.golem_stone",
 			"normalTexture":{
 				"index":1
 			},
