@@ -69,6 +69,19 @@ impl Gltf {
         self.array("animations").iter().filter_map(|a| a.get("name").and_then(Value::as_str)).map(str::to_string).collect()
     }
 
+    /// Morph target names (Blender writes them to each mesh's `extras.targetNames`).
+    pub fn morph_target_names(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for mesh in self.array("meshes") {
+            for n in mesh.get("extras").and_then(|e| e.get("targetNames")).and_then(Value::as_array).into_iter().flatten() {
+                if let Some(n) = n.as_str() {
+                    out.insert(n.to_string());
+                }
+            }
+        }
+        out
+    }
+
     /// True when every primitive of every skinned mesh carries the attribute.
     pub fn all_skinned_have(&self, attribute: &str) -> bool {
         let meshes = self.array("meshes");

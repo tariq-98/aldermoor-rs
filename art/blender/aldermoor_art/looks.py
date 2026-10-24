@@ -136,3 +136,24 @@ def assemble(look):
     return skel, [o for obs in meshes.values() for o in obs]
 
 
+
+
+def socket_offsets(body_type):
+    """Socket frames measured on a body type's own rest pose, as offsets from their parent bones.
+
+    Review renders use these rather than the skeleton's socket bones, so a change to
+    rig.socket_frames shows up before the bodies are rebuilt. Call before `assemble` (it loads
+    the body afresh, since assembled bodies lose the regions their clothes cover).
+    """
+    from . import rig
+    sc.reset()
+    objs = load(CAT["body_types"][body_type]["file"])
+    skel = sc.armature_of(objs)
+    body = next(o for o in sc.meshes_of(objs) if o.name.startswith("body"))
+    frames = rig.socket_frames(skel, body)
+    return {n: (parent, skel.data.bones[parent].matrix_local.inverted() @ m) for n, (parent, m) in frames.items()}
+
+
+def socket_world(skel, offsets, name):
+    parent, local = offsets[name]
+    return skel.matrix_world @ skel.pose.bones[parent].matrix @ local

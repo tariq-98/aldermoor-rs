@@ -23,7 +23,7 @@ equipped correctly.**
 | [Quaternius Universal Base Characters](https://quaternius.itch.io/universal-base-characters) (free tier) | Two bodies, six hairstyles and beards, two eyebrow sets | CC0 |
 | [Quaternius Modular Outfits, Fantasy](https://quaternius.itch.io/modular-character-outfits-fantasy) (free tier) | Peasant and Ranger outfits, 20 parts, two colourways each | CC0 |
 | [Quaternius Universal Animation Library 1 and 2](https://quaternius.itch.io/universal-animation-library) (free tiers) | 84 clips: locomotion, roll, sword combos, block, shield, casting, hits, deaths, farming, chopping, sitting, talking, zombies | CC0 |
-| Our own (built in `art/blender/`) | Weapons, shields, bows, staves, capes, backpacks, armour, race parts, extra animations | Ours |
+| Our own (built in `art/blender/`) | Weapons, shields, bows, staves, capes, backpacks, armour, garments, race parts, creatures, 29 more clips | Ours |
 
 All of these share one 65-bone humanoid rig with Unreal-mannequin bone names. Downloads are listed,
 hashed and licensed in `art/vendor.json`; `art/fetch_vendor.sh` re-fetches them. The archives
@@ -79,23 +79,32 @@ Hair is hidden by any piece with `covers_hair`. Beards and brows are hidden when
 - **Clearance:** cloth is pushed 3 mm clear of every body region it leaves visible.
 - **Hair:** hair is pushed clear of the scalp after moving onto each head.
 
-**Sockets.** Bones whose names start with `socket_` carry equipment.
+**Sockets.** Bones whose names start with `socket_` carry equipment. Only body files carry them;
+clothing binds to the body's skeleton by bone name.
 - **The authoring rule:** an item is authored in Blender with its attachment point at the origin,
   "up" along +Z and "front" along −Y. A socket's local +Y is where the item's up points, and its
   local +Z is where the item's front points.
 - **In glTF terms:** an item file's +Y and +Z axes map onto the socket node's +Y and +Z.
 - **Weapons:** up is the blade or shaft tip, and front is the cutting edge. The origin is the
-  centre of the grip.
+  centre of the grip: near the guard for swords, 60% of the way up a staff, the middle of a
+  spear (so poles stand on the ground at the hand's height and ride the back centred).
+- **In the hand:** a hand socket's +Y runs from the little finger to the index finger (out of the
+  thumb side of a fist) and its +Z along the back of the hand, towards the knuckles.
 
 | Socket | Parent | Holds |
 |---|---|---|
 | `socket_hand_r`, `socket_hand_l` | hands | Drawn weapons, wands, torches |
 | `socket_shield_l` | left forearm | Strapped shields |
 | `socket_back` | upper spine | Backpacks; the reference point for cape collars |
-| `socket_back_1`, `socket_back_2` | upper spine | Stowed two-handers, staves, bows and shields, crossing the back |
+| `socket_back_1`, `socket_back_2` | upper spine | Blades, hilt up behind the right (1) or left (2) shoulder, where that hand reaches |
+| `socket_back_pole` | upper spine | Staves, spears and long tools, head up over the right shoulder |
+| `socket_back_bow` | upper spine | Bows, the upper limb over the left shoulder (the mirror of `socket_back_pole`) |
+| `socket_back_shield` | upper spine | Shields, upright in the middle of the back, over anything slung beneath |
 | `socket_quiver` | upper spine | Quivers, arrows over the right shoulder |
 | `socket_quiver_hip` | pelvis | The quiver when a backpack takes the back |
-| `socket_pack`, `socket_pack_side` | upper spine | A shield on the travel pack's outer face; a bow or staff down its left side |
+| `socket_pack` | upper spine | A shield on the travel pack's outer face |
+| `socket_pack_side`, `socket_pack_side_r` | upper spine | Long items down the pack's left side (bows) and right side (poles) |
+| `socket_pack_blade` | upper spine | Blades on the pack's right side, hilt up |
 | `socket_hip_l`, `socket_hip_r` | pelvis | Sheathed one-handers, hilt forward |
 | `socket_head` | head | Rigid hats and helmets |
 
@@ -111,6 +120,8 @@ Hair is hidden by any piece with `covers_hair`. Beards and brows are hidden when
   `out = mix(out, base * d / max(ref, 0.01), m)`.
   This keeps the weave, stitching and shading, and gives exactly *d* where the cloth was
   painted *ref*. Apply it after the base texture is decoded to linear and before lighting.
+  The palette is the catalogue's `dyes` (`id`, `label`, `linear`); the workshop offers it per
+  channel of every dyeable piece.
 
 ## Catalogue: `assets/catalog/humanoid.json`
 
@@ -121,11 +132,12 @@ relative to `assets/`. Positions are glTF (metres, +Y up, +Z forward).
 |---|---|
 | `regions` | Region names in bit order |
 | `skin_tones`, `hair_colours` | `id` plus `linear` RGB |
+| `dyes` | The dye palette: `id`, `label` and `linear` RGB |
 | `body_types.<id>` | `label`, `file` (the body with the skeleton and sockets), `pelvis`, `height`, `skin_reference`, `sockets`, `colliders` (cloth capsules: `bone`, `radius`, and ends `a` and `b` in the bone's node frame) |
 | `defaults.<body type>` | A starting look: pieces, hair, brows, beard, tone and hair colour |
-| `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`) |
+| `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`; our own clips add `source: "authored"`, and may add `upper_body`, `curves` and `events`: see "Clips, curves and events") |
 | `hair[]` | `id`, `kind` (`hair`, `beard` or `brows`), `label`, and `files.<body type>` |
-| `pieces[]` | `id`, `slot`, `layer`, `label`, `files.<body type>`, `hides.<body type>`, `covers_hair`, `coverage` (diagnostic), and for dyeable pieces `dye` and `dye_channels`. `source` names the build that owns the piece |
+| `pieces[]` | `id`, `slot`, `layer`, `label`, `files.<body type>`, `hides.<body type>`, `covers_hair`, `coverage` (diagnostic), and for dyeable pieces `dye` and `dye_channels`. `source` names the build that owns the piece; `idle` names the clip to stand in while it's worn |
 | `texture_variants`, `texture_variant_labels` | Base texture name mapped to its alternatives, and display names for each colourway |
 
 Each entry in `hides.<body type>` maps either `body` or a lower piece's id to the list of regions
@@ -144,13 +156,78 @@ The gear catalogue, `assets/catalog/gear.json`, follows the same rules. Each ite
 - `stowed`: the socket while put away, chosen by the equipped back item's `back_kind`
   (`default`, `cape` or `backpack`);
 - `sheath`: an optional file that stays on the stowed socket;
-- `clips`: which library clips the item uses;
+- `clips`: which library clips the item uses, by role: `idle` (while drawn), `attacks` (in
+  turn), `ready` and `stow` (taking it out and putting it away), and family extras (`block`,
+  `dash`, `bash`, `work`; staves' `channel` and `slam`; bows' `draw`, `aim` and `release`);
+- `grips.off_hand`: for two-handed items, where the other hand holds them (`at`, `up`, `front`
+  in the item's glTF space, and `range`, how far along the item that hand may slide);
+- `grab_range`: for back items, how far along the item's up axis (metres from its grip) a hand
+  may take it when drawing;
+- `string`: for bows, the string's `rest` point and its `pull` at full draw, in the item's space;
 - for back items, `back_kind`, plus `layer` and `hides` as for pieces.
 
 Capes also have `springs`: `chains` of `cape_<column>_<link>` bones rooted on `spine_03`, plus
 `stiffness`, `drag`, `gravity` and particle `radius`. A cape's collar copies the body's own skin
 weights, so it can't separate from the shoulders. Only the chains swing, against the body type's
 `colliders`.
+
+## Clips, curves and events
+
+The library is the Universal Animation Library's 84 clips plus 29 of our own, built by
+`art/blender/build_clips.py`. Ours are keyed in code on the broad frame's skeleton: each pose
+places the item and the hands follow their sockets, so on that body every grip is exact.
+
+| Family | Clips |
+|---|---|
+| Bow | `Bow_Idle_Loop`, `Bow_Draw` (arrow from the quiver to full draw), `Bow_Aim_Loop`, `Bow_Release`, `Bow_Shoot` (draw, loose and recover in 1.2 s) |
+| Staff | `Staff_Idle_Loop` (planted), `Staff_Cast`, `Staff_Channel_Loop`, `Staff_Slam` |
+| Spear | `Spear_Idle_Loop`, `Spear_Thrust`, `Spear_Sweep` |
+| Greatsword | `GreatSword_Idle_Loop`, `GreatSword_Slash`, `GreatSword_Swing`, `GreatSword_Overhead` |
+| Drawing | `Draw_Hip` / `Sheathe_Hip` (right hand, left hip), `Draw_Hip_L` / `Sheathe_Hip_L` (the mirror), `Draw_Side` / `Sheathe_Side` (right hand, right hip), `Draw_Back` / `Sheathe_Back` (blades over the right shoulder), `Draw_Pole` / `Sheathe_Pole` (poles over the right shoulder), `Draw_Bow` / `Sheathe_Bow` (the left hand, over the left shoulder) |
+| Robes | `Idle_Robe_Loop`: the idle with the arms held a little out, clear of a skirt |
+
+**Upper-body clips** (`upper_body: true`, the draws) play on the spine, arms, neck and head over
+whatever the legs are doing. The same goes for a drawn idle while the unit moves: legs from the
+locomotion clip, the rest from the item's `idle`.
+
+**Curves** are lists of `[seconds, value]` keys. Between keys the value is linear; before the
+first and after the last it holds; two keys at the same time make a step, and at that instant the
+later key wins. `assets::curve` implements this, and the workshop's `perform.js` does too.
+
+| Curve | While it's above 0 |
+|---|---|
+| `off_hand` | The off hand is pulled onto the main item by two-bone IK, weighted by the value |
+| `reach` | The hand taking or stowing an item is pulled onto it where it rides |
+| `string` | The drawing hand holds the bowstring |
+| `arrow` | A nocked arrow shows |
+
+**Events** mark moments: `grab` (the item moves to the hand), `stow` (it moves back to where it
+rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands) and `cast` (a
+spell leaves).
+
+**Off-hand IK.** Clips play on bodies with other proportions, so the off hand drifts off
+two-handed items. While `off_hand` > 0, find where the clip puts that hand's socket, measure
+along the item's up axis to the nearest point (in the item's space), keep it within
+`grips.off_hand.range`, and pull the hand there with two-bone IK (keeping the clip's elbow
+plane), turned like `grips.off_hand` (`up` and `front` give the hand socket's +Y and +Z there).
+That lets a spear run through the front hand as it's thrust.
+
+**Drawing and stowing.** An item's `ready` clip takes it from where it rides; its `stow` clip puts
+it back. With `s` = the distance along the stowed item's up axis to the point nearest the hand's
+socket, kept within `grab_range` (in item metres; multiply by `gear_scale`):
+- while `reach` > 0, pull the hand's socket onto the stowed item at `s`, turned like the item;
+- **ready:** before `grab` the item stays where it rides. At `grab` it moves to the hand, offset
+  `−s` along its up axis (so the point the hand took is in the hand), and the offset eases to 0
+  with smoothstep between `grab` and the end of the clip;
+- **stow:** before `stow` the item is in the hand with an offset of `−s × smoothstep(t / stow)`,
+  measuring `s` each frame; at `stow` it moves back to where it rides;
+- other gear without its own clip (a shield, the off-hand dagger) moves at the same event.
+
+**Bows.** The bow's mesh has two morph targets. `arrow` shows a nocked arrow (it is folded inside
+the grip otherwise); set it from the `arrow` curve. `draw` pulls the string's middle back by
+`string.pull` and bends the limbs; with `h` = the drawing hand's socket in the bow's space,
+set it to `clamp(dot(h − rest, pull) / dot(pull, pull), 0, 1) × string curve`, so the string
+always meets the hand, whatever the archer's size. The drawing hand is the one not holding the bow.
 
 ## Materials and file details
 
@@ -161,18 +238,19 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 - **Glowing parts:** crystals, flames, runes and undead eyes use emissive colour with
   `KHR_materials_emissive_strength`.
 - **Transparency:** the lantern's glass is the only blended material (`alphaMode: BLEND`).
-- **Skinning:** every skinned file carries the whole skeleton as nodes. Bind a piece's joints to
-  the body's bones by name and keep the piece's own inverse bind matrices. A piece may add
-  bones the body lacks (`cape_<column>_<link>` chains): parent them under the bone their glTF
-  parent is named after.
+- **Skinning:** every skinned file carries the 65 rig bones as nodes; bodies add the sockets.
+  Bind a piece's joints to the body's bones by name and keep the piece's own inverse bind
+  matrices. A piece may add bones the body lacks (`cape_<column>_<link>` chains): parent them
+  under the bone their glTF parent is named after.
 - **Animation clips:** 30 fps and in place (no root motion). Every bone has rotation tracks; only
   the pelvis has translation.
 - **Beasts:** one `.glb` each, on the same axes (+Y up, facing +Z, metres), with in-place clips.
-- **The reference implementation:** the workshop does all of this in about 1,800 lines of
+- **The reference implementation:** the workshop does all of this in about 2,100 lines of
   three.js (`tools/workshop/src/`):
   - `character.js`: assembly, rebinding by bone name, sockets and the drawn/stowed rules;
   - `regions.js`: the hiding shader;
   - `anim.js`: clip retargeting and the pelvis remap;
+  - `perform.js`: clip curves and events (off-hand and reach IK, drawing and stowing, bows);
   - `springs.js`: the cape solver;
   - `beast.js`: beasts.
 
@@ -195,7 +273,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 
 | Script | Builds | Writes |
 |---|---|---|
-| `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits, 84 clips | `humanoid/`, `catalog/humanoid.json` |
+| `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
+| `build_clips.py` | The clip library: the 84 vendor clips plus our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
 | `build_races.py` | Elves, dwarves and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
@@ -212,6 +291,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 - **Catalogue checks:** `cargo test -p assets` (the `assets` crate) loads every catalogue and
   checks that each named thing exists:
   - every file, bone, socket, collider, region, hide target and clip;
+  - clip curves and events (known names, inside the clip, values 0 to 1), and that what a
+    clip asks of an item (an off-hand grip, a bowstring, a `grab` or `stow` event) the item has;
   - `_REGION` on every skinned piece;
   - that every dressable body type has a fit for every piece;
   - that no id or label mentions spiders, arachnids or webs.
@@ -224,18 +305,17 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Appearance | 8 skin tones plus 4 goblin greens, 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard |
 | Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron (two colourways each); mage's, gravecaller's and sunward robes; belted tunic; traveller's coat; smith's apron; wizard's and straw hats. Each garment has a `dye` mask: R for the main cloth, G for the trim |
 | Plate | Cuirass with faulds, pauldrons, gauntlets, leg plates, nasal helm, kettle hat |
-| Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow, longbow and quiver |
+| Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow and longbow (drawable strings, nocked arrows) and quiver |
 | Caster gear | Oak, gravecaller's and sunward staves; wand, spellbook and focus orb |
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: idle, walk, run, attack, hit, death, jump, howl |
-| Clips | 84 humanoid clips: locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie |
+| Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
 **Gaps, next in line:**
-- clips for archery, two-handed weapons, spears, staves, and drawing and sheathing;
-- dyes in the workshop (the masks exist);
-- a robe idle with the arms held slightly out, so hands don't push through skirts;
+- dye masks for the Quaternius outfits (the garments have theirs);
 - foxfolk;
+- weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
 - more beasts and hostile humanoid outfits;
 - a material and texture pass on gear;
 - level-of-detail meshes.

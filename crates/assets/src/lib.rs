@@ -41,6 +41,13 @@ pub struct Tone {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Dye {
+    pub id: String,
+    pub label: String,
+    pub linear: [f32; 3],
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Collider {
     pub bone: String,
     pub radius: f32,
@@ -70,6 +77,23 @@ pub struct BodyType {
     pub dress: Option<bool>,
 }
 
+/// The curves a clip may carry, each a list of `[seconds, value]` keys (see [`curve`]):
+/// - `off_hand`: how far the off hand is pulled onto the main item's `grips.off_hand` (0..1);
+/// - `reach`: how far the drawing hand is pulled onto the stowed item (drawing and sheathing);
+/// - `string`: the drawing hand holds the bowstring, so the bow's `draw` morph follows it;
+/// - `arrow`: a nocked arrow shows (the bow's `arrow` morph).
+pub const CURVES: [&str; 4] = ["off_hand", "reach", "string", "arrow"];
+
+/// The moments a clip may mark: an item moves to the hand (`grab`) or back to where it rides
+/// (`stow`); an arrow leaves (`release`); a blow lands (`hit`); a spell leaves (`cast`).
+pub const EVENTS: [&str; 5] = ["grab", "stow", "release", "hit", "cast"];
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Event {
+    pub t: f32,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Clip {
     pub name: String,
@@ -78,6 +102,42 @@ pub struct Clip {
     pub looping: bool,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// `"authored"` for clips built in `art/blender/build_clips.py`.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Plays on the spine, arms and head only, over whatever the legs are doing.
+    #[serde(default)]
+    pub upper_body: bool,
+    #[serde(default)]
+    pub curves: BTreeMap<String, Vec<[f32; 2]>>,
+    #[serde(default)]
+    pub events: Vec<Event>,
+}
+
+impl Clip {
+    pub fn curve(&self, name: &str, t: f32) -> f32 {
+        self.curves.get(name).map(|k| curve(k, t)).unwrap_or(0.0)
+    }
+
+    pub fn event(&self, name: &str) -> Option<f32> {
+        self.events.iter().find(|e| e.name == name).map(|e| e.t)
+    }
+}
+
+/// A clip curve's value at `t`: linear between keys, held before the first and after the last.
+/// Two keys at the same time make a step; at that instant the later key wins.
+pub fn curve(keys: &[[f32; 2]], t: f32) -> f32 {
+    let Some(first) = keys.first() else { return 0.0 };
+    if t < first[0] {
+        return first[1];
+    }
+    for w in keys.windows(2) {
+        let ([t0, v0], [t1, v1]) = (w[0], w[1]);
+        if t0 <= t && t < t1 {
+            return v0 + (v1 - v0) * (t - t0) / (t1 - t0);
+        }
+    }
+    keys[keys.len() - 1][1]
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +172,9 @@ pub struct Piece {
     /// A dye mask texture (R main cloth, G trim), for dyeable pieces.
     #[serde(default)]
     pub dye: Option<String>,
+    /// The idle to stand in while wearing this piece (robes hold the arms clear of the skirt).
+    #[serde(default)]
+    pub idle: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -120,6 +183,9 @@ pub struct Humanoid {
     pub regions: Vec<String>,
     pub skin_tones: Vec<Tone>,
     pub hair_colours: Vec<Tone>,
+    /// The dye palette for pieces with a `dye` mask.
+    #[serde(default)]
+    pub dyes: Vec<Dye>,
     pub body_types: BTreeMap<String, BodyType>,
     pub animations: Animations,
     pub hair: Vec<Hair>,
@@ -151,6 +217,34 @@ pub struct Item {
     pub clips: BTreeMap<String, Value>,
     #[serde(default)]
     pub springs: Option<Value>,
+    /// Where other hands hold the item, in its own glTF space.
+    #[serde(default)]
+    pub grips: BTreeMap<String, Frame>,
+    /// How far along its up axis (metres, from its grip) a hand may take the item when drawing
+    /// it from where it rides.
+    #[serde(default)]
+    pub grab_range: Option<[f32; 2]>,
+    /// Bows: the string's rest point and its pull at full draw, for the `draw` morph.
+    #[serde(default)]
+    pub string: Option<BowString>,
+}
+
+/// A socket-like frame on an item: a hand's grip point, its up (the thumb side's direction)
+/// and its front (the knuckles' direction), in the item's glTF space.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Frame {
+    pub at: [f32; 3],
+    pub up: [f32; 3],
+    pub front: [f32; 3],
+    /// How far along `up` (metres, from the item's grip) the hand may slide to follow the clip.
+    #[serde(default)]
+    pub range: Option<[f32; 2]>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BowString {
+    pub rest: [f32; 3],
+    pub pull: [f32; 3],
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -227,7 +321,6 @@ impl Catalog {
         let mut problem = |s: String| out.push(Problem(s));
         let h = &self.humanoid;
         let regions: BTreeSet<&str> = h.regions.iter().map(String::as_str).collect();
-        let clips: BTreeSet<&str> = h.animations.clips.iter().map(|c| c.name.as_str()).collect();
         let piece_ids: BTreeSet<&str> = h.pieces.iter().map(|p| p.id.as_str()).collect();
         // Each file is parsed once, however many entries name it.
         let cache: std::cell::RefCell<BTreeMap<String, Result<Gltf, String>>> = Default::default();
@@ -276,6 +369,32 @@ impl Catalog {
                 }
             }
         }
+        for c in &h.animations.clips {
+            for (name, keys) in &c.curves {
+                if !CURVES.contains(&name.as_str()) {
+                    problem(format!("clip {}: unknown curve {name}", c.name));
+                }
+                if keys.is_empty() || keys.windows(2).any(|w| w[1][0] < w[0][0]) {
+                    problem(format!("clip {}: curve {name} needs keys in time order", c.name));
+                }
+                if keys.iter().any(|k| k[0] < 0.0 || k[0] > c.seconds + 1e-3 || !(0.0..=1.0).contains(&k[1])) {
+                    problem(format!("clip {}: curve {name} has a key outside the clip or outside 0..1", c.name));
+                }
+            }
+            for e in &c.events {
+                if !EVENTS.contains(&e.name.as_str()) {
+                    problem(format!("clip {}: unknown event {}", c.name, e.name));
+                }
+                if e.t < 0.0 || e.t > c.seconds + 1e-3 {
+                    problem(format!("clip {}: event {} at {} is outside the clip", c.name, e.name, e.t));
+                }
+            }
+            for (event, needs) in [("grab", "reach"), ("stow", "reach"), ("release", "string")] {
+                if c.event(event).is_some() && !c.curves.contains_key(needs) {
+                    problem(format!("clip {}: a {event} event without a {needs} curve", c.name));
+                }
+            }
+        }
 
         // Skinned files: joints come from the body's skeleton, and pieces carry regions.
         let check_skinned = |kind: &str, id: &str, bt: &str, rel: &str, needs_regions: bool, problem: &mut dyn FnMut(String)| {
@@ -306,6 +425,11 @@ impl Catalog {
                     problem(format!("piece {}: missing dye mask {dye}", p.id));
                 }
             }
+            if let Some(idle) = &p.idle {
+                if !h.animations.clips.iter().any(|c| &c.name == idle) {
+                    problem(format!("piece {}: idle {idle} isn't in the library", p.id));
+                }
+            }
             for (bt, targets) in &p.hides {
                 for (target, list) in targets {
                     if target != "body" && !piece_ids.contains(target.as_str()) {
@@ -318,6 +442,9 @@ impl Catalog {
                     }
                 }
             }
+        }
+        if h.pieces.iter().any(|p| p.dye.is_some()) && h.dyes.is_empty() {
+            problem("pieces have dye masks but the catalogue has no dyes".into());
         }
         for hair in &h.hair {
             for (bt, rel) in &hair.files {
@@ -332,6 +459,7 @@ impl Catalog {
                 .filter_map(|bt| skeletons.get(bt))
                 .flat_map(|s| s.iter().filter(|n| n.starts_with("socket_")).cloned())
                 .collect();
+            let by_name: BTreeMap<&str, &Clip> = h.animations.clips.iter().map(|c| (c.name.as_str(), c)).collect();
             for item in &gear.items {
                 for rel in item.file.iter().chain(item.sheath.iter()) {
                     if let Err(e) = open(rel) {
@@ -346,16 +474,48 @@ impl Catalog {
                         problem(format!("item {}: socket {s} isn't on the human skeletons", item.id));
                     }
                 }
-                for v in item.clips.values() {
+                for (role, v) in &item.clips {
                     let names: Vec<&str> = match v {
                         Value::String(s) => vec![s.as_str()],
                         Value::Array(a) => a.iter().filter_map(Value::as_str).collect(),
                         _ => vec![],
                     };
                     for n in names {
-                        if !clips.contains(n) {
+                        let Some(clip) = by_name.get(n) else {
                             problem(format!("item {}: clip {n} isn't in the library", item.id));
+                            continue;
+                        };
+                        // What a clip asks of an item, the item must have.
+                        if clip.curves.contains_key("off_hand") && !item.grips.contains_key("off_hand") {
+                            problem(format!("item {}: clip {n} wants an off-hand grip the item doesn't give", item.id));
                         }
+                        if clip.curves.contains_key("string") && item.string.is_none() {
+                            problem(format!("item {}: clip {n} draws a bowstring the item lacks", item.id));
+                        }
+                        let wants = match role.as_str() {
+                            "ready" => Some("grab"),
+                            "stow" => Some("stow"),
+                            _ => None,
+                        };
+                        if let Some(event) = wants {
+                            if clip.event(event).is_none() {
+                                problem(format!("item {}: its {role} clip {n} has no {event} event", item.id));
+                            }
+                        }
+                    }
+                }
+                if item.string.is_some() {
+                    match item.file.as_deref().map(open) {
+                        Some(Ok(g)) => {
+                            let morphs = g.morph_target_names();
+                            for m in ["draw", "arrow"] {
+                                if !morphs.contains(m) {
+                                    problem(format!("item {}: bow lacks the {m} morph target", item.id));
+                                }
+                            }
+                        }
+                        Some(Err(_)) => {}
+                        None => problem(format!("item {}: a bowstring on an item without a file", item.id)),
                     }
                 }
             }

@@ -79,6 +79,23 @@ export class Player {
     return true;
   }
 
+  /** Plays a clip once and holds its last frame; `onDone` runs when it ends. */
+  playOnce(name, fade = 0.2, onDone = null) {
+    if (!this.play(name, fade)) return false;
+    const action = this.action;
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    if (onDone) {
+      const done = (e) => {
+        if (e.action !== action) return;
+        this.mixer.removeEventListener('finished', done);
+        if (this.action === action) onDone();
+      };
+      this.mixer.addEventListener('finished', done);
+    }
+    return true;
+  }
+
   get duration() {
     return this.action ? this.action.getClip().duration : 0;
   }

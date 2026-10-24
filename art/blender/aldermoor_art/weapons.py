@@ -9,6 +9,7 @@ import math
 from mathutils import Matrix, Vector
 
 from . import shapes as sh
+from .holds import NOCK_Z
 
 
 def _blade(length, base_z, w0, w_mid, t0, t1, tip=0.18, n=28, name="blade", mat="steel", fuller=True):
@@ -36,6 +37,25 @@ def _blade(length, base_z, w0, w_mid, t0, t1, tip=0.18, n=28, name="blade", mat=
     bm = sh.loft(sections)
     ob = sh.obj(name, bm, mat, smooth=False)
     return sh.finish(ob, bevel=0.0004, segments=1, angle=50)
+
+
+def _regrip(parts, at):
+    """Moves everything but the grip wrap so the grip sits `at` (0..1) of the way up the item.
+
+    Poles are held near their balance, so a staff can stand on the ground at the hand's height
+    and rides the back centred.
+    """
+    zs = []
+    for ob in parts:
+        if ob.name.startswith("grip"):
+            continue
+        zs += [(ob.matrix_basis @ v.co).z for v in ob.data.vertices]
+    lo, hi = min(zs), max(zs)
+    dz = -(lo + at * (hi - lo))
+    for ob in parts:
+        if not ob.name.startswith("grip"):
+            ob.location.z += dz
+    return parts
 
 
 def _grip(z0, z1, r, ridges=9, mat="leather", name="grip"):
@@ -189,34 +209,118 @@ def round_shield(face="wood_light", paint="paint_red"):
     return parts
 
 
-def hunting_bow():
-    """A recurve bow held at its grip. The string side is +Y (towards the archer)."""
-    brace = 0.17
+ARROW_SIDE = 0.012  # The arrow rests on the bow's left (+X) side, for a right-handed archer.
+
+
+def _tag(ob, group):
+    vg = ob.vertex_groups.new(name=group)
+    vg.add(list(range(len(ob.data.vertices))), 1.0, "REPLACE")
+    return ob
+
+
+def _bow(half=0.705, brace=0.17, recurve=0.05, width=0.017, wood="wood", riser_wood="wood_dark"):
+    """A bow held at its grip. The string side is +Y (towards the archer).
+
+    The string has a middle ring at the nocking point and a nocked arrow is built in place, so
+    `bow_morphs` can turn them into the `draw` and `arrow` morph targets after the join.
+    """
+    reach = half - 0.085
     path_up = []
     for i in range(21):
         t = i / 20
-        z = 0.085 + t * 0.62
+        z = 0.085 + t * reach
         bend = brace * 0.55 * t ** 1.7
-        recurve = -0.05 * max(0.0, (t - 0.8) / 0.2) ** 2
-        path_up.append(Vector((0, bend + recurve, z)))
+        rc = -recurve * max(0.0, (t - 0.8) / 0.2) ** 2
+        path_up.append(Vector((0, bend + rc, z)))
     limbs = []
     for s in (1, -1):
         path = [Vector((p.x, p.y, p.z * s)) for p in path_up]
-        limb = sh.obj("limb", sh.sweep(path, lambda t: 0.017 * (1 - 0.55 * t), n=10, power=2.4, ratio=0.45,
-                                        up=Vector((0, 1, 0))), "wood")
-        limbs.append(sh.finish(limb, bevel=0))
+        limb = sh.obj("limb", sh.sweep(path, lambda t: width * (1 - 0.55 * t), n=10, power=2.4, ratio=0.45,
+                                        up=Vector((0, 1, 0))), wood)
+        limbs.append(_tag(sh.finish(limb, bevel=0), "limb"))
     riser_path = [Vector((0, -0.006 * math.sin(math.pi * i / 10), -0.09 + 0.18 * i / 10)) for i in range(11)]
     riser = sh.finish(sh.obj("riser", sh.sweep(riser_path, lambda t: 0.019 - 0.004 * abs(2 * t - 1), n=12, power=2.2,
-                                                 ratio=0.8, up=Vector((0, 1, 0))), "wood_dark"), bevel=0)
+                                                 ratio=0.8, up=Vector((0, 1, 0))), riser_wood), bevel=0)
     wrap = _grip(-0.055, 0.055, 0.0205, ridges=10, mat="leather")
-    tips = [Vector((0, path_up[-1].y, path_up[-1].z)), Vector((0, path_up[-1].y, -path_up[-1].z))]
-    string = sh.obj("string", sh.sweep([tips[0], tips[1]], lambda t: 0.0011, n=6, up=Vector((1, 0, 0))), "cord")
+    tip = path_up[-1]
+    tips = [Vector((0, tip.y, tip.z)), Vector((0, tip.y, -tip.z))]
+    string = _tag(sh.obj("string", sh.sweep([tips[0], Vector((0, tip.y, NOCK_Z)), tips[1]], lambda t: 0.0013, n=6,
+                                              up=Vector((1, 0, 0))), "cord"), "string")
     nocks = []
     for p in tips:
         k = sh.obj("nock", sh.lathe([(0, -0.012), (0.0075, -0.006), (0.0075, 0.006), (0, 0.012)], 10), "bone")
         k.location = p
-        nocks.append(k)
-    return limbs + [riser, wrap, string] + nocks
+        nocks.append(_tag(k, "limb"))
+    shafts = []
+    for piece in arrow():
+        # Nocked: the arrow points at the target (-Y) from the string.
+        piece.rotation_euler = (math.pi / 2, 0, 0)
+        piece.location = (ARROW_SIDE, tip.y, NOCK_Z)
+        shafts.append(_tag(piece, "arrow"))
+    return limbs + [riser, wrap, string] + nocks + shafts
+
+
+def hunting_bow():
+    """A short recurve."""
+    return _bow()
+
+
+def longbow():
+    """A tall, straight self bow."""
+    return _bow(half=0.9, brace=0.15, recurve=0.0, width=0.0195, wood="wood_light")
+
+
+def bow_morphs(ob, draw):
+    """Turns a joined bow's tagged parts into two morph targets.
+
+    `arrow` shows the nocked arrow (it is folded into the grip otherwise). `draw` pulls the
+    string's middle back by `draw` metres towards the archer, bends the limbs and carries the
+    arrow with the string. Returns the string's rest point and pull, in item space.
+    """
+    me = ob.data
+    groups = {g.name: g.index for g in ob.vertex_groups}
+
+    def members(name):
+        gi = groups[name]
+        return {v.index for v in me.vertices if any(g.group == gi and g.weight > 0.5 for g in v.groups)}
+
+    limb, string, arrow_v = members("limb"), members("string"), members("arrow")
+    co = [v.co.copy() for v in me.vertices]
+    z1 = max(abs(co[i].z) for i in limb)
+    z0 = 0.085
+    bend, shrink = 0.11 * z1 / 0.705, 0.035 * z1 / 0.705
+
+    def limb_delta(p):
+        t = max(0.0, min(1.0, (abs(p.z) - z0) / (z1 - z0)))
+        return Vector((0, bend * t * t, -math.copysign(shrink * t * t, p.z)))
+
+    middle = [co[i] for i in string if abs(co[i].z - NOCK_Z) < 0.05]
+    rest = sum(middle, Vector()) / len(middle)
+    rest = Vector((0, rest.y, NOCK_Z))
+    pull = Vector((0, draw, 0))
+    fold = Vector((0, 0, NOCK_Z))
+    basis = ob.shape_key_add(name="Basis", from_mix=False)
+    k_arrow = ob.shape_key_add(name="arrow", from_mix=False)
+    k_draw = ob.shape_key_add(name="draw", from_mix=False)
+    for i, p in enumerate(co):
+        if i in arrow_v:
+            basis.data[i].co = fold
+            me.vertices[i].co = fold
+            k_arrow.data[i].co = p
+            k_draw.data[i].co = fold + pull
+        elif i in string:
+            if p.z > z1 * 0.5:
+                d = limb_delta(Vector((0, 0, z1)))
+            elif p.z < -z1 * 0.5:
+                d = limb_delta(Vector((0, 0, -z1)))
+            else:
+                d = pull
+            k_draw.data[i].co = p + d
+        elif i in limb:
+            k_draw.data[i].co = p + limb_delta(p)
+    for g in list(ob.vertex_groups):
+        ob.vertex_groups.remove(g)
+    return rest, pull
 
 
 def arrow(length=0.76, fletch="feather", head="iron"):
@@ -266,7 +370,7 @@ def quiver(arrows=7):
 
 
 def battle_staff(crystal="crystal_blue"):
-    """A wizard's staff held a third of the way up; the head is at +Z."""
+    """A wizard's staff held 60% of the way up; the head is at +Z."""
     path = []
     for i in range(41):
         t = i / 40
@@ -298,7 +402,7 @@ def battle_staff(crystal="crystal_blue"):
     parts.append(gem)
     foot = sh.obj("ferrule", sh.lathe([(0.017, -0.6), (0.016, -0.625), (0.01, -0.64), (0, -0.645)], 12), "iron")
     parts.append(foot)
-    return parts
+    return _regrip(parts, 0.6)
 
 
 def wand(crystal="crystal_violet"):
@@ -362,7 +466,7 @@ def mace():
 
 
 def spear():
-    """Held a third of the way up the shaft; the point is at +Z."""
+    """Held at its middle; the point is at +Z."""
     parts = [_haft(-0.62, 1.32, 0.0145, 0.0135, "wood_light")]
     parts.append(_grip(-0.1, 0.1, 0.0165, ridges=7, mat="leather"))
     leaf = []
@@ -376,7 +480,7 @@ def spear():
     parts.append(sh.finish(sh.obj("point", sh.loft(leaf), "steel", smooth=False), bevel=0))
     parts.append(sh.obj("socket", sh.lathe([(0.015, 1.24), (0.019, 1.27), (0.017, 1.31), (0.009, 1.33)], 12), "iron"))
     parts.append(sh.obj("butt", sh.lathe([(0.015, -0.6), (0.016, -0.63), (0.009, -0.65), (0.0, -0.66)], 12), "iron"))
-    return parts
+    return _regrip(parts, 0.5)
 
 
 def greatsword():
@@ -442,13 +546,6 @@ def kite_shield(face="paint_blue", charge="paint_cream"):
     return parts
 
 
-def longbow():
-    parts = hunting_bow()
-    for p in parts:
-        p.scale = (1.0, 1.05, 1.28)
-    return parts
-
-
 def skull(scale=1.0, mat="bone"):
     """A stylised skull: cranium, brow, cheekbones and a jaw, with dark sockets."""
     cran = sh.obj("skull", sh.lathe([(0.0, 0.07), (0.03, 0.065), (0.048, 0.045), (0.054, 0.015), (0.05, -0.01),
@@ -488,7 +585,7 @@ def necro_staff():
         parts.append(charm)
         cord = sh.obj("cord", sh.sweep([Vector((0.0, 0, z + 0.06)), Vector((0.03 * (1 if k else -1), 0, z + 0.012))], lambda t: 0.0015, n=5, up=Vector((0, 1, 0))), "cord")
         parts.append(cord)
-    return parts
+    return _regrip(parts, 0.6)
 
 
 def healer_staff():
@@ -507,7 +604,7 @@ def healer_staff():
     parts.append(gem)
     parts.append(sh.obj("ribbon", sh.ribbon([Vector((0.012, 0, 0.94)), Vector((0.03, -0.01, 0.85)), Vector((0.025, 0.0, 0.74)), Vector((0.04, 0.01, 0.66))],
                                             [Vector((1, -0.3, 0))] * 4, 0.025, 0.002), "wool_cream"))
-    return parts
+    return _regrip(parts, 0.6)
 
 
 def spellbook():

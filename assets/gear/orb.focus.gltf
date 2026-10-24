@@ -98,7 +98,7 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":106,
+			"count":104,
 			"max":[
 				0.04500000178813934,
 				0.04500000178813934,
@@ -114,13 +114,13 @@
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":106,
+			"count":104,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":106,
+			"count":104,
 			"type":"VEC2"
 		},
 		{
@@ -132,29 +132,29 @@
 		{
 			"bufferView":4,
 			"componentType":5126,
-			"count":956,
+			"count":870,
 			"max":[
 				0.052598077803850174,
 				0.05258556455373764,
 				0.029247837141156197
 			],
 			"min":[
-				-0.037953417748212814,
+				-0.038253117352724075,
 				-0.07000000029802322,
-				-0.05299999937415123
+				-0.052598074078559875
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":5,
 			"componentType":5126,
-			"count":956,
+			"count":870,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":6,
 			"componentType":5126,
-			"count":956,
+			"count":870,
 			"type":"VEC2"
 		},
 		{
@@ -167,56 +167,56 @@
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":1272,
+			"byteLength":1248,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1272,
-			"byteOffset":1272,
+			"byteLength":1248,
+			"byteOffset":1248,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":848,
-			"byteOffset":2544,
+			"byteLength":832,
+			"byteOffset":2496,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":648,
-			"byteOffset":3392,
+			"byteOffset":3328,
 			"target":34963
 		},
 		{
 			"buffer":0,
-			"byteLength":11472,
-			"byteOffset":4040,
+			"byteLength":10440,
+			"byteOffset":3976,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":11472,
-			"byteOffset":15512,
+			"byteLength":10440,
+			"byteOffset":14416,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":7648,
-			"byteOffset":26984,
+			"byteLength":6960,
+			"byteOffset":24856,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":5292,
-			"byteOffset":34632,
+			"byteOffset":31816,
 			"target":34963
 		}
 	],
 	"buffers":[
 		{
-			"byteLength":39924,
+			"byteLength":37108,
 			"uri":"orb.focus.bin"
 		}
 	]

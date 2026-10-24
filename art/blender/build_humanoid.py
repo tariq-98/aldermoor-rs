@@ -1,9 +1,10 @@
-"""Builds the humanoid family: skeletons, bodies, hair, outfits, the clip library and its catalogue.
+"""Builds the humanoid family: skeletons, bodies, hair, outfits and their catalogue.
 
     art/blender.sh -P art/blender/build_humanoid.py [-- --review]
 
 Reads art/vendor/quaternius (see art/vendor.json) and writes assets/humanoid/ plus
-assets/catalog/humanoid.json. `--review` also renders check images to art/out/review/.
+assets/catalog/humanoid.json. The clip library is build_clips.py's, which runs next. `--review`
+also renders check images to art/out/review/.
 """
 
 import json
@@ -14,7 +15,7 @@ from pathlib import Path
 import bpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import cloth, export, fit, materials as mt, regions as rg, rig, scene as sc  # noqa: E402
+from aldermoor_art import cloth, dyes, export, fit, materials as mt, regions as rg, rig, scene as sc  # noqa: E402
 
 V = sc.VENDOR / "quaternius"
 OUT = sc.OUT / "humanoid"
@@ -80,6 +81,15 @@ OUTFITS = {
     },
 }
 
+# Dye masks for the painted outfits, by colour (aldermoor_art/dyes.py): R is the main cloth and G
+# the trim. Ranges are hue in degrees, saturation and value in sRGB.
+OUTFIT_DYES = {
+    "ranger": ("T_Ranger_BaseColor", [("cloth", dict(hue=(70, 170), sat=(0.25, 1.0), val=(0.04, 1.0))),
+                                      ("leather", dict(hue=(8, 45), sat=(0.35, 1.0), val=(0.1, 0.85)))]),
+    "peasant": ("T_Peasant_BaseColor", [("linen", dict(hue=(30, 75), sat=(0.0, 0.33), val=(0.4, 0.88))),
+                                        ("wool", dict(hue=(0, 60), sat=(0.12, 1.0), val=(0.02, 0.27)))]),
+}
+
 SKIN_TONES = [
     # Linear RGB albedo. The renderer multiplies a skin's detail map by twice the tone. The
     # Quaternius paintings average (0.38, 0.19, 0.10), close to "warm".
@@ -107,6 +117,27 @@ HAIR_COLOURS = [
 ]
 
 
+# Dyes for dyeable pieces (linear RGB): plant and mineral colours a valley could make.
+DYES = [
+    ("madder", "Madder red", [0.42, 0.05, 0.035]),
+    ("crimson", "Crimson", [0.3, 0.012, 0.04]),
+    ("rust", "Rust", [0.4, 0.13, 0.035]),
+    ("ochre", "Ochre", [0.52, 0.32, 0.06]),
+    ("weld", "Weld yellow", [0.62, 0.5, 0.1]),
+    ("moss", "Moss", [0.16, 0.22, 0.04]),
+    ("forest", "Forest green", [0.035, 0.13, 0.045]),
+    ("teal", "Teal", [0.02, 0.17, 0.17]),
+    ("woad", "Woad blue", [0.04, 0.1, 0.32]),
+    ("indigo", "Indigo", [0.03, 0.03, 0.15]),
+    ("heather", "Heather", [0.22, 0.1, 0.28]),
+    ("plum", "Plum", [0.16, 0.035, 0.12]),
+    ("walnut", "Walnut", [0.14, 0.07, 0.03]),
+    ("slate", "Slate", [0.1, 0.11, 0.13]),
+    ("charcoal", "Charcoal", [0.025, 0.025, 0.03]),
+    ("bone", "Bone white", [0.7, 0.66, 0.56]),
+]
+
+
 def gl(v):
     """Blender Z-up to glTF Y-up."""
     return [round(v.x, 5), round(v.z, 5), round(-v.y, 5)]
@@ -117,71 +148,14 @@ def rel(path):
 
 
 def reference_frames():
+    """The Universal Animation Library's rest frames, which every skeleton adopts."""
     objs = sc.import_gltf(V / "anims/UAL1_Standard.glb")
     arm = sc.armature_of(objs)
     frames = rig.rest_frames(arm)
-    pelvis = arm.data.bones["pelvis"].head_local.copy()
     sc.remove(objs)
     for a in list(bpy.data.actions):
         bpy.data.actions.remove(a)
-    return frames, pelvis
-
-
-# --- The clip library -------------------------------------------------------------------------
-
-def clip_tags(name):
-    n = name.lower()
-    tags = []
-    for key, words in {
-        "locomotion": ("walk", "jog", "sprint", "crouch", "swim", "jump", "roll", "slide", "climb", "ninja"),
-        "combat": ("sword", "punch", "melee", "shield", "hit", "death", "knockback", "spell", "throw", "pistol"),
-        "work": ("farm", "chopping", "fixing", "chest", "pickup", "push", "interact", "consume", "carry"),
-        "social": ("talking", "wave", "yes", "idle_no", "dance", "fold", "sitting", "lay", "rail"),
-        "undead": ("zombie",),
-    }.items():
-        if any(w in n for w in words):
-            tags.append(key)
-    return tags or ["idle"]
-
-
-def fcurves_of(action):
-    if getattr(action, "layers", None) and action.layers:
-        bag = action.layers[0].strips[0].channelbags
-        return bag[0].fcurves if len(bag) else []
-    return action.fcurves
-
-
-def build_animations(frames, pelvis):
-    sc.reset()
-    first = sc.import_gltf(V / "anims/UAL1_Standard.glb")
-    arm = sc.armature_of(first)
-    sc.remove(sc.meshes_of(first))
-    second = sc.import_gltf(V / "anims/UAL2_Standard.glb")
-    sc.remove([o for o in second])
-    arm.name = "humanoid"
-    arm.data.name = "humanoid"
-    clips = []
-    for action in sorted(bpy.data.actions, key=lambda a: a.name):
-        if action.name.startswith("A_TPose"):
-            bpy.data.actions.remove(action)
-            continue
-        fcs = fcurves_of(action)
-        # Only rotations travel between skeletons; the pelvis also keeps its translation.
-        for fc in [fc for fc in fcs if fc.data_path.endswith(".scale")
-                   or (fc.data_path.endswith(".location") and '"pelvis"' not in fc.data_path)]:
-            fcs.remove(fc)
-        start, end = action.frame_range
-        action.use_fake_user = True
-        tags = clip_tags(action.name)
-        clips.append({
-            "name": action.name,
-            "seconds": round((end - start) / sc.FPS, 3),
-            "loop": "loop" in action.name.lower(),
-            "group": tags[0],
-            "tags": tags,
-        })
-    export.animations(OUT / "anims.glb", arm)
-    return {"file": rel(OUT / "anims.glb"), "pelvis": gl(pelvis), "fps": sc.FPS, "clips": clips}
+    return frames
 
 
 # --- Bodies, hair and outfits -----------------------------------------------------------------
@@ -247,7 +221,7 @@ def build_body_type(key, info, frames):
     light = {"Male": "T_Superhero_Male_Ligh", "Female": "T_Superhero_Female_Light_BaseColor"}[Sex]
     skin_ref = skin_material(body, light, f"{key}_body")
     publish_all(eyes, 256)
-    export.piece(OUT / key / "body.gltf", [skel, body, eyes])
+    export.piece(OUT / key / "body.gltf", [skel, body, eyes], sockets=True)
     entry = {
         "label": info["label"],
         "file": rel(OUT / key / "body.gltf"),
@@ -379,17 +353,21 @@ def review_body_type(key, skel, body, body_regions):
 
 
 def main():
-    frames, pelvis = reference_frames()
+    frames = reference_frames()
     catalog = {
         "version": 1,
         "regions": rg.REGIONS,
         "skin_tones": [{"id": n, "linear": c} for n, c in SKIN_TONES],
         "hair_colours": [{"id": n, "linear": c} for n, c in HAIR_COLOURS],
+        "dyes": [{"id": n, "label": label, "linear": c} for n, label, c in DYES],
         "body_types": {},
         "hair": [],
         "pieces": [],
     }
-    catalog["animations"] = build_animations(frames, pelvis)
+    # The clip library is build_clips.py's (it runs next); keep what it last wrote.
+    old_path = sc.OUT / "catalog" / "humanoid.json"
+    if old_path.exists():
+        catalog["animations"] = json.loads(old_path.read_text()).get("animations", {})
     hair_index, piece_index = {}, {}
     for key, info in BODY_TYPES.items():
         entry, hair, pieces = build_body_type(key, info, frames)
@@ -414,6 +392,12 @@ def main():
         "female": {"pieces": ["peasant.top", "peasant.trousers", "peasant.shoes"], "hair": "hair.buns",
                    "brows": "brows.fine", "beard": None, "tone": "olive", "hair_colour": "dark brown"},
     }
+    for oid, (tex, channels) in OUTFIT_DYES.items():
+        refs = dyes.mask_from_texture(TEX / f"{tex}.jpg", TEX / f"{tex}_dye.png", channels)
+        for p in catalog["pieces"]:
+            if p["id"].startswith(f"{oid}."):
+                p["dye"] = rel(TEX / f"{tex}_dye.png")
+                p["dye_channels"] = [{k: v for k, v in r.items() if k != "coverage"} for r in refs]
     for oid, outfit in OUTFITS.items():
         catalog.setdefault("texture_variant_labels", {}).update(outfit.get("variant_labels", {}))
         for base, alts in outfit["variants"].items():

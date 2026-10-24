@@ -75,7 +75,9 @@ catalogue (docs/ASSETS.md):
 - `pieces`: clothing and armour ids. Their layers decide what covers what.
 - `gear`: (slot, item id) pairs from `assets/catalog/gear.json`.
 - `drawn`: weapons on their `held` sockets (true), or on their `stowed` sockets, chosen by
-  the back item's `back_kind`.
+  the back item's `back_kind`. When it changes, play the main-hand item's `clips.ready` or
+  `clips.stow` over the legs; the item changes hands at that clip's `grab` or `stow` event
+  (docs/ASSETS.md, "Clips, curves and events").
 
 Today the player is a farmhand with an arming sword and a round shield. Goblins wear the Ranger
 jerkin with a hunting knife and round shield, and wolves are `wolf.grey`. `drawn` turns on
@@ -87,15 +89,20 @@ Humanoid clips by pose, from `anims.glb`:
 
 | Pose | Clip |
 |---|---|
-| Idle | `Idle_Loop`; with weapons drawn, the main-hand item's `clips.idle` |
-| Walk | `Walk_Loop` |
-| Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 6 m/s |
+| Idle | `Idle_Loop`; with weapons drawn, the main-hand item's `clips.idle` (`Sword_Idle`, `Bow_Idle_Loop`, `Staff_Idle_Loop`, `Spear_Idle_Loop`, `GreatSword_Idle_Loop`); a piece with an `idle` (the robes' `Idle_Robe_Loop`) replaces `Idle_Loop` |
+| Walk | `Walk_Loop`; with weapons drawn, the item's idle on the upper body over it |
+| Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 6 m/s (the same layering when drawn) |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
 | Dodge | `Roll` |
-| Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`) |
-| Cast | `Spell_Simple_Shoot` |
+| Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |
+| Cast | A staff's `clips.attacks` (`Staff_Cast`); otherwise `Spell_Simple_Shoot` |
 | Hit | `Hit_Chest` |
 | Dead | `Death01` |
+
+Every clip's `curves` apply on every frame and its `events` fire as they pass: the off hand
+stays on two-handed items, bowstrings follow the drawing hand, and `Bow_Shoot` looses its arrow
+at its `release` event (spawn the projectile then). The rules, with a reference implementation,
+are in docs/ASSETS.md, "Clips, curves and events".
 
 Beasts name their clips by role in `clips` (idle, walk, run, attack, hit, death, jump, special).
 

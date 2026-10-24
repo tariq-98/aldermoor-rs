@@ -3,6 +3,9 @@
 // Every skinned piece carries a float vertex attribute `_region` (glTF `_REGION`), the index of
 // its body region (see docs/ASSETS.md). A per-mesh integer bitmask uniform says which regions to
 // drop; their vertices are pushed outside clip space, so the whole triangle is clipped.
+//
+// The same patch applies dyes: a mask (R main cloth, G trim) recolours the base texture as
+// out = mix(out, base * dye / max(reference, 0.01), mask), before lighting.
 
 import * as THREE from 'three';
 
@@ -36,8 +39,24 @@ const VERTEX_TAIL = `#include <project_vertex>
 
 const FRAGMENT_HEAD = `#include <common>
 uniform int uRegionDebug;
+uniform sampler2D uDyeMap;
+uniform vec2 uDyeOn;
+uniform vec3 uDyeR;
+uniform vec3 uDyeRefR;
+uniform vec3 uDyeG;
+uniform vec3 uDyeRefG;
 varying float vRegion;
 ${PALETTE_GLSL}`;
+
+const FRAGMENT_DYE = `#include <map_fragment>
+#if defined(USE_MAP) && defined(DYEABLE)
+	if (uDyeOn.x > 0.0 || uDyeOn.y > 0.0) {
+		vec4 dyeMask = texture2D(uDyeMap, vMapUv);
+		vec3 dyeBase = diffuseColor.rgb;
+		diffuseColor.rgb = mix(diffuseColor.rgb, dyeBase * uDyeR / max(uDyeRefR, vec3(0.01)), dyeMask.r * uDyeOn.x);
+		diffuseColor.rgb = mix(diffuseColor.rgb, dyeBase * uDyeG / max(uDyeRefG, vec3(0.01)), dyeMask.g * uDyeOn.y);
+	}
+#endif`;
 
 const FRAGMENT_COLOUR = `#include <color_fragment>
 	if (uRegionDebug == 1) {
@@ -59,18 +78,28 @@ export function bitmask(names, regions) {
  * Patches a material (already cloned for this mesh) to hide regions. Returns the mesh's uniform,
  * whose `value` is the bitmask of hidden regions.
  */
-export function patchMaterial(material, hidden) {
+export function patchMaterial(material, hidden, dye) {
+  // Skin and hair take tints, not dyes.
+  const dyeable = !/^(skin|hair)/.test(material.name || '');
+  if (dyeable) material.defines = { ...(material.defines || {}), DYEABLE: '' };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uHidden = hidden;
     shader.uniforms.uRegionDebug = regionDebug;
+    shader.uniforms.uDyeMap = dye.map;
+    shader.uniforms.uDyeOn = dye.on;
+    shader.uniforms.uDyeR = dye.r;
+    shader.uniforms.uDyeRefR = dye.refR;
+    shader.uniforms.uDyeG = dye.g;
+    shader.uniforms.uDyeRefG = dye.refG;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', VERTEX_HEAD)
       .replace('#include <project_vertex>', VERTEX_TAIL);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', FRAGMENT_HEAD)
+      .replace('#include <map_fragment>', FRAGMENT_DYE)
       .replace('#include <color_fragment>', FRAGMENT_COLOUR);
   };
-  material.customProgramCacheKey = () => 'aldermoor-regions';
+  material.customProgramCacheKey = () => (dyeable ? 'aldermoor-regions-dye' : 'aldermoor-regions');
   material.needsUpdate = true;
 }
 
@@ -106,11 +135,19 @@ export function prepareMesh(obj) {
   obj.frustumCulled = false; // Skinned bounds don't follow the animation.
   const hasRegion = !!obj.geometry.getAttribute('_region');
   const hidden = { value: 0 };
+  const dye = {
+    map: { value: null },
+    on: { value: new THREE.Vector2(0, 0) },
+    r: { value: new THREE.Color(1, 1, 1) },
+    refR: { value: new THREE.Color(1, 1, 1) },
+    g: { value: new THREE.Color(1, 1, 1) },
+    refG: { value: new THREE.Color(1, 1, 1) },
+  };
   if (hasRegion) {
-    for (const m of cloned) patchMaterial(m, hidden);
+    for (const m of cloned) patchMaterial(m, hidden, dye);
     obj.customDepthMaterial = depthMaterial(hidden);
   }
-  return { mesh: obj, hidden, hasRegion };
+  return { mesh: obj, hidden, dye, hasRegion };
 }
 
 /** prepareMesh for every mesh under `root`. */

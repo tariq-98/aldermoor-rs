@@ -428,7 +428,7 @@ def crown(skel, s, body=None):
 
 def finish_body_type(cat, bt, label, race, skel, objs, extra=None):
     """Exports a creature body and records it in the catalogue."""
-    path = export.piece(OUT / bt / "body.gltf", [skel] + objs)
+    path = export.piece(OUT / bt / "body.gltf", [skel] + objs, sockets=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(sc.ROOT / "art" / "out" / f"humanoid-{bt}.blend"))
     body = bpy.data.objects["body"]
     entry = {

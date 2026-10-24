@@ -22,8 +22,12 @@ def _select(objects):
     bpy.context.view_layer.objects.active = objects[0]
 
 
-def piece(path, objects):
-    """A skinned piece (or the body): its armature plus meshes, no animation."""
+def piece(path, objects, sockets=False):
+    """A skinned piece (or the body): its armature plus meshes, no animation.
+
+    Only bodies carry the socket bones (`sockets=True`); clothing binds to the body's skeleton by
+    bone name, so leaving the sockets out keeps a socket change from touching every piece.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     _select(objects)
@@ -39,7 +43,7 @@ def piece(path, objects):
         export_attributes=True,
         export_extras=True,
         export_yup=True,
-        export_def_bones=False,
+        export_def_bones=not sockets,
         export_rest_position_armature=True,
         export_materials="EXPORT",
         export_image_format="AUTO",

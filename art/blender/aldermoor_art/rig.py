@@ -162,14 +162,30 @@ def socket_frames(arm, body):
     chest = h["spine_03"] + Vector((0, 0, 0.05))
     back_point = surface(chest, back, 0.0)
     out["socket_back"] = ("spine_03", _frame(up, front, back_point))
-    # Two diagonal slots across the back: hilt over the right shoulder, and over the left.
-    for name, tilt in (("socket_back_1", -1.0), ("socket_back_2", 1.0)):
-        u = Vector((tilt * 0.55, 0, -1)).normalized()  # Item up = blade tip, pointing down and across.
-        e = Vector((0, 1, 0)).cross(u)
-        out[name] = ("spine_03", _frame(u, e, back_point + back * 0.06))
-    # With a travel pack on: a shield strapped to its outer face, long items down its left side.
+    # Everything on the back can be drawn over a shoulder (docs/ASSETS.md, "Drawing and
+    # sheathing"). Blades hang hilt-up behind a shoulder, the grip where that hand reaches:
+    # socket_back_1 over the right shoulder, socket_back_2 over the left.
+    shoulder_z = (h["upperarm_l"].z + h["clavicle_l"].z) / 2
+    for name, sign in (("socket_back_1", -1.0), ("socket_back_2", 1.0)):
+        u = Vector((-sign * 0.55, 0.06, -0.83)).normalized()  # Item up = blade tip, down and across.
+        e = back.cross(u) * -sign  # Mirror images, so a mirrored draw meets the item as it lies.
+        grip = surface(Vector((sign * 0.11, h["spine_03"].y, shoulder_z - 0.03)), back, 0.07)
+        out[name] = ("spine_03", _frame(u, e, grip))
+    # Poles (staves, spears, tools) cross the back head-up over the right shoulder; bows the
+    # same way over the left. Their grips sit mid-back, and the hand takes the shaft higher up.
+    mid_back = surface(Vector((0, h["spine_03"].y, (h["spine_02"].z + h["spine_03"].z) / 2)), back, 0.07)
+    for name, sign in (("socket_back_pole", -1.0), ("socket_back_bow", 1.0)):
+        u = Vector((sign * 0.42, 0.04, 0.91)).normalized()
+        out[name] = ("spine_03", _frame(u, back.cross(u) * -sign, mid_back))
+    # Shields: upright in the middle of the back, face out, over anything slung beneath.
+    out["socket_back_shield"] = ("spine_03", _frame(Vector((0, 0.08, 1)), back, back_point + back * 0.11 + Vector((0, 0, -0.06))))
+    # With a travel pack on: a shield strapped to its outer face, long items down its sides
+    # (bows on the left, for the left hand; everything else on the right).
     out["socket_pack"] = ("spine_03", _frame(up, back, back_point + Vector((0, 0.235, -0.05))))
     out["socket_pack_side"] = ("spine_03", _frame(Vector((0.12, 0.08, 1)), Vector((1, 0, 0)), back_point + Vector((0.205, 0.11, -0.04))))
+    out["socket_pack_side_r"] = ("spine_03", _frame(Vector((-0.12, 0.08, 1)), Vector((-1, 0, 0)), back_point + Vector((-0.205, 0.11, -0.04))))
+    # Blades ride the pack's right side tip-down, the hilt up behind the right shoulder.
+    out["socket_pack_blade"] = ("spine_03", _frame(Vector((0.12, 0.08, -1)), Vector((-1, 0, 0)), back_point + Vector((-0.205, 0.11, 0.09))))
     # Quiver: arrows over the right shoulder.
     out["socket_quiver"] = ("spine_03", _frame(Vector((-0.35, 0.12, 1)), front, back_point + back * 0.05 + Vector((0.04, 0, -0.06))))
     # Sheathed one-handers on the hips, hilt forward and up, tip back and down.

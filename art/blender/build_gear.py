@@ -16,70 +16,98 @@ from mathutils import Matrix
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aldermoor_art import export, review, scene as sc, shapes as sh, weapons as wp  # noqa: E402
+from aldermoor_art.holds import BOW_DRAW, OFF_HAND  # noqa: E402
 
 OUT = sc.OUT / "gear"
 REVIEW = sc.ROOT / "art" / "out" / "review" / "gear"
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 
-# Rigid items. Clips name entries in the animation library; archery clips come later.
+# Rigid items. `clips` name entries in the animation library (build_clips.py): `idle` while drawn,
+# `attacks` in turn, `ready` and `stow` to take the item out and put it away. Two-handed items
+# say where the off hand holds them (`grips`), and back items how far along them a hand may take
+# them when drawing (`grab_range`, metres along the item's up axis). docs/ASSETS.md has the rest.
+SWORD = {"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Sword_Regular_B", "Sword_Regular_C", "Sword_Regular_Combo",
+                                           "Sword_Heavy_Combo"], "block": "Sword_Block", "dash": "Sword_Dash",
+         "ready": "Draw_Hip", "stow": "Sheathe_Hip"}
+STAFF = {"idle": "Staff_Idle_Loop", "attacks": ["Staff_Cast"], "channel": "Staff_Channel_Loop", "slam": "Staff_Slam",
+         "ready": "Draw_Pole", "stow": "Sheathe_Pole"}
+BOW = {"idle": "Bow_Idle_Loop", "attacks": ["Bow_Shoot"], "draw": "Bow_Draw", "aim": "Bow_Aim_Loop", "release": "Bow_Release",
+       "ready": "Draw_Bow", "stow": "Sheathe_Bow"}
+POLE_STOWED = {"default": "socket_back_pole", "backpack": "socket_pack_side_r"}
+BOW_STOWED = {"default": "socket_back_bow", "backpack": "socket_pack_side"}
+SHIELD_STOWED = {"default": "socket_back_shield", "backpack": "socket_pack", "cape": "socket_back_shield"}
+
+
+def off_hand(family):
+    """The off hand's socket frame on an item, in the item's glTF space (up +Y, front +Z)."""
+    s, t, (lo, hi) = OFF_HAND[family]
+    return {"at": [0.0, s, 0.0], "up": [0.0, 1.0, 0.0], "front": [round(math.sin(t), 5), 0.0, round(math.cos(t), 5)],
+            "range": [lo, hi]}
+
+
 ITEMS = [
     dict(id="sword.arming", label="Arming sword", family="sword", slot="main_hand", build=wp.arming_sword,
-         sheath=wp.arming_sword_sheath, held="socket_hand_r", stowed={"default": "socket_hip_l"},
-         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Sword_Regular_B", "Sword_Regular_C", "Sword_Regular_Combo", "Sword_Heavy_Combo"],
-                "block": "Sword_Block", "dash": "Sword_Dash"}),
+         sheath=wp.arming_sword_sheath, held="socket_hand_r", stowed={"default": "socket_hip_l"}, clips=SWORD),
     dict(id="dagger.hunting", label="Hunting knife", family="dagger", slot="off_hand", build=wp.dagger,
          sheath=wp.dagger_sheath, held="socket_hand_l", stowed={"default": "socket_hip_r"},
-         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Melee_Hook"]}),
+         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Melee_Hook"], "ready": "Draw_Hip_L", "stow": "Sheathe_Hip_L"}),
     dict(id="shield.round", label="Round shield", family="shield", slot="off_hand", build=wp.round_shield,
-         held="socket_shield_l", stowed={"default": "socket_back_2", "backpack": "socket_pack", "cape": "socket_back_2"},
+         held="socket_shield_l", stowed=SHIELD_STOWED,
          clips={"idle": "Idle_Shield_Loop", "block": "Idle_Shield_Loop", "bash": "Shield_OneShot", "dash": "Shield_Dash"}),
-    dict(id="bow.hunting", label="Hunting bow", family="bow", slot="two_hand", build=wp.hunting_bow,
-         held="socket_hand_l", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"}, clips={"idle": "Idle_Loop"}),
+    dict(id="bow.hunting", label="Hunting bow", family="bow", slot="two_hand", build=wp.hunting_bow, post="bow",
+         held="socket_hand_l", stowed=BOW_STOWED, clips=BOW, grab_range=[-0.7, 0.7]),
     # Ammunition has no drawn state: only where it rides, which depends on the back item.
     dict(id="quiver.leather", label="Leather quiver", family="quiver", slot="ammo", build=wp.quiver,
          stowed={"default": "socket_quiver", "backpack": "socket_quiver_hip"}, clips={}),
     dict(id="staff.oak", label="Oak staff", family="staff", slot="two_hand", build=wp.battle_staff,
-         held="socket_hand_r", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"},
-         clips={"idle": "Spell_Simple_Idle_Loop", "attacks": ["Spell_Simple_Shoot"], "enter": "Spell_Simple_Enter", "exit": "Spell_Simple_Exit"}),
+         held="socket_hand_r", stowed=POLE_STOWED, clips=STAFF, grips={"off_hand": off_hand("staff")}, grab_range=[-1.0, 0.6]),
     dict(id="wand.yew", label="Yew wand", family="wand", slot="main_hand", build=wp.wand,
          held="socket_hand_r", stowed={"default": "socket_hip_r"},
-         clips={"idle": "Spell_Simple_Idle_Loop", "attacks": ["Spell_Simple_Shoot"]}),
+         clips={"idle": "Spell_Simple_Idle_Loop", "attacks": ["Spell_Simple_Shoot"], "ready": "Draw_Side", "stow": "Sheathe_Side"}),
     dict(id="axe.bearded", label="Bearded axe", family="axe", slot="main_hand", build=wp.hand_axe,
          held="socket_hand_r", stowed={"default": "socket_hip_l"},
-         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Sword_Regular_B", "Melee_Hook"], "work": "TreeChopping_Loop"}),
+         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Sword_Regular_B", "Melee_Hook"], "work": "TreeChopping_Loop",
+                "ready": "Draw_Hip", "stow": "Sheathe_Hip"}),
     dict(id="mace.flanged", label="Flanged mace", family="mace", slot="main_hand", build=wp.mace,
          held="socket_hand_r", stowed={"default": "socket_hip_l"},
-         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Sword_Regular_C"]}),
+         clips={"idle": "Sword_Idle", "attacks": ["Sword_Regular_A", "Sword_Regular_C"], "ready": "Draw_Hip", "stow": "Sheathe_Hip"}),
     dict(id="spear.ash", label="Ash spear", family="spear", slot="main_hand", build=wp.spear,
-         held="socket_hand_r", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"},
-         clips={"idle": "Sword_Idle", "attacks": ["Sword_Dash", "Sword_Regular_A"]}),
+         held="socket_hand_r", stowed=POLE_STOWED,
+         clips={"idle": "Spear_Idle_Loop", "attacks": ["Spear_Thrust", "Spear_Sweep"], "ready": "Draw_Pole", "stow": "Sheathe_Pole"},
+         grips={"off_hand": off_hand("spear")}, grab_range=[-1.1, 1.0]),
     dict(id="sword.great", label="Greatsword", family="greatsword", slot="two_hand", build=wp.greatsword,
-         held="socket_hand_r", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"},
-         clips={"idle": "Sword_Idle", "attacks": ["Sword_Heavy_Combo", "Sword_Regular_C"], "block": "Sword_Block"}),
+         held="socket_hand_r", stowed={"default": "socket_back_1", "backpack": "socket_pack_blade"},
+         clips={"idle": "GreatSword_Idle_Loop", "attacks": ["GreatSword_Slash", "GreatSword_Swing", "GreatSword_Overhead"],
+                "ready": "Draw_Back", "stow": "Sheathe_Back"},
+         grips={"off_hand": off_hand("greatsword")}, grab_range=[-0.15, 0.05]),
     dict(id="shield.kite", label="Kite shield", family="shield", slot="off_hand", build=wp.kite_shield,
-         held="socket_shield_l", stowed={"default": "socket_back_2", "backpack": "socket_pack", "cape": "socket_back_2"},
+         held="socket_shield_l", stowed=SHIELD_STOWED,
          clips={"idle": "Idle_Shield_Loop", "block": "Idle_Shield_Loop", "bash": "Shield_OneShot"}),
-    dict(id="bow.long", label="Longbow", family="bow", slot="two_hand", build=wp.longbow,
-         held="socket_hand_l", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"}, clips={"idle": "Idle_Loop"}),
+    dict(id="bow.long", label="Longbow", family="bow", slot="two_hand", build=wp.longbow, post="bow",
+         held="socket_hand_l", stowed=BOW_STOWED, clips=BOW, grab_range=[-0.85, 0.85]),
     dict(id="staff.necro", label="Gravecaller's staff", family="staff", slot="two_hand", build=wp.necro_staff,
-         held="socket_hand_r", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"},
-         clips={"idle": "Spell_Simple_Idle_Loop", "attacks": ["Spell_Simple_Shoot"]}),
+         held="socket_hand_r", stowed=POLE_STOWED, clips=STAFF, grips={"off_hand": off_hand("staff")}, grab_range=[-1.0, 0.6]),
     dict(id="staff.healer", label="Sunward staff", family="staff", slot="two_hand", build=wp.healer_staff,
-         held="socket_hand_r", stowed={"default": "socket_back_1", "backpack": "socket_pack_side"},
-         clips={"idle": "Spell_Simple_Idle_Loop", "attacks": ["Spell_Simple_Shoot"]}),
+         held="socket_hand_r", stowed=POLE_STOWED, clips=STAFF, grips={"off_hand": off_hand("staff")}, grab_range=[-1.0, 0.6]),
     dict(id="book.spells", label="Spellbook", family="book", slot="off_hand", build=wp.spellbook,
-         held="socket_hand_l", stowed={"default": "socket_hip_r"}, clips={"idle": "Spell_Simple_Idle_Loop"}),
+         held="socket_hand_l", stowed={"default": "socket_hip_r"},
+         clips={"idle": "Spell_Simple_Idle_Loop", "ready": "Draw_Hip_L", "stow": "Sheathe_Hip_L"}),
     dict(id="orb.focus", label="Focus orb", family="focus", slot="off_hand", build=wp.focus_orb,
-         held="socket_hand_l", stowed={"default": "socket_hip_r"}, clips={"idle": "Spell_Simple_Idle_Loop"}),
+         held="socket_hand_l", stowed={"default": "socket_hip_r"},
+         clips={"idle": "Spell_Simple_Idle_Loop", "ready": "Draw_Hip_L", "stow": "Sheathe_Hip_L"}),
     # Work tools for NPC routines and the crafting skills.
     dict(id="tool.hammer", label="Smith's hammer", family="tool", slot="main_hand", build=wp.smith_hammer,
-         held="socket_hand_r", stowed={"default": "socket_hip_r"}, clips={"work": "Fixing_Kneeling"}),
+         held="socket_hand_r", stowed={"default": "socket_hip_r"},
+         clips={"work": "Fixing_Kneeling", "ready": "Draw_Side", "stow": "Sheathe_Side"}),
     dict(id="tool.hoe", label="Hoe", family="tool", slot="two_hand", build=wp.hoe,
-         held="socket_hand_r", stowed={"default": "socket_back_1"}, clips={"work": "Farm_Harvest"}),
+         held="socket_hand_r", stowed=POLE_STOWED, clips={"work": "Farm_Harvest", "ready": "Draw_Pole", "stow": "Sheathe_Pole"},
+         grab_range=[-0.5, 0.9]),
     dict(id="tool.watering_can", label="Watering can", family="tool", slot="off_hand", build=wp.watering_can,
-         held="socket_hand_r", stowed={"default": "socket_hip_r"}, clips={"work": "Farm_Watering"}),
+         held="socket_hand_r", stowed={"default": "socket_hip_r"},
+         clips={"work": "Farm_Watering", "ready": "Draw_Side", "stow": "Sheathe_Side"}),
     dict(id="tool.lantern", label="Lantern", family="tool", slot="off_hand", build=wp.lantern,
-         held="socket_hand_l", stowed={"default": "socket_hip_r"}, clips={"idle": "Idle_Lantern_Loop"}),
+         held="socket_hand_l", stowed={"default": "socket_hip_r"},
+         clips={"idle": "Idle_Lantern_Loop", "ready": "Draw_Hip_L", "stow": "Sheathe_Hip_L"}),
 ]
 
 
@@ -88,8 +116,13 @@ def build_item(item):
     parts = item["build"]()
     ob = sh.join(parts, item["id"])
     sh.uv_unwrap(ob)
+    entry = {k: v for k, v in item.items() if k not in ("build", "sheath", "post")}
+    if item.get("post") == "bow":
+        rest, pull = wp.bow_morphs(ob, BOW_DRAW)
+        # Item glTF space: x, z, -y of Blender's.
+        entry["string"] = {"rest": [round(rest.x, 5), round(rest.z, 5), round(-rest.y, 5)],
+                           "pull": [round(pull.x, 5), round(pull.z, 5), round(-pull.y, 5)]}
     path = export.rigid(OUT / f"{item['id']}.gltf", [ob])
-    entry = {k: v for k, v in item.items() if k not in ("build", "sheath")}
     entry["file"] = str(path.relative_to(sc.OUT))
     entry["triangles"] = sh.triangles([ob])
     if item.get("sheath"):
@@ -106,10 +139,9 @@ def build_item(item):
 C = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, -1, 0, 0), (0, 0, 0, 1)))  # Blender to glTF axes.
 
 
-def mount(objs, skel, socket):
-    """Places imported item objects on a socket, exactly as the runtime does."""
-    pb = skel.pose.bones[socket]
-    m = skel.matrix_world @ pb.matrix @ C
+def mount(objs, socket_matrix):
+    """Places imported item objects on a socket's world matrix, exactly as the runtime does."""
+    m = socket_matrix @ C
     for o in objs:
         if o.parent is None:
             o.matrix_world = m @ o.matrix_world
@@ -143,27 +175,30 @@ SCENES = [
     ("sword-swing", "Sword_Regular_A", 7, {"sword.arming": "held", "shield.round": "held"}),
     ("sword-block", "Sword_Block", 12, {"sword.arming": "held", "shield.round": "held"}),
     ("stowed", "Walk_Loop", 10, {"sword.arming": "stowed", "shield.round": "stowed", "quiver.leather": "held", "dagger.hunting": "stowed"}),
-    ("bow", "Idle_Loop", 20, {"bow.hunting": "held", "quiver.leather": "held", "dagger.hunting": "stowed"}),
-    ("staff-cast", "Spell_Simple_Shoot", 6, {"staff.oak": "held"}),
+    ("bow", "Bow_Aim_Loop", 0, {"bow.hunting": "held", "quiver.leather": "held", "dagger.hunting": "stowed"}),
+    ("staff-cast", "Staff_Cast", 13, {"staff.oak": "held"}),
     ("wand-idle", "Spell_Simple_Idle_Loop", 20, {"wand.yew": "held", "dagger.hunting": "held"}),
     ("bow-stowed", "Jog_Fwd_Loop", 6, {"bow.hunting": "stowed", "quiver.leather": "held", "sword.arming": "stowed"}),
     ("axe", "Sword_Regular_A", 7, {"axe.bearded": "held", "shield.kite": "held"}),
     ("mace", "Sword_Idle", 12, {"mace.flanged": "held", "shield.kite": "held"}),
-    ("spear", "Sword_Dash", 12, {"spear.ash": "held"}),
-    ("greatsword", "Sword_Heavy_Combo", 30, {"sword.great": "held"}),
-    ("necro", "Spell_Simple_Shoot", 6, {"staff.necro": "held", "book.spells": "held"}),
-    ("healer", "Spell_Simple_Idle_Loop", 20, {"staff.healer": "held", "orb.focus": "held"}),
+    ("spear", "Spear_Idle_Loop", 0, {"spear.ash": "held"}),
+    ("greatsword", "GreatSword_Idle_Loop", 0, {"sword.great": "held"}),
+    ("necro", "Staff_Idle_Loop", 0, {"staff.necro": "held", "book.spells": "held"}),
+    ("healer", "Staff_Channel_Loop", 0, {"staff.healer": "held", "orb.focus": "held"}),
     ("smith", "Fixing_Kneeling", 40, {"tool.hammer": "held"}),
     ("lantern", "Idle_Lantern_Loop", 20, {"tool.lantern": "held"}),
     ("water", "Farm_Watering", 40, {"tool.watering_can": "held"}),
     ("harvest", "Farm_Harvest", 30, {"tool.hoe": "held"}),
     ("back-two-handers", "Walk_Loop", 10, {"sword.great": "stowed", "shield.kite": "stowed"}),
+    ("back-poles", "Walk_Loop", 10, {"staff.oak": "stowed", "shield.round": "stowed"}),
+    ("back-bow", "Walk_Loop", 10, {"bow.long": "stowed", "quiver.leather": "held"}),
 ]
 
 
 def on_character(entries):
     from aldermoor_art import looks
     by_id = {e["id"]: e for e in entries}
+    offsets = looks.socket_offsets("male")
     files = []
     for name, clip, frame, gear in SCENES:
         look = dict(body="male", pieces=["ranger.top", "ranger.trousers", "ranger.boots"], hair="hair.simple_parted",
@@ -173,11 +208,16 @@ def on_character(entries):
             e = by_id[iid]
             socket = e.get("held", e["stowed"]["default"]) if state == "held" else e["stowed"]["default"]
             item = import_item(e["file"])
-            mount(item, skel, socket)
+            mount(item, looks.socket_world(skel, offsets, socket))
+            if e.get("string") and state == "held":
+                for o in item:
+                    if o.data.shape_keys:
+                        o.data.shape_keys.key_blocks["arrow"].value = 1.0
+                        o.data.shape_keys.key_blocks["draw"].value = 1.0
             objs += item
             if e.get("sheath"):
                 sheath = import_item(e["sheath"])
-                mount(sheath, skel, e["stowed"]["default"])
+                mount(sheath, looks.socket_world(skel, offsets, e["stowed"]["default"]))
                 objs += sheath
         bpy.context.view_layer.update()
         for yaw in (25, 160):

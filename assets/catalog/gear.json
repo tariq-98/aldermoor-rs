@@ -20,7 +20,9 @@
      "Sword_Heavy_Combo"
     ],
     "block": "Sword_Block",
-    "dash": "Sword_Dash"
+    "dash": "Sword_Dash",
+    "ready": "Draw_Hip",
+    "stow": "Sheathe_Hip"
    },
    "file": "gear/sword.arming.gltf",
    "triangles": 3110,
@@ -40,7 +42,9 @@
     "attacks": [
      "Sword_Regular_A",
      "Melee_Hook"
-    ]
+    ],
+    "ready": "Draw_Hip_L",
+    "stow": "Sheathe_Hip_L"
    },
    "file": "gear/dagger.hunting.gltf",
    "triangles": 2726,
@@ -53,9 +57,9 @@
    "slot": "off_hand",
    "held": "socket_shield_l",
    "stowed": {
-    "default": "socket_back_2",
+    "default": "socket_back_shield",
     "backpack": "socket_pack",
-    "cape": "socket_back_2"
+    "cape": "socket_back_shield"
    },
    "clips": {
     "idle": "Idle_Shield_Loop",
@@ -73,14 +77,38 @@
    "slot": "two_hand",
    "held": "socket_hand_l",
    "stowed": {
-    "default": "socket_back_1",
+    "default": "socket_back_bow",
     "backpack": "socket_pack_side"
    },
    "clips": {
-    "idle": "Idle_Loop"
+    "idle": "Bow_Idle_Loop",
+    "attacks": [
+     "Bow_Shoot"
+    ],
+    "draw": "Bow_Draw",
+    "aim": "Bow_Aim_Loop",
+    "release": "Bow_Release",
+    "ready": "Draw_Bow",
+    "stow": "Sheathe_Bow"
+   },
+   "grab_range": [
+    -0.7,
+    0.7
+   ],
+   "string": {
+    "rest": [
+     0.0,
+     0.02,
+     -0.0435
+    ],
+    "pull": [
+     0.0,
+     0.0,
+     -0.6
+    ]
    },
    "file": "gear/bow.hunting.gltf",
-   "triangles": 2564
+   "triangles": 2660
   },
   {
    "id": "quiver.leather",
@@ -102,17 +130,46 @@
    "slot": "two_hand",
    "held": "socket_hand_r",
    "stowed": {
-    "default": "socket_back_1",
-    "backpack": "socket_pack_side"
+    "default": "socket_back_pole",
+    "backpack": "socket_pack_side_r"
    },
    "clips": {
-    "idle": "Spell_Simple_Idle_Loop",
+    "idle": "Staff_Idle_Loop",
     "attacks": [
-     "Spell_Simple_Shoot"
+     "Staff_Cast"
     ],
-    "enter": "Spell_Simple_Enter",
-    "exit": "Spell_Simple_Exit"
+    "channel": "Staff_Channel_Loop",
+    "slam": "Staff_Slam",
+    "ready": "Draw_Pole",
+    "stow": "Sheathe_Pole"
    },
+   "grips": {
+    "off_hand": {
+     "at": [
+      0.0,
+      0.28,
+      0.0
+     ],
+     "up": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "front": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "range": [
+      0.1,
+      0.55
+     ]
+    }
+   },
+   "grab_range": [
+    -1.0,
+    0.6
+   ],
    "file": "gear/staff.oak.gltf",
    "triangles": 3126
   },
@@ -129,7 +186,9 @@
     "idle": "Spell_Simple_Idle_Loop",
     "attacks": [
      "Spell_Simple_Shoot"
-    ]
+    ],
+    "ready": "Draw_Side",
+    "stow": "Sheathe_Side"
    },
    "file": "gear/wand.yew.gltf",
    "triangles": 340
@@ -150,7 +209,9 @@
      "Sword_Regular_B",
      "Melee_Hook"
     ],
-    "work": "TreeChopping_Loop"
+    "work": "TreeChopping_Loop",
+    "ready": "Draw_Hip",
+    "stow": "Sheathe_Hip"
    },
    "file": "gear/axe.bearded.gltf",
    "triangles": 1710
@@ -169,7 +230,9 @@
     "attacks": [
      "Sword_Regular_A",
      "Sword_Regular_C"
-    ]
+    ],
+    "ready": "Draw_Hip",
+    "stow": "Sheathe_Hip"
    },
    "file": "gear/mace.flanged.gltf",
    "triangles": 2012
@@ -181,16 +244,45 @@
    "slot": "main_hand",
    "held": "socket_hand_r",
    "stowed": {
-    "default": "socket_back_1",
-    "backpack": "socket_pack_side"
+    "default": "socket_back_pole",
+    "backpack": "socket_pack_side_r"
    },
    "clips": {
-    "idle": "Sword_Idle",
+    "idle": "Spear_Idle_Loop",
     "attacks": [
-     "Sword_Dash",
-     "Sword_Regular_A"
-    ]
+     "Spear_Thrust",
+     "Spear_Sweep"
+    ],
+    "ready": "Draw_Pole",
+    "stow": "Sheathe_Pole"
    },
+   "grips": {
+    "off_hand": {
+     "at": [
+      0.0,
+      0.45,
+      0.0
+     ],
+     "up": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "front": [
+      -0.64279,
+      0.0,
+      0.76604
+     ],
+     "range": [
+      0.1,
+      0.9
+     ]
+    }
+   },
+   "grab_range": [
+    -1.1,
+    1.0
+   ],
    "file": "gear/spear.ash.gltf",
    "triangles": 1770
   },
@@ -202,16 +294,45 @@
    "held": "socket_hand_r",
    "stowed": {
     "default": "socket_back_1",
-    "backpack": "socket_pack_side"
+    "backpack": "socket_pack_blade"
    },
    "clips": {
-    "idle": "Sword_Idle",
+    "idle": "GreatSword_Idle_Loop",
     "attacks": [
-     "Sword_Heavy_Combo",
-     "Sword_Regular_C"
+     "GreatSword_Slash",
+     "GreatSword_Swing",
+     "GreatSword_Overhead"
     ],
-    "block": "Sword_Block"
+    "ready": "Draw_Back",
+    "stow": "Sheathe_Back"
    },
+   "grips": {
+    "off_hand": {
+     "at": [
+      0.0,
+      -0.1,
+      0.0
+     ],
+     "up": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "front": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "range": [
+      -0.16,
+      -0.06
+     ]
+    }
+   },
+   "grab_range": [
+    -0.15,
+    0.05
+   ],
    "file": "gear/sword.great.gltf",
    "triangles": 3806
   },
@@ -222,9 +343,9 @@
    "slot": "off_hand",
    "held": "socket_shield_l",
    "stowed": {
-    "default": "socket_back_2",
+    "default": "socket_back_shield",
     "backpack": "socket_pack",
-    "cape": "socket_back_2"
+    "cape": "socket_back_shield"
    },
    "clips": {
     "idle": "Idle_Shield_Loop",
@@ -241,14 +362,38 @@
    "slot": "two_hand",
    "held": "socket_hand_l",
    "stowed": {
-    "default": "socket_back_1",
+    "default": "socket_back_bow",
     "backpack": "socket_pack_side"
    },
    "clips": {
-    "idle": "Idle_Loop"
+    "idle": "Bow_Idle_Loop",
+    "attacks": [
+     "Bow_Shoot"
+    ],
+    "draw": "Bow_Draw",
+    "aim": "Bow_Aim_Loop",
+    "release": "Bow_Release",
+    "ready": "Draw_Bow",
+    "stow": "Sheathe_Bow"
+   },
+   "grab_range": [
+    -0.85,
+    0.85
+   ],
+   "string": {
+    "rest": [
+     0.0,
+     0.02,
+     -0.0825
+    ],
+    "pull": [
+     0.0,
+     0.0,
+     -0.6
+    ]
    },
    "file": "gear/bow.long.gltf",
-   "triangles": 2564
+   "triangles": 2660
   },
   {
    "id": "staff.necro",
@@ -257,15 +402,46 @@
    "slot": "two_hand",
    "held": "socket_hand_r",
    "stowed": {
-    "default": "socket_back_1",
-    "backpack": "socket_pack_side"
+    "default": "socket_back_pole",
+    "backpack": "socket_pack_side_r"
    },
    "clips": {
-    "idle": "Spell_Simple_Idle_Loop",
+    "idle": "Staff_Idle_Loop",
     "attacks": [
-     "Spell_Simple_Shoot"
-    ]
+     "Staff_Cast"
+    ],
+    "channel": "Staff_Channel_Loop",
+    "slam": "Staff_Slam",
+    "ready": "Draw_Pole",
+    "stow": "Sheathe_Pole"
    },
+   "grips": {
+    "off_hand": {
+     "at": [
+      0.0,
+      0.28,
+      0.0
+     ],
+     "up": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "front": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "range": [
+      0.1,
+      0.55
+     ]
+    }
+   },
+   "grab_range": [
+    -1.0,
+    0.6
+   ],
    "file": "gear/staff.necro.gltf",
    "triangles": 2230
   },
@@ -276,15 +452,46 @@
    "slot": "two_hand",
    "held": "socket_hand_r",
    "stowed": {
-    "default": "socket_back_1",
-    "backpack": "socket_pack_side"
+    "default": "socket_back_pole",
+    "backpack": "socket_pack_side_r"
    },
    "clips": {
-    "idle": "Spell_Simple_Idle_Loop",
+    "idle": "Staff_Idle_Loop",
     "attacks": [
-     "Spell_Simple_Shoot"
-    ]
+     "Staff_Cast"
+    ],
+    "channel": "Staff_Channel_Loop",
+    "slam": "Staff_Slam",
+    "ready": "Draw_Pole",
+    "stow": "Sheathe_Pole"
    },
+   "grips": {
+    "off_hand": {
+     "at": [
+      0.0,
+      0.28,
+      0.0
+     ],
+     "up": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "front": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "range": [
+      0.1,
+      0.55
+     ]
+    }
+   },
+   "grab_range": [
+    -1.0,
+    0.6
+   ],
    "file": "gear/staff.healer.gltf",
    "triangles": 2188
   },
@@ -298,7 +505,9 @@
     "default": "socket_hip_r"
    },
    "clips": {
-    "idle": "Spell_Simple_Idle_Loop"
+    "idle": "Spell_Simple_Idle_Loop",
+    "ready": "Draw_Hip_L",
+    "stow": "Sheathe_Hip_L"
    },
    "file": "gear/book.spells.gltf",
    "triangles": 224
@@ -313,7 +522,9 @@
     "default": "socket_hip_r"
    },
    "clips": {
-    "idle": "Spell_Simple_Idle_Loop"
+    "idle": "Spell_Simple_Idle_Loop",
+    "ready": "Draw_Hip_L",
+    "stow": "Sheathe_Hip_L"
    },
    "file": "gear/orb.focus.gltf",
    "triangles": 990
@@ -328,7 +539,9 @@
     "default": "socket_hip_r"
    },
    "clips": {
-    "work": "Fixing_Kneeling"
+    "work": "Fixing_Kneeling",
+    "ready": "Draw_Side",
+    "stow": "Sheathe_Side"
    },
    "file": "gear/tool.hammer.gltf",
    "triangles": 1532
@@ -340,11 +553,18 @@
    "slot": "two_hand",
    "held": "socket_hand_r",
    "stowed": {
-    "default": "socket_back_1"
+    "default": "socket_back_pole",
+    "backpack": "socket_pack_side_r"
    },
    "clips": {
-    "work": "Farm_Harvest"
+    "work": "Farm_Harvest",
+    "ready": "Draw_Pole",
+    "stow": "Sheathe_Pole"
    },
+   "grab_range": [
+    -0.5,
+    0.9
+   ],
    "file": "gear/tool.hoe.gltf",
    "triangles": 600
   },
@@ -358,7 +578,9 @@
     "default": "socket_hip_r"
    },
    "clips": {
-    "work": "Farm_Watering"
+    "work": "Farm_Watering",
+    "ready": "Draw_Side",
+    "stow": "Sheathe_Side"
    },
    "file": "gear/tool.watering_can.gltf",
    "triangles": 272
@@ -373,7 +595,9 @@
     "default": "socket_hip_r"
    },
    "clips": {
-    "idle": "Idle_Lantern_Loop"
+    "idle": "Idle_Lantern_Loop",
+    "ready": "Draw_Hip_L",
+    "stow": "Sheathe_Hip_L"
    },
    "file": "gear/tool.lantern.gltf",
    "triangles": 476

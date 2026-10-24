@@ -85,8 +85,8 @@ function swatches(list, value, onChange, display = (rgb) => rgb) {
   for (const item of list) {
     const b = el('button', {
       type: 'button',
-      title: item.id,
-      'aria-label': item.id,
+      title: item.label || item.id,
+      'aria-label': item.label || item.id,
       class: item.id === value ? 'swatch on' : 'swatch',
       style: `background: ${linearToCss(display(item.linear))}`,
     });
@@ -171,6 +171,15 @@ export function renderPanel(root, app) {
       const opts = [{ value: '', label: 'Original' }, ...alts.map((a, i) => ({ value: a, label: `Colourway ${i + 2}` }))];
       wear.body.append(row('  Colourway', select(opts, state.variants[id] || '', (v) => actions.setVariant(id, v))));
     }
+    // Dyes: one row per channel, starting with the colour it was painted.
+    const piece = id ? humanoid.pieces.find((p) => p.id === id) : null;
+    if (piece?.dye && humanoid.dyes?.length) {
+      (piece.dye_channels || []).forEach((ch, k) => {
+        const list = [{ id: '', label: 'As painted', linear: ch.reference }, ...humanoid.dyes];
+        const name = ch.name.replace(/^\w/, (c) => c.toUpperCase());
+        wear.body.append(row(`  ${name} dye`, swatches(list, state.dyes[id]?.[k] || '', (v) => actions.setDye(id, k, v || null))));
+      });
+    }
   }
   root.append(wear.sec);
 
@@ -200,6 +209,11 @@ export function renderPanel(root, app) {
       kit.body.append(row(slotLabel(slot), s));
     }
     kit.body.append(el('div', { class: 'row' }, toggle('Weapons drawn', state.drawn, actions.setDrawn)));
+    if (character?.attacks?.().length) {
+      const attack = el('button', { type: 'button', class: 'wide' }, 'Attack');
+      attack.addEventListener('click', actions.attack);
+      kit.body.append(el('div', { class: 'row buttons' }, attack));
+    }
   }
   root.append(kit.sec);
 

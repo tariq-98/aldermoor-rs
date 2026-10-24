@@ -21,6 +21,7 @@ const DEFAULTS = {
   haircol: 'chestnut',
   pieces: { torso_under: 'peasant.top', legs_under: 'peasant.trousers', feet: 'peasant.shoes' },
   variants: {},
+  dyes: {},
   gear: {},
   drawn: true,
   clip: 'Idle_Loop',
@@ -51,6 +52,10 @@ function parseHash(hash) {
     else if (k.startsWith('p.')) {
       if (none(v)) s.pieces[k.slice(2)] = v;
     } else if (k.startsWith('v.')) s.variants[k.slice(2)] = v;
+    else if (k.startsWith('d.')) {
+      const [main, trim] = v.split(',');
+      s.dyes[k.slice(2)] = [main || null, trim || null];
+    }
     else if (k.startsWith('g.')) {
       if (none(v)) s.gear[k.slice(2)] = v;
     } else if (k === 'drawn') s.drawn = v !== '0';
@@ -77,6 +82,9 @@ function writeHash(s) {
   for (const [slot, id] of Object.entries(s.pieces)) if (id) p.set(`p.${slot}`, id);
   if (!Object.values(s.pieces).some(Boolean)) p.set('p.torso_under', 'none');
   for (const [id, v] of Object.entries(s.variants)) if (v && s.pieces && Object.values(s.pieces).includes(id)) p.set(`v.${id}`, v);
+  for (const [id, pair] of Object.entries(s.dyes)) {
+    if (pair?.some(Boolean) && Object.values(s.pieces).includes(id)) p.set(`d.${id}`, pair.map((x) => x || '').join(','));
+  }
   for (const [slot, id] of Object.entries(s.gear)) if (id) p.set(`g.${slot}`, id);
   if (!s.drawn) p.set('drawn', '0');
   p.set('clip', s.clip);
@@ -175,6 +183,7 @@ class App {
     next.setTone(this.tone(s.tone));
     next.setHairColour(this.hairColour(s.haircol));
     next.variants = { ...s.variants };
+    next.dyes = structuredClone(s.dyes);
     const jobs = [];
     for (const [kind, id] of [['hair', s.hair], ['brows', s.brows], ['beard', s.beard]]) if (id) jobs.push(next.setHair(kind, id));
     for (const [slot, id] of Object.entries(s.pieces)) if (id) jobs.push(next.setPiece(slot, id));
@@ -295,8 +304,31 @@ class App {
         s().pieces[slot] = id;
         if (!id) delete s().pieces[slot];
         await this.character.setPiece(slot, id);
+        // A robe's idle replaces the generic one, and back again.
+        const rest = this.character.restIdle();
+        if ((s().clip === 'Idle_Loop' || s().clip === 'Idle_Robe_Loop') && s().clip !== rest) {
+          s().clip = rest;
+          this.playClip(rest);
+        }
+      }),
+      // Dyes recolour the original colourway, so choosing one clears the other.
+      setDye: (id, channel, dyeId) => this.run(async () => {
+        const pair = [...(s().dyes[id] || [null, null])];
+        pair[channel] = dyeId || null;
+        if (pair.some(Boolean)) s().dyes[id] = pair;
+        else delete s().dyes[id];
+        if (dyeId && s().variants[id]) {
+          delete s().variants[id];
+          this.character.setVariant(id, null);
+        }
+        this.character.setDye(id, channel, dyeId);
       }),
       setVariant: (id, stem) => this.run(async () => {
+        if (stem && s().dyes[id]) {
+          delete s().dyes[id];
+          this.character.setDye(id, 0, null);
+          this.character.setDye(id, 1, null);
+        }
         if (stem) s().variants[id] = stem;
         else delete s().variants[id];
         this.character.setVariant(id, stem);
@@ -316,10 +348,44 @@ class App {
           this.playClip(clips[0]);
         }
       }),
+      // Drawing plays the gear's ready clip (stowing, its stow clip), then its idle.
       setDrawn: (on) => this.run(async () => {
         s().drawn = on;
-        this.character.setDrawn(on);
+        const c = this.character;
+        c.setDrawn(on);
+        const clip = c.transitionClip?.(on);
+        if (!clip) return;
+        s().clip = clip;
+        s().paused = false;
+        c.player.paused = false;
+        c.player.playOnce(clip, 0.15, () => {
+          const next = (on && c.gearIdle()) || c.restIdle();
+          s().clip = next;
+          this.playClip(next, 0.25);
+          writeHash(s());
+        });
       }),
+      // The main hand's attacks in turn, each followed by the drawn idle.
+      attack: () => this.run(async () => {
+        const c = this.character;
+        const list = c.attacks?.() || [];
+        if (!list.length) return;
+        this.attackIndex = ((this.attackIndex ?? -1) + 1) % list.length;
+        if (!s().drawn) {
+          s().drawn = true;
+          c.setDrawn(true);
+        }
+        const name = list[this.attackIndex];
+        s().clip = name;
+        s().paused = false;
+        c.player.paused = false;
+        c.player.playOnce(name, 0.12, () => {
+          const next = c.gearIdle() || 'Idle_Loop';
+          s().clip = next;
+          this.playClip(next, 0.2);
+          writeHash(s());
+        });
+      }, false),
       setClip: (name) => this.run(async () => {
         s().clip = name;
         s().t = null;

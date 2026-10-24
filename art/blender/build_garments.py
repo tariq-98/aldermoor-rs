@@ -238,6 +238,11 @@ def main():
             hides = {"body": fit.hides(cov, 0.9)}
             if is_hat:
                 hides["body"] = sorted(set(hides["body"]) | {"scalp"}, key=rg.INDEX.get)
+            # A long skirt hangs clear of the thighs, so rays miss them, yet any stance pushes
+            # them through its sides: robes hide the thighs under them outright.
+            under_skirt = {"thigh_hi", "thigh_lo"} if spec.get("kind") == "robe" else set()
+            if under_skirt:
+                hides["body"] = sorted(set(hides["body"]) | under_skirt, key=rg.INDEX.get)
             layer = 2.5 if is_hat else spec["layer"]
             for o in bpy.data.objects:
                 if o.type == "MESH" and o.get("piece") and o not in parts:
@@ -245,7 +250,7 @@ def main():
                     if q_layer >= layer:
                         continue
                     c2 = fit.coverage(o, rg.read(o), parts, reach_out=0.09, reach_in=0.01)
-                    pair = fit.hides(c2, 0.95)
+                    pair = set(fit.hides(c2, 0.95)) | (under_skirt & {rg.REGIONS[i] for i in rg.read(o)})
                     if pair:
                         hides.setdefault(o["piece"], [])
                         hides[o["piece"]] = sorted(set(hides[o["piece"]]) | set(pair), key=rg.INDEX.get)
@@ -257,6 +262,8 @@ def main():
                                                # What each dye channel was painted as (linear RGB): a dye recolours it.
                                                "dye_channels": [{"channel": "r", "name": "cloth", "reference": list(spec["base"])},
                                                                 {"channel": "g", "name": "trim", "reference": list(spec["trim"])}]})
+            if spec.get("kind") == "robe":
+                m["idle"] = "Idle_Robe_Loop"  # The arms held clear of the skirt.
             m["files"][bt] = str(path.relative_to(sc.OUT))
             m["hides"][bt] = hides
             print("BUILT", bt, spec["id"], sh.triangles(parts), "tris; hides body", hides["body"])

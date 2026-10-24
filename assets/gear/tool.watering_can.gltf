@@ -58,10 +58,10 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":300,
+			"count":303,
 			"max":[
 				0.08500000089406967,
-				0.12531478703022003,
+				0.12531480193138123,
 				0.2406698763370514
 			],
 			"min":[
@@ -74,13 +74,13 @@
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":300,
+			"count":303,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":300,
+			"count":303,
 			"type":"VEC2"
 		},
 		{
@@ -93,32 +93,32 @@
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":3600,
+			"byteLength":3636,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3600,
-			"byteOffset":3600,
+			"byteLength":3636,
+			"byteOffset":3636,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2400,
-			"byteOffset":7200,
+			"byteLength":2424,
+			"byteOffset":7272,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":1632,
-			"byteOffset":9600,
+			"byteOffset":9696,
 			"target":34963
 		}
 	],
 	"buffers":[
 		{
-			"byteLength":11232,
+			"byteLength":11328,
 			"uri":"tool.watering_can.bin"
 		}
 	]

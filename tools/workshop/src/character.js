@@ -1,11 +1,13 @@
 // One assembled character: a body with its skeleton, plus clothing, hair and gear bound to it.
 //
 // Follows docs/ASSETS.md: pieces are rebound to the body's bones by name, regions are hidden by
-// layer, skin and hair are tinted, rigid gear rides on socket bones, and capes swing on springs.
+// layer, skin and hair are tinted, rigid gear rides on socket bones, clips' curves and events
+// move hands and items (perform.js), and capes swing on springs.
 
 import * as THREE from 'three';
 import { bitmask, prepareMesh } from './regions.js';
 import { Player, prepareClips } from './anim.js';
+import { Performer } from './perform.js';
 import { SpringBones, defaultColliders, resolveColliders } from './springs.js';
 
 export const ASSETS = '/assets/';
@@ -74,6 +76,7 @@ export class Character {
     this.tone = null;
     this.hairColour = null;
     this.variants = {}; // piece id -> texture stem
+    this.dyes = {}; // piece id -> [main cloth dye id, trim dye id] (null keeps the painted colour)
     this.drawn = true;
     this.springs = [];
     this.helpers = null;
@@ -103,6 +106,7 @@ export class Character {
     const ratio = this.def.pelvis[1] / this.cat.animations.pelvis[1];
     this.clips = prepareClips(this.ctx.library, pelvis.position.clone(), ratio);
     this.player = new Player(this.root, this.clips);
+    this.performer = new Performer(this);
     this.root.updateMatrixWorld(true);
     // Rest-pose snapshot of the socket frames, for the helper display.
     this.sockets = this.def.sockets || [...this.bones.keys()].filter((n) => n.startsWith('socket_'));
@@ -176,6 +180,7 @@ export class Character {
         rec.layer = def.layer;
         this.pieces.set(id, rec);
         this.applyVariant(id);
+        this.applyDyes(id);
       }
     }
     this.applyTints();
@@ -276,6 +281,44 @@ export class Character {
     }
   }
 
+  // --- Dyes -------------------------------------------------------------------------------
+
+  /** Dyes a piece's main cloth (channel 0) or trim (channel 1); null restores the paint. */
+  setDye(id, channel, dyeId) {
+    const pair = [...(this.dyes[id] || [null, null])];
+    pair[channel] = dyeId || null;
+    if (pair.some(Boolean)) this.dyes[id] = pair;
+    else delete this.dyes[id];
+    this.applyDyes(id);
+  }
+
+  applyDyes(id) {
+    const rec = this.pieces.get(id);
+    const def = rec?.def;
+    if (!def?.dye) return;
+    if (!rec.dyeMask) {
+      const tex = textureLoader.load(ASSETS + def.dye);
+      tex.flipY = false; // glTF convention.
+      tex.colorSpace = THREE.NoColorSpace;
+      rec.dyeMask = tex;
+    }
+    const palette = new Map((this.cat.dyes || []).map((d) => [d.id, d.linear]));
+    const refs = Object.fromEntries((def.dye_channels || []).map((c) => [c.channel, c.reference]));
+    const [main, trim] = this.dyes[id] || [null, null];
+    for (const e of rec.entries) {
+      if (!e.dye) continue;
+      e.dye.map.value = rec.dyeMask;
+      const set = (colour, ref, key, refKey, on) => {
+        const rgb = colour && palette.get(colour);
+        e.dye.on.value[on] = rgb ? 1 : 0;
+        if (rgb) e.dye[key].value.setRGB(...rgb, THREE.LinearSRGBColorSpace);
+        if (ref) e.dye[refKey].value.setRGB(...ref, THREE.LinearSRGBColorSpace);
+      };
+      set(main, refs.r, 'r', 'refR', 'x');
+      set(trim, refs.g, 'g', 'refG', 'y');
+    }
+  }
+
   // --- Visibility -------------------------------------------------------------------------
 
   /** Everything that can hide regions: pieces plus skinned gear. */
@@ -363,11 +406,13 @@ export class Character {
     obj.scale.set(s, s, s);
   }
 
-  placeGear() {
+  /** Puts gear on its held or stowed sockets (`drawn` overrides the character's state). */
+  placeGear(drawn = this.drawn, skip = null) {
     for (const rec of this.gear.values()) {
+      if (rec === skip) continue;
       const def = rec.def;
       if (rec.object) {
-        const socket = this.drawn || def.slot === 'back' || def.slot === 'ammo' ? def.held || this.stowedSocket(def) : this.stowedSocket(def) || def.held;
+        const socket = drawn || def.slot === 'back' || def.slot === 'ammo' ? def.held || this.stowedSocket(def) : this.stowedSocket(def) || def.held;
         if (socket) this.attach(rec.object, socket);
       }
       if (rec.sheath) {
@@ -425,6 +470,38 @@ export class Character {
     this.placeGear();
   }
 
+  /** The clip that takes the gear out (drawing) or puts it away, if the gear has one. */
+  transitionClip(drawing) {
+    for (const slot of ['main_hand', 'off_hand']) {
+      const clips = this.gear.get(slot)?.def?.clips;
+      const name = drawing ? clips?.ready : clips?.stow;
+      if (name && this.clips.has(name)) return name;
+    }
+    return null;
+  }
+
+  /** The idle for the drawn gear (the main hand's first). */
+  gearIdle() {
+    for (const slot of ['main_hand', 'off_hand']) {
+      const idle = this.gear.get(slot)?.def?.clips?.idle;
+      if (idle && this.clips.has(idle)) return idle;
+    }
+    return null;
+  }
+
+  /** The idle with weapons away: a worn piece may name its own (robes hold the arms out). */
+  restIdle() {
+    for (const rec of this.pieces.values()) {
+      const idle = rec.def?.idle;
+      if (idle && this.clips.has(idle)) return idle;
+    }
+    return 'Idle_Loop';
+  }
+
+  attacks() {
+    return [].concat(this.gear.get('main_hand')?.def?.clips?.attacks || []).filter((n) => this.clips.has(n));
+  }
+
   /** The drawn weapons' preferred clips, in order. */
   gearClips() {
     const out = [];
@@ -473,6 +550,8 @@ export class Character {
 
   update(dt) {
     this.player.update(dt);
+    this.group.updateMatrixWorld(true);
+    this.performer.apply();
     this.group.updateMatrixWorld(true);
     for (const s of this.springs) s.update(this.player.paused ? 0 : dt * this.player.speed);
   }

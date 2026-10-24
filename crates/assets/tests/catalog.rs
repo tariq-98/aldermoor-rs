@@ -49,3 +49,65 @@ fn the_checker_catches_broken_promises() {
     assert!(problems.iter().any(|p| p.contains("missing.gltf")), "{problems:?}");
     assert!(problems.iter().any(|p| p.starts_with("forbidden content")), "{problems:?}");
 }
+
+#[test]
+fn clip_curves_follow_the_documented_rule() {
+    let keys = [[0.3, 0.0], [0.3, 1.0], [0.72, 1.0], [0.8, 0.0]];
+    assert_eq!(assets::curve(&keys, 0.0), 0.0, "held before the first key");
+    assert_eq!(assets::curve(&keys, 0.29), 0.0);
+    assert_eq!(assets::curve(&keys, 0.3), 1.0, "at a step the later key wins");
+    assert_eq!(assets::curve(&keys, 0.5), 1.0);
+    assert!((assets::curve(&keys, 0.76) - 0.5).abs() < 1e-5, "linear between keys");
+    assert_eq!(assets::curve(&keys, 2.0), 0.0, "held after the last key");
+    assert_eq!(assets::curve(&[], 1.0), 0.0);
+}
+
+#[test]
+fn authored_clips_carry_what_the_renderer_needs() {
+    let cat = assets::Catalog::load(root()).unwrap();
+    let clip = |name: &str| cat.humanoid.animations.clips.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("no clip {name}"));
+    let shoot = clip("Bow_Shoot");
+    let release = shoot.event("release").expect("the arrow leaves at a release event");
+    assert!(shoot.curve("string", release - 0.05) > 0.99 && shoot.curve("string", release) < 0.01);
+    assert!(shoot.curve("arrow", release - 0.05) > 0.99 && shoot.curve("arrow", release) < 0.01);
+    for name in ["Draw_Hip", "Draw_Back", "Draw_Pole", "Draw_Bow", "Draw_Hip_L", "Draw_Side"] {
+        let c = clip(name);
+        let grab = c.event("grab").unwrap_or_else(|| panic!("{name} grabs"));
+        assert!(c.curve("reach", grab) > 0.99, "{name}: the hand is on the item when it takes it");
+        assert!(c.upper_body, "{name} plays over the legs");
+    }
+    for name in ["Sheathe_Hip", "Sheathe_Back", "Sheathe_Pole", "Sheathe_Bow"] {
+        let c = clip(name);
+        let stow = c.event("stow").unwrap_or_else(|| panic!("{name} stows"));
+        assert!(c.curve("reach", stow) > 0.99, "{name}: the hand is at the item's place when it lets go");
+    }
+    for name in ["GreatSword_Idle_Loop", "Spear_Idle_Loop", "Staff_Slam"] {
+        assert!(clip(name).curves.contains_key("off_hand"), "{name} holds with both hands");
+    }
+    let gear = cat.gear.as_ref().unwrap();
+    for id in ["bow.hunting", "bow.long"] {
+        let bow = gear.items.iter().find(|i| i.id == id).unwrap();
+        let s = bow.string.as_ref().expect("bows describe their string");
+        assert!(s.pull[2] < -0.3, "{id}: the string pulls back towards the archer (-z)");
+    }
+}
+
+#[test]
+fn the_checker_catches_broken_clip_promises() {
+    let mut cat = assets::Catalog::load(root()).unwrap();
+    let clips = &mut cat.humanoid.animations.clips;
+    let i = clips.iter().position(|c| c.name == "Draw_Hip").unwrap();
+    clips[i].curves.remove("reach");
+    clips[i].events.push(assets::Event { t: 9.0, name: "teleport".into() });
+    let gear = cat.gear.as_mut().unwrap();
+    let great = gear.items.iter_mut().find(|i| i.id == "sword.great").unwrap();
+    great.grips.clear();
+    let bow = gear.items.iter_mut().find(|i| i.id == "bow.hunting").unwrap();
+    bow.string = None;
+    let problems: Vec<String> = cat.check().into_iter().map(|p| p.0).collect();
+    assert!(problems.iter().any(|p| p.contains("Draw_Hip: a grab event without a reach curve")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("unknown event teleport")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("outside the clip")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("sword.great") && p.contains("off-hand grip")), "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("bow.hunting") && p.contains("bowstring")), "{problems:?}");
+}

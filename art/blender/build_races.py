@@ -101,7 +101,7 @@ def build(race_id, race, frame, cat):
         hair["beard.dwarven"] = [beard]
         extra_hair.append("beard.dwarven")
     # Export: the body, every outfit piece and every hairstyle.
-    files = {"body": rel(export.piece(OUT / bt / "body.gltf", [skel, body, eyes]))}
+    files = {"body": rel(export.piece(OUT / bt / "body.gltf", [skel, body, eyes], sockets=True))}
     by_piece = {}
     for o in outfits:
         by_piece.setdefault(o["piece"], []).append(o)
