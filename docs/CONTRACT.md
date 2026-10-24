@@ -38,7 +38,7 @@ let fight: Arc<CombatView> = host.combat().unwrap(); // combat detail from the s
 let events = host.take_events(); // everything since you last asked
 ```
 
-Each `Snapshot` (protocol version 4) has:
+Each `Snapshot` (protocol version 5) has:
 
 - `units`: everyone within 160 m. For each one:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
@@ -50,7 +50,7 @@ Each `Snapshot` (protocol version 4) has:
     mana, focus, energy or essence) and its maximum;
   - `bar`: ten `Slot`s for keys 1–9 and 0, each with the ability's key (also its icon's name),
     name, seconds of cooldown left and its full recharge, cost, range, `ground` (aim it at the
-    ground) and `auto` (the basic attack). While downed, the bar holds the downed skills;
+    ground) with the `radius` of the circle it lands in, and `auto` (the basic attack). While downed, the bar holds the downed skills;
     `cooldowns` repeats the ten cooldowns;
   - `gcd` (seconds of global cooldown left), `cast` (the cast bar: ability, name, elapsed,
     duration, channel, interruptible), `auras` (key, name, stacks, seconds left, full

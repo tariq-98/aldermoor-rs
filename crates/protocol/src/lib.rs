@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -238,6 +238,9 @@ pub struct Slot {
     pub range: f32,
     /// True when it's aimed at the ground (send `UseSlot::ground`).
     pub ground: bool,
+    /// For a ground skill, the radius of the circle it lands in (for the aim preview); 0 for
+    /// everything else.
+    pub radius: f32,
     /// True when it repeats on its own while you have a target (the basic attack).
     pub auto: bool,
 }

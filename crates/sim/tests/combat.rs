@@ -173,6 +173,9 @@ fn every_specialty_starts_with_a_full_bar() {
         let p = f.sim.snapshot(Some(id)).player.unwrap();
         assert_eq!(p.bar.len(), 10);
         assert!(p.bar[0].auto, "{s:?}'s first skill isn't its basic attack");
+        for slot in &p.bar {
+            assert_eq!(slot.ground, slot.radius > 0.0, "{s:?}: {} says ground {} but radius {}", slot.ability, slot.ground, slot.radius);
+        }
         assert_ne!(p.resource_kind, ResourceKind::None);
     }
 }
