@@ -230,7 +230,7 @@ class App {
   async buildBeast() {
     const s = this.state;
     this.status('Loading creature…');
-    const next = await Beast.create({ creatures: this.creatures, loader: this.loader }, s.beast);
+    const next = await Beast.create({ creatures: this.creatures, loader: this.loader, lod: s.lod }, s.beast);
     if (this.character) this.character.dispose();
     this.character = next;
     this.view.scene.add(next.group);

@@ -2,11 +2,13 @@
 
     art/blender.sh -P art/blender/build_beasts.py [-- --review]
 
-The body is an implicit surface (metaball capsules along the skeleton), remeshed into one clean
-manifold mesh, given fur ruffs and shaded with vertex colours. The rig is weighted
-automatically. Gaits are generated: paws follow stance-and-swing paths per leg, solved with
-two-bone IK, with body bob, spine flex, head counter-motion and a swaying tail, then baked to
-keyframes. Writes assets/creatures/<id>.glb and assets/catalog/creatures.json.
+The body is a signed distance field (aldermoor_art/wolf.py: muscles, a carved mouth and eye
+sockets, sculpted locks of fur) meshed at three levels of detail, each painted on its own: a
+grizzled coat with markings, fur strands and a normal map. Bone-heat weights come from a clean
+copy without the locks. Gaits are generated: paws follow stance-and-swing paths per leg, solved
+with two-bone IK, with body bob, spine flex, head counter-motion and a swaying tail, then baked
+to keyframes. Writes assets/creatures/<id>.glb (with .lod1 and .lod2 beside it) and
+assets/catalog/creatures.json.
 """
 
 import json
@@ -21,30 +23,35 @@ from mathutils import Matrix, Quaternion, Vector
 from mathutils.noise import noise as perlin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import review, scene as sc, shapes as sh  # noqa: E402
+from aldermoor_art import export, review, scene as sc, shapes as sh, wolf  # noqa: E402
 
 OUT = sc.OUT / "creatures"
 CAT_PATH = sc.OUT / "catalog" / "creatures.json"
+# Painted maps are embedded in each glb, so the files themselves stay in the scratch folder.
+TEX = sc.ROOT / "art" / "out" / "creatures" / "textures"
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 FPS = sc.FPS
 
 # The wolf faces -Y, stands on z = 0. Joint positions in metres.
 J = {
     "root": (0, 0, 0),
-    "hips": (0, 0.40, 0.74), "spine_1": (0, 0.18, 0.76), "spine_2": (0, -0.06, 0.79), "chest": (0, -0.28, 0.81),
-    "neck_1": (0, -0.40, 0.86), "neck_2": (0, -0.50, 0.95), "head": (0, -0.58, 1.01), "head_end": (0, -0.66, 1.03),
-    "jaw": (0, -0.61, 0.95), "jaw_end": (0, -0.8, 0.925),
-    "tail_1": (0, 0.50, 0.75), "tail_2": (0, 0.62, 0.70), "tail_3": (0, 0.72, 0.60), "tail_4": (0, 0.80, 0.49), "tail_end": (0, 0.86, 0.38),
+    "hips": (0, 0.40, 0.72), "spine_1": (0, 0.18, 0.74), "spine_2": (0, -0.06, 0.76), "chest": (0, -0.28, 0.78),
+    "neck_1": (0, -0.38, 0.80), "neck_2": (0, -0.49, 0.86), "head": (0, -0.56, 1.0), "head_end": (0, -0.68, 1.02),
+    "jaw": (0, -0.6, 0.94), "jaw_end": (0, -0.77, 0.93),
+    "tail_1": (0, 0.51, 0.73), "tail_2": (0, 0.61, 0.68), "tail_3": (0, 0.69, 0.585), "tail_4": (0, 0.755, 0.47), "tail_end": (0, 0.795, 0.33),
 }
 for sd, x in (("l", 1), ("r", -1)):
     J.update({
-        f"ear_{sd}": (0.055 * x, -0.57, 1.08), f"ear_end_{sd}": (0.075 * x, -0.555, 1.18),
-        f"scapula_{sd}": (0.09 * x, -0.25, 0.83), f"humerus_{sd}": (0.12 * x, -0.33, 0.62), f"radius_{sd}": (0.125 * x, -0.29, 0.38),
-        f"pastern_{sd}": (0.125 * x, -0.30, 0.11), f"fpaw_{sd}": (0.125 * x, -0.33, 0.04), f"fpaw_end_{sd}": (0.125 * x, -0.40, 0.02),
-        f"femur_{sd}": (0.11 * x, 0.42, 0.70), f"tibia_{sd}": (0.12 * x, 0.32, 0.45), f"hock_{sd}": (0.12 * x, 0.47, 0.20),
-        f"hpaw_{sd}": (0.12 * x, 0.44, 0.045), f"hpaw_end_{sd}": (0.12 * x, 0.37, 0.02),
+        f"ear_{sd}": (0.048 * x, -0.555, 1.072), f"ear_end_{sd}": (0.075 * x, -0.548, 1.17),
+        f"scapula_{sd}": (0.065 * x, -0.24, 0.80), f"humerus_{sd}": (0.09 * x, -0.36, 0.60), f"radius_{sd}": (0.09 * x, -0.28, 0.40),
+        f"pastern_{sd}": (0.08 * x, -0.292, 0.12), f"fpaw_{sd}": (0.08 * x, -0.31, 0.04), f"fpaw_end_{sd}": (0.08 * x, -0.38, 0.02),
+        f"femur_{sd}": (0.085 * x, 0.42, 0.66), f"tibia_{sd}": (0.092 * x, 0.30, 0.44), f"hock_{sd}": (0.09 * x, 0.465, 0.19),
+        f"hpaw_{sd}": (0.085 * x, 0.44, 0.045), f"hpaw_end_{sd}": (0.085 * x, 0.37, 0.02),
     })
 J = {k: Vector(v) for k, v in J.items()}
+# The head's joints above are in the head's own frame (wolf.head_matrix carries it onto the neck).
+for _name in ("head", "head_end", "jaw", "jaw_end", "ear_l", "ear_end_l", "ear_r", "ear_end_r"):
+    J[_name] = wolf.head_matrix() @ J[_name]
 
 # Bone: (head joint, tail joint, parent).
 BONES = [("root", "root", None), ("hips", "spine_1", "root"), ("spine_1", "spine_2", "hips"), ("spine_2", "chest", "spine_1"),
@@ -76,181 +83,6 @@ def make_rig(scale):
             ebs[name].parent = ebs[parent]
     bpy.ops.object.mode_set(mode="OBJECT")
     return ob
-
-
-def capsule(mb, a, b, r):
-    el = mb.elements.new(type="CAPSULE")
-    d = b - a
-    el.co = (a + b) / 2
-    el.size_x = max(d.length / 2, 1e-4)
-    el.radius = r
-    el.rotation = Vector((1, 0, 0)).rotation_difference(d.normalized() if d.length > 1e-6 else Vector((1, 0, 0)))
-    el.stiffness = 2.0
-    return el
-
-
-def ball(mb, c, r, kind="BALL", size=(1, 1, 1), rot=None):
-    el = mb.elements.new(type=kind)
-    el.co = c
-    el.radius = r
-    if kind == "ELLIPSOID":
-        el.size_x, el.size_y, el.size_z = size
-    if rot is not None:
-        el.rotation = rot
-    el.stiffness = 2.0
-    return el
-
-
-def _ring(c, w, h, n=20, drop=0.0):
-    """An egg-shaped cross-section in the XZ plane around c: w wide, h deep, fuller below."""
-    pts = []
-    for i in range(n):
-        a = 2 * math.pi * i / n
-        x = math.cos(a) * w / 2
-        z = math.sin(a) * h / 2
-        if z < 0:
-            x *= 1.0 - drop * (-z / (h / 2)) ** 2
-        pts.append(c + Vector((x, 0, z)))
-    return pts
-
-
-def _tube(points, radii, n=12):
-    """A tube through points; ring frames are carried along (parallel transport), so no twist."""
-    secs = []
-    side = None
-    for i, (p, r) in enumerate(zip(points, radii)):
-        tan = (points[min(i + 1, len(points) - 1)] - points[max(i - 1, 0)]).normalized()
-        if side is None:
-            side = tan.cross(Vector((1, 0, 0)))
-            if side.length < 1e-3:
-                side = tan.cross(Vector((0, 1, 0)))
-        side = (side - tan * side.dot(tan)).normalized()
-        up = side.cross(tan).normalized()
-        secs.append(sh.ring(p, side, up, r, r, n))
-    return sh.loft(secs)
-
-
-def wolf_body(scale, bulk=1.0):
-    """The body as lofted torso, neck, head, legs and tail, unioned by a voxel remesh."""
-    s = scale
-    B = bulk
-    parts = []
-    # Torso along the spine from rump to shoulders: (y, back height, width, depth).
-    prof = [(0.50, 0.70, 0.12, 0.16), (0.42, 0.74, 0.20, 0.25), (0.30, 0.755, 0.19, 0.24), (0.16, 0.765, 0.165, 0.22),
-            (0.02, 0.785, 0.19, 0.27), (-0.12, 0.81, 0.235, 0.35), (-0.24, 0.83, 0.25, 0.38), (-0.34, 0.835, 0.23, 0.34),
-            (-0.42, 0.84, 0.18, 0.25)]
-    secs = []
-    for y, back, w, d in prof:
-        c = Vector((0, y, back - d / 2)) * s
-        secs.append(_ring(c, w * s * B, d * s * B, 24, drop=0.25))
-    torso = sh.loft([[Vector((0, (prof[0][0] + 0.03) * s, (prof[0][1] - 0.08) * s))]] + secs + [[Vector((0, (prof[-1][0] - 0.04) * s, (prof[-1][1] - 0.12) * s))]])
-    parts.append(sh.obj("torso", torso))
-    # Neck with a ruff, rising to the head.
-    neck_pts = [Vector((0, -0.34, 0.76)), Vector((0, -0.44, 0.84)), Vector((0, -0.52, 0.93)), Vector((0, -0.57, 0.99))]
-    parts.append(sh.obj("neck", _tube([p * s for p in neck_pts], [r * s * B for r in (0.13, 0.12, 0.095, 0.08)], 16)))
-    # Head: a rounded skull and a tapering muzzle.
-    skull = sh.lathe([(0.0, -0.075), (0.05, -0.065), (0.075, -0.02), (0.075, 0.03), (0.05, 0.07), (0.0, 0.08)], 16)
-    sh.transform(skull, Matrix.Translation(Vector((0, -0.6, 1.0)) * s) @ Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Diagonal((1.0 * s * B, 0.9 * s, 1.15 * s, 1.0)))
-    parts.append(sh.obj("skull", skull))
-    muzzle_pts = [Vector((0, -0.62, 0.985)), Vector((0, -0.7, 0.965)), Vector((0, -0.78, 0.952)), Vector((0, -0.845, 0.95))]
-    parts.append(sh.obj("muzzle", _tube([p * s for p in muzzle_pts], [r * s * B for r in (0.06, 0.047, 0.036, 0.026)], 14)))
-    # Legs.
-    for sd in ("l", "r"):
-        f = [J[f"scapula_{sd}"] + Vector((0, 0.02, -0.05)), J[f"humerus_{sd}"], J[f"radius_{sd}"], J[f"pastern_{sd}"], J[f"fpaw_{sd}"]]
-        parts.append(sh.obj("fleg", _tube([p * s for p in f], [r * s * B for r in (0.08, 0.068, 0.043, 0.033, 0.031)], 12)))
-        h = [J[f"femur_{sd}"] + Vector((0, 0.0, 0.02)), J[f"tibia_{sd}"] + Vector((0, 0.01, 0.0)), J[f"hock_{sd}"], J[f"hpaw_{sd}"]]
-        parts.append(sh.obj("hleg", _tube([p * s for p in h], [r * s * B for r in (0.1, 0.065, 0.036, 0.031)], 12)))
-        for pw in (J[f"fpaw_{sd}"], J[f"hpaw_{sd}"]):
-            paw = sh.lathe([(0.0, -0.025), (0.032, -0.02), (0.036, 0.0), (0.026, 0.02), (0.0, 0.026)], 12)
-            sh.transform(paw, Matrix.Translation(pw * s + Vector((0, -0.025, -0.012)) * s) @ Matrix.Diagonal((s * B, 1.35 * s, 0.75 * s, 1.0)))
-            parts.append(sh.obj("paw", paw))
-    # A bushy tail, thickest in the middle.
-    tail = [J["tail_1"], J["tail_2"], J["tail_3"], J["tail_4"], J["tail_end"]]
-    parts.append(sh.obj("tail", _tube([p * s for p in tail], [r * s * B for r in (0.045, 0.07, 0.075, 0.06, 0.02)], 14)))
-    body = sh.join(parts, "body")
-    body.data.remesh_voxel_size = 0.0105 * scale
-    sc.activate(body)
-    bpy.ops.object.voxel_remesh()
-    # Blend the creases where legs and neck meet the torso, keeping the volume.
-    lap = body.modifiers.new("blend", "LAPLACIANSMOOTH")
-    lap.lambda_factor = 0.6
-    lap.iterations = 12
-    lap.use_volume_preserve = True
-    bpy.ops.object.modifier_apply(modifier=lap.name)
-    return body
-
-
-def lower_jaw(scale, bulk=1.0):
-    """The lower jaw as its own piece, so the mouth can open without tearing the muzzle."""
-    s, B = scale, bulk
-    pts = [Vector((0, -0.62, 0.935)), Vector((0, -0.7, 0.922)), Vector((0, -0.78, 0.917)), Vector((0, -0.825, 0.92))]
-    jaw = sh.obj("jaw", _tube([p * s for p in pts], [r * s * B for r in (0.038, 0.03, 0.023, 0.012)], 12))
-    jaw.data.materials.clear()
-    vg = jaw.vertex_groups.new(name="jaw")
-    vg.add(list(range(len(jaw.data.vertices))), 1.0, "REPLACE")
-    return jaw
-
-
-def fur(body, scale, seed):
-    """Spiky ruffs on the neck, back and tail; smooth fur elsewhere."""
-    rnd = random.Random(seed)
-    off = Vector((rnd.random() * 9, rnd.random() * 9, rnd.random() * 9))
-    me = body.data
-    for v in me.vertices:
-        p = v.co / scale
-        n = v.normal
-        ruff = max(0.0, 1 - ((p.y + 0.42) / 0.16) ** 2) * (1 if p.z > 0.72 else 0.5)     # Neck mane.
-        back = max(0.0, n.z) * (1 if p.z > 0.8 else 0) * 0.5                                 # Along the spine.
-        tail = max(0.0, (p.y - 0.55) / 0.3) * (1 if p.z < 0.8 else 0)                       # The tail.
-        cheek = max(0.0, 1 - ((p - Vector((0, -0.6, 0.97))).length / 0.09) ** 2) * (1 if abs(p.x) > 0.04 else 0)
-        mask = min(1.0, ruff + back + tail + cheek * 0.8)
-        if mask <= 0:
-            continue
-        k = perlin(p * 38 + off)
-        spike = max(0.0, k) ** 1.5
-        v.co += n * (0.022 * scale * mask * spike)
-    me.update()
-
-
-def ears(skel, scale):
-    parts = []
-    for sd, x in (("l", 1), ("r", -1)):
-        base = J[f"ear_{sd}"] * scale
-        tip = J[f"ear_end_{sd}"] * scale
-        bm = bmesh.new()
-        ring = []
-        for i in range(6):
-            a = 2 * math.pi * i / 6
-            ring.append(bm.verts.new(base + Vector((math.cos(a) * 0.035, math.sin(a) * 0.016 + 0.006, 0)) * scale))
-        t = bm.verts.new(tip)
-        for i in range(6):
-            bm.faces.new((ring[i], ring[(i + 1) % 6], t))
-        bm.faces.new(list(reversed(ring)))
-        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-        ob = sh.obj(f"ear_{sd}", bm, None, smooth=True)
-        parts.append(ob)
-    return parts
-
-
-def paint(body, palette):
-    """Vertex colours: darker saddle, pale belly and legs, dark muzzle tip and ear tips."""
-    me = body.data
-    attr = me.color_attributes.new("Col", "BYTE_COLOR", "POINT")
-    s = palette["scale"]
-    for v in me.vertices:
-        p = v.co / s
-        n = v.normal
-        top = max(0.0, n.z) ** 0.7 * (1 if p.z > 0.62 else 0)
-        under = max(0.0, -n.z) * 1.2 + (1 if p.z < 0.42 else 0) * 0.8
-        c = Vector(palette["coat"])
-        c = c.lerp(Vector(palette["saddle"]), min(1.0, top * 1.2))
-        c = c.lerp(Vector(palette["belly"]), min(1.0, under))
-        if p.y < -0.78:
-            c = c.lerp(Vector(palette["nose"]), min(1.0, (-0.78 - p.y) / 0.06))
-        if p.z > 1.12:
-            c = c.lerp(Vector(palette["saddle"]), 0.8)
-        attr.data[v.index].color = (*c, 1.0)
-    me.color_attributes.active_color = attr
 
 
 def segment_weights(body, skel, scale, falloff=0.035):
@@ -308,19 +140,6 @@ def segment_weights(body, skel, scale, falloff=0.035):
             vg.add([i], w, "REPLACE")
 
 
-def coat_material(name, rough=0.85):
-    m = bpy.data.materials.new(name)
-    m.use_nodes = True
-    nt = m.node_tree
-    bsdf = nt.nodes["Principled BSDF"]
-    vc = nt.nodes.new("ShaderNodeVertexColor")
-    vc.layer_name = "Col"
-    nt.links.new(vc.outputs["Color"], bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = rough
-    bsdf.inputs["Sheen Weight"].default_value = 0.0
-    return m
-
-
 # --- Animation -----------------------------------------------------------------------------
 
 def two_bone(a, l1, l2, target, pole):
@@ -344,10 +163,12 @@ class Poser:
         self.len = {b.name: b.length for b in skel.data.bones}
 
     def reset(self):
+        """The rest pose, with the mouth closed (it is modelled a little open)."""
         for pb in self.skel.pose.bones:
             pb.matrix_basis.identity()
             pb.rotation_mode = "QUATERNION"
         bpy.context.view_layer.update()
+        self.rotate("jaw", Vector((1, 0, 0)), -wolf.JAW_CLOSE)
 
     def head(self, name):
         return self.skel.pose.bones[name].head.copy()
@@ -507,7 +328,7 @@ def animate(skel, scale):
         P.rotate("neck_1", X, -0.25 * crouch + 0.3 * lunge)
         P.rotate("head", X, 0.2 * lunge)
         bite = math.sin(math.pi * max(0.0, min(1.0, (t - 0.32) / 0.25)))
-        P.rotate("jaw", X, -0.55 * bite)
+        P.rotate("jaw", X, 0.5 * bite)
         for sd in ("l", "r"):
             P.rotate(f"ear_{sd}", X, -0.5 * max(crouch, lunge))
         P.rotate("tail_1", X, 0.3 * crouch)
@@ -528,16 +349,19 @@ def animate(skel, scale):
     def death(P, t, f):
         k = ease(t / 0.7)
         roll = ease((t - 0.25) / 0.6)
-        pb = P.skel.pose.bones["root"]
-        pb.rotation_quaternion = Quaternion((0, 1, 0), -1.45 * roll)
-        pb.location = Vector((0.0, 0.0, 0.0))
-        bpy.context.view_layer.update()
-        P.move_root(Vector((0, 0, -0.38 * k * scale)))
-        bent = {leg: p + Vector((0, 0.06 if leg[0] == "f" else -0.04, 0.22 * k)) * scale for leg, p in rest.items()}
+        # The legs buckle and fold as the body sinks, all in the standing frame...
+        P.move_root(Vector((0, 0, -0.2 * k * scale)))
+        bent = {leg: p + Vector((0, 0.06 if leg[0] == "f" else -0.04, 0.2 * k)) * scale for leg, p in rest.items()}
         legs(P, scale, bent, crouch=k)
         P.rotate("neck_1", X, -0.5 * k)
-        P.rotate("jaw", X, -0.2 * k)
+        P.rotate("jaw", X, 0.15 * k)
         P.rotate("tail_1", X, 0.4 * k)
+        # ...then the whole wolf rolls onto its side about the ground, lifted so its flank rests on it.
+        th = 1.45 * roll
+        lift = max(0.0, 0.15 - (0.62 - 0.2 * k) * math.cos(th)) * roll
+        pb = P.skel.pose.bones["root"]
+        pb.matrix = Matrix.Translation((0, 0, lift * scale)) @ Quaternion((0, 1, 0), -th).to_matrix().to_4x4() @ pb.bone.matrix_local
+        bpy.context.view_layer.update()
 
     clip(P, scale, "Death", 1.6, death)
 
@@ -547,7 +371,7 @@ def animate(skel, scale):
         P.move_root(Vector((0, 0, (-0.1 * crouch + 0.35 * up) * scale)))
         paws = {leg: p + Vector((0, 0, 0.35 * up + (0.12 * up if leg[0] == "h" else 0.2 * up))) * scale for leg, p in rest.items()}
         legs(P, scale, paws, crouch)
-        P.rotate("neck_1", X, 0.2 * up)
+        P.rotate("neck_1", X, -0.15 * up)
         P.rotate("tail_1", X, -0.3 * up)
 
     clip(P, scale, "Jump", 1.0, jump)
@@ -555,9 +379,10 @@ def animate(skel, scale):
     def howl(P, t, f):
         k = ease(t / 0.25) * (1 - ease((t - 0.8) / 0.2))
         legs(P, scale, rest)
-        P.rotate("neck_1", X, 0.75 * k)
-        P.rotate("neck_2", X, 0.35 * k)
-        P.rotate("jaw", X, -0.35 * k * (0.8 + 0.2 * math.sin(t * 40)))
+        P.rotate("neck_1", X, -0.7 * k)
+        P.rotate("neck_2", X, -0.35 * k)
+        P.rotate("head", X, -0.2 * k)
+        P.rotate("jaw", X, 0.3 * k * (0.85 + 0.15 * math.sin(t * 9)))
         for sd in ("l", "r"):
             P.rotate(f"ear_{sd}", X, 0.15 * k)
 
@@ -568,83 +393,195 @@ def animate(skel, scale):
 
 BEASTS = [
     dict(id="wolf.grey", label="Grey wolf", scale=1.0, bulk=1.0, seed=3,
-         palette=dict(coat=(0.15, 0.14, 0.125), saddle=(0.045, 0.04, 0.036), belly=(0.36, 0.33, 0.29), nose=(0.02, 0.016, 0.014)),
-         eyes="crystal_gold", speeds={"walk": 1.6, "run": 6.4}),
+         palette=dict(coat=(0.12, 0.105, 0.085), saddle=(0.028, 0.025, 0.023), tawny=(0.2, 0.125, 0.065),
+                      belly=(0.42, 0.38, 0.31), nose=(0.012, 0.01, 0.009)),
+         iris=(0.85, 0.52, 0.1), speeds={"walk": 1.6, "run": 6.4}),
     dict(id="wolf.dire", label="Dire wolf", scale=1.28, bulk=1.12, seed=11,
-         palette=dict(coat=(0.05, 0.045, 0.042), saddle=(0.016, 0.014, 0.013), belly=(0.12, 0.105, 0.095), nose=(0.012, 0.01, 0.01)),
-         eyes="crystal_red", speeds={"walk": 1.8, "run": 7.0}),
+         palette=dict(coat=(0.035, 0.032, 0.03), saddle=(0.011, 0.01, 0.0095), tawny=(0.05, 0.04, 0.032),
+                      belly=(0.1, 0.092, 0.082), nose=(0.006, 0.005, 0.005)),
+         iris=(0.9, 0.22, 0.06), speeds={"walk": 1.8, "run": 7.0}),
 ]
 
 
-def build(beast):
+def auto_weights(body, skel, scale):
+    """Bone-heat weights, the way Blender's automatic weights spread them over the surface; the
+    root bone deforms nothing and the jaw moves only the separate lower jaw. Vertices heat
+    leaves unweighted fall back to their nearest bone segments."""
+    root = skel.data.bones["root"]
+    root.use_deform = False
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    body.select_set(True)
+    skel.select_set(True)
+    bpy.context.view_layer.objects.active = skel
+    bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+    root.use_deform = True
+    # The jaw and the ears move only their own parts, which are weighted separately.
+    head = body.vertex_groups["head"]
+    for name in ("jaw", "ear_l", "ear_r"):
+        vg = body.vertex_groups.get(name)
+        if not vg:
+            continue
+        for v in body.data.vertices:
+            for g in v.groups:
+                if g.group == vg.index and g.weight > 0:
+                    head.add([v.index], g.weight, "ADD")
+        body.vertex_groups.remove(vg)
+    loose = [v.index for v in body.data.vertices if not any(g.weight > 1e-4 for g in v.groups)]
+    if loose:
+        print("heat left", len(loose), "vertices unweighted; using bone segments for them")
+        tmp = bpy.data.objects.new("tmp", body.data.copy())
+        bpy.context.scene.collection.objects.link(tmp)
+        tmp.vertex_groups.clear()
+        segment_weights(tmp, skel, scale)
+        names = {g.index: g.name for g in tmp.vertex_groups}
+        for i in loose:
+            for g in tmp.data.vertices[i].groups:
+                name = names[g.group]
+                dst = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
+                dst.add([i], g.weight, "REPLACE")
+        bpy.data.objects.remove(tmp)
+
+
+def transfer_weights(src, dst):
+    """Copies vertex weights from src onto dst's surface (interpolated from the nearest face)."""
+    for name in [g.name for g in src.vertex_groups]:
+        if name not in dst.vertex_groups:
+            dst.vertex_groups.new(name=name)
+    mod = dst.modifiers.new("weights", "DATA_TRANSFER")
+    mod.object = src
+    mod.use_vert_data = True
+    mod.data_types_verts = {"VGROUP_WEIGHTS"}
+    mod.vert_mapping = "POLYINTERP_NEAREST"
+    mod.layers_vgroup_select_src = "ALL"
+    mod.layers_vgroup_select_dst = "NAME"
+    sc.activate(dst)
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+
+
+def jaw_weights(body, scale):
+    """The lower jaw: whatever lies under the mouth's slit, wholly from the corners forward."""
+    inv = wolf.head_matrix().inverted()
+    jaw = body.vertex_groups.get("jaw") or body.vertex_groups.new(name="jaw")
+    for v in body.data.vertices:
+        q = inv @ (v.co / scale)
+        if q.y > -0.59 or q.z > wolf.slit_z(abs(q.x)):
+            continue
+        w = ease((-0.59 - q.y) / 0.05)
+        if w <= 0:
+            continue
+        for g in v.groups:
+            g.weight *= 1 - w
+        jaw.add([v.index], w, "REPLACE")
+
+
+def ear_weights(ear, skel, side):
+    """The ear bends from its base: head weight there, ear weight up the rest."""
+    b = skel.data.bones[f"ear_{side}"]
+    h, t = skel.matrix_world @ b.head_local, skel.matrix_world @ b.tail_local
+    ax = t - h
+    ge = ear.vertex_groups.new(name=f"ear_{side}")
+    gh = ear.vertex_groups.new(name="head")
+    for v in ear.data.vertices:
+        u = (v.co - h).dot(ax) / ax.length_squared
+        w = max(0.0, min(1.0, (u + 0.05) / 0.3))
+        w = w * w * (3 - 2 * w)
+        if w > 0:
+            ge.add([v.index], w, "REPLACE")
+        if w < 1:
+            gh.add([v.index], 1 - w, "REPLACE")
+
+
+# Levels of detail: (grid step, triangles, coat texture size). Each is meshed from the field and
+# painted on its own; they share the skeleton and its clips.
+LEVELS = ((0.0035, 26000, 2048), (0.006, 11000, 1024), (0.01, 4200, 512))
+
+
+def make(beast):
+    """The rig; the body at each level of detail, weighted, bound and painted; and the extras
+    (ear fur, eyes, nose, teeth, claws). No clips yet."""
     sc.reset()
-    sh.PALETTE.setdefault("crystal_gold", ((1.0, 0.7, 0.15), 0.0, 0.1))
-    sh.PALETTE.setdefault("crystal_red", ((1.0, 0.15, 0.08), 0.0, 0.1))
-    sh.GLOW.update(crystal_gold=2.5, crystal_red=3.5)
     s = beast["scale"]
+    B = beast["bulk"]
     skel = make_rig(s)
-    body = wolf_body(s, beast["bulk"])
-    fur(body, s, beast["seed"])
-    # Keep it light: a few thousand triangles.
-    tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
-    if tris > 16000:
-        dec = body.modifiers.new("dec", "DECIMATE")
-        dec.ratio = 16000 / tris
-        sc.activate(body)
-        bpy.ops.object.modifier_apply(modifier=dec.name)
-    sm = body.modifiers.new("smooth", "SMOOTH")
-    sm.factor, sm.iterations = 0.5, 2
-    sc.activate(body)
-    bpy.ops.object.modifier_apply(modifier=sm.name)
-    for p in body.data.polygons:
-        p.use_smooth = True
-    pal = dict(beast["palette"], scale=s)
-    extras = ears(skel, s)
-    body = sh.join([body] + extras, "body")
-    paint(body, pal)
-    body.data.materials.clear()
-    body.data.materials.append(coat_material(f"coat.{beast['id']}"))
-    # Weights from the nearest bone segments, then eyes and nose as rigid parts of the head.
-    segment_weights(body, skel, s)
-    jaw = lower_jaw(s, beast["bulk"])
-    body = sh.join([body, jaw], "body")
-    for name in [c.name for c in body.data.color_attributes]:
-        body.data.color_attributes.remove(body.data.color_attributes[name])
-    paint(body, pal)
-    sc.bind(body, skel)
-    eyes = []
-    for sd, x in (("l", 1), ("r", -1)):
-        e = sh.obj("eye", sh.lathe([(0.0, -0.012), (0.011, -0.004), (0.011, 0.004), (0.0, 0.012)], 10), beast["eyes"])
-        e.scale = (s, s, s)
-        e.location = Vector((0.042 * x, -0.66, 1.025)) * s
-        e.rotation_euler = (math.radians(90), 0, 0)
-        eyes.append(e)
-    nose = sh.obj("nose", sh.lathe([(0.0, -0.016), (0.018, -0.006), (0.016, 0.01), (0.0, 0.016)], 10), "leather_dark")
-    nose.scale = (s, s, s)
-    nose.location = Vector((0, -0.84, 0.965)) * s
-    extras = sh.join(eyes + [nose], "face")
-    vg = extras.vertex_groups.new(name="head")
-    vg.add(list(range(len(extras.data.vertices))), 1.0, "REPLACE")
-    sc.bind(extras, skel)
+    base, full, eye = wolf.anatomy(B, beast["seed"])
+    eye = (Vector(eye[0]) * s, Vector(eye[1]), Vector(eye[2]), Vector(eye[3]))
+    # Bone heat over a clean surface without the locks, carried onto each furred level; then the
+    # lower jaw under the mouth's slit, and the ears bending from their bases.
+    ref = wolf.mesh_body(base, s, 0.007, 9000, "body_ref")
+    auto_weights(ref, skel, s)
+    levels = []
+    for n, (step, target, size) in enumerate(LEVELS):
+        name = "body" if n == 0 else f"body_lod{n}"
+        body = wolf.mesh_body(full, s, step, target, name)
+        transfer_weights(ref, body)
+        jaw_weights(body, s)
+        parts = [body]
+        for ear, side in zip(wolf.ears(J, s, B), ("l", "r")):
+            ear_weights(ear, skel, side)
+            parts.append(ear)
+        body = sh.join(parts, name)
+        for p in body.data.polygons:
+            p.use_smooth = True
+        sc.bind(body, skel)
+        stem = beast["id"].replace(".", "_") + (f"_lod{n}" if n else "")
+        wolf.paint(body, skel, J, s, beast["palette"], eye, TEX, stem, size=size, seed=beast["seed"])
+        levels.append(body)
+    bpy.data.objects.remove(ref)
+    coat = wolf.ear_fur(levels[0], skel, s, seed=beast["seed"])
+    eyes = wolf.eyes(eye, s, TEX, beast["id"].replace(".", "_"), iris=beast["iris"])
+    nose = wolf.nose(s, B)
+    upper, lower = wolf.teeth(s, B)
+    front, hind = wolf.claws(s, B)
+    rigid = [(nose, "head"), (upper, "head"), (lower, "jaw")] + [(e, "head") for e in eyes]
+    for ob, bone in rigid:
+        g = ob.vertex_groups.new(name=bone)
+        g.add(list(range(len(ob.data.vertices))), 1.0, "REPLACE")
+    # Each claw follows its own paw.
+    for ob, bone in ((front, "fpaw"), (hind, "hpaw")):
+        for side in ("l", "r"):
+            g = ob.vertex_groups.new(name=f"{bone}_{side}")
+            g.add([v.index for v in ob.data.vertices if (v.co.x > 0) == (side == "l")], 1.0, "REPLACE")
+    # How far down each extra goes: ear fur only at full detail, teeth and claws to LOD 1.
+    coat["lod_max"] = 0
+    for ob in (upper, lower, front, hind):
+        ob["lod_max"] = 1
+    for ob in [nose] + eyes:
+        ob["lod_max"] = 2
+    extras = [coat, nose, upper, lower, front, hind] + eyes
+    for ob in extras:
+        sc.bind(ob, skel)
+    return skel, levels, extras
+
+
+def build(beast):
+    s = beast["scale"]
+    skel, levels, extras = make(beast)
     animate(skel, s)
     path = OUT / f"{beast['id']}.glb"
     path.parent.mkdir(parents=True, exist_ok=True)
-    for o in bpy.context.view_layer.objects:
-        o.select_set(o in (skel, body, extras))
-    bpy.context.view_layer.objects.active = skel
-    bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True, export_animations=True,
-                              export_animation_mode="ACTIONS", export_force_sampling=True, export_skins=True,
-                              export_yup=True, export_apply=False, export_vertex_color="ACTIVE", export_all_vertex_colors=False)
+    for n, body in enumerate(levels):
+        objs = [skel, body] + [e for e in extras if e["lod_max"] >= n]
+        for o in bpy.context.view_layer.objects:
+            o.select_set(o in objs)
+        bpy.context.view_layer.objects.active = skel
+        bpy.ops.export_scene.gltf(filepath=str(export.lod_path(path, n) if n else path), export_format="GLB",
+                                  use_selection=True, export_animations=True, export_animation_mode="ACTIONS",
+                                  export_force_sampling=True, export_skins=True, export_yup=True, export_apply=False,
+                                  export_vertex_color="MATERIAL")
+    meshes = [levels[0]] + extras
     entry = {
         "id": beast["id"], "label": beast["label"], "family": "beast", "file": str(path.relative_to(sc.OUT)),
-        "height": round(max((body.matrix_world @ v.co).z for v in body.data.vertices), 3),
-        "triangles": sum(len(p.vertices) - 2 for p in body.data.polygons),
+        "height": round(max((levels[0].matrix_world @ v.co).z for v in levels[0].data.vertices), 3),
+        "triangles": sum(len(p.vertices) - 2 for m in meshes for p in m.data.polygons),
         "clips": {"idle": "Idle_Loop", "walk": "Walk_Loop", "run": "Run_Loop", "attack": "Attack", "hit": "Hit",
                   "death": "Death", "jump": "Jump", "special": "Howl"},
         "speeds": beast["speeds"], "sim_body": "wolf",
     }
     if "--review" in ARGS:
-        review_beast(beast, skel, [body, extras])
+        for b in levels[1:]:
+            b.hide_render = True
+        review_beast(beast, skel, meshes)
     return entry
 
 
@@ -666,4 +603,5 @@ def main():
     print("WROTE", CAT_PATH, [(e["id"], e["triangles"]) for e in entries])
 
 
-main()
+if __name__ == "__main__":
+    main()

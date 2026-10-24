@@ -110,6 +110,8 @@ at its `release` event (spawn the projectile then). The rules, with a reference 
 are in docs/ASSETS.md, "Clips, curves and events".
 
 Beasts name their clips by role in `clips` (idle, walk, run, attack, hit, death, jump, special).
+They have levels of detail like everything else (`lod_path` names the files), and their clips
+always carry the jaw closed (the bind pose's mouth is a little open), so draw them animated.
 
 ## Input the client sends
 

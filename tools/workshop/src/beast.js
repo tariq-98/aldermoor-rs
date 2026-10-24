@@ -3,14 +3,14 @@
 // app uses for characters (player, group, def, bones, update, dispose), minus clothing and gear.
 
 import * as THREE from 'three';
-import { ASSETS } from './character.js';
+import { ASSETS, lodFile } from './character.js';
 import { Player } from './anim.js';
 
 export class Beast {
   static async create(ctx, id) {
     const def = ctx.creatures.creatures.find((c) => c.id === id);
     if (!def) throw new Error(`no creature ${id}`);
-    const gltf = await ctx.loader.loadAsync(ASSETS + def.file);
+    const gltf = await ctx.loader.loadAsync(ASSETS + lodFile(def.file, ctx.lod));
     return new Beast(def, gltf);
   }
 
@@ -27,7 +27,6 @@ export class Beast {
         o.castShadow = true;
         o.receiveShadow = true;
         o.frustumCulled = false;
-        // Coats are painted in vertex colours.
         if (o.geometry.attributes.color) o.material.vertexColors = true;
       }
     });

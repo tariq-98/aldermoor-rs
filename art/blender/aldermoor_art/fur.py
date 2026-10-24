@@ -63,6 +63,13 @@ def fbm(p, cell, seed, octaves=3, gain=0.5):
     return acc / norm
 
 
+def ramp(a, b, x):
+    """0 at a, 1 at b (either order), smoothstepped; floats or arrays."""
+    t = np.clip((np.asarray(x, dtype=np.float64) - a) / (b - a), 0.0, 1.0)
+    out = t * t * (3 - 2 * t)
+    return float(out) if np.ndim(out) == 0 else out
+
+
 def standardise(x):
     return (x - x.mean()) / max(x.std(), 1e-9)
 

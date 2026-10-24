@@ -301,7 +301,7 @@ same kit the Swift village used, remade at the characters' quality.
   metalness B; one JPEG serves both glTF slots), in `gear/textures/`. Glowing and see-through
   parts (crystals, flames, glass) keep separate materials.
 - **Vertex colours:** where present, `COLOR_0` multiplies the base colour, as the glTF spec says:
-  the skeleton's aged bone and the beasts' painted coats.
+  the skeleton's aged bone and the worked kit's occlusion.
 - **Glowing parts:** crystals, flames, runes and undead eyes use emissive colour with
   `KHR_materials_emissive_strength`.
 - **Transparency:** the lantern's glass is the only blended material (`alphaMode: BLEND`).
@@ -311,7 +311,12 @@ same kit the Swift village used, remade at the characters' quality.
   under the bone their glTF parent is named after.
 - **Animation clips:** 30 fps and in place (no root motion). Every bone has rotation tracks; only
   the pelvis has translation.
-- **Beasts:** one `.glb` each, on the same axes (+Y up, facing +Z, metres), with in-place clips.
+- **Beasts:** one `.glb` each, on the same axes (+Y up, facing +Z, metres), with in-place clips
+  and their textures embedded. `<id>.lod1.glb` and `<id>.lod2.glb` sit beside each, on the same
+  skeleton with the same clips, but meshed and painted on their own (their own texture
+  coordinates, and maps at 1024 and 512 px), so switch the whole file. A wolf's mouth is
+  modelled a little open and every clip carries the jaw closed, so show beasts with a clip
+  playing; the bind pose has parted lips.
 - **The reference implementation:** the workshop does all of this in about 2,100 lines of
   three.js (`tools/workshop/src/`):
   - `character.js`: assembly, rebinding by bone name, sockets and the drawn/stowed rules;
@@ -356,12 +361,12 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
 | `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks | `humanoid/<body type>/clothes/` |
-| `build_beasts.py` | Wolves on their own four-legged rig, with generated gaits | `creatures/`, `catalog/creatures.json` |
+| `build_beasts.py` | Wolves on their own four-legged rig: anatomy as a signed distance field with sculpted locks of fur (`aldermoor_art/wolf.py`, `sdf.py`), painted coats and generated gaits | `creatures/`, `catalog/creatures.json` |
 | `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
   share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
-  single `.glb` files.
+  single `.glb` files with their textures inside.
 - **Review:** `review_humanoid.py` and the `--review` flags assemble looks the way the game will,
   from the exported files, and render them into `art/out/` (ignored by git).
 - **Catalogue checks:** `cargo test -p assets` (the `assets` crate) loads every catalogue and
@@ -386,16 +391,14 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Caster gear | Oak, gravecaller's and sunward staves; wand, spellbook and focus orb |
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
-| Beasts | Grey wolf and dire wolf: idle, walk, run, attack, hit, death, jump, howl |
+| Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
 | Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
 **Gaps, next in line:**
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
-- beasts rebuilt to the characters' standard (the wolves are the first draft), then boars,
-  bears and deer, and hostile humanoid outfits;
-- terrain materials and the dungeon's kit;
-- levels of detail for beasts.
+- more beasts the way the wolves are made (boars, bears and deer), and hostile humanoid outfits;
+- terrain materials and the dungeon's kit.
 
 ## Milestones
 

@@ -60,10 +60,11 @@ def studio(floor=True):
     scene.camera = cam
 
 
-def render(path, objects, yaw=25.0, size=(900, 1100), pad=1.0, look=None, height=None, focus=None):
+def render(path, objects, yaw=25.0, size=(900, 1100), pad=1.0, look=None, height=None, focus=None, elev=0.0):
     """Renders the objects from the front (yaw 0 looks at the -Y face), rotated by yaw degrees.
 
-    `focus` frames a region instead: a (centre, half-height) pair in world space.
+    `focus` frames a region instead: a (centre, half-height) pair in world space. `elev` raises
+    the camera by that many degrees (90 looks straight down).
     """
     studio()
     scene = bpy.context.scene
@@ -88,7 +89,8 @@ def render(path, objects, yaw=25.0, size=(900, 1100), pad=1.0, look=None, height
     half = math.atan(18 / cam.data.lens)
     vfov_half = half if aspect <= 1 else math.atan(math.tan(half) / aspect)
     dist = (h * 1.08 / 2) / math.tan(vfov_half)
-    eye = Vector((c.x - math.sin(a) * dist, c.y - math.cos(a) * dist, c.z + h * 0.06))
+    e = math.radians(min(elev, 89.5))
+    eye = Vector((c.x - math.sin(a) * math.cos(e) * dist, c.y - math.cos(a) * math.cos(e) * dist, c.z + math.sin(e) * dist + h * 0.06))
     cam.location = eye
     cam.rotation_euler = (c - eye).to_track_quat("-Z", "Y").to_euler()
     for name, off in (("review_key", (-2.5, -3.0, 2.5)), ("review_fill", (3.0, -1.5, 0.5)), ("review_rim", (0.5, 3.0, 2.0))):

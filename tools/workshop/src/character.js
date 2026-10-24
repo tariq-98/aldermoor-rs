@@ -12,9 +12,9 @@ import { SpringBones, defaultColliders, resolveColliders } from './springs.js';
 
 export const ASSETS = '/assets/';
 
-/** A mesh file at a level of detail: `x.gltf` is level 0, `x.lod1.gltf` level 1 and so on. */
+/** A mesh file at a level of detail: `x.gltf` is level 0, `x.lod1.gltf` level 1 and so on (or `.glb`). */
 export function lodFile(file, lod) {
-  return lod ? file.replace(/\.gltf$/, `.lod${lod}.gltf`) : file;
+  return lod ? file.replace(/\.(gltf|glb)$/, `.lod${lod}.$1`) : file;
 }
 
 function disposeObject(root) {

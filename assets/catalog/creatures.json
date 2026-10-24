@@ -6,8 +6,8 @@
    "label": "Grey wolf",
    "family": "beast",
    "file": "creatures/wolf.grey.glb",
-   "height": 1.18,
-   "triangles": 16111,
+   "height": 1.068,
+   "triangles": 30168,
    "clips": {
     "idle": "Idle_Loop",
     "walk": "Walk_Loop",
@@ -29,8 +29,8 @@
    "label": "Dire wolf",
    "family": "beast",
    "file": "creatures/wolf.dire.glb",
-   "height": 1.51,
-   "triangles": 16112,
+   "height": 1.367,
+   "triangles": 30185,
    "clips": {
     "idle": "Idle_Loop",
     "walk": "Walk_Loop",

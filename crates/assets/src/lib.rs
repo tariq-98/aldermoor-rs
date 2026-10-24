@@ -675,6 +675,7 @@ impl Catalog {
                         }
                     }
                 }
+                check_lods(&format!("creature {}", cr.id), &cr.file, &mut problem);
             }
         }
 
