@@ -15,7 +15,7 @@ import bpy
 from mathutils import Matrix
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import export, review, scene as sc, shapes as sh, weapons as wp  # noqa: E402
+from aldermoor_art import export, review, scene as sc, shapes as sh, surface, weapons as wp  # noqa: E402
 from aldermoor_art.holds import BOW_DRAW, OFF_HAND  # noqa: E402
 
 OUT = sc.OUT / "gear"
@@ -111,11 +111,21 @@ ITEMS = [
 ]
 
 
+TEX = OUT / "textures"
+
+
+def texture_size(ob):
+    """1K for long items, 512 for the rest (docs/ASSETS.md budgets 1K for gear)."""
+    return 1024 if max(ob.dimensions) > 0.9 else 512
+
+
 def build_item(item):
     sc.reset()
     parts = item["build"]()
     ob = sh.join(parts, item["id"])
     sh.uv_unwrap(ob)
+    # Bake before the bow's morphs fold its arrow away.
+    surface.bake(ob, TEX, item["id"], texture_size(ob))
     entry = {k: v for k, v in item.items() if k not in ("build", "sheath", "post")}
     if item.get("post") == "bow":
         rest, pull = wp.bow_morphs(ob, BOW_DRAW)
@@ -129,6 +139,7 @@ def build_item(item):
         sc.reset()
         sob = sh.join(item["sheath"](), f"{item['id']}.sheath")
         sh.uv_unwrap(sob)
+        surface.bake(sob, TEX, f"{item['id']}.sheath", 512)
         spath = export.rigid(OUT / f"{item['id']}.sheath.gltf", [sob])
         entry["sheath"] = str(spath.relative_to(sc.OUT))
     return entry

@@ -26,15 +26,17 @@
 	"materials":[
 		{
 			"doubleSided":true,
-			"name":"gear.brass",
+			"name":"gear.tool.watering_can",
+			"occlusionTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.7799999713897705,
-					0.550000011920929,
-					0.2199999988079071,
-					1
-				],
-				"roughnessFactor":0.3499999940395355
+				"baseColorTexture":{
+					"index":1
+				},
+				"metallicRoughnessTexture":{
+					"index":0
+				}
 			}
 		}
 	],
@@ -52,6 +54,28 @@
 					"material":0
 				}
 			]
+		}
+	],
+	"textures":[
+		{
+			"sampler":0,
+			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
+		}
+	],
+	"images":[
+		{
+			"mimeType":"image/jpeg",
+			"name":"tool.watering_can_orm.jpg",
+			"uri":"textures/tool.watering_can_orm.jpg"
+		},
+		{
+			"mimeType":"image/jpeg",
+			"name":"tool.watering_can_color.jpg",
+			"uri":"textures/tool.watering_can_color.jpg"
 		}
 	],
 	"accessors":[
@@ -114,6 +138,12 @@
 			"byteLength":1632,
 			"byteOffset":9696,
 			"target":34963
+		}
+	],
+	"samplers":[
+		{
+			"magFilter":9729,
+			"minFilter":9987
 		}
 	],
 	"buffers":[

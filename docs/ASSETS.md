@@ -247,6 +247,11 @@ always meets the hand, whatever the archer's size. The drawing hand is the one n
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM
   and roughness maps are linear. Normal maps follow the glTF convention.
+- **Gear surfaces:** each rigid item has one material for most of it, baked by
+  `aldermoor_art/surface.py` from procedural wood grain, leather, brushed metal, edge wear,
+  grime and chipped paint: a colour texture and an ORM texture (occlusion R, roughness G,
+  metalness B; one JPEG serves both glTF slots), in `gear/textures/`. Glowing and see-through
+  parts (crystals, flames, glass) keep separate materials.
 - **Vertex colours:** where present, `COLOR_0` multiplies the base colour, as the glTF spec says:
   the skeleton's aged bone and the beasts' painted coats.
 - **Glowing parts:** crystals, flames, runes and undead eyes use emissive colour with
@@ -319,7 +324,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Appearance | 8 skin tones, 4 goblin greens and 5 fox furs (red fox, ember, sand, silver, arctic), 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard; 16 dyes |
 | Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron (two colourways each); mage's, gravecaller's and sunward robes; belted tunic; traveller's coat; smith's apron; wizard's and straw hats. Each garment has a `dye` mask: R for the main cloth, G for the trim |
 | Plate | Cuirass with faulds, pauldrons, gauntlets, leg plates, nasal helm, kettle hat |
-| Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow and longbow (drawable strings, nocked arrows) and quiver |
+| Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow and longbow (drawable strings, nocked arrows) and quiver; all with baked surface detail |
 | Caster gear | Oak, gravecaller's and sunward staves; wand, spellbook and focus orb |
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
@@ -329,7 +334,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 **Gaps, next in line:**
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
 - more beasts and hostile humanoid outfits;
-- a material and texture pass on gear;
+- the same surface pass for plate armour;
 - level-of-detail meshes.
 
 ## Milestones

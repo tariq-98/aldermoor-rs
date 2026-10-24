@@ -21,29 +21,17 @@
 	"materials":[
 		{
 			"doubleSided":true,
-			"name":"gear.leather_tan",
+			"name":"gear.dagger.hunting.sheath",
+			"occlusionTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.23999999463558197,
-					0.12999999523162842,
-					0.05999999865889549,
-					1
-				],
-				"metallicFactor":0,
-				"roughnessFactor":0.6600000262260437
-			}
-		},
-		{
-			"doubleSided":true,
-			"name":"gear.brass",
-			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.7799999713897705,
-					0.550000011920929,
-					0.2199999988079071,
-					1
-				],
-				"roughnessFactor":0.3499999940395355
+				"baseColorTexture":{
+					"index":1
+				},
+				"metallicRoughnessTexture":{
+					"index":0
+				}
 			}
 		}
 	],
@@ -59,27 +47,40 @@
 					},
 					"indices":3,
 					"material":0
-				},
-				{
-					"attributes":{
-						"POSITION":4,
-						"NORMAL":5,
-						"TEXCOORD_0":6
-					},
-					"indices":7,
-					"material":1
 				}
 			]
+		}
+	],
+	"textures":[
+		{
+			"sampler":0,
+			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
+		}
+	],
+	"images":[
+		{
+			"mimeType":"image/jpeg",
+			"name":"dagger.hunting.sheath_orm.jpg",
+			"uri":"textures/dagger.hunting.sheath_orm.jpg"
+		},
+		{
+			"mimeType":"image/jpeg",
+			"name":"dagger.hunting.sheath_color.jpg",
+			"uri":"textures/dagger.hunting.sheath_color.jpg"
 		}
 	],
 	"accessors":[
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":268,
+			"count":419,
 			"max":[
 				0.007499999832361937,
-				0.2849999964237213,
+				0.28999999165534973,
 				0.024000000208616257
 			],
 			"min":[
@@ -92,104 +93,52 @@
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":268,
+			"count":419,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":268,
+			"count":419,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5123,
-			"count":1068,
-			"type":"SCALAR"
-		},
-		{
-			"bufferView":4,
-			"componentType":5126,
-			"count":151,
-			"max":[
-				0.004999999888241291,
-				0.28999999165534973,
-				0.004924038890749216
-			],
-			"min":[
-				-0.004999999888241291,
-				0.2750000059604645,
-				-0.004924038890749216
-			],
-			"type":"VEC3"
-		},
-		{
-			"bufferView":5,
-			"componentType":5126,
-			"count":151,
-			"type":"VEC3"
-		},
-		{
-			"bufferView":6,
-			"componentType":5126,
-			"count":151,
-			"type":"VEC2"
-		},
-		{
-			"bufferView":7,
-			"componentType":5123,
-			"count":534,
+			"count":1602,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":3216,
+			"byteLength":5028,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3216,
-			"byteOffset":3216,
+			"byteLength":5028,
+			"byteOffset":5028,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2144,
-			"byteOffset":6432,
+			"byteLength":3352,
+			"byteOffset":10056,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2136,
-			"byteOffset":8576,
+			"byteLength":3204,
+			"byteOffset":13408,
 			"target":34963
-		},
+		}
+	],
+	"samplers":[
 		{
-			"buffer":0,
-			"byteLength":1812,
-			"byteOffset":10712,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":1812,
-			"byteOffset":12524,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":1208,
-			"byteOffset":14336,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":1068,
-			"byteOffset":15544,
-			"target":34963
+			"magFilter":9729,
+			"minFilter":9987
 		}
 	],
 	"buffers":[

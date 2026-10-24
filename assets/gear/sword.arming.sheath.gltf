@@ -21,29 +21,17 @@
 	"materials":[
 		{
 			"doubleSided":true,
-			"name":"gear.leather_dark",
+			"name":"gear.sword.arming.sheath",
+			"occlusionTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.09000000357627869,
-					0.05000000074505806,
-					0.029999999329447746,
-					1
-				],
-				"metallicFactor":0,
-				"roughnessFactor":0.5799999833106995
-			}
-		},
-		{
-			"doubleSided":true,
-			"name":"gear.brass",
-			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.7799999713897705,
-					0.550000011920929,
-					0.2199999988079071,
-					1
-				],
-				"roughnessFactor":0.3499999940395355
+				"baseColorTexture":{
+					"index":1
+				},
+				"metallicRoughnessTexture":{
+					"index":0
+				}
 			}
 		}
 	],
@@ -59,58 +47,37 @@
 					},
 					"indices":3,
 					"material":0
-				},
-				{
-					"attributes":{
-						"POSITION":4,
-						"NORMAL":5,
-						"TEXCOORD_0":6
-					},
-					"indices":7,
-					"material":1
 				}
 			]
+		}
+	],
+	"textures":[
+		{
+			"sampler":0,
+			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
+		}
+	],
+	"images":[
+		{
+			"mimeType":"image/jpeg",
+			"name":"sword.arming.sheath_orm.jpg",
+			"uri":"textures/sword.arming.sheath_orm.jpg"
+		},
+		{
+			"mimeType":"image/jpeg",
+			"name":"sword.arming.sheath_color.jpg",
+			"uri":"textures/sword.arming.sheath_color.jpg"
 		}
 	],
 	"accessors":[
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":482,
-			"max":[
-				0.008500000461935997,
-				0.8429999947547913,
-				0.027948735281825066
-			],
-			"min":[
-				-0.008500000461935997,
-				0.06800000369548798,
-				-0.027948735281825066
-			],
-			"type":"VEC3"
-		},
-		{
-			"bufferView":1,
-			"componentType":5126,
-			"count":482,
-			"type":"VEC3"
-		},
-		{
-			"bufferView":2,
-			"componentType":5126,
-			"count":482,
-			"type":"VEC2"
-		},
-		{
-			"bufferView":3,
-			"componentType":5123,
-			"count":2088,
-			"type":"SCALAR"
-		},
-		{
-			"bufferView":4,
-			"componentType":5126,
-			"count":1151,
+			"count":1633,
 			"max":[
 				0.011405255645513535,
 				0.8519999980926514,
@@ -124,72 +91,54 @@
 			"type":"VEC3"
 		},
 		{
-			"bufferView":5,
+			"bufferView":1,
 			"componentType":5126,
-			"count":1151,
+			"count":1633,
 			"type":"VEC3"
 		},
 		{
-			"bufferView":6,
+			"bufferView":2,
 			"componentType":5126,
-			"count":1151,
+			"count":1633,
 			"type":"VEC2"
 		},
 		{
-			"bufferView":7,
+			"bufferView":3,
 			"componentType":5123,
-			"count":3978,
+			"count":6066,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":5784,
+			"byteLength":19596,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":5784,
-			"byteOffset":5784,
+			"byteLength":19596,
+			"byteOffset":19596,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3856,
-			"byteOffset":11568,
+			"byteLength":13064,
+			"byteOffset":39192,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":4176,
-			"byteOffset":15424,
+			"byteLength":12132,
+			"byteOffset":52256,
 			"target":34963
-		},
+		}
+	],
+	"samplers":[
 		{
-			"buffer":0,
-			"byteLength":13812,
-			"byteOffset":19600,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":13812,
-			"byteOffset":33412,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":9208,
-			"byteOffset":47224,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":7956,
-			"byteOffset":56432,
-			"target":34963
+			"magFilter":9729,
+			"minFilter":9987
 		}
 	],
 	"buffers":[

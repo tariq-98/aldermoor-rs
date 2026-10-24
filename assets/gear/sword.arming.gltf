@@ -21,29 +21,17 @@
 	"materials":[
 		{
 			"doubleSided":true,
-			"name":"gear.steel",
+			"name":"gear.sword.arming",
+			"occlusionTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.46000000834465027,
-					0.4699999988079071,
-					0.5,
-					1
-				],
-				"roughnessFactor":0.4000000059604645
-			}
-		},
-		{
-			"doubleSided":true,
-			"name":"gear.leather",
-			"pbrMetallicRoughness":{
-				"baseColorFactor":[
-					0.14000000059604645,
-					0.06499999761581421,
-					0.029999999329447746,
-					1
-				],
-				"metallicFactor":0,
-				"roughnessFactor":0.6200000047683716
+				"baseColorTexture":{
+					"index":1
+				},
+				"metallicRoughnessTexture":{
+					"index":0
+				}
 			}
 		}
 	],
@@ -59,24 +47,37 @@
 					},
 					"indices":3,
 					"material":0
-				},
-				{
-					"attributes":{
-						"POSITION":4,
-						"NORMAL":5,
-						"TEXCOORD_0":6
-					},
-					"indices":7,
-					"material":1
 				}
 			]
+		}
+	],
+	"textures":[
+		{
+			"sampler":0,
+			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
+		}
+	],
+	"images":[
+		{
+			"mimeType":"image/jpeg",
+			"name":"sword.arming_orm.jpg",
+			"uri":"textures/sword.arming_orm.jpg"
+		},
+		{
+			"mimeType":"image/jpeg",
+			"name":"sword.arming_color.jpg",
+			"uri":"textures/sword.arming_color.jpg"
 		}
 	],
 	"accessors":[
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":2095,
+			"count":2899,
 			"max":[
 				0.02199999988079071,
 				0.8240447044372559,
@@ -92,104 +93,52 @@
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":2095,
+			"count":2899,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":2095,
+			"count":2899,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5123,
-			"count":5598,
-			"type":"SCALAR"
-		},
-		{
-			"bufferView":4,
-			"componentType":5126,
-			"count":804,
-			"max":[
-				0.015949999913573265,
-				0.05400000140070915,
-				0.015949999913573265
-			],
-			"min":[
-				-0.015949999913573265,
-				-0.05400000140070915,
-				-0.015949999913573265
-			],
-			"type":"VEC3"
-		},
-		{
-			"bufferView":5,
-			"componentType":5126,
-			"count":804,
-			"type":"VEC3"
-		},
-		{
-			"bufferView":6,
-			"componentType":5126,
-			"count":804,
-			"type":"VEC2"
-		},
-		{
-			"bufferView":7,
-			"componentType":5123,
-			"count":3732,
+			"count":9330,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":25140,
+			"byteLength":34788,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":25140,
-			"byteOffset":25140,
+			"byteLength":34788,
+			"byteOffset":34788,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":16760,
-			"byteOffset":50280,
+			"byteLength":23192,
+			"byteOffset":69576,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":11196,
-			"byteOffset":67040,
+			"byteLength":18660,
+			"byteOffset":92768,
 			"target":34963
-		},
+		}
+	],
+	"samplers":[
 		{
-			"buffer":0,
-			"byteLength":9648,
-			"byteOffset":78236,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":9648,
-			"byteOffset":87884,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":6432,
-			"byteOffset":97532,
-			"target":34962
-		},
-		{
-			"buffer":0,
-			"byteLength":7464,
-			"byteOffset":103964,
-			"target":34963
+			"magFilter":9729,
+			"minFilter":9987
 		}
 	],
 	"buffers":[
