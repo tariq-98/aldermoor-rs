@@ -48,5 +48,17 @@ fn every_look_names_real_art() {
         if let Some(t) = &look.tone {
             assert!(cat.humanoid.skin_tones.iter().any(|x| &x.id == t), "no tone {t}");
         }
+        for (piece, main, trim) in &look.dyes {
+            assert!(look.pieces.contains(piece), "a dye for {piece}, which isn't worn");
+            let def = cat.humanoid.pieces.iter().find(|x| &x.id == piece).unwrap();
+            assert!(def.dye.is_some(), "{piece} can't be dyed");
+            for d in [main, trim].into_iter().flatten() {
+                assert!(cat.humanoid.dyes.iter().any(|x| &x.id == d), "no dye {d}");
+            }
+        }
+        for (piece, variant) in &look.variants {
+            assert!(look.pieces.contains(piece), "a colourway for {piece}, which isn't worn");
+            assert!(cat.humanoid.texture_variants.values().any(|v| v.contains(variant)), "no colourway {variant}");
+        }
     }
 }

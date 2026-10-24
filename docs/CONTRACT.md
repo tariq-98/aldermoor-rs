@@ -65,7 +65,7 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 
 ## Art for each unit
 
-Each unit's `look` (`protocol::Look`, protocol version 2) names everything in the art
+Each unit's `look` (`protocol::Look`, protocol version 3) names everything in the art
 catalogue (docs/ASSETS.md):
 - `art`: a body type in `assets/catalog/humanoid.json` (`"male"`, `"elf_female"`,
   `"goblin_male"`, `"skeleton"`…) or a beast in `assets/catalog/creatures.json`
@@ -74,13 +74,16 @@ catalogue (docs/ASSETS.md):
   (hair and beard) or the body's default (tone and hair colour).
 - `pieces`: clothing and armour ids. Their layers decide what covers what.
 - `gear`: (slot, item id) pairs from `assets/catalog/gear.json`.
+- `dyes`: (piece id, main dye, trim dye) for dyed pieces, dye ids from the catalogue's `dyes`
+  (`None` keeps that channel's painted colour); `variants`: (piece id, colourway texture) for
+  pieces in another colourway. A piece has one or the other.
 - `drawn`: weapons on their `held` sockets (true), or on their `stowed` sockets, chosen by
   the back item's `back_kind`. When it changes, play the main-hand item's `clips.ready` or
   `clips.stow` over the legs; the item changes hands at that clip's `grab` or `stow` event
   (docs/ASSETS.md, "Clips, curves and events").
 
 Today the player is a farmhand with an arming sword and a round shield. Goblins wear the Ranger
-jerkin with a hunting knife and round shield, and wolves are `wolf.grey`. `drawn` turns on
+jerkin dyed rust and walnut, with a hunting knife and round shield, and wolves are `wolf.grey`. `drawn` turns on
 during a fight. Looks are sent every tick for now; the network version will send them only
 when they change. `tools/workshop/` assembles a look from these names exactly as the game
 should (docs/ASSETS.md, "The reference implementation").

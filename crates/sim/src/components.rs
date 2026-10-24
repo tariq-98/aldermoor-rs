@@ -242,6 +242,7 @@ pub fn player_look() -> protocol::Look {
         pieces: ["peasant.top", "peasant.trousers", "peasant.shoes"].map(String::from).to_vec(),
         gear: vec![("main_hand".into(), "sword.arming".into()), ("off_hand".into(), "shield.round".into())],
         drawn: false,
+        ..Default::default()
     }
 }
 
@@ -255,6 +256,11 @@ impl MonsterKind {
                 tone: Some("goblin green".into()),
                 pieces: ["ranger.top", "peasant.trousers", "peasant.shoes"].map(String::from).to_vec(),
                 gear: vec![("main_hand".into(), "dagger.hunting".into()), ("off_hand".into(), "shield.round".into())],
+                // Scavenged clothes, dyed dull: not mistaken for a ranger at a distance.
+                dyes: vec![
+                    ("ranger.top".into(), Some("rust".into()), Some("walnut".into())),
+                    ("peasant.trousers".into(), Some("slate".into()), Some("charcoal".into())),
+                ],
                 ..Default::default()
             },
         }

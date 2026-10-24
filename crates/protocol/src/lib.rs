@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -71,6 +71,13 @@ pub struct Look {
     pub gear: Vec<(String, String)>,
     /// Weapons in hand (true) or put away on their stowed sockets.
     pub drawn: bool,
+    /// Dyed pieces: (piece id, main cloth dye, trim dye), ids from the catalogue's `dyes`.
+    /// `None` keeps the colour that channel was painted (docs/ASSETS.md, "Tints").
+    #[serde(default)]
+    pub dyes: Vec<(String, Option<String>, Option<String>)>,
+    /// Pieces in another colourway: (piece id, texture name from `texture_variants`).
+    #[serde(default)]
+    pub variants: Vec<(String, String)>,
 }
 
 /// One unit as the client should draw it this tick.
@@ -186,6 +193,7 @@ mod tests {
                     pieces: vec!["peasant.top".into()],
                     gear: vec![("main_hand".into(), "sword.arming".into())],
                     drawn: true,
+                    dyes: vec![("peasant.top".into(), Some("woad".into()), None)],
                     ..Default::default()
                 },
             }],
