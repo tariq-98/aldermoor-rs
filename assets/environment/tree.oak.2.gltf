@@ -50,7 +50,7 @@
 					"index":3
 				},
 				"metallicFactor":0,
-				"roughnessFactor":0.800000011920929
+				"roughnessFactor":0.7799999713897705
 			}
 		}
 	],
@@ -173,47 +173,47 @@
 		{
 			"bufferView":6,
 			"componentType":5126,
-			"count":8434,
+			"count":14750,
 			"type":"SCALAR"
 		},
 		{
 			"bufferView":7,
 			"componentType":5126,
-			"count":8434,
+			"count":14750,
 			"max":[
-				3.4959137439727783,
-				8.3336763381958,
-				4.212921142578125
+				3.499635934829712,
+				8.387685775756836,
+				3.726315975189209
 			],
 			"min":[
-				-4.019970417022705,
-				4.562953472137451,
-				-3.483456611633301
+				-3.9524459838867188,
+				4.560529708862305,
+				-3.570981740951538
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":8,
 			"componentType":5126,
-			"count":8434,
+			"count":14750,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":9,
 			"componentType":5126,
-			"count":8434,
+			"count":14750,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":10,
 			"componentType":5126,
-			"count":8434,
+			"count":14750,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":11,
 			"componentType":5123,
-			"count":9600,
+			"count":15600,
 			"type":"SCALAR"
 		}
 	],
@@ -256,38 +256,38 @@
 		},
 		{
 			"buffer":0,
-			"byteLength":33736,
+			"byteLength":59000,
 			"byteOffset":59556,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":101208,
-			"byteOffset":93292,
+			"byteLength":177000,
+			"byteOffset":118556,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":101208,
-			"byteOffset":194500,
+			"byteLength":177000,
+			"byteOffset":295556,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":67472,
-			"byteOffset":295708,
+			"byteLength":118000,
+			"byteOffset":472556,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":101208,
-			"byteOffset":363180,
+			"byteLength":177000,
+			"byteOffset":590556,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":19200,
-			"byteOffset":464388,
+			"byteLength":31200,
+			"byteOffset":767556,
 			"target":34963
 		}
 	],
@@ -299,7 +299,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":483588,
+			"byteLength":798756,
 			"uri":"tree.oak.2.bin"
 		}
 	]

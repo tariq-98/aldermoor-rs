@@ -35,8 +35,8 @@
    "kind": "plant",
    "wind": true,
    "file": "environment/bush.1.gltf",
-   "height": 1.252,
-   "triangles": 1280
+   "height": 1.262,
+   "triangles": 2600
   },
   {
    "id": "bush.2",
@@ -44,8 +44,8 @@
    "kind": "plant",
    "wind": true,
    "file": "environment/bush.2.gltf",
-   "height": 1.28,
-   "triangles": 1280
+   "height": 1.224,
+   "triangles": 2600
   },
   {
    "id": "cottage.stone",
@@ -261,8 +261,8 @@
    "kind": "tree",
    "wind": true,
    "file": "environment/tree.oak.1.gltf",
-   "height": 7.843,
-   "triangles": 3830
+   "height": 7.828,
+   "triangles": 5830
   },
   {
    "id": "tree.oak.2",
@@ -270,8 +270,8 @@
    "kind": "tree",
    "wind": true,
    "file": "environment/tree.oak.2.gltf",
-   "height": 8.334,
-   "triangles": 3830
+   "height": 8.388,
+   "triangles": 5830
   },
   {
    "id": "tree.oak.3",
@@ -279,8 +279,8 @@
    "kind": "tree",
    "wind": true,
    "file": "environment/tree.oak.3.gltf",
-   "height": 9.011,
-   "triangles": 3830
+   "height": 8.86,
+   "triangles": 5830
   },
   {
    "id": "tree.pine.1",

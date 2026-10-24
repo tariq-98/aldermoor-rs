@@ -33,7 +33,7 @@
 					"index":1
 				},
 				"metallicFactor":0,
-				"roughnessFactor":0.800000011920929
+				"roughnessFactor":0.7799999713897705
 			}
 		}
 	],
@@ -81,85 +81,85 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":3607,
+			"count":7183,
 			"type":"SCALAR"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":3607,
+			"count":7183,
 			"max":[
-				0.7092259526252747,
-				1.2520990371704102,
-				0.9616137742996216
+				1.0676047801971436,
+				1.262299656867981,
+				1.0233790874481201
 			],
 			"min":[
-				-0.9962968230247498,
-				0.03964903950691223,
-				-0.948262095451355
+				-0.92210853099823,
+				0.019999999552965164,
+				-0.8519346714019775
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":3607,
+			"count":7183,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":3607,
+			"count":7183,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":4,
 			"componentType":5126,
-			"count":3607,
+			"count":7183,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":5,
 			"componentType":5123,
-			"count":3840,
+			"count":7800,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":14428,
+			"byteLength":28732,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":43284,
-			"byteOffset":14428,
+			"byteLength":86196,
+			"byteOffset":28732,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":43284,
-			"byteOffset":57712,
+			"byteLength":86196,
+			"byteOffset":114928,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":28856,
-			"byteOffset":100996,
+			"byteLength":57464,
+			"byteOffset":201124,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":43284,
-			"byteOffset":129852,
+			"byteLength":86196,
+			"byteOffset":258588,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":7680,
-			"byteOffset":173136,
+			"byteLength":15600,
+			"byteOffset":344784,
 			"target":34963
 		}
 	],
@@ -171,7 +171,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":180816,
+			"byteLength":360384,
 			"uri":"bush.1.bin"
 		}
 	]

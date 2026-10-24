@@ -18,10 +18,11 @@ from pathlib import Path
 
 import bmesh
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import env, export, golem, review, scene as sc, sdf, shapes as sh  # noqa: E402
+from aldermoor_art import env, export, fur, golem, review, scene as sc, sdf, shapes as sh  # noqa: E402
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 ONLY = next((a.split("=", 1)[1].split(",") for a in ARGS if a.startswith("--only=")), None)
@@ -512,14 +513,11 @@ def broadleaf(seed, height=7.4):
         mid = base.lerp(tip, 0.5) + Vector((0, 0, 0.4))
         parts.append(tube("branch", [base, mid, tip], [0.15, 0.09, 0.03], barkm, sides=7))
         tips.append(tip)
-    # The crown: clumps over the branch tips and around the top, one soft mass.
-    clumps = []
+    # The crown: a cluster of leafy clumps over each branch tip and round the top.
     centres = tips + [crown_c + Vector((0, 0, 1.0)), crown_c + Vector((0.8, 0.4, 0.3)), crown_c + Vector((-0.7, -0.5, 0.5))]
-    for k, c in enumerate(centres):
-        r = rng.uniform(1.25, 1.8) if k < len(tips) else rng.uniform(1.6, 2.0)
-        clumps.append(lump("clump", c, r, leaves, seed * 31 + k, scale=(1.0, 1.0, 0.8), rough=0.28, subdiv=3))
-    crown = env.join(clumps, "crown")
-    env.soften_normals(crown, crown_c, 0.85)
+    radii = [rng.uniform(1.25, 1.8) if k < len(tips) else rng.uniform(1.6, 2.0) for k in range(len(centres))]
+    crown = canopy("crown", centres, radii, leaves, seed)
+    env.soften_normals(crown, crown_c, 0.6)
     env.shade(crown, lambda co, n: _leaf_shade(co, n, crown_c, height))
     env.wind(crown, lambda co: 0.45 + 0.55 * min(1.0, (co - crown_c).length / 3.2))
     wood = env.join(parts, "wood")
@@ -527,6 +525,36 @@ def broadleaf(seed, height=7.4):
     env.shade(wood, env.grime(0.0, 0.6, 0.3))
     env.wind(wood, lambda co: 0.25 * max(0.0, co.z / height) ** 2)
     return [env.join([wood, crown], f"tree")]
+
+
+def canopy(name, centres, radii, mat, seed, step=0.07, target=5200):
+    """Foliage as a field: round each centre a core and a ring of smaller clumps, mostly on top,
+    joined softly and ruffled, so the silhouette breaks into clumps of leaves."""
+    rng = np.random.default_rng(seed)
+    parts = []
+    for c, R in zip(centres, radii):
+        c = np.array(c)
+        parts.append(sdf.Ellipsoid(c, np.array((0.8, 0.8, 0.62)) * R))
+        for _ in range(8):
+            d = rng.normal(size=3) + np.array((0, 0, 0.45))
+            d /= np.linalg.norm(d)
+            rr = R * rng.uniform(0.34, 0.52)
+            parts.append(sdf.Ellipsoid(c + d * R * np.array((0.66, 0.66, 0.5)), np.array((rr, rr, rr * 0.85))))
+    field = sdf.Union(parts, k=0.2 * max(radii) / 1.6)
+    s1 = int(rng.integers(1, 9999))
+    field = sdf.Displace(field, lambda p: 0.07 * (2 * fur.fbm(p, 0.24, s1, octaves=2) - 1), reach=0.08)
+    ob = sdf.mesh(field, step, name, relax_iters=2)
+    tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
+    if tris > target:
+        dec = ob.modifiers.new("decimate", "DECIMATE")
+        dec.ratio = target / tris
+        sc.activate(ob)
+        bpy.ops.object.modifier_apply(modifier=dec.name)
+    for p in ob.data.polygons:
+        p.use_smooth = True
+    ob.data.materials.append(mat)
+    env.box_uvs(ob)
+    return ob
 
 
 def _leaf_shade(co, n, centre, height):
@@ -581,11 +609,13 @@ def pine(seed, height=9.0):
 def bush(seed):
     rng = random.Random(seed)
     leaves = env.surface("foliage")[0]
-    clumps = [lump("clump", (rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4), 0.45 + rng.uniform(0, 0.25)), rng.uniform(0.55, 0.8), leaves,
-                   seed * 7 + k, scale=(1.0, 1.0, 0.8), rough=0.3, subdiv=3, flat_bottom=0.6) for k in range(4)]
-    ob = env.join(clumps, "bush")
+    centres = [Vector((rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4), 0.45 + rng.uniform(0, 0.25))) for _ in range(4)]
+    ob = canopy("bush", centres, [rng.uniform(0.55, 0.8) for _ in centres], leaves, seed, step=0.035, target=2600)
+    # Sit on the ground: nothing below it.
+    for v in ob.data.vertices:
+        v.co.z = max(v.co.z, 0.02)
     c = Vector((0, 0, 0.4))
-    env.soften_normals(ob, c, 0.6)
+    env.soften_normals(ob, c, 0.5)
     env.shade(ob, lambda co, n: _leaf_shade(co, n, c, 1.2))
     env.wind(ob, lambda co: min(1.0, co.z / 1.2))
     return [ob]

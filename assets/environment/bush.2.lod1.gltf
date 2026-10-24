@@ -33,7 +33,7 @@
 					"index":1
 				},
 				"metallicFactor":0,
-				"roughnessFactor":0.800000011920929
+				"roughnessFactor":0.7799999713897705
 			}
 		}
 	],
@@ -81,85 +81,85 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":1831,
+			"count":3628,
 			"type":"SCALAR"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":1831,
+			"count":3628,
 			"max":[
-				1.2530207633972168,
-				1.3048888444900513,
-				1.1687688827514648
+				1.242451548576355,
+				1.2492893934249878,
+				1.0880398750305176
 			],
 			"min":[
-				-0.9110894799232483,
-				-0.04522642120718956,
-				-1.083051323890686
+				-0.975135862827301,
+				0.012460233643651009,
+				-1.2536805868148804
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":1831,
+			"count":3628,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":1831,
+			"count":3628,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":4,
 			"componentType":5126,
-			"count":1831,
+			"count":3628,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":5,
 			"componentType":5123,
-			"count":1920,
+			"count":3900,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":7324,
+			"byteLength":14512,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":21972,
-			"byteOffset":7324,
+			"byteLength":43536,
+			"byteOffset":14512,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":21972,
-			"byteOffset":29296,
+			"byteLength":43536,
+			"byteOffset":58048,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":14648,
-			"byteOffset":51268,
+			"byteLength":29024,
+			"byteOffset":101584,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":21972,
-			"byteOffset":65916,
+			"byteLength":43536,
+			"byteOffset":130608,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3840,
-			"byteOffset":87888,
+			"byteLength":7800,
+			"byteOffset":174144,
 			"target":34963
 		}
 	],
@@ -171,7 +171,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":91728,
+			"byteLength":181944,
 			"uri":"bush.2.lod1.bin"
 		}
 	]

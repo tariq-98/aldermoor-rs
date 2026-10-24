@@ -230,17 +230,42 @@ def rock(size=1024, seed=8):
     return colour, 0.8 * broad + 0.35 * mid + 0.25 * grit - 1.4 * crack, 8.0, 0.86 + 0.06 * grit
 
 
-def foliage(size=1024, seed=9, base=(0.13, 0.25, 0.06)):
-    """Dense leaves: overlapping leaf shapes in varied greens, darker in the gaps."""
-    f1, edge, idx, n = voronoi(size, 900, seed, jitter=1.0, warp=4)
+def foliage(size=1024, seed=9, base=(0.13, 0.25, 0.06), count=1500):
+    """Dense leaves: pointed leaves laid over one another in varied greens, each with a midrib,
+    darker at its stalk and lighter towards its tip, deep shade in the gaps. Tiles seamlessly."""
     rng = np.random.default_rng(seed)
-    tone = rng.uniform(0.85, 1.15, n)[idx]
-    hue = rng.uniform(-0.04, 0.05, n)[idx]
-    leaf = np.clip(edge / 5.0, 0, 1) ** 0.5
+    base = np.array(base)
+    colour = np.empty((size, size, 3))
+    colour[:] = base * 0.32
+    height = np.zeros((size, size))
     clumps = noise(size, 3, seed + 1)
-    k = tone * (0.84 + 0.2 * leaf) * (0.72 + 0.5 * clumps)
-    colour = np.stack([base[0] * k + hue * 0.3, base[1] * k + hue * 0.2, base[2] * k], -1)
-    return colour, 0.5 * leaf + 0.6 * clumps, 3.0, 0.8 + 0.0 * leaf
+    for k in range(count):
+        cx, cy = rng.uniform(0, size, 2)
+        L = rng.uniform(22, 34)
+        W = L * rng.uniform(0.36, 0.48)
+        a = rng.uniform(0, 2 * np.pi)
+        ca, sa = np.cos(a), np.sin(a)
+        r = int(L + 2)
+        xs = np.arange(int(cx) - r, int(cx) + r + 1)
+        ys = np.arange(int(cy) - r, int(cy) + r + 1)
+        X, Y = np.meshgrid(xs, ys)
+        dx, dy = X - cx, Y - cy
+        u = dx * ca + dy * sa
+        v = -dx * sa + dy * ca
+        t = np.clip((u / L + 1) / 2, 0, 1)
+        half = W * np.sin(np.pi * t) ** 0.75 * (1 - 0.3 * t)
+        inside = (np.abs(u) < L) & (np.abs(v) < half)
+        if not inside.any():
+            continue
+        across = np.abs(v) / np.maximum(half, 1e-6)
+        tone = rng.uniform(0.8, 1.2)
+        tint = base * tone + np.array((0.05, 0.03, -0.01)) * rng.uniform(-1, 1.4)
+        shade = (0.62 + 0.42 * t) * (1 - 0.18 * across ** 2) * (1 + 0.12 * np.exp(-(v / 1.3) ** 2))
+        yi, xi = Y[inside] % size, X[inside] % size
+        colour[yi, xi] = np.clip(tint[None, :] * shade[inside][:, None], 0, 1)
+        height[yi, xi] = k / count * 0.6 + 0.3 * t[inside] + 0.1 * (1 - across[inside] ** 2)
+    colour *= (0.78 + 0.4 * clumps)[..., None]
+    return colour, height, 9.0, 0.78 + 0.0 * height
 
 
 def needles(size=1024, seed=10):

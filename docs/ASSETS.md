@@ -278,7 +278,8 @@ same kit the Swift village used, remade at the characters' quality.
 - **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
   thatch, clay tiles, cobbles, bark, foliage, needles), each a colour map and a normal map,
   with UVs in metres, so samplers repeat. `COLOR_0` multiplies the base colour, as glTF says:
-  grime at the foot of walls, shade under the eaves, canopies darker inside. Rocks are the
+  grime at the foot of walls, shade under the eaves, canopies darker inside. Oak and bush
+  canopies are fields of leafy clumps under the foliage tile (drawn leaves with midribs). Rocks are the
   exception: each boulder is painted on its own (`rock_<n>_color.jpg` and `_normal.jpg`:
   mottled stone, lichen, moss, rain streaks, damp at the ground), from the stone fields the
   golem uses.
