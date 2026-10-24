@@ -88,7 +88,8 @@ function writeHash(s) {
   if (!Object.values(s.pieces).some(Boolean)) p.set('p.torso_under', 'none');
   for (const [id, v] of Object.entries(s.variants)) if (v && s.pieces && Object.values(s.pieces).includes(id)) p.set(`v.${id}`, v);
   for (const [id, pair] of Object.entries(s.dyes)) {
-    if (pair?.some(Boolean) && Object.values(s.pieces).includes(id)) p.set(`d.${id}`, pair.map((x) => x || '').join(','));
+    const worn = Object.values(s.pieces).includes(id) || Object.values(s.gear).includes(id);
+    if (pair?.some(Boolean) && worn) p.set(`d.${id}`, pair.map((x) => x || '').join(','));
   }
   for (const [slot, id] of Object.entries(s.gear)) if (id) p.set(`g.${slot}`, id);
   if (!s.drawn) p.set('drawn', '0');

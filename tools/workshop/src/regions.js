@@ -164,10 +164,9 @@ export function prepareMesh(obj) {
     dark: { value: new THREE.Color(0, 0, 0) },
     markOn: { value: 0 },
   };
-  if (hasRegion) {
-    for (const m of cloned) patchMaterial(m, hidden, dye);
-    obj.customDepthMaterial = depthMaterial(hidden);
-  }
+  // Every skinned mesh takes the patch (for dyes); only meshes with regions ever hide any.
+  for (const m of cloned) patchMaterial(m, hidden, dye);
+  if (hasRegion) obj.customDepthMaterial = depthMaterial(hidden);
   return { mesh: obj, hidden, dye, hasRegion };
 }
 

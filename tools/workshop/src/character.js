@@ -326,10 +326,21 @@ export class Character {
     this.applyDyes(id);
   }
 
+  /** The record a dye targets: a piece, or a skinned back item (capes). */
+  dyeTarget(id) {
+    const piece = this.pieces.get(id);
+    if (piece) return { def: piece.def, entries: piece.entries, rec: piece };
+    for (const rec of this.gear.values()) {
+      if (rec.def?.id === id && rec.skinned) return { def: rec.def, entries: rec.skinned.entries, rec };
+    }
+    return null;
+  }
+
   applyDyes(id) {
-    const rec = this.pieces.get(id);
-    const def = rec?.def;
+    const target = this.dyeTarget(id);
+    const def = target?.def;
     if (!def?.dye) return;
+    const rec = target.rec;
     if (!rec.dyeMask) {
       const tex = textureLoader.load(ASSETS + def.dye);
       tex.flipY = false; // glTF convention.
@@ -339,7 +350,7 @@ export class Character {
     const palette = new Map((this.cat.dyes || []).map((d) => [d.id, d.linear]));
     const refs = Object.fromEntries((def.dye_channels || []).map((c) => [c.channel, c.reference]));
     const [main, trim] = this.dyes[id] || [null, null];
-    for (const e of rec.entries) {
+    for (const e of target.entries) {
       if (!e.dye) continue;
       e.dye.map.value = rec.dyeMask;
       const set = (colour, ref, key, refKey, on) => {
@@ -477,6 +488,7 @@ export class Character {
         if (def.springs) rec.springs = this.makeSprings(def.springs);
       }
       this.gear.set(slot, rec);
+      if (def.dye) this.applyDyes(def.id);
     }
     this.placeGear();
     this.applyTints();

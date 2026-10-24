@@ -703,7 +703,28 @@
     "drag": 0.25,
     "gravity": 9.81,
     "radius": 0.035
-   }
+   },
+   "dye": "gear/textures/cape_traveller_dye.png",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.2,
+      0.018,
+      0.016
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.36,
+      0.24,
+      0.08
+     ]
+    }
+   ]
   },
   {
    "id": "cape.ranger",
@@ -806,7 +827,28 @@
     "drag": 0.25,
     "gravity": 9.81,
     "radius": 0.035
-   }
+   },
+   "dye": "gear/textures/cape_ranger_dye.png",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.03,
+      0.075,
+      0.032
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.14,
+      0.065,
+      0.03
+     ]
+    }
+   ]
   },
   {
    "id": "backpack.travel",

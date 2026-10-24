@@ -323,6 +323,16 @@ def backpack(skel, env, style):
                  Vector((centre.x, centre.y + D / 2 + 0.012, top_z - 0.15))]
     flap_n = [(p - centre).normalized() for p in flap_path]
     parts.append(sh.finish(sh.obj("pack_flap", sh.ribbon(flap_path, flap_n, W * 0.96, 0.007), style["leather"]), bevel=0.002, angle=30))
+    # Two straps over the flap, down to buckles on the front.
+    for sx in (-W * 0.26, W * 0.26):
+        path = [p + Vector((sx, 0, 0)) + n * 0.006 for p, n in zip(flap_path[1:], flap_n[1:])]
+        path.append(path[-1] + Vector((0, 0.004, -0.12)))
+        normals = flap_n[1:] + [flap_n[-1]]
+        parts.append(sh.obj("pack_flap_strap", sh.ribbon(path, normals, 0.03, 0.005), style["leather"]))
+        b = path[-2] + Vector((0, 0.008, -0.02))
+        frame = sh.sweep([b + Vector((-0.02, 0, 0.016)), b + Vector((0.02, 0, 0.016)), b + Vector((0.02, 0, -0.016)),
+                          b + Vector((-0.02, 0, -0.016)), b + Vector((-0.02, 0, 0.016))], lambda t: 0.0035, n=6, up=Vector((0, 1, 0)))
+        parts.append(sh.obj("pack_buckle", frame, "brass"))
     # Front pocket on the outside face.
     pocket = []
     for k in range(5):

@@ -288,6 +288,13 @@ same kit the Swift village used, remade at the characters' quality.
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM
   and roughness maps are linear. Normal maps follow the glTF convention.
+- **Armour and back items:** plate, capes' collars and brooches, and the travel pack share
+  worked tiling surfaces (`aldermoor_art/metal.py`): hammered steel, brass, smooth leather and
+  woven wool, each a colour map, an ORM map (occlusion R, roughness G, metalness B) and a normal
+  map in `humanoid/textures/kit_*`, box-projected in metres. Occlusion from the body, the clothes
+  underneath and the kit itself is in `COLOR_0`, which multiplies the base colour.
+- **Capes** are woven wool with a trim round the hem, sides and collar, and are dyeable like
+  garments: the gear item has `dye` and `dye_channels`, and `Look::dyes` may name back items.
 - **Gear surfaces:** each rigid item has one material for most of it, baked by
   `aldermoor_art/surface.py` from procedural wood grain, leather, brushed metal, edge wear,
   grime and chipped paint: a colour texture and an ORM texture (occlusion R, roughness G,
@@ -388,7 +395,6 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 - beasts rebuilt to the characters' standard (the wolves are the first draft), then boars,
   bears and deer, and hostile humanoid outfits;
 - terrain materials and the dungeon's kit;
-- the same surface pass for plate armour;
 - levels of detail for beasts.
 
 ## Milestones

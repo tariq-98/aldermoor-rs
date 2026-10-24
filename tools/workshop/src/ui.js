@@ -225,6 +225,15 @@ export function renderPanel(root, app) {
       const s = select(options, state.gear[slot] || '', (v) => actions.setGear(slot, v));
       if (disabled) s.disabled = true;
       kit.body.append(row(slotLabel(slot), s));
+      // Back items with a dye mask (capes) take dyes like clothing.
+      const item = items.find((g) => g.id === state.gear[slot]);
+      if (item?.dye && humanoid.dyes?.length) {
+        (item.dye_channels || []).forEach((ch, k) => {
+          const list = [{ id: '', label: 'As painted', linear: ch.reference }, ...humanoid.dyes];
+          const name = ch.name.replace(/^\w/, (c) => c.toUpperCase());
+          kit.body.append(row(`  ${name} dye`, swatches(list, state.dyes[item.id]?.[k] || '', (v) => actions.setDye(item.id, k, v || null))));
+        });
+      }
     }
     kit.body.append(el('div', { class: 'row' }, toggle('Weapons drawn', state.drawn, actions.setDrawn)));
     if (character?.attacks?.().length) {

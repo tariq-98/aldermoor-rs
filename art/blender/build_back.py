@@ -14,7 +14,7 @@ import bmesh
 import bpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import cloth, export, regions as rg, review, scene as sc  # noqa: E402
+from aldermoor_art import cloth, export, garments as gm, metal, regions as rg, review, scene as sc, shapes as sh  # noqa: E402
 
 OUT = sc.OUT / "gear"
 REVIEW = sc.ROOT / "art" / "out" / "review" / "back"
@@ -22,9 +22,28 @@ ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 HUMANOID = json.loads((sc.OUT / "catalog" / "humanoid.json").read_text())
 
 CAPES = [
-    dict(id="cape.traveller", label="Traveller's cape", cloth="wool_red", trim="wool_red", metal="brass", length=0.42),
+    dict(id="cape.traveller", label="Traveller's cape", cloth="wool_red", trim="wool_red_trim", metal="brass", length=0.42),
     dict(id="cape.ranger", label="Ranger's cloak", cloth="wool_green", trim="leather", metal="iron", length=0.30),
 ]
+TEX = OUT / "textures"
+
+
+def cape_material(style):
+    """Woven wool with a trim round the hem, sides and collar, and a dye mask: the same for every
+    body type, since every cape shares one grid of UVs (u across, v from hem to collar)."""
+    sid = style["id"].replace(".", "_")
+    base = list(sh.PALETTE[style["cloth"]][0])
+    trim = list(sh.PALETTE[style["trim"]][0])
+    path = TEX / sid
+    if not path.with_suffix(".jpg").exists():
+        TEX.mkdir(parents=True, exist_ok=True)
+        gm.cloth_texture(path, 1024, base, trim, [(0.0, 0.03), (0.975, 1.0)], weave=0.1, seed=7, ubands=[(0.0, 0.018), (0.982, 1.0)])
+    img = bpy.data.images.load(str(path.with_suffix(".jpg")), check_existing=True)
+    m = gm.cloth_material(f"cloth.{style['id']}", img)
+    info = {"dye": str(Path(f"{path}_dye.png").relative_to(sc.OUT)),
+            "dye_channels": [{"channel": "r", "name": "cloth", "reference": base},
+                             {"channel": "g", "name": "trim", "reference": trim}]}
+    return m, info
 PACKS = [
     dict(id="backpack.travel", label="Travel pack", cloth="leather_tan", leather="leather", roll="wool_blue"),
 ]
@@ -55,6 +74,10 @@ def envelope(body):
     return env, trunk
 
 
+def clothes_of():
+    return [o for o in bpy.data.objects if o.type == "MESH" and o.get("slot") in ("torso_under", "legs_under")]
+
+
 def merge_catalog(entries):
     path = sc.OUT / "catalog" / "gear.json"
     cat = json.loads(path.read_text()) if path.exists() else {"version": 1, "items": []}
@@ -72,11 +95,16 @@ def main():
             skel, body = open_body(bt)
             env, trunk = envelope(body)
             parts, chains = cloth.cape(skel, env, style)
+            mat, dye = cape_material(style)
+            parts[0].data.materials.clear()
+            parts[0].data.materials.append(mat)
+            metal.work(parts, [trunk] + clothes_of(), keep_uvs=[parts[0]])
             path = export.piece(OUT / bt / f"{style['id']}.gltf", [skel] + parts)
             e = entries.setdefault(style["id"], {
                 "id": style["id"], "label": style["label"], "family": "cape", "slot": "back", "back_kind": "cape",
                 "layer": 2.8, "files": {}, "hides": {},
                 "springs": {"chains": chains, "stiffness": 0.35, "drag": 0.25, "gravity": 9.81, "radius": 0.035},
+                **dye,
             })
             e["files"][bt] = str(path.relative_to(sc.OUT))
             e["hides"][bt] = {"body": []}
@@ -86,6 +114,7 @@ def main():
             skel, body = open_body(bt)
             env, trunk = envelope(body)
             parts = cloth.backpack(skel, env, style)
+            metal.work(parts, [trunk] + clothes_of())
             path = export.piece(OUT / bt / f"{style['id']}.gltf", [skel] + parts)
             e = entries.setdefault(style["id"], {
                 "id": style["id"], "label": style["label"], "family": "backpack", "slot": "back", "back_kind": "backpack",

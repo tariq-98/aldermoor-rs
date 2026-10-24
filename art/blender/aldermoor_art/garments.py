@@ -162,11 +162,11 @@ def skirt_weights(h, p, centre_z):
 
 # --- Cloth textures --------------------------------------------------------------------------
 
-def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=1):
-    """Paints base cloth with trim bands at given v ranges, plus a soft weave.
+def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=1, ubands=()):
+    """Paints base cloth with trim bands at given v ranges (and u ranges), plus a soft weave.
 
     Writes `<path>.jpg` (colour) and `<path>_dye.png` (R = main cloth, G = trim). Colours are
-    linear RGB; `bands` are (v0, v1) pairs in 0..1.
+    linear RGB; `bands` and `ubands` are (lo, hi) pairs in 0..1.
     """
     rng = np.random.default_rng(seed)
     v = np.linspace(0, 1, size)[:, None] * np.ones((1, size))
@@ -174,11 +174,18 @@ def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=
     trim_mask = np.zeros((size, size))
     for v0, v1 in bands:
         trim_mask = np.maximum(trim_mask, ((v >= v0) & (v <= v1)).astype(float))
+    for u0, u1 in ubands:
+        trim_mask = np.maximum(trim_mask, ((u >= u0) & (u <= u1)).astype(float))
     # A thin dark line along each band's edges, like stitching.
     edge = np.zeros((size, size))
     for v0, v1 in bands:
         for e in (v0, v1):
-            edge = np.maximum(edge, np.exp(-((v - e) * size / 2.5) ** 2))
+            if 0 < e < 1:
+                edge = np.maximum(edge, np.exp(-((v - e) * size / 2.5) ** 2))
+    for u0, u1 in ubands:
+        for e in (u0, u1):
+            if 0 < e < 1:
+                edge = np.maximum(edge, np.exp(-((u - e) * size / 2.5) ** 2))
     noise = rng.normal(0, 1, (size // 8, size // 8))
     noise = np.kron(noise, np.ones((8, 8)))[:size, :size]
     threads = 0.5 + 0.5 * np.sin(u * size * 0.9) * np.sin(v * size * 0.9)

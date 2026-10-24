@@ -76,9 +76,9 @@ catalogue (docs/ASSETS.md):
   (hair and beard) or the body's default (tone and hair colour).
 - `pieces`: clothing and armour ids. Their layers decide what covers what.
 - `gear`: (slot, item id) pairs from `assets/catalog/gear.json`.
-- `dyes`: (piece id, main dye, trim dye) for dyed pieces, dye ids from the catalogue's `dyes`
-  (`None` keeps that channel's painted colour); `variants`: (piece id, colourway texture) for
-  pieces in another colourway. A piece has one or the other.
+- `dyes`: (piece or back item id, main dye, trim dye) for dyed pieces and capes, dye ids from
+  the catalogue's `dyes` (`None` keeps that channel's painted colour); `variants`: (piece id,
+  colourway texture) for pieces in another colourway. A piece has one or the other.
 - `drawn`: weapons on their `held` sockets (true), or on their `stowed` sockets, chosen by
   the back item's `back_kind`. When it changes, play the main-hand item's `clips.ready` or
   `clips.stow` over the legs; the item changes hands at that clip's `grab` or `stow` event

@@ -49,9 +49,11 @@ fn every_look_names_real_art() {
             assert!(cat.humanoid.skin_tones.iter().any(|x| &x.id == t), "no tone {t}");
         }
         for (piece, main, trim) in &look.dyes {
-            assert!(look.pieces.contains(piece), "a dye for {piece}, which isn't worn");
-            let def = cat.humanoid.pieces.iter().find(|x| &x.id == piece).unwrap();
-            assert!(def.dye.is_some(), "{piece} can't be dyed");
+            let worn_item = look.gear.iter().any(|(_, id)| id == piece);
+            assert!(look.pieces.contains(piece) || worn_item, "a dye for {piece}, which isn't worn");
+            let dyeable = cat.humanoid.pieces.iter().find(|x| &x.id == piece).map(|d| d.dye.is_some())
+                .or_else(|| cat.gear.as_ref()?.items.iter().find(|i| &i.id == piece).map(|i| i.dye.is_some()));
+            assert_eq!(dyeable, Some(true), "{piece} can't be dyed");
             for d in [main, trim].into_iter().flatten() {
                 assert!(cat.humanoid.dyes.iter().any(|x| &x.id == d), "no dye {d}");
             }

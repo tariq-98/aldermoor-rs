@@ -71,7 +71,8 @@ pub struct Look {
     pub gear: Vec<(String, String)>,
     /// Weapons in hand (true) or put away on their stowed sockets.
     pub drawn: bool,
-    /// Dyed pieces: (piece id, main cloth dye, trim dye), ids from the catalogue's `dyes`.
+    /// Dyed pieces and back items: (piece or item id, main cloth dye, trim dye), dye ids from
+    /// the catalogue's `dyes`.
     /// `None` keeps the colour that channel was painted (docs/ASSETS.md, "Tints").
     #[serde(default)]
     pub dyes: Vec<(String, Option<String>, Option<String>)>,

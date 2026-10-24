@@ -248,6 +248,9 @@ pub struct Item {
     /// Bows: the string's rest point and its pull at full draw, for the `draw` morph.
     #[serde(default)]
     pub string: Option<BowString>,
+    /// A dye mask (R main cloth, G trim) for dyeable back items (capes), as for pieces.
+    #[serde(default)]
+    pub dye: Option<String>,
 }
 
 /// A socket-like frame on an item: a hand's grip point, its up (the thumb side's direction)
@@ -602,6 +605,11 @@ impl Catalog {
                 for (bt, rel) in &item.files {
                     check_skinned("item", &item.id, bt, rel, false, &mut problem);
                     check_lods(&format!("item {} ({bt})", item.id), rel, &mut problem);
+                }
+                if let Some(dye) = &item.dye {
+                    if !self.root.join(dye).exists() {
+                        problem(format!("item {}: missing dye mask {dye}", item.id));
+                    }
                 }
                 for s in item.held.iter().chain(item.stowed.values()) {
                     if !human_sockets.contains(s) {

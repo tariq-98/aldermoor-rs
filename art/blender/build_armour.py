@@ -17,7 +17,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import armour as ar, export, fit, regions as rg, review, scene as sc, shapes as sh  # noqa: E402
+from aldermoor_art import armour as ar, export, fit, metal, regions as rg, review, scene as sc, shapes as sh  # noqa: E402
 
 OUT = sc.OUT / "humanoid"
 REVIEW = sc.ROOT / "art" / "out" / "review" / "armour"
@@ -449,12 +449,16 @@ def build(bt, cat):
         if o.type == "MESH" and o.get("piece"):
             lower.setdefault(o["piece"], []).append(o)
     built = {}
+    clothes = [o for ms in lower.values() for o in ms]
     for pid, label, slot, layer, fn in PIECES:
         parts = fn(skel, h)
         for p in parts:
             if p.parent is None:
                 sc.bind(p, skel)
             rg.tag(p, skel)
+        # Hammered steel, brass and leather instead of flat colours, with occlusion from the
+        # body, the clothes underneath and the plate itself.
+        metal.work(parts, [body] + clothes)
         built[pid] = parts
         cov = fit.coverage(body, body_regions, parts, reach_out=0.08)
         hides = {"body": sorted(set(fit.hides(cov)) | set(DECLARED.get(pid, [])), key=rg.INDEX.get)}
