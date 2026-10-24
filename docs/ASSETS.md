@@ -443,6 +443,9 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - both levels of detail beside every file, on the same skeleton;
   - `_REGION` on every skinned piece;
   - that every dressable body type has a fit for every piece;
+  - that no piece costs more than four draws beyond its materials: parts that share a
+    material are joined into one mesh at export (`export.joined`), so the renderer draws plate
+    a material at a time, not a plate at a time;
   - that the ground, river and sky files exist, the terrain's layers match in size (they stack
     into texture arrays), the weights are square, the sky is twice as wide as tall, and the
     light's numbers make sense;

@@ -477,6 +477,8 @@ def build(bt, cat):
             pair = sorted(set(pair), key=rg.INDEX.get)
             if pair:
                 hides[qid] = pair
+        # One mesh for the piece: a draw per material, not one per plate.
+        parts = export.joined(parts, pid)
         path = OUT / bt / "armour" / f"{pid}.gltf"
         export.piece(path, [skel] + parts)
         entries.append({"id": pid, "label": label, "slot": slot, "layer": layer, "file": str(path.relative_to(sc.OUT)),

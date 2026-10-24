@@ -376,6 +376,10 @@ pub struct Catalog {
     pub environment: Option<EnvironmentCatalog>,
 }
 
+/// A skinned piece may cost this many more draws than it has materials. Parts sharing a
+/// material belong in one mesh: plate exported as one mesh per plate cost 25 draws a cuirass.
+pub const SPARE_DRAWS: usize = 4;
+
 /// Something a catalogue entry promises that the files don't deliver.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem(pub String);
@@ -547,6 +551,10 @@ impl Catalog {
                     }
                     if needs_regions && !g.all_skinned_have("_REGION") {
                         problem(format!("{kind} {id} ({bt}): a skinned primitive lacks _REGION"));
+                    }
+                    let (draws, materials) = (g.draws(), g.materials());
+                    if draws > materials + SPARE_DRAWS {
+                        problem(format!("{kind} {id} ({bt}): {draws} draws for {materials} materials: join its meshes (export.joined)"));
                     }
                 }
             }

@@ -132,6 +132,22 @@ def _with_lods(path, objects, write):
 
 # --- Exports ----------------------------------------------------------------------------------
 
+def joined(objects, name):
+    """Joins a piece's meshes into one, keeping each face's material, so glTF writes one
+    primitive (one draw) per material instead of one per part. Every part must already be
+    skinned to the same armature (scene.bind); other objects pass through."""
+    objects = scene.alive(objects)
+    meshes = [o for o in objects if o.type == "MESH"]
+    others = [o for o in objects if o.type != "MESH"]
+    if len(meshes) < 2:
+        return objects
+    _select(meshes)
+    bpy.ops.object.join()  # Every mesh but the active one is gone after this.
+    ob = bpy.context.view_layer.objects.active
+    ob.name = name
+    return [ob] + others
+
+
 def _piece(path, objects, sockets):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

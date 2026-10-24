@@ -82,6 +82,28 @@ impl Gltf {
         out
     }
 
+    /// How many draws the file costs the renderer: a primitive of every mesh a node uses.
+    pub fn draws(&self) -> usize {
+        let meshes = self.array("meshes");
+        self.array("nodes")
+            .iter()
+            .filter_map(|n| n.get("mesh").and_then(Value::as_u64))
+            .filter_map(|i| meshes.get(i as usize))
+            .map(|m| m.get("primitives").and_then(Value::as_array).map_or(0, Vec::len))
+            .sum()
+    }
+
+    /// How many different materials its primitives use.
+    pub fn materials(&self) -> usize {
+        let mut seen = BTreeSet::new();
+        for mesh in self.array("meshes") {
+            for p in mesh.get("primitives").and_then(Value::as_array).into_iter().flatten() {
+                seen.insert(p.get("material").and_then(Value::as_u64));
+            }
+        }
+        seen.len()
+    }
+
     /// True when every primitive of every mesh carries the attribute.
     pub fn all_meshes_have(&self, attribute: &str) -> bool {
         self.array("meshes").iter().all(|m| {
