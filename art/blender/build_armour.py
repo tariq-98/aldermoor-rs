@@ -329,9 +329,12 @@ def legs(skel, h, side):
 
 def helmet(skel, h, style):
     body = bpy.data.objects["body"]
-    layer = ar.Layer([body], ["scalp", "ears", "face"])
+    # Fitted to the skull, not the ears: helmets hide the ears, and foxfolk's stand tall.
+    layer = ar.Layer([body], ["scalp", "face"])
     head = h["Head"]
-    top_z = max((body.matrix_world @ v.co).z for v in body.data.vertices)
+    regions = rg.read(body)
+    skull = {i for p, r in zip(body.data.polygons, regions) if r in (rg.INDEX["scalp"], rg.INDEX["face"]) for i in p.vertices}
+    top_z = max((body.matrix_world @ body.data.vertices[i].co).z for i in skull)
     c = head + Vector((0, 0.005, (top_z - head.z) * 0.45))
     cols = 48
     rows = []
@@ -500,9 +503,18 @@ def review_set(bt):
 
 def main():
     cat = json.loads(CAT_PATH.read_text())
+    # `--only=foxfolk_male,foxfolk_female` refits just those body types.
+    only = next((a.split("=", 1)[1].split(",") for a in ARGS if a.startswith("--only=")), None)
     merged = {}
+    if only:
+        for p in cat["pieces"]:
+            if p.get("source") == "armour":
+                merged[p["id"]] = {k: v for k, v in p.items() if k not in ("files", "hides", "coverage")} | {
+                    "files": {k: v for k, v in p["files"].items() if k not in only},
+                    "hides": {k: v for k, v in p["hides"].items() if k not in only},
+                    "coverage": {k: v for k, v in p.get("coverage", {}).items() if k not in only}}
     for bt, info in cat["body_types"].items():
-        if info.get("dress") is False:
+        if info.get("dress") is False or (only and bt not in only):
             continue  # Golems and other creatures that wear nothing.
         ents = build(bt, cat)
         for e in ents:

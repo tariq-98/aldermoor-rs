@@ -1441,53 +1441,53 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":206,
+			"count":207,
 			"type":"SCALAR"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":206,
+			"count":207,
 			"max":[
-				0.3980829417705536,
-				1.5449529886245728,
-				0.36707377433776855
+				0.3364245593547821,
+				1.5278464555740356,
+				0.30541539192199707
 			],
 			"min":[
-				-0.3980829417705536,
+				-0.3364245593547821,
 				1.3042895793914795,
-				-0.18334892392158508
+				-0.15975327789783478
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":206,
+			"count":207,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":206,
+			"count":207,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":4,
 			"componentType":5121,
-			"count":206,
+			"count":207,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":5,
 			"componentType":5126,
-			"count":206,
+			"count":207,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":6,
 			"componentType":5123,
-			"count":588,
+			"count":594,
 			"type":"SCALAR"
 		},
 		{
@@ -1500,50 +1500,50 @@
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":824,
+			"byteLength":828,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2472,
-			"byteOffset":824,
+			"byteLength":2484,
+			"byteOffset":828,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2472,
-			"byteOffset":3296,
+			"byteLength":2484,
+			"byteOffset":3312,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1648,
-			"byteOffset":5768,
+			"byteLength":1656,
+			"byteOffset":5796,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":824,
-			"byteOffset":7416,
+			"byteLength":828,
+			"byteOffset":7452,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3296,
-			"byteOffset":8240,
+			"byteLength":3312,
+			"byteOffset":8280,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1176,
-			"byteOffset":11536,
+			"byteLength":1188,
+			"byteOffset":11592,
 			"target":34963
 		},
 		{
 			"buffer":0,
 			"byteLength":4160,
-			"byteOffset":12712
+			"byteOffset":12780
 		}
 	],
 	"samplers":[
@@ -1554,7 +1554,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":16872,
+			"byteLength":16940,
 			"uri":"hat.wizard.lod2.bin"
 		}
 	]

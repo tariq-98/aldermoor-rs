@@ -49,16 +49,28 @@ bodies. Every outfit and hairstyle is offered on both; nothing is gendered in th
 **Races** are the human frames rescaled bone by bone, so every piece of clothing follows. Elves,
 dwarves and goblins add pointed ears, a bigger nose or a dwarven beard. **Foxfolk** have a
 muzzle (the same shaping moves beards, brows and hoods), fox ears on top of the head, a tail on
-six bones (`tail_01` to `tail_06`, rooted on the pelvis) and fur instead of skin:
-- **Fur:** the body's material is one tintable `skin.*` material whose detail map is fur. Its
-  `markings` mask (R the light fur: muzzle, throat, bib, inner ears, tail tip; G the dark: nose,
-  ear backs, socks and gloves) shares the body's UVs. Fur tones have `light` and `dark` colours
-  as well as `linear`. With `c` = 2 × linear, `l` = 2 × light and `d` = 2 × dark, the base colour
-  is `detail × mix(mix(c, l, R), d, G)`.
+six bones (`tail_01` to `tail_06`, rooted on the pelvis), amber eyes with slit pupils, and fur
+instead of skin:
+- **Fur:** the body's material is one tintable `skin.*` material: a fur detail map whose strands
+  and clumps run along the fur's growth (back from the nose, down the body and limbs, along the
+  tail), a matching normal map, and baked occlusion. Its `markings` mask (R the light fur:
+  muzzle, throat, bib, inner ears, tail tip; G the dark: nose, lips, eye rims, ear backs, socks
+  and gloves) shares the body's UVs. Fur tones have `light` and `dark` colours as well as
+  `linear`. With `c` = 2 × linear, `l` = 2 × light and `d` = 2 × dark, the base colour is
+  `detail × mix(mix(c, l, R), d, G)`. Apply it to **every** `skin.*` material on a fur body type,
+  pieces included: outfits that bring their own bare arms (the Peasant and Ranger tops) wear the
+  body's fur on the body's UVs.
+- **Details** are extra meshes in the body file, skinned to the same skeleton: `fur` (tufts: the
+  cheek ruff, throat, inner ears, chest and tail), `whiskers`, `claws` (outfits with bare hands
+  carry their own) and `nose` (a glossy pad, its own material). Tufts, whiskers and claws use
+  the fur material with UVs into the body's texture, so they take the coat's colours (whiskers
+  and claws the markings' dark) and hide with the body's regions. Whiskers exist only at full
+  detail; tufts, claws and the nose go down to LOD 1.
 - **The tail** swings on springs: the body type's `springs` (chains, stiffness, drag, gravity,
   radius) work like a cape's, and the body's `colliders` include capsules on the tail bones, so
   capes drape over it. A chain never collides with capsules on its own bones.
-- **Headwear** hides the fox ears (every head piece hides `ears` on foxfolk).
+- **Headwear** hides the fox ears (every head piece hides `ears` on foxfolk). Helmets and hats
+  are fitted to the skull, not the ears, on every body.
 
 **Body regions.** Every skinned piece carries a per-vertex float attribute `_REGION` (glTF
 `_REGION`; three.js `_region`), assigned from the skeleton:

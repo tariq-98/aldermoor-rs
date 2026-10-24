@@ -5682,34 +5682,34 @@
      "neck": 0.262,
      "scalp": 0.865,
      "face": 0.585,
-     "ears": 0.79
+     "ears": 0.789
     },
     "dwarf_female": {
      "neck": 0.054,
      "scalp": 0.864,
-     "ears": 0.87,
+     "ears": 0.867,
      "face": 0.614
     },
     "foxfolk_male": {
-     "scalp": 0.602,
-     "face": 0.357,
-     "ears": 0.558
+     "scalp": 0.58,
+     "face": 0.451,
+     "ears": 0.364
     },
     "foxfolk_female": {
-     "scalp": 0.614,
-     "face": 0.367,
-     "ears": 0.561
+     "scalp": 0.601,
+     "face": 0.465,
+     "ears": 0.393
     },
     "goblin_male": {
-     "neck": 0.064,
-     "scalp": 0.561,
-     "face": 0.544,
-     "ears": 0.729
+     "neck": 0.07,
+     "scalp": 0.597,
+     "face": 0.57,
+     "ears": 0.572
     },
     "goblin_female": {
-     "scalp": 0.727,
-     "ears": 0.848,
-     "face": 0.593
+     "scalp": 0.736,
+     "ears": 0.642,
+     "face": 0.607
     },
     "skeleton": {
      "face": 0.266,
@@ -5839,44 +5839,44 @@
     "elf_female": {
      "scalp": 0.809,
      "ears": 0.928,
-     "face": 0.657
+     "face": 0.656
     },
     "dwarf_male": {
      "chest": 0.081,
      "neck": 0.513,
      "scalp": 0.865,
      "face": 0.618,
-     "ears": 0.79
+     "ears": 0.789
     },
     "dwarf_female": {
      "neck": 0.237,
      "scalp": 0.869,
-     "ears": 0.87,
+     "ears": 0.867,
      "face": 0.643
     },
     "foxfolk_male": {
-     "scalp": 0.602,
-     "face": 0.477,
-     "ears": 0.569
+     "scalp": 0.58,
+     "face": 0.51,
+     "ears": 0.387
     },
     "foxfolk_female": {
-     "scalp": 0.614,
-     "face": 0.476,
-     "ears": 0.574
+     "scalp": 0.601,
+     "face": 0.539,
+     "ears": 0.3
     },
     "goblin_male": {
-     "neck": 0.064,
-     "scalp": 0.561,
-     "face": 0.571,
-     "ears": 0.729
+     "neck": 0.07,
+     "scalp": 0.597,
+     "face": 0.6,
+     "ears": 0.572
     },
     "goblin_female": {
-     "scalp": 0.727,
-     "ears": 0.848,
-     "face": 0.607
+     "scalp": 0.736,
+     "ears": 0.642,
+     "face": 0.628
     },
     "skeleton": {
-     "face": 0.275,
+     "face": 0.276,
      "scalp": 0.421,
      "ears": 0.995
     },

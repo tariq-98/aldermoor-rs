@@ -104,7 +104,7 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":10590,
+			"count":10450,
 			"max":[
 				5.800000190734863,
 				5.800000190734863,
@@ -120,19 +120,19 @@
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":10590,
+			"count":10450,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":10590,
+			"count":10450,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":10590,
+			"count":10450,
 			"type":"VEC3"
 		},
 		{
@@ -185,62 +185,62 @@
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":127080,
+			"byteLength":125400,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":127080,
-			"byteOffset":127080,
+			"byteLength":125400,
+			"byteOffset":125400,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":84720,
-			"byteOffset":254160,
+			"byteLength":83600,
+			"byteOffset":250800,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":127080,
-			"byteOffset":338880,
+			"byteLength":125400,
+			"byteOffset":334400,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":31584,
-			"byteOffset":465960,
+			"byteOffset":459800,
 			"target":34963
 		},
 		{
 			"buffer":0,
 			"byteLength":192,
-			"byteOffset":497544,
+			"byteOffset":491384,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":192,
-			"byteOffset":497736,
+			"byteOffset":491576,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":128,
-			"byteOffset":497928,
+			"byteOffset":491768,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":192,
-			"byteOffset":498056,
+			"byteOffset":491896,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":48,
-			"byteOffset":498248,
+			"byteOffset":492088,
 			"target":34963
 		}
 	],
@@ -252,7 +252,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":498296,
+			"byteLength":492136,
 			"uri":"windmill.sails.bin"
 		}
 	]

@@ -186,7 +186,10 @@ def build_garment(spec, skel, body):
 def build_hat(spec, skel, body):
     h = gm.heads(skel)
     head = h["Head"]
-    pts = [body.matrix_world @ v.co for v in body.data.vertices if (body.matrix_world @ v.co).z > head.z]
+    # The skull, not the ears: hats hide the ears, and foxfolk's stand tall.
+    regions = rg.read(body)
+    skull = {i for p, r in zip(body.data.polygons, regions) if r in (rg.INDEX["scalp"], rg.INDEX["face"]) for i in p.vertices}
+    pts = [body.matrix_world @ body.data.vertices[i].co for i in skull if (body.matrix_world @ body.data.vertices[i].co).z > head.z]
     top = max(p.z for p in pts) if pts else head.z + 0.22
     c = Vector((head.x, head.y + 0.005, top - 0.075))
     ring_r = max(((p - c) * Vector((1, 1, 0))).length for p in pts if abs(p.z - c.z) < 0.01) + 0.012 if pts else 0.1

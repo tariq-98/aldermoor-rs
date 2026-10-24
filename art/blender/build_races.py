@@ -105,6 +105,7 @@ def build(race_id, race, frame, cat):
     if race.get("nose"):
         rc.bigger_nose(body, regions, race["nose"], head)
     extra = {}
+    body_parts = []
     if race.get("fox"):
         face = fox.Face(skel, body, eyes)
         fox.muzzle(face, [body] + outfits + [m for ms in hair.values() for m in ms])
@@ -116,6 +117,9 @@ def build(race_id, race, frame, cat):
         fox.join_parts(body, parts)
         sc.bind(body, skel)
         _, marks = fox.paint(body, face, skel, OUT / "textures", f"fox_{frame}")
+        body_parts = fox.details(face, skel, body)
+        outfits += fox.dress(outfits, body, skel)
+        fox.fox_eyes(eyes, OUT / "textures")
         extra["markings"] = f"humanoid/textures/{marks}"
         extra["springs"] = dict(FOX_TAIL_SPRINGS, chains=[fox.TAIL])
     extra_hair = []
@@ -129,7 +133,7 @@ def build(race_id, race, frame, cat):
         hair["beard.dwarven"] = [beard]
         extra_hair.append("beard.dwarven")
     # Export: the body, every outfit piece and every hairstyle.
-    files = {"body": rel(export.piece(OUT / bt / "body.gltf", [skel, body, eyes], sockets=True))}
+    files = {"body": rel(export.piece(OUT / bt / "body.gltf", [skel, body, eyes] + body_parts, sockets=True))}
     by_piece = {}
     for o in outfits:
         by_piece.setdefault(o["piece"], []).append(o)

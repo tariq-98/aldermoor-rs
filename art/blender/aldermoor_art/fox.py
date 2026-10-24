@@ -1,16 +1,23 @@
-"""Foxfolk: a muzzle, fox ears and a tail on the race-scaled human body, with fur painted in.
+"""Foxfolk: a muzzle, fox ears and a tail on the race-scaled human body, with fur, whiskers, a
+nose, claws and fox eyes.
 
 Everything here works on the rest pose in world space, after races.deform has scaled the body:
 - `muzzle` is a spatial field: it pushes the lower face forward into a snout and narrows it. The
   same field moves beards, brows and hoods, so they keep their fit.
-- The human ears fold into the skull (and become scalp); fox ears stand on top of the head.
+- The human ears are replaced by skull; fox ears stand on top of the head.
 - The tail hangs from six new bones rooted on the pelvis, for spring physics.
-- `paint` rasterises every triangle in UV space and writes a tone-neutral fur detail map (the
-  skin tint colours it, as for every body) and a markings mask: R for the light fur, G the dark.
-  The body's own UVs shrink to make room for the ears and tail.
+- `paint` writes the fur (aldermoor_art/fur.py): a tone-neutral detail map with strands and
+  clumps running along the fur's flow (the skin tint colours it, as for every body), a matching
+  normal map, and a markings mask (R the light fur, G the dark, including the lips and eye rims).
+- `details` grows the rest: tufts (cheek ruff, throat, inner ears, chest, tail), whiskers, the
+  nose and claws. Tufts, whiskers and claws use the fur material with UVs into the body's own
+  texture, so they take the coat's colours, the markings' dark for whiskers and claws, and hide
+  with the body's regions.
+- `dress` gives outfits that bring their own bare arms the same fur and claws.
 """
 
 import math
+import random
 from pathlib import Path
 
 import bmesh
@@ -19,7 +26,7 @@ import numpy as np
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
-from . import materials as mt, regions as rg, scene as sc
+from . import fur, materials as mt, regions as rg, scene as sc
 
 TAIL = [f"tail_{i:02d}" for i in range(1, 7)]
 UV_SHRINK = 0.84  # The body's islands move into [0, 0.84]^2; ears and tail take the strips.
@@ -62,6 +69,35 @@ class Face:
         self.chin = min(middle, key=lambda p: p.z).copy()
         self.top_z = max(p.z for p in scalp + face)
         self.half_width = max(abs(p.x) for p in scalp)
+        self.mouth = []
+        self.eye_rims = []
+        self.ears = {}
+
+    def find_openings(self, body):
+        """The mouth slit and the eye openings: the open edges of the face (after the muzzle)."""
+        me = body.data
+        mw = body.matrix_world
+        regions = rg.read(body)
+        face = rg.INDEX["face"]
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.faces.ensure_lookup_table()
+        mouth, rims = [], []
+        for e in bm.edges:
+            if not e.is_boundary or regions[e.link_faces[0].index] != face:
+                continue
+            for v in e.verts:
+                p = mw @ v.co
+                if min((p - self.eye_l).length, (p - self.eye_r).length) < 0.032:
+                    rims.append(p)
+                elif p.z < self.eye_z - 0.03 and abs(p.x) < 0.06 and p.y < self.head.y - 0.03:
+                    mouth.append(p)
+        bm.free()
+        self.mouth = mouth
+        self.eye_rims = rims
+        if mouth:
+            xs = [p.x for p in mouth]
+            self.mouth_corners = [max(mouth, key=lambda p: p.x), min(mouth, key=lambda p: p.x)]
 
 
 # --- The muzzle -----------------------------------------------------------------------------
@@ -245,8 +281,8 @@ def _part(name, rings, uv_rect, weights, region, part_of, cap_tip=True):
             for loop, (ui, vj) in zip(f.loops, uvs):
                 loop[uv_layer].uv = (u0 + (u1 - u0) * ui / n, v0 + (v1 - v0) * vj / rows)
             faces.append(f)
-    if cap_tip is False:
-        pass
+    # Rings may run either way round; make every face point out.
+    bmesh.ops.recalc_face_normals(bm, faces=faces)
     bm.normal_update()
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
@@ -305,6 +341,7 @@ def fox_ear(face, side, height=0.125, width=0.074, depth=0.042):
         a = 2 * math.pi * i / n
         return (PART_EAR_FRONT if math.sin(a) < 0 else PART_EAR_BACK), t
 
+    face.ears[side] = (base, up, front, height)
     return _part(f"ear_{'l' if side > 0 else 'r'}", rings, EAR_UV[side], lambda j: {"Head": 1.0}, "ears", part_of)
 
 
@@ -434,15 +471,57 @@ def join_parts(body, parts):
 
 # --- Fur --------------------------------------------------------------------------------------
 
-def _noise(p, scale, seed):
-    """Smooth pseudo-noise from summed sines (cheap and seamless across UV islands)."""
-    rng = np.random.default_rng(seed)
-    acc = np.zeros(p.shape[0])
-    for _ in range(4):
-        d = rng.normal(size=3)
-        d /= np.linalg.norm(d)
-        acc += np.sin(p @ d * scale * rng.uniform(0.7, 1.4) + rng.uniform(0, 6.28))
-    return acc / 4
+def flow_rules(face):
+    """Which way the fur grows: back from the nose over the head, down the neck and body, along
+    the limbs to the fingers and toes, and along the tail."""
+    nose = face.nose
+
+    def rule(name, head, tail, p):
+        if name == "Head":
+            d = p - nose
+            d.z -= 0.35 * d.length
+            return d
+        if name.startswith(("upperarm", "lowerarm", "hand", "index", "middle", "ring", "pinky", "thumb",
+                             "thigh", "calf", "foot", "ball", "tail_")):
+            return tail - head
+        if name.startswith(("neck", "spine", "pelvis", "clavicle")):
+            return Vector((0, 0.25, -1))
+        return None
+
+    return rule
+
+
+def flow(body, skel, face):
+    out = fur.bone_flow(body, skel, flow_rules(face))
+    # The ears grow from base to tip.
+    part = np.zeros(len(body.data.vertices))
+    body.data.attributes["fox_part"].data.foreach_get("value", part)
+    mw = body.matrix_world
+    for v in body.data.vertices:
+        if part[v.index] in (PART_EAR_FRONT, PART_EAR_BACK):
+            side = 1 if (mw @ v.co).x > 0 else -1
+            up = face.ears[side][1]
+            n = (mw.to_3x3() @ v.normal).normalized()
+            f = up - n * up.dot(n)
+            if f.length > 1e-6:
+                out[v.index] = f.normalized()
+    return out
+
+
+def _segment_distance(pos, a, b):
+    ab = b - a
+    t = np.clip(((pos - a) @ ab) / max(ab @ ab, 1e-12), 0, 1)
+    return np.linalg.norm(pos - (a + t[:, None] * ab), axis=1)
+
+
+def _points_distance(pos, pts, chunk=200000):
+    """Distance from each position to the nearest of a few points."""
+    pts = np.array([tuple(p) for p in pts])
+    out = np.empty(len(pos))
+    for k in range(0, len(pos), chunk):
+        d = np.linalg.norm(pos[k:k + chunk, None, :] - pts[None, :, :], axis=2)
+        out[k:k + chunk] = d.min(1)
+    return out
 
 
 def markings(face, pos, region, part, t, skel_heads):
@@ -458,6 +537,7 @@ def markings(face, pos, region, part, t, skel_heads):
     limbs = np.isin(region, [R[n] for n in ("upperarm_hi", "upperarm_lo", "forearm_hi", "forearm_lo", "hand",
                                             "thigh_hi", "thigh_lo", "shin_hi", "shin_lo", "foot")])
     trunk = is_body & ~limbs
+    on_face = is_body & (region == R["face"])
     # The face and throat: light below a line from the outer eye corners down to the nose tip,
     # on the front of the head and neck. Only position decides, so region seams don't show.
     front = ramp(head[1] + 0.012, head[1] - 0.028, y)
@@ -465,7 +545,6 @@ def markings(face, pos, region, part, t, skel_heads):
     line = (face.eye_z - 0.032) * (1 - along) + (nose[2] - 0.012) * along
     chest_top = skel_heads["neck_01"][2]
     face_light = ramp(line + 0.007, line - 0.007, z) * front * ramp(chest_top - 0.03, chest_top + 0.03, z)
-    on_head = np.isin(region, [R["face"], R["neck"], R["scalp"]]) & is_body
     light = np.where(trunk, np.maximum(light, face_light), light)
     # Dark tear marks: from each eye's inner corner down the side of the muzzle.
     for eye in (face.eye_l, face.eye_r):
@@ -475,10 +554,29 @@ def markings(face, pos, region, part, t, skel_heads):
         tt = np.clip(((pos - a) @ ab) / (ab @ ab), 0, 1)
         d = np.linalg.norm(pos - (a + tt[:, None] * ab), axis=1)
         width = 0.0055 * (1 - 0.6 * tt)
-        dark = np.where(on_head & (region == R["face"]), np.maximum(dark, ramp(width + 0.003, width, d) * 0.85), dark)
+        dark = np.where(on_face, np.maximum(dark, ramp(width + 0.003, width, d) * 0.85), dark)
     # The nose.
     dn = np.linalg.norm(pos - nose, axis=1)
-    dark = np.where(is_body & (region == R["face"]), np.maximum(dark, ramp(0.021, 0.013, dn)), dark)
+    dark = np.where(on_face, np.maximum(dark, ramp(0.021, 0.013, dn)), dark)
+    # Dark lips: along the mouth slit, and on back from each corner along the jaw.
+    near = on_face & (np.abs(z - (face.chin.z + face.nose.z) / 2) < 0.05)
+    if face.mouth and near.any():
+        idx = np.nonzero(near)[0]
+        d = _points_distance(pos[idx], face.mouth)
+        for c in getattr(face, "mouth_corners", []):
+            a = np.array(tuple(c))
+            side = 1.0 if a[0] > 0 else -1.0
+            b = a + np.array((side * 0.012, 0.03, 0.006))
+            d = np.minimum(d, _segment_distance(pos[idx], a, b) + 0.0006)
+        dark[idx] = np.maximum(dark[idx], ramp(0.0032, 0.0016, d))
+    # Dark rims round the eyes.
+    if face.eye_rims:
+        near = on_face & (np.minimum(np.linalg.norm(pos - np.array(face.eye_l), axis=1),
+                                     np.linalg.norm(pos - np.array(face.eye_r), axis=1)) < 0.045)
+        idx = np.nonzero(near)[0]
+        if len(idx):
+            d = _points_distance(pos[idx], face.eye_rims)
+            dark[idx] = np.maximum(dark[idx], ramp(0.0034, 0.0014, d) * 0.9)
     # A bib down the chest, narrowing and fading towards the belly.
     spine_y = skel_heads["spine_03"][1]
     belly_z = skel_heads["spine_01"][2]
@@ -510,99 +608,35 @@ def markings(face, pos, region, part, t, skel_heads):
     return np.clip(light, 0, 1), np.clip(dark, 0, 1)
 
 
-def fur_detail(pos, part):
-    """Tone-neutral fur (mean 0.5): broad soft variation and fine streaks running down the body."""
-    broad = _noise(pos, 18.0, 3)
-    streak = _noise(pos * np.array([1.0, 1.0, 0.22]), 160.0, 7)
-    fine = _noise(pos, 420.0, 11)
-    return 0.5 + 0.045 * broad + 0.04 * streak + 0.02 * fine
-
-
-def _bleed(img, filled, passes=6):
-    """Spreads painted texels into the empty ones next to them (no dark seams in the mips)."""
-    for _ in range(passes):
-        grow = np.zeros_like(filled)
-        acc = np.zeros_like(img)
-        cnt = np.zeros(filled.shape)
-        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            sf = np.roll(filled, (dy, dx), (0, 1))
-            si = np.roll(img, (dy, dx), (0, 1))
-            acc += si * sf[..., None]
-            cnt += sf
-        add = (~filled) & (cnt > 0)
-        img[add] = acc[add] / cnt[add][:, None]
-        filled = filled | add
-    return img
-
-
 def paint(body, face, skel, out_dir, stem, size=2048):
-    """Writes `<stem>_fur.jpg` (detail) and `<stem>_markings.png`, and gives the body a fur material."""
+    """Writes `<stem>_fur.jpg` (detail), `<stem>_fur_normal.jpg` and `<stem>_markings.png`, and
+    gives the body one fur material (tinted like skin)."""
     me = body.data
-    mw = body.matrix_world
-    me.calc_loop_triangles()
-    uv = np.empty(len(me.loops) * 2, dtype=np.float32)
-    me.uv_layers["UVMap"].data.foreach_get("uv", uv)
-    uv = uv.reshape(-1, 2)
-    co = np.empty(len(me.vertices) * 3, dtype=np.float32)
-    me.vertices.foreach_get("co", co)
-    co = co.reshape(-1, 3)
-    m = np.array(mw)
-    world = co @ m[:3, :3].T + m[:3, 3]
-    part = np.zeros(len(me.vertices), dtype=np.float32)
-    tval = np.zeros(len(me.vertices), dtype=np.float32)
+    part = np.zeros(len(me.vertices))
+    tval = np.zeros(len(me.vertices))
     me.attributes["fox_part"].data.foreach_get("value", part)
     me.attributes["fox_t"].data.foreach_get("value", tval)
-    regions = np.array(rg.read(body))
+    face.find_openings(body)
+    flows = flow(body, skel, face)
+    gb = fur.GBuffer(body, size, flow=flows, attrs={"part": part, "t": tval})
+    regions = np.array(rg.read(body))[gb.poly]
     heads = {b.name: np.array(skel.matrix_world @ b.head_local) for b in skel.data.bones}
-    detail = np.zeros((size, size, 3), dtype=np.float32)
-    marks = np.zeros((size, size, 3), dtype=np.float32)
-    filled = np.zeros((size, size), dtype=bool)
-    for tri in me.loop_triangles:
-        li = list(tri.loops)
-        vi = list(tri.vertices)
-        t_uv = uv[li] * size
-        lo = np.floor(t_uv.min(0)).astype(int)
-        hi = np.ceil(t_uv.max(0)).astype(int)
-        lo = np.clip(lo, 0, size - 1)
-        hi = np.clip(hi, 0, size - 1)
-        xs, ys = np.meshgrid(np.arange(lo[0], hi[0] + 1), np.arange(lo[1], hi[1] + 1))
-        px = np.stack([xs.ravel() + 0.5, ys.ravel() + 0.5], 1)
-        a, b, c = t_uv
-        v0, v1 = b - a, c - a
-        den = v0[0] * v1[1] - v1[0] * v0[1]
-        if abs(den) < 1e-12:
-            continue
-        d = px - a
-        w1 = (d[:, 0] * v1[1] - v1[0] * d[:, 1]) / den
-        w2 = (v0[0] * d[:, 1] - d[:, 0] * v0[1]) / den
-        w0 = 1 - w1 - w2
-        inside = (w0 >= -1e-3) & (w1 >= -1e-3) & (w2 >= -1e-3)
-        if not inside.any():
-            continue
-        bc = np.stack([w0, w1, w2], 1)[inside]
-        p = bc @ world[vi]
-        pt = bc @ part[vi]
-        tt = bc @ tval[vi]
-        reg = np.full(p.shape[0], regions[tri.polygon_index])
-        L, D = markings(face, p, reg, np.round(pt), tt, heads)
-        f = fur_detail(p, pt)
-        ix = xs.ravel()[inside]
-        iy = ys.ravel()[inside]
-        detail[iy, ix] = f[:, None]
-        marks[iy, ix, 0] = L
-        marks[iy, ix, 1] = D
-        filled[iy, ix] = True
-    detail = _bleed(detail, filled.copy(), 8)
-    marks = _bleed(marks, filled.copy(), 8)
-    detail[~filled] = 0.5
-    rgba = np.concatenate([detail, np.ones((size, size, 1), np.float32)], -1)
-    # The detail is stored as sRGB like the other skin detail maps: mean 0.5 after decoding.
-    srgb = mt._linear_to_srgb(np.clip(rgba[..., :3], 0, 1))
+    light, dark = markings(face, gb.pos, regions, np.round(gb.attrs["part"]), gb.attrs["t"], heads)
+    strands, clumps = fur.fur_fields(gb, seed=7)
+    ao = fur.bake_ao(body, size)[gb.iy, gb.ix]
+    ao = np.clip(ao, 0, 1) ** 0.8
+    height = np.clip(0.5 + 0.2 * clumps + 0.13 * strands, 0, 1)
+    detail = (1 + 0.17 * clumps + 0.09 * strands) * (0.62 + 0.38 * ao)
+    detail *= 0.5 / detail.mean()
     out_dir = Path(out_dir)
-    fur_img = mt._save(np.concatenate([srgb, rgba[..., 3:]], -1).astype(np.float32), out_dir / f"{stem}_fur.jpg", "sRGB")
-    mrgba = np.concatenate([marks, np.ones((size, size, 1), np.float32)], -1)
-    mt._save(mrgba, out_dir / f"{stem}_markings.png", "Non-Color")
-    # One fur material for the whole body: tinted like skin, rough, no skin normal map.
+    det = fur.bleed(gb.image(np.repeat(detail[:, None], 3, 1), fill=0.5), gb.mask, 10)
+    # Stored as sRGB like the other skin detail maps: mean 0.5 after decoding.
+    fur_img = fur.save_rgb(mt._linear_to_srgb(np.clip(det, 0, 1)), out_dir / f"{stem}_fur.jpg", "sRGB")
+    nrm_img = fur.save_rgb(fur.normal_map(gb, height, 0.00045), out_dir / f"{stem}_fur_normal.jpg", "Non-Color")
+    marks = np.zeros((len(light), 3))
+    marks[:, 0] = light
+    marks[:, 1] = dark
+    fur.save_rgb(fur.bleed(gb.image(marks), gb.mask, 10), out_dir / f"{stem}_markings.png", "Non-Color")
     mat = bpy.data.materials.new(f"skin.{stem}")
     mat.use_nodes = True
     nt = mat.node_tree
@@ -610,12 +644,394 @@ def paint(body, face, skel, out_dir, stem, size=2048):
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = fur_img
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    bsdf.inputs["Roughness"].default_value = 0.88
+    tn = nt.nodes.new("ShaderNodeTexImage")
+    tn.image = nrm_img
+    nm = nt.nodes.new("ShaderNodeNormalMap")
+    nt.links.new(tn.outputs["Color"], nm.inputs["Color"])
+    nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+    bsdf.inputs["Roughness"].default_value = 0.86
     mat["tint"] = "skin"
     body.data.materials.clear()
     body.data.materials.append(mat)
     for p in body.data.polygons:
         p.material_index = 0
+    # A texel deep inside the dark fur (the gloves), for parts that wear the coat's dark:
+    # whiskers and claws. Away from island edges, so filtering never reaches other colours.
+    solid = gb.image(np.where((dark > 0.99) & (light < 0.01), 1.0, 0.0))
+    for _ in range(6):
+        solid = np.minimum.reduce([solid, np.roll(solid, 1, 0), np.roll(solid, -1, 0), np.roll(solid, 1, 1), np.roll(solid, -1, 1)])
+    ys, xs = np.nonzero(solid > 0.5)
+    k = len(ys) // 2
+    body["dark_uv"] = ((xs[k] + 0.5) / size, (ys[k] + 0.5) / size)
     for name in ("fox_part", "fox_t"):
         body.data.attributes.remove(body.data.attributes[name])
     return f"{stem}_fur.jpg", f"{stem}_markings.png"
+
+
+# --- Details: tufts, whiskers, nose and claws ------------------------------------------------------
+
+def _tube(bm, pts, radii, sides=4):
+    rings = []
+    side = None
+    for i, (p, r) in enumerate(zip(pts, radii)):
+        tan = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+        if side is None:
+            side = tan.orthogonal().normalized()
+        side = (side - tan * side.dot(tan)).normalized()
+        up = tan.cross(side).normalized()
+        if r <= 0:
+            rings.append([bm.verts.new(p)])
+            continue
+        rings.append([bm.verts.new(p + (side * math.cos(a) + up * math.sin(a)) * r)
+                      for a in (2 * math.pi * k / sides for k in range(sides))])
+    faces = []
+    for r0, r1 in zip(rings, rings[1:]):
+        m = len(r0)
+        for i in range(m):
+            j = (i + 1) % m
+            if len(r1) == 1:
+                faces.append(bm.faces.new((r0[i], r0[j], r1[0])))
+            else:
+                faces.append(bm.faces.new((r0[i], r0[j], r1[j], r1[i])))
+    if len(rings[0]) > 2:
+        faces.append(bm.faces.new(list(reversed(rings[0]))))
+    return rings, faces
+
+
+def _finish(bm, name, material, uv, region, weights, lod_max):
+    """A mesh object from a bmesh: one UV everywhere, one region, rigid skin weights."""
+    uv_layer = bm.loops.layers.uv.new("UVMap")
+    reg_layer = bm.loops.layers.float.new("_REGION")
+    for f in bm.faces:
+        f.smooth = True
+        for loop in f.loops:
+            loop[uv_layer].uv = uv
+            loop[reg_layer] = float(rg.INDEX[region])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    me.materials.append(material)
+    for vi, wd in weights(me):
+        for bone, w in wd.items():
+            vg = ob.vertex_groups.get(bone) or ob.vertex_groups.new(name=bone)
+            vg.add([vi], w, "REPLACE")
+    ob["lod_max"] = lod_max
+    ob["lod_decimate"] = False
+    return ob
+
+
+def whiskers(face, body, material, uv):
+    """Whiskers on the muzzle pads, two over each eye and one on each cheek."""
+    tree = BVHTree.FromObject(body, bpy.context.evaluated_depsgraph_get())
+    eye_mid = (face.eye_l + face.eye_r) / 2
+    nose = face.nose
+    back = (eye_mid - nose)
+    back.z = 0
+    back.normalize()
+    rng = random.Random(5)
+    bm = bmesh.new()
+
+    def surface_point(start, direction):
+        hit = tree.ray_cast(start, direction.normalized(), 0.2)
+        return hit[0], hit[1]
+
+    for side in (1, -1):
+        out = Vector((side, 0, 0))
+        # Pads: on the muzzle sides, a third of the way from the nose to the eyes.
+        for row, dz in enumerate((0.007, 0.0, -0.007)):
+            for col, ds in enumerate((-0.009, 0.0, 0.009)):
+                c = nose.lerp(eye_mid, 0.36) + back * ds
+                c.z = nose.z - 0.014 + dz
+                p, n = surface_point(Vector((0, c.y, c.z)), out)
+                if p is None:
+                    continue
+                length = (0.12 - 0.012 * row) * rng.uniform(0.9, 1.1)
+                d = (out * 0.85 + back * 0.5 + Vector((0, 0, 0.12 - 0.12 * row))).normalized()
+                droop = Vector((0, 0, -1)) * 0.25 + back * 0.15
+                pts = [p - n * 0.002 + (d + droop * (s * s)) * (length * s) for s in (0, 0.2, 0.4, 0.6, 0.8, 1.0)]
+                _tube(bm, pts, [0.0008, 0.0007, 0.00055, 0.0004, 0.00025, 0.0], sides=4)
+        # Over each eye: two longer hairs sweeping up and back.
+        eye = face.eye_l if side > 0 else face.eye_r
+        for k, (dy, h) in enumerate(((-0.004, 0.016), (0.006, 0.019))):
+            # From in front of the brow, back into it.
+            p, n = surface_point(Vector((eye.x * 0.85, eye.y + dy - 0.05, eye.z + h)), Vector((0, 1, 0)))
+            if p is None:
+                continue
+            d = (out * 0.5 + back * 0.6 + Vector((0, 0, 0.75))).normalized()
+            pts = [p - n * 0.002 + (d + back * 0.3 * s * s) * (0.055 * s) for s in (0, 0.25, 0.5, 0.75, 1.0)]
+            _tube(bm, pts, [0.0006, 0.0005, 0.00038, 0.00022, 0.0], sides=4)
+        # One on each cheek, behind the mouth corner.
+        c = nose.lerp(eye_mid, 0.75)
+        c.z = (face.eye_z + nose.z) / 2 - 0.02
+        p, n = surface_point(Vector((0, c.y, c.z)), out)
+        if p is not None:
+            d = (out * 0.8 + back * 0.6 - Vector((0, 0, 0.1))).normalized()
+            pts = [p - n * 0.002 + d * (0.06 * s) for s in (0, 0.25, 0.5, 0.75, 1.0)]
+            _tube(bm, pts, [0.0006, 0.0005, 0.00038, 0.00022, 0.0], sides=4)
+    return _finish(bm, "whiskers", material, uv, "face", lambda me: [(v.index, {"Head": 1.0}) for v in me.vertices], 0)
+
+
+def nose_tip(face, body):
+    """A glossy nose pad over the muzzle's tip, with two nostrils."""
+    eye_mid = (face.eye_l + face.eye_r) / 2
+    fwd = (face.nose - eye_mid)
+    fwd.normalize()
+    side = Vector((1, 0, 0))
+    up = side.cross(fwd).normalized()
+    if up.z < 0:
+        up = -up
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=10, radius=1.0)
+    for v in bm.verts:
+        q = v.co
+        # Wider than tall, flattened at the front, with two nostril dents low on the front.
+        x, y, z = q.x * 0.0125, q.y * 0.0095, q.z * 0.0085
+        fwd_k = max(0.0, q.y)
+        y *= 1.0 - 0.25 * fwd_k ** 2
+        for sx in (-1, 1):
+            d = (Vector((q.x, q.y, q.z)) - Vector((sx * 0.45, 0.85, -0.25))).length
+            if d < 0.45:
+                y -= 0.004 * (1 - d / 0.45) ** 2
+        v.co = face.nose + side * x + fwd * (y - 0.003) + up * (z + 0.001)
+    mat = bpy.data.materials.get("fox_nose") or bpy.data.materials.new("fox_nose")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Base Color"].default_value = (0.018, 0.014, 0.013, 1)
+    bsdf.inputs["Roughness"].default_value = 0.32
+    return _finish(bm, "nose", mat, (0.5, 0.5), "face", lambda me: [(v.index, {"Head": 1.0}) for v in me.vertices], 1)
+
+
+FINGERS = ("thumb", "index", "middle", "ring", "pinky")
+
+
+def claws(skel, material, uv, region="hand", name="claws"):
+    """A curved claw from each fingertip, rigid on the last finger bone."""
+    bm = bmesh.new()
+    owners = []
+    heads = {b.name: skel.matrix_world @ b.head_local for b in skel.data.bones}
+    for side in ("l", "r"):
+        w, idx, pk, mid = (heads[f"{n}_{side}"] for n in ("hand", "index_01", "pinky_01", "middle_01"))
+        palm = (mid - w).cross(idx - pk).normalized()
+        thumb = heads[f"thumb_02_{side}"]
+        if palm.dot(thumb - (idx + pk) / 2) < 0:
+            palm = -palm
+        # The palm faces where the thumb hangs; the nail is on the other side.
+        for f in FINGERS:
+            tip_bone = f"{f}_03_{side}"
+            leaf = f"{f}_04_leaf_{side}"
+            if tip_bone not in heads or leaf not in heads:
+                continue
+            a, b = heads[tip_bone], heads[leaf]
+            along = (b - a).normalized()
+            dorsal = -(palm - along * palm.dot(along)).normalized()
+            size = 0.85 if f in ("pinky", "thumb") else 1.0
+            base = b - along * 0.004 + dorsal * 0.0035
+            length = 0.013 * size
+            pts = [base + (along + -dorsal * 0.45 * s * s) * (length * s) for s in (0, 0.33, 0.66, 1.0)]
+            rings, _ = _tube(bm, pts, [0.0034 * size, 0.0026 * size, 0.0014 * size, 0.0], sides=6)
+            owners.append((tip_bone, [v for r in rings for v in r]))
+    bm.verts.index_update()
+    owner_of = {v.index: bone for bone, vs in owners for v in vs}
+    return _finish(bm, name, material, uv, region, lambda me: [(vi, {bone: 1.0}) for vi, bone in owner_of.items()], 1)
+
+
+def details(face, skel, body):
+    """Tufts, whiskers, the nose and claws, as separate objects bound to the skeleton."""
+    mat = body.data.materials[0]
+    dark_uv = tuple(body["dark_uv"])
+    surface = fur.Surface(body)
+    rule = flow_rules(face)
+    heads = {b.name: skel.matrix_world @ b.head_local for b in skel.data.bones}
+    R = rg.INDEX
+    eye_mid = (face.eye_l + face.eye_r) / 2
+
+    def flow_at(p, n):
+        idx = surface.nearest(p)[1]
+        wd = surface.weights_at(idx, surface.bary(idx, p))
+        acc = Vector()
+        for bone, w in wd.items():
+            b = skel.data.bones.get(bone)
+            if b is None:
+                continue
+            d = rule(bone, skel.matrix_world @ b.head_local, skel.matrix_world @ b.tail_local, Vector(p))
+            if d is not None:
+                acc += Vector(d).normalized() * w
+        return acc if acc.length > 1e-6 else Vector((0, 0, -1))
+
+    objs = []
+    # The cheek ruff: a band behind and below the eyes, flaring back, out and down, longest at
+    # the angle of the jaw.
+    jaw_z = (face.chin.z + face.eye_z) / 2 - 0.01
+
+    def cheeks(p, n, r):
+        if r not in (R["face"], R["neck"]) or abs(p.x) < 0.04 or n.x * p.x < 0.3 * abs(p.x):
+            return 0
+        if not (eye_mid.y - 0.004 < p.y < eye_mid.y + 0.075):
+            return 0
+        return 1 if jaw_z - 0.035 < p.z < face.eye_z - 0.006 else 0
+
+    def cheek_dir(p, n):
+        side = 1 if p.x > 0 else -1
+        return Vector((side * 0.55, 0.85, -0.55))
+
+    def cheek_len(p):
+        k = min(1.0, max(0.0, (p.y - eye_mid.y) / 0.07)) * 0.6 + min(1.0, max(0.0, (face.eye_z - p.z) / 0.05)) * 0.4
+        return 0.03 + 0.032 * k
+
+    roots = fur.scatter(surface, cheeks, 80, 0.0065, seed=11)
+    objs.append(fur.tufts(surface, roots, cheek_dir, length=cheek_len, width=0.016, lift=0.55, droop=0.3, spread=0.3,
+                          seed=11, name="fur_cheeks"))
+    # The throat, under the jaw.
+    neck_y = heads["neck_01"].y
+    def throat(p, n, r):
+        if r not in (R["neck"], R["face"]):
+            return 0
+        return 1 if (p.y < neck_y - 0.035 and heads["neck_01"].z + 0.01 < p.z < face.chin.z + 0.005 and n.z < 0.3) else 0
+    roots = fur.scatter(surface, throat, 14, 0.01, seed=12)
+    objs.append(fur.tufts(surface, roots, lambda p, n: Vector((0, 0.3, -1)), length=0.032, width=0.017, lift=0.35, droop=0.2,
+                          seed=12, name="fur_throat"))
+    # Inside the ears: light fur rising from the base.
+    for side in (1, -1):
+        base, up, front, height = face.ears[side]
+        def ear(p, n, r, base=base, up=up, front=front, height=height):
+            if r != R["ears"]:
+                return 0
+            d = p - base
+            t = d.dot(up) / height
+            lateral = (d - up * d.dot(up) - front * d.dot(front)).length
+            # The middle of the cup, low down, where the fur stays inside the ear.
+            return 1 if (0.06 < t < 0.3 and n.dot(front) > 0.35 and lateral < 0.012 * (1 - t)) else 0
+        roots = fur.scatter(surface, ear, 7, 0.006, seed=13 + side)
+        objs.append(fur.tufts(surface, roots, lambda p, n, up=up, front=front: up + front * 0.25, length=0.022,
+                              width=0.009, lift=0.3, droop=0.12, spread=0.15, seed=13 + side, name="fur_ear"))
+    # The chest bib (hidden under shirts with the chest).
+    def chest(p, n, r):
+        return 1 if (r == R["chest"] and abs(p.x) < 0.06 and p.y < heads["spine_03"].y - 0.05 and n.y < -0.4) else 0
+    roots = fur.scatter(surface, chest, 14, 0.012, seed=15)
+    objs.append(fur.tufts(surface, roots, lambda p, n: Vector((0, 0.15, -1)), length=0.028, width=0.016, lift=0.3, droop=0.15,
+                          seed=15, name="fur_chest"))
+    # The tail: fluff all along it, pointing to the tip.
+    def tail(p, n, r):
+        return 1 if r == R["tail"] else 0
+    roots = fur.scatter(surface, tail, 80, 0.016, seed=16)
+    objs.append(fur.tufts(surface, roots, flow_at, length=0.055, width=0.024, lift=0.45, droop=0.2, spread=0.5,
+                          seed=16, name="fur_tail"))
+    tufts = sc.alive([o for o in objs if o is not None and len(o.data.polygons)])
+    for o in tufts:
+        o.data.materials.append(mat)
+    fur_ob = fur_join(tufts, "fur")
+    fur_ob["lod_max"] = 1
+    whisk = whiskers(face, body, mat, dark_uv)
+    nose = nose_tip(face, body)
+    claw = claws(skel, mat, dark_uv)
+    out = [fur_ob, whisk, nose, claw]
+    for o in out:
+        sc.bind(o, skel)
+    return out
+
+
+def fur_join(objects, name):
+    if len(objects) == 1:
+        objects[0].name = name
+        return objects[0]
+    for o in bpy.context.selected_objects:
+        o.select_set(False)
+    for o in objects:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objects[0]
+    bpy.ops.object.join()
+    ob = bpy.context.view_layer.objects.active
+    ob.name = name
+    ob.data.name = name
+    return ob
+
+
+# --- Outfits and eyes ------------------------------------------------------------------------------
+
+def dress(outfits, body, skel):
+    """Bare skin that outfits bring (Quaternius tops come with their own forearms and hands)
+    takes the body's fur: its UVs are moved onto the body's texture and it wears the body's fur
+    material. Outfits with hands get claws. Returns the new claw objects (tagged with their piece)."""
+    mat = body.data.materials[0]
+    dark_uv = tuple(body["dark_uv"])
+    surface = fur.Surface(body)
+    added = []
+    for ob in outfits:
+        slots = [k for k, s in enumerate(ob.material_slots) if s.material and s.material.name.startswith("skin")]
+        if not slots:
+            continue
+        me = ob.data
+        uv = me.uv_layers.active.data
+        mw = ob.matrix_world
+        regions = rg.read(ob) if "_REGION" in me.attributes else None
+        has_hand = False
+        for p in me.polygons:
+            if p.material_index not in slots:
+                continue
+            if regions and regions[p.index] == rg.INDEX["hand"]:
+                has_hand = True
+            # The whole face maps through the body triangle under its centre (extrapolated
+            # linearly), so it never straddles a seam in the body's UVs.
+            _, idx = surface.nearest(mw @ p.center)
+            for li in p.loop_indices:
+                q = mw @ me.vertices[me.loops[li].vertex_index].co
+                uv[li].uv = surface.uv_at(idx, surface.bary(idx, q, clamp=False))
+        for k in slots:
+            ob.material_slots[k].material = mat
+        if has_hand:
+            c = claws(skel, mat, dark_uv, name=f"{ob['piece']}.claws")
+            c["piece"] = ob["piece"]
+            sc.bind(c, skel)
+            added.append(c)
+    return added
+
+
+def fox_eyes(eyes, out_dir):
+    """Amber eyes with slit pupils, painted over the human eye texture's layout."""
+    out = Path(out_dir) / "T_Eye_Fox.jpg"
+    mat = eyes.material_slots[0].material.copy()
+    mat.name = "MI_Eyes_Fox"
+    eyes.material_slots[0].material = mat
+    node = next(n for n in mat.node_tree.nodes if n.type == "TEX_IMAGE" and "Normal" not in n.image.name)
+    src = mt._pixels(node.image)
+    h, w, _ = src.shape
+    size = 512
+    # Upsample the sclera and lids (nearest is fine; they're soft), then paint the iris.
+    ys = (np.arange(size) + 0.5) / size * h
+    xs = (np.arange(size) + 0.5) / size * w
+    base = src[np.clip(ys.astype(int), 0, h - 1)][:, np.clip(xs.astype(int), 0, w - 1)][..., :3]
+    v, u = np.mgrid[0:size, 0:size]
+    u = (u + 0.5) / size - 0.5
+    v = (v + 0.5) / size - 0.5
+    r = np.sqrt(u * u + v * v)
+    ang = np.arctan2(v, u)
+    iris_r = 0.15
+    rng = np.random.default_rng(3)
+    fibres = np.zeros_like(r)
+    for k in range(6):
+        fibres += np.sin(ang * rng.integers(20, 60) + rng.uniform(0, 6.28)) * rng.uniform(0.3, 1.0)
+    fibres = fibres / 6
+    t = np.clip(r / iris_r, 0, 1)
+    inner = np.array([0.95, 0.62, 0.12])
+    outer = np.array([0.55, 0.22, 0.04])
+    iris = inner[None, None, :] * (1 - t[..., None]) ** 0.7 + outer[None, None, :] * (1 - (1 - t[..., None]) ** 0.7)
+    iris *= (1 + 0.12 * fibres)[..., None]
+    ring = np.clip((r - iris_r * 0.86) / (iris_r * 0.14), 0, 1)
+    iris *= (1 - 0.75 * ring)[..., None]
+    # The slit: tall and narrow, soft-edged.
+    slit = ((u / 0.018) ** 2 + (v / 0.105) ** 2)
+    pupil = np.clip((1.15 - slit) / 0.3, 0, 1)
+    iris *= (1 - 0.96 * pupil)[..., None]
+    a = np.clip((iris_r - r) / 0.006, 0, 1)
+    col = base * (1 - a[..., None]) + mt._linear_to_srgb(np.clip(iris, 0, 1)) * a[..., None]
+    # A highlight, upper left.
+    hl = np.exp(-(((u + 0.035) / 0.016) ** 2 + ((v - 0.04) / 0.016) ** 2))
+    col = col * (1 - hl[..., None]) + hl[..., None] * 0.97
+    rgba = np.ones((size, size, 4), np.float32)
+    rgba[..., :3] = np.clip(col, 0, 1)
+    img = mt._save(rgba, out, "sRGB")
+    node.image = img
+    return out.name

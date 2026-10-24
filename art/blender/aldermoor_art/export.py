@@ -111,16 +111,22 @@ def decimated(ob, ratio):
 
 
 def _with_lods(path, objects, write):
-    """Writes LOD0 with `write`, then each level of detail from decimated mesh copies."""
+    """Writes LOD0 with `write`, then each level of detail from decimated mesh copies.
+
+    A mesh object may say how far down it goes (`lod_max`: whiskers only at full detail, fur
+    tufts down to LOD 1) and whether to decimate it (`lod_decimate`: small rigid parts like
+    claws keep their shape).
+    """
     write(path, objects)
     meshes = [o for o in objects if o.type == "MESH"]
     others = [o for o in objects if o.type != "MESH"]
     if not meshes or any(m.data.shape_keys for m in meshes):
         return path
     for n, ratio in enumerate(LODS, 1):
-        copies = [decimated(m, ratio) for m in meshes]
-        write(lod_path(path, n), others + copies)
-        scene.remove(copies)
+        kept = [m for m in meshes if m.get("lod_max", len(LODS)) >= n]
+        copies = [decimated(m, ratio) if m.get("lod_decimate", True) else None for m in kept]
+        write(lod_path(path, n), others + [c or m for c, m in zip(copies, kept)])
+        scene.remove([c for c in copies if c is not None])
     return path
 
 

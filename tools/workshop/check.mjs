@@ -1,6 +1,9 @@
 // Loads looks in headless Chrome, saves screenshots and fails on console errors.
 //
-//   node tools/workshop/check.mjs [--out DIR] [--only name,name] [--springs]
+//   node tools/workshop/check.mjs [--out DIR] [--only name,name] [--looks FILE] [--springs]
+//
+// --looks FILE renders the looks in a JSON file ({ name: hash, ... }) instead of the built-in set;
+// a look's hash may add `&cam=x,y,z,tx,ty,tz` for an exact camera position and target.
 //
 // Screenshots go to art/out/review/workshop/ by default. --springs also runs the spring-bone
 // test: a procedural chain hung from the upper spine, checked for attachment, finite motion and
@@ -22,6 +25,7 @@ const flag = (name, fallback) => {
 };
 const OUT = path.resolve(flag('--out', path.join(ROOT, 'art/out/review/workshop')));
 const ONLY = flag('--only', '');
+const LOOKS_FILE = flag('--looks', '');
 const SPRINGS = args.includes('--springs');
 const UI = args.includes('--ui');
 const NOGEAR = args.includes('--nogear');
@@ -151,10 +155,25 @@ async function main() {
       if (r.status() >= 400 && !r.url().endsWith('gear.json')) problems.push(`[http ${r.status()}] ${r.url()}`);
     });
 
-    const names = ONLY ? ONLY.split(',') : Object.keys(LOOKS);
+    const looks = LOOKS_FILE ? JSON.parse(fs.readFileSync(LOOKS_FILE, 'utf8')) : LOOKS;
+    const names = ONLY ? ONLY.split(',') : Object.keys(looks);
     for (const name of names) {
-      await page.goto(`${base}#${LOOKS[name]}`, { waitUntil: 'load' });
+      // An exact camera (x,y,z,tx,ty,tz) rides in the hash as `cam=`; presets are names.
+      const hash = looks[name];
+      const exact = /(?:^|&)cam=(-?[\d.]+(?:,-?[\d.]+){5})(?:&|$)/.exec(hash);
+      await page.goto(`${base}#${exact ? hash.replace(exact[1], 'three_quarter') : hash}`, { waitUntil: 'load' });
       await settle(page);
+      if (exact) {
+        const v = exact[1].split(',').map(Number);
+        await page.evaluate((v) => {
+          const view = window.workshop.view;
+          view.controls.target.set(v[3], v[4], v[5]);
+          view.camera.position.set(v[0], v[1], v[2]);
+          view.camera.lookAt(v[3], v[4], v[5]);
+          view.controls.update();
+        }, v);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      }
       const info = await page.evaluate(() => {
         const w = window.workshop;
         const c = w.character;

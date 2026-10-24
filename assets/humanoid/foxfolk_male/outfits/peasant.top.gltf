@@ -8,7 +8,7 @@
 		{
 			"name":"Scene",
 			"nodes":[
-				73
+				74
 			]
 		}
 	],
@@ -1430,9 +1430,20 @@
 			"skin":0
 		},
 		{
+			"extras":{
+				"lod_max":1,
+				"lod_decimate":false,
+				"piece":"peasant.top"
+			},
+			"mesh":2,
+			"name":"peasant.top.claws",
+			"skin":0
+		},
+		{
 			"children":[
 				71,
 				72,
+				73,
 				70
 			],
 			"name":"skeleton"
@@ -1459,7 +1470,7 @@
 			"extras":{
 				"tint":"skin"
 			},
-			"name":"skin.male_peasant_top",
+			"name":"skin.fox_male",
 			"normalTexture":{
 				"index":3
 			},
@@ -1468,23 +1479,21 @@
 					"index":4
 				},
 				"metallicFactor":0,
-				"metallicRoughnessTexture":{
-					"index":5
-				}
+				"roughnessFactor":0.8600000143051147
 			}
 		},
 		{
 			"doubleSided":true,
 			"name":"MI_Peasant.001",
 			"normalTexture":{
-				"index":6
+				"index":5
 			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":7
+					"index":6
 				},
 				"metallicRoughnessTexture":{
-					"index":8
+					"index":7
 				}
 			}
 		}
@@ -1537,6 +1546,23 @@
 					"material":2
 				}
 			]
+		},
+		{
+			"name":"peasant.top.claws",
+			"primitives":[
+				{
+					"attributes":{
+						"_REGION":24,
+						"POSITION":25,
+						"NORMAL":26,
+						"TEXCOORD_0":27,
+						"JOINTS_0":28,
+						"WEIGHTS_0":29
+					},
+					"indices":30,
+					"material":1
+				}
+			]
 		}
 	],
 	"textures":[
@@ -1559,10 +1585,6 @@
 		{
 			"sampler":0,
 			"source":4
-		},
-		{
-			"sampler":0,
-			"source":5
 		},
 		{
 			"sampler":0,
@@ -1594,19 +1616,14 @@
 			"uri":"../../textures/T_Peasant_ORM.png"
 		},
 		{
-			"mimeType":"image/png",
-			"name":"T_Regular_Male_Normal.png",
-			"uri":"../../textures/T_Regular_Male_Normal.png"
+			"mimeType":"image/jpeg",
+			"name":"fox_male_fur_normal.jpg",
+			"uri":"../../textures/fox_male_fur_normal.jpg"
 		},
 		{
 			"mimeType":"image/jpeg",
-			"name":"male_peasant_top_SkinDetail.jpg",
-			"uri":"../../textures/male_peasant_top_SkinDetail.jpg"
-		},
-		{
-			"mimeType":"image/png",
-			"name":"T_Regular_Male_Roughness.png",
-			"uri":"../../textures/T_Regular_Male_Roughness.png"
+			"name":"fox_male_fur.jpg",
+			"uri":"../../textures/fox_male_fur.jpg"
 		}
 	],
 	"skins":[
@@ -1750,13 +1767,13 @@
 		{
 			"bufferView":8,
 			"componentType":5126,
-			"count":2539,
+			"count":9829,
 			"type":"SCALAR"
 		},
 		{
 			"bufferView":9,
 			"componentType":5126,
-			"count":2539,
+			"count":9829,
 			"max":[
 				0.8725301027297974,
 				1.4763606786727905,
@@ -1772,31 +1789,31 @@
 		{
 			"bufferView":10,
 			"componentType":5126,
-			"count":2539,
+			"count":9829,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":11,
 			"componentType":5126,
-			"count":2539,
+			"count":9829,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":12,
 			"componentType":5126,
-			"count":2539,
+			"count":9829,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":13,
 			"componentType":5121,
-			"count":2539,
+			"count":9829,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":14,
 			"componentType":5126,
-			"count":2539,
+			"count":9829,
 			"type":"VEC4"
 		},
 		{
@@ -1862,6 +1879,58 @@
 			"componentType":5123,
 			"count":11568,
 			"type":"SCALAR"
+		},
+		{
+			"bufferView":24,
+			"componentType":5126,
+			"count":190,
+			"type":"SCALAR"
+		},
+		{
+			"bufferView":25,
+			"componentType":5126,
+			"count":190,
+			"max":[
+				0.8762860298156738,
+				1.4338126182556152,
+				0.00835864245891571
+			],
+			"min":[
+				-0.8762858510017395,
+				1.3500704765319824,
+				-0.11202772706747055
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":26,
+			"componentType":5126,
+			"count":190,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":27,
+			"componentType":5126,
+			"count":190,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":28,
+			"componentType":5121,
+			"count":190,
+			"type":"VEC4"
+		},
+		{
+			"bufferView":29,
+			"componentType":5126,
+			"count":190,
+			"type":"VEC4"
+		},
+		{
+			"bufferView":30,
+			"componentType":5123,
+			"count":1020,
+			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
@@ -1915,97 +1984,139 @@
 		},
 		{
 			"buffer":0,
-			"byteLength":10156,
+			"byteLength":39316,
 			"byteOffset":71424,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":30468,
-			"byteOffset":81580,
+			"byteLength":117948,
+			"byteOffset":110740,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":30468,
-			"byteOffset":112048,
+			"byteLength":117948,
+			"byteOffset":228688,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":20312,
-			"byteOffset":142516,
+			"byteLength":78632,
+			"byteOffset":346636,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":20312,
-			"byteOffset":162828,
+			"byteLength":78632,
+			"byteOffset":425268,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":10156,
-			"byteOffset":183140,
+			"byteLength":39316,
+			"byteOffset":503900,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":40624,
-			"byteOffset":193296,
+			"byteLength":157264,
+			"byteOffset":543216,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":23580,
-			"byteOffset":233920,
+			"byteOffset":700480,
 			"target":34963
 		},
 		{
 			"buffer":0,
 			"byteLength":4544,
-			"byteOffset":257500
+			"byteOffset":724060
 		},
 		{
 			"buffer":0,
 			"byteLength":13444,
-			"byteOffset":262044,
+			"byteOffset":728604,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":40332,
-			"byteOffset":275488,
+			"byteOffset":742048,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":40332,
-			"byteOffset":315820,
+			"byteOffset":782380,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":26888,
-			"byteOffset":356152,
+			"byteOffset":822712,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":13444,
-			"byteOffset":383040,
+			"byteOffset":849600,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":53776,
-			"byteOffset":396484,
+			"byteOffset":863044,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":23136,
-			"byteOffset":450260,
+			"byteOffset":916820,
+			"target":34963
+		},
+		{
+			"buffer":0,
+			"byteLength":760,
+			"byteOffset":939956,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":2280,
+			"byteOffset":940716,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":2280,
+			"byteOffset":942996,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":1520,
+			"byteOffset":945276,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":760,
+			"byteOffset":946796,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":3040,
+			"byteOffset":947556,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":2040,
+			"byteOffset":950596,
 			"target":34963
 		}
 	],
@@ -2017,7 +2128,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":473396,
+			"byteLength":952636,
 			"uri":"peasant.top.bin"
 		}
 	]

@@ -1552,53 +1552,53 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":191,
+			"count":192,
 			"type":"SCALAR"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":191,
+			"count":192,
 			"max":[
-				0.2565312087535858,
-				1.8950339555740356,
-				0.2370329201221466
+				0.3311431407928467,
+				1.8230645656585693,
+				0.31164485216140747
 			],
 			"min":[
-				-0.2565312087535858,
-				1.78318452835083,
-				-0.1176685318350792
+				-0.3311431407928467,
+				1.6986356973648071,
+				-0.14622128009796143
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":191,
+			"count":192,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":191,
+			"count":192,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":4,
 			"componentType":5121,
-			"count":191,
+			"count":192,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":5,
 			"componentType":5126,
-			"count":191,
+			"count":192,
 			"type":"VEC4"
 		},
 		{
 			"bufferView":6,
 			"componentType":5123,
-			"count":546,
+			"count":552,
 			"type":"SCALAR"
 		},
 		{
@@ -1611,50 +1611,50 @@
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":764,
+			"byteLength":768,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2292,
-			"byteOffset":764,
+			"byteLength":2304,
+			"byteOffset":768,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":2292,
-			"byteOffset":3056,
+			"byteLength":2304,
+			"byteOffset":3072,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1528,
-			"byteOffset":5348,
+			"byteLength":1536,
+			"byteOffset":5376,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":764,
-			"byteOffset":6876,
+			"byteLength":768,
+			"byteOffset":6912,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3056,
-			"byteOffset":7640,
+			"byteLength":3072,
+			"byteOffset":7680,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":1092,
-			"byteOffset":10696,
+			"byteLength":1104,
+			"byteOffset":10752,
 			"target":34963
 		},
 		{
 			"buffer":0,
 			"byteLength":4544,
-			"byteOffset":11788
+			"byteOffset":11856
 		}
 	],
 	"samplers":[
@@ -1665,7 +1665,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":16332,
+			"byteLength":16400,
 			"uri":"hat.straw.lod2.bin"
 		}
 	]

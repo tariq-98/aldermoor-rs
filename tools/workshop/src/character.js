@@ -113,12 +113,12 @@ export class Character {
     this.player = new Player(this.root, this.clips);
     this.performer = new Performer(this);
     this.root.updateMatrixWorld(true);
-    // Fur: a markings mask on the body, and a tail on springs.
+    // Fur: a markings mask on the body's UVs, and a tail on springs.
     if (this.def.markings) {
       const tex = textureLoader.load(ASSETS + this.def.markings);
       tex.flipY = false;
       tex.colorSpace = THREE.NoColorSpace;
-      for (const e of this.bodyMeshes) if (e.dye) e.dye.markings.value = tex;
+      this.markings = tex;
     }
     if (this.def.springs) this.bodySprings = this.makeSprings(this.def.springs);
     // Rest-pose snapshot of the socket frames, for the helper display.
@@ -224,17 +224,26 @@ export class Character {
   /** The skin or fur tone: `linear`, plus `light` and `dark` for bodies with fur markings. */
   setTone(rgb, tone = null) {
     this.tone = rgb;
-    const on = this.def.markings && tone?.light && tone?.dark ? 1 : 0;
-    for (const e of this.bodyMeshes) {
-      if (!e.dye) continue;
-      e.dye.markOn.value = on;
-      if (on) {
-        // Doubled like the tone itself: the fur detail map averages 0.5.
-        e.dye.light.value.setRGB(...tone.light.map((c) => 2 * c), THREE.LinearSRGBColorSpace);
-        e.dye.dark.value.setRGB(...tone.dark.map((c) => 2 * c), THREE.LinearSRGBColorSpace);
-      }
-    }
+    this.toneEntry = tone;
     this.applyTints();
+  }
+
+  /**
+   * Fur markings apply to every skin material on a fur body type: the body, its tufts,
+   * whiskers and claws, and outfits' bare arms (which wear the body's fur on the body's UVs).
+   */
+  applyMarkings() {
+    const tone = this.toneEntry;
+    const on = this.markings && tone?.light && tone?.dark ? 1 : 0;
+    for (const e of this.allMeshEntries()) {
+      if (!e.dye || !materialsOf(e.mesh).some((m) => (m.name || '').startsWith('skin'))) continue;
+      e.dye.markOn.value = on;
+      if (!on) continue;
+      e.dye.markings.value = this.markings;
+      // Doubled like the tone itself: the fur detail map averages 0.5.
+      e.dye.light.value.setRGB(...tone.light.map((c) => 2 * c), THREE.LinearSRGBColorSpace);
+      e.dye.dark.value.setRGB(...tone.dark.map((c) => 2 * c), THREE.LinearSRGBColorSpace);
+    }
   }
 
   setHairColour(rgb) {
@@ -251,6 +260,7 @@ export class Character {
   }
 
   applyTints() {
+    this.applyMarkings();
     for (const e of this.allMeshEntries()) {
       for (const m of materialsOf(e.mesh)) {
         const name = m.name || '';
