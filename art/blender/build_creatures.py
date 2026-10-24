@@ -4,8 +4,8 @@
 
 They are body types on the shared humanoid skeleton, so the whole clip library, sockets and
 gear work on them. The undead are Blender's CC0 anatomical skeleton: each bone is bound rigidly
-to the matching rig bone after being laid along it. Golems are stone chunks, one per bone, on a
-heavier rig. Run after build_races.py and before build_back.py and build_armour.py, which also
+to the matching rig bone after being laid along it. Golems are hewn stones, one per bone, on a
+heavier rig (aldermoor_art/golem.py), with carved runes and a glowing heart. Run after build_races.py and before build_back.py and build_armour.py, which also
 fit capes and plate to the undead.
 """
 
@@ -19,10 +19,9 @@ import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
-from mathutils.noise import noise as perlin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import cloth, export, races as rc, regions as rg, review, scene as sc, shapes as sh  # noqa: E402
+from aldermoor_art import cloth, export, golem, races as rc, regions as rg, review, scene as sc, sdf, shapes as sh  # noqa: E402
 
 OUT = sc.OUT / "humanoid"
 CAT_PATH = sc.OUT / "catalog" / "humanoid.json"
@@ -283,33 +282,13 @@ GOLEM = {
 }
 
 
-def rock(name, centre, axis, length, radius, seed, mat="stone"):
-    """A faceted stone, roughly an ellipsoid along `axis`."""
-    rnd = random.Random(seed)
-    bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
-    off = Vector((rnd.random() * 10, rnd.random() * 10, rnd.random() * 10))
-    for v in bm.verts:
-        n = v.co.normalized()
-        d = 1.0 + 0.22 * perlin(n * 1.6 + off) + 0.08 * perlin(n * 4.0 + off)
-        v.co = Vector((n.x * radius * d, n.y * length / 2 * d, n.z * radius * d * 0.92))
-    # Flatten a few facets so it reads as cut stone.
-    for _ in range(3):
-        plane = Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1))).normalized()
-        lim = 0.78 * min(radius, length / 2)
-        for v in bm.verts:
-            k = v.co.dot(plane)
-            if k > lim:
-                v.co -= plane * (k - lim)
-    q = Vector((0, 1, 0)).rotation_difference(axis.normalized())
-    bmesh.ops.transform(bm, matrix=Matrix.Translation(centre) @ q.to_matrix().to_4x4(), verts=bm.verts)
-    ob = sh.obj(name, bm, mat, smooth=False)
-    # Moss on the upward faces.
-    ob.data.materials.append(sh.material("moss"))
-    for p in ob.data.polygons:
-        if p.normal.z > 0.62:
-            p.material_index = 1
-    return ob
+def decimate(ob, target):
+    tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
+    if tris > target:
+        dec = ob.modifiers.new("decimate", "DECIMATE")
+        dec.ratio = target / tris
+        sc.activate(ob)
+        bpy.ops.object.modifier_apply(modifier=dec.name)
 
 
 def build_golem(cat):
@@ -337,7 +316,8 @@ def build_golem(cat):
     for sd in ("l", "r"):
         nxt.update({f"clavicle_{sd}": f"upperarm_{sd}", f"upperarm_{sd}": f"lowerarm_{sd}", f"lowerarm_{sd}": f"hand_{sd}",
                     f"hand_{sd}": f"middle_02_{sd}", f"thigh_{sd}": f"calf_{sd}", f"calf_{sd}": f"foot_{sd}", f"foot_{sd}": f"ball_leaf_{sd}"})
-    stones = []
+    # Stones as fields: [name, bone, field, (centre, frame, radii)].
+    fields = []
     for i, (bone, child) in enumerate(nxt.items()):
         a, b = h[bone], h[child]
         pts = pts_by.get(bone, [])
@@ -352,41 +332,74 @@ def build_golem(cat):
         if bone.startswith(("thigh", "calf")):
             r = max(r * 1.2, 0.16 if bone.startswith("thigh") else 0.14)
         c = a + seg * 0.5
+        # One great boulder for the chest; the stones of the waist sit smaller behind it.
         if bone == "spine_03":
-            r *= 1.18
-        st = rock(f"stone_{bone}", c, seg, length, max(r, 0.05), seed=i * 7 + 3)
-        rigid(st, bone)
-        stones.append(st)
+            r *= 1.25
+            length *= 1.35
+        elif bone in ("spine_01", "spine_02"):
+            r *= 0.82
+        d = seg.normalized()
+        field, frame = golem.stone(c - d * length / 2, c + d * length / 2, max(r, 0.05), seed=i * 7 + 3)
+        fields.append([f"stone_{bone}", bone, field, frame])
     # Joint stones bridge the elbows, knees and shoulders.
     for k, (bone, at, rad) in enumerate([(f"{b}_{sd}", j, r) for sd in ("l", "r") for b, j, r in
                                          (("lowerarm", "lowerarm", 0.15), ("calf", "calf", 0.16), ("upperarm", "upperarm", 0.21))]):
-        side = bone[-1]
-        jt = h[f"{at}_{side}"]
-        st = rock(f"joint_{bone}", jt + Vector((0, 0.0, 0.03 if "upperarm" in bone else 0.0)), Vector((0, 0, 1)), rad * 1.7, rad, seed=200 + k)
-        rigid(st, bone)
-        stones.append(st)
-    # The head: a small brow-heavy stone with a glowing slit.
-    hd = rock("stone_head", h["Head"] + Vector((0, -0.02, 0.13)), Vector((0, 0, 1)), 0.26, 0.13, seed=99)
-    rigid(hd, "Head")
-    stones.append(hd)
-    slit = sh.obj("slit", sh.ribbon([h["Head"] + Vector((x, -0.13, 0.15)) for x in (-0.07, 0.0, 0.07)], [Vector((0, -1, 0))] * 3, 0.018, 0.004), "rune")
-    rigid(slit, "Head")
-    # A glowing core in the chest, and runes down the arms.
-    core = sh.obj("core", sh.lathe([(0.0, -0.07), (0.06, -0.03), (0.065, 0.0), (0.06, 0.03), (0.0, 0.07)], 8), "rune")
-    core.location = h["spine_03"] + Vector((0, -0.24, 0.02))
-    rigid(core, "spine_03")
-    parts = stones + [slit, core]
-    for sd in ("l", "r"):
-        a, b = h[f"upperarm_{sd}"], h[f"lowerarm_{sd}"]
-        line = [a.lerp(b, t) + Vector((0, -0.17, 0.12)) for t in (0.25, 0.5, 0.75)]
-        rune = sh.obj("rune", sh.ribbon(line, [Vector((0, -0.6, 0.8))] * 3, 0.02, 0.004), "rune")
-        rigid(rune, f"upperarm_{sd}")
-        parts.append(rune)
-    body = sh.join(parts, "body")
+        jt = h[f"{at}_{bone[-1]}"] + Vector((0, 0.0, 0.03 if "upperarm" in bone else 0.0))
+        up = Vector((0, 0, rad * 0.85))
+        field, frame = golem.stone(jt - up, jt + up, rad, seed=200 + k, cuts=3)
+        fields.append([f"joint_{bone}", bone, field, frame])
+    head, eyes = golem.head(h["Head"] + Vector((0, -0.02, 0.13)))
+    fields.append(["stone_head", "Head", head, None])
+    by = {f[0]: f for f in fields}
+    glowing = []
+
+    def light(strokes, w, fade=False):
+        for q in strokes:
+            for i in range(len(q) - 1):
+                glowing.append((q[i], q[i + 1], w * (1 - 0.5 * i / len(q)) if fade else w, 1 - 0.55 * i / len(q) if fade else 1.0))
+
+    # The heart in the chest, cracks glowing out from it, and a column of runes either side.
+    chest = by["stone_spine_03"]
+    centre = chest[3][0]
+    field, (hp, hn), cracks, w = golem.heart(chest[2], centre, (0, -1, 0.1), (0, 0, 1), 0.075, seed=5)
+    light(cracks, w, fade=True)
+    for x, glyphs in ((1, (0, 3, 6)), (-1, (2, 5, 1))):
+        strokes, w = golem.runes(field, centre, (x * 0.62, -1, 0.05), (0, 0, 1), glyphs, 0.07)
+        light(strokes, w)
+    chest[2] = field
+    # Runes down the outsides of the upper arms and the fronts of the thighs.
+    for sd, x in (("l", 1), ("r", -1)):
+        ua = by[f"stone_upperarm_{sd}"]
+        strokes, w = golem.runes(ua[2], ua[3][0], (x, -0.45, 0.25), h[f"upperarm_{sd}"] - h[f"lowerarm_{sd}"], (4, 7), 0.06)
+        light(strokes, w)
+        th = by[f"stone_thigh_{sd}"]
+        strokes, w = golem.runes(th[2], th[3][0], (0.35 * x, -1, 0.0), h[f"thigh_{sd}"] - h[f"calf_{sd}"], (1,), 0.075)
+        light(strokes, w)
+    # Mesh each stone, share out the triangles by area and bind each stone to its bone.
+    stones = []
+    for name, bone, field, _ in fields:
+        stones.append((sdf.mesh(field, golem.STEP, name, relax_iters=3), bone))
+    areas = [sum(p.area for p in ob.data.polygons) for ob, _ in stones]
+    for (ob, bone), area in zip(stones, areas):
+        decimate(ob, max(250, int(21000 * area / sum(areas))))
+        rigid(ob, bone)
+    body = sh.join([ob for ob, _ in stones], "body")
+    # Smooth stone, but the hewn faces meet at sharp edges.
+    for p in body.data.polygons:
+        p.use_smooth = True
+    body.data.set_sharp_from_angle(angle=math.radians(38))
+    golem.paint(body, glowing, OUT / "textures", "golem_stone")
+    lights = golem.glow_eyes(eyes)
+    for e in lights:
+        rigid(e, "Head")
+    heart = golem.crystal(Vector(hp) - Vector(hn) * 0.012, hn, 0.06)
+    rigid(heart, "spine_03")
+    glow = sh.join(lights + [heart], "glow")
     bpy.data.objects.remove(body_h)
     sc.bind(body, skel)
+    sc.bind(glow, skel)
     rg.tag(body, skel)
-    return skel, body
+    return skel, body, glow
 
 
 def crown(skel, s, body=None):
@@ -453,8 +466,8 @@ def main():
     c = crown(skel, 1.3, body)
     finish_body_type(cat, "barrow_king", "The Barrow King", "undead", skel, [body, eyes, c],
                      {"gear_scale": 1.3, "boss": True})
-    skel, body = build_golem(cat)
-    finish_body_type(cat, "golem", "Stone golem", "construct", skel, [body], {"gear_scale": 1.8, "dress": False})
+    skel, body, glow = build_golem(cat)
+    finish_body_type(cat, "golem", "Stone golem", "construct", skel, [body, glow], {"gear_scale": 1.8, "dress": False})
     cat.setdefault("races", {})
     cat["races"]["undead"] = {"label": "Undead", "frames": {"male": "skeleton", "boss": "barrow_king"}, "npc_only": True, "creature": True}
     cat["races"]["construct"] = {"label": "Construct", "frames": {"male": "golem"}, "npc_only": True, "creature": True}

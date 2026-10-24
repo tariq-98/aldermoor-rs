@@ -303,7 +303,8 @@ same kit the Swift village used, remade at the characters' quality.
 - **Vertex colours:** where present, `COLOR_0` multiplies the base colour, as the glTF spec says:
   the skeleton's aged bone and the worked kit's occlusion.
 - **Glowing parts:** crystals, flames, runes and undead eyes use emissive colour with
-  `KHR_materials_emissive_strength`.
+  `KHR_materials_emissive_strength`; the stone golem's runes and the cracks round its heart are
+  an emissive texture on its stone material.
 - **Transparency:** the lantern's glass is the only blended material (`alphaMode: BLEND`).
 - **Skinning:** every skinned file carries the 65 rig bones as nodes; bodies add the sockets.
   Bind a piece's joints to the body's bones by name and keep the piece's own inverse bind
@@ -356,7 +357,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
 | `build_clips.py` | The clip library: the 84 vendor clips plus our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
 | `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`) | `humanoid/<race>_<frame>/` |
-| `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
+| `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig. The golem's hewn stones are fields (`aldermoor_art/golem.py`) painted with lichen, moss and glowing runes | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
 | `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |

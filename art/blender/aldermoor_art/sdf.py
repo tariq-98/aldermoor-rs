@@ -80,7 +80,8 @@ class Ellipsoid(Node):
             q = q @ self.R
         k0 = np.linalg.norm(q / self.r, axis=-1)
         k1 = np.linalg.norm(q / (self.r * self.r), axis=-1)
-        return k0 * (k0 - 1.0) / np.maximum(k1, 1e-9)
+        # The approximation is 0/0 at the very centre, which is as deep inside as it gets.
+        return np.where(k1 > 1e-9, k0 * (k0 - 1.0) / np.maximum(k1, 1e-9), -self.r.min())
 
     def bounds(self):
         e = self.r if self.R is None else np.sqrt(((self.R * self.r[None, :]) ** 2).sum(1))
@@ -195,6 +196,34 @@ class Subtract(Node):
             cut[m] = self.b(p[m])
             d = smax(d, -cut, self.k)
         return d
+
+
+class Plane(Node):
+    """The half-space behind a plane through `point` facing `n`. Unbounded: use it only to cut
+    (Intersect), never in a Union."""
+
+    def __init__(self, point, n):
+        self.n = _v(n) / np.linalg.norm(n)
+        self.d = float(self.n @ _v(point))
+
+    def bounds(self):
+        return np.full(3, -np.inf), np.full(3, np.inf)
+
+    def __call__(self, p):
+        return p @ self.n - self.d
+
+
+class Intersect(Node):
+    """What lies inside both a and b, the seam rounded by k; bounded by a."""
+
+    def __init__(self, a, b, k=0.0):
+        self.a, self.b, self.k = a, b, k
+
+    def bounds(self):
+        return self.a.bounds()
+
+    def __call__(self, p):
+        return smax(self.a(p), self.b(p), self.k)
 
 
 class Mirror(Node):
