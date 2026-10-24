@@ -1,0 +1,65 @@
+{
+  "note": "Third-party art the pipeline builds from. Downloads live in art/vendor/ (not in git). art/fetch_vendor.sh fetches and checks them.",
+  "packs": [
+    {
+      "id": "universal-base-characters",
+      "author": "Quaternius",
+      "page": "https://quaternius.itch.io/universal-base-characters",
+      "tier": "Standard (free)",
+      "file": "Universal Base Characters[Standard].zip",
+      "bytes": 128968391,
+      "sha256": "fdbf1804c90dfc1ea03e992bff7da2dfd1a79318e13270a660180f9308455f40",
+      "licence": "CC0-1.0 (License.txt in the archive and the itch.io page)",
+      "fetched": "2026-10-24",
+      "extract": {
+        "Universal Base Characters[Standard]/Base Characters/Godot - UE/": "base-characters/",
+        "Universal Base Characters[Standard]/Base Characters/Textures/": "base-characters/Textures/",
+        "Universal Base Characters[Standard]/Hairstyles/Rigged to Head Bone/glTF (Godot -Unreal)/": "hair/"
+      }
+    },
+    {
+      "id": "modular-character-outfits-fantasy",
+      "author": "Quaternius",
+      "page": "https://quaternius.itch.io/modular-character-outfits-fantasy",
+      "tier": "Standard (free): Peasant and Ranger, male and female",
+      "file": "Modular Character Outfits - Fantasy[Standard].zip",
+      "bytes": 294347394,
+      "sha256": "c3468b18871cc8c8f05ab14df7712baf22cb9f389cbd870babf130e595187f70",
+      "licence": "CC0-1.0",
+      "fetched": "2026-10-24",
+      "extract": {
+        "Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/": "outfits/",
+        "Modular Character Outfits - Fantasy[Standard]/Textures/": "outfits/Textures/"
+      }
+    },
+    {
+      "id": "universal-animation-library",
+      "author": "Quaternius",
+      "page": "https://quaternius.itch.io/universal-animation-library",
+      "tier": "Standard (free), v3.0, 43 clips",
+      "file": "Universal Animation Library[Standard].zip",
+      "bytes": 15904933,
+      "sha256": "cc73fc4e495b82958207316596317a3f40b9fa38065bde1027937452da537724",
+      "licence": "CC0-1.0",
+      "fetched": "2026-10-24",
+      "extract": {
+        "Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb": "anims/UAL1_Standard.glb",
+        "Universal Animation Library[Standard]/License.txt": "LICENSE-CC0.txt"
+      }
+    },
+    {
+      "id": "universal-animation-library-2",
+      "author": "Quaternius",
+      "page": "https://quaternius.itch.io/universal-animation-library-2",
+      "tier": "Standard (free), v2.2, 42 clips",
+      "file": "Universal Animation Library 2[Standard].zip",
+      "bytes": 18735003,
+      "sha256": "4008ea208a604773a2b2177d965f0f5d3195498b5bf838c3f5785d68e95f2a68",
+      "licence": "CC0-1.0",
+      "fetched": "2026-10-24",
+      "extract": {
+        "Universal Animation Library 2[Standard]/Unreal-Godot/UAL2_Standard.glb": "anims/UAL2_Standard.glb"
+      }
+    }
+  ]
+}

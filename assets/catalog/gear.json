@@ -1,0 +1,284 @@
+{
+ "version": 1,
+ "items": [
+  {
+   "id": "sword.arming",
+   "label": "Arming sword",
+   "family": "sword",
+   "slot": "main_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_hip_l"
+   },
+   "clips": {
+    "idle": "Sword_Idle",
+    "attacks": [
+     "Sword_Regular_A",
+     "Sword_Regular_B",
+     "Sword_Regular_C",
+     "Sword_Regular_Combo",
+     "Sword_Heavy_Combo"
+    ],
+    "block": "Sword_Block",
+    "dash": "Sword_Dash"
+   },
+   "file": "gear/sword.arming.gltf",
+   "triangles": 3110,
+   "sheath": "gear/sword.arming.sheath.gltf"
+  },
+  {
+   "id": "dagger.hunting",
+   "label": "Hunting knife",
+   "family": "dagger",
+   "slot": "off_hand",
+   "held": "socket_hand_l",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "idle": "Sword_Idle",
+    "attacks": [
+     "Sword_Regular_A",
+     "Melee_Hook"
+    ]
+   },
+   "file": "gear/dagger.hunting.gltf",
+   "triangles": 2726,
+   "sheath": "gear/dagger.hunting.sheath.gltf"
+  },
+  {
+   "id": "shield.round",
+   "label": "Round shield",
+   "family": "shield",
+   "slot": "off_hand",
+   "held": "socket_shield_l",
+   "stowed": {
+    "default": "socket_back_2",
+    "backpack": "socket_pack",
+    "cape": "socket_back_2"
+   },
+   "clips": {
+    "idle": "Idle_Shield_Loop",
+    "block": "Idle_Shield_Loop",
+    "bash": "Shield_OneShot",
+    "dash": "Shield_Dash"
+   },
+   "file": "gear/shield.round.gltf",
+   "triangles": 3774
+  },
+  {
+   "id": "bow.hunting",
+   "label": "Hunting bow",
+   "family": "bow",
+   "slot": "two_hand",
+   "held": "socket_hand_l",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Idle_Loop"
+   },
+   "file": "gear/bow.hunting.gltf",
+   "triangles": 2564
+  },
+  {
+   "id": "quiver.leather",
+   "label": "Leather quiver",
+   "family": "quiver",
+   "slot": "ammo",
+   "stowed": {
+    "default": "socket_quiver",
+    "backpack": "socket_quiver_hip"
+   },
+   "clips": {},
+   "file": "gear/quiver.leather.gltf",
+   "triangles": 1298
+  },
+  {
+   "id": "staff.oak",
+   "label": "Oak staff",
+   "family": "staff",
+   "slot": "two_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Spell_Simple_Idle_Loop",
+    "attacks": [
+     "Spell_Simple_Shoot"
+    ],
+    "enter": "Spell_Simple_Enter",
+    "exit": "Spell_Simple_Exit"
+   },
+   "file": "gear/staff.oak.gltf",
+   "triangles": 3126
+  },
+  {
+   "id": "wand.yew",
+   "label": "Yew wand",
+   "family": "wand",
+   "slot": "main_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "idle": "Spell_Simple_Idle_Loop",
+    "attacks": [
+     "Spell_Simple_Shoot"
+    ]
+   },
+   "file": "gear/wand.yew.gltf",
+   "triangles": 340
+  },
+  {
+   "id": "cape.traveller",
+   "label": "Traveller's cape",
+   "family": "cape",
+   "slot": "back",
+   "back_kind": "cape",
+   "layer": 2.8,
+   "files": {
+    "male": "gear/male/cape.traveller.gltf",
+    "female": "gear/female/cape.traveller.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": []
+    },
+    "female": {
+     "body": []
+    }
+   },
+   "springs": {
+    "chains": [
+     [
+      "cape_0_0",
+      "cape_0_1",
+      "cape_0_2",
+      "cape_0_3",
+      "cape_0_4"
+     ],
+     [
+      "cape_1_0",
+      "cape_1_1",
+      "cape_1_2",
+      "cape_1_3",
+      "cape_1_4"
+     ],
+     [
+      "cape_2_0",
+      "cape_2_1",
+      "cape_2_2",
+      "cape_2_3",
+      "cape_2_4"
+     ],
+     [
+      "cape_3_0",
+      "cape_3_1",
+      "cape_3_2",
+      "cape_3_3",
+      "cape_3_4"
+     ],
+     [
+      "cape_4_0",
+      "cape_4_1",
+      "cape_4_2",
+      "cape_4_3",
+      "cape_4_4"
+     ]
+    ],
+    "stiffness": 0.35,
+    "drag": 0.25,
+    "gravity": 9.81,
+    "radius": 0.035
+   }
+  },
+  {
+   "id": "cape.ranger",
+   "label": "Ranger's cloak",
+   "family": "cape",
+   "slot": "back",
+   "back_kind": "cape",
+   "layer": 2.8,
+   "files": {
+    "male": "gear/male/cape.ranger.gltf",
+    "female": "gear/female/cape.ranger.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": []
+    },
+    "female": {
+     "body": []
+    }
+   },
+   "springs": {
+    "chains": [
+     [
+      "cape_0_0",
+      "cape_0_1",
+      "cape_0_2",
+      "cape_0_3",
+      "cape_0_4"
+     ],
+     [
+      "cape_1_0",
+      "cape_1_1",
+      "cape_1_2",
+      "cape_1_3",
+      "cape_1_4"
+     ],
+     [
+      "cape_2_0",
+      "cape_2_1",
+      "cape_2_2",
+      "cape_2_3",
+      "cape_2_4"
+     ],
+     [
+      "cape_3_0",
+      "cape_3_1",
+      "cape_3_2",
+      "cape_3_3",
+      "cape_3_4"
+     ],
+     [
+      "cape_4_0",
+      "cape_4_1",
+      "cape_4_2",
+      "cape_4_3",
+      "cape_4_4"
+     ]
+    ],
+    "stiffness": 0.35,
+    "drag": 0.25,
+    "gravity": 9.81,
+    "radius": 0.035
+   }
+  },
+  {
+   "id": "backpack.travel",
+   "label": "Travel pack",
+   "family": "backpack",
+   "slot": "back",
+   "back_kind": "backpack",
+   "layer": 2.9,
+   "files": {
+    "male": "gear/male/backpack.travel.gltf",
+    "female": "gear/female/backpack.travel.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": []
+    },
+    "female": {
+     "body": []
+    }
+   }
+  }
+ ]
+}

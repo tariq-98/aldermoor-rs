@@ -1,0 +1,16 @@
+{
+  "name": "aldermoor-workshop",
+  "private": true,
+  "type": "module",
+  "description": "The character workshop: assemble, dress and animate Aldermoor characters in the browser",
+  "scripts": {
+    "serve": "./serve.sh",
+    "check": "node check.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1"
+  }
+}

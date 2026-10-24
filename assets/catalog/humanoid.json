@@ -1,0 +1,1776 @@
+{
+ "version": 1,
+ "regions": [
+  "scalp",
+  "face",
+  "ears",
+  "neck",
+  "chest",
+  "belly",
+  "hips",
+  "upperarm_hi",
+  "upperarm_lo",
+  "forearm_hi",
+  "forearm_lo",
+  "hand",
+  "thigh_hi",
+  "thigh_lo",
+  "shin_hi",
+  "shin_lo",
+  "foot",
+  "tail"
+ ],
+ "skin_tones": [
+  {
+   "id": "porcelain",
+   "linear": [
+    0.56,
+    0.34,
+    0.23
+   ]
+  },
+  {
+   "id": "fair",
+   "linear": [
+    0.48,
+    0.27,
+    0.17
+   ]
+  },
+  {
+   "id": "warm",
+   "linear": [
+    0.4,
+    0.21,
+    0.12
+   ]
+  },
+  {
+   "id": "olive",
+   "linear": [
+    0.32,
+    0.18,
+    0.09
+   ]
+  },
+  {
+   "id": "tan",
+   "linear": [
+    0.25,
+    0.13,
+    0.065
+   ]
+  },
+  {
+   "id": "brown",
+   "linear": [
+    0.16,
+    0.08,
+    0.042
+   ]
+  },
+  {
+   "id": "deep",
+   "linear": [
+    0.09,
+    0.045,
+    0.025
+   ]
+  },
+  {
+   "id": "ebony",
+   "linear": [
+    0.05,
+    0.026,
+    0.016
+   ]
+  }
+ ],
+ "hair_colours": [
+  {
+   "id": "black",
+   "linear": [
+    0.012,
+    0.01,
+    0.009
+   ]
+  },
+  {
+   "id": "dark brown",
+   "linear": [
+    0.045,
+    0.025,
+    0.014
+   ]
+  },
+  {
+   "id": "chestnut",
+   "linear": [
+    0.13,
+    0.055,
+    0.025
+   ]
+  },
+  {
+   "id": "auburn",
+   "linear": [
+    0.25,
+    0.07,
+    0.03
+   ]
+  },
+  {
+   "id": "copper",
+   "linear": [
+    0.45,
+    0.16,
+    0.05
+   ]
+  },
+  {
+   "id": "honey",
+   "linear": [
+    0.48,
+    0.3,
+    0.12
+   ]
+  },
+  {
+   "id": "blonde",
+   "linear": [
+    0.7,
+    0.52,
+    0.28
+   ]
+  },
+  {
+   "id": "ash",
+   "linear": [
+    0.4,
+    0.38,
+    0.34
+   ]
+  },
+  {
+   "id": "white",
+   "linear": [
+    0.8,
+    0.8,
+    0.78
+   ]
+  },
+  {
+   "id": "moss",
+   "linear": [
+    0.1,
+    0.2,
+    0.07
+   ]
+  },
+  {
+   "id": "midnight",
+   "linear": [
+    0.03,
+    0.05,
+    0.16
+   ]
+  }
+ ],
+ "body_types": {
+  "male": {
+   "label": "Broad frame",
+   "file": "humanoid/male/body.gltf",
+   "pelvis": [
+    0.0,
+    0.9491,
+    -0.043
+   ],
+   "height": 1.81,
+   "skin_reference": [
+    0.37912195920944214,
+    0.19172488152980804,
+    0.1066417470574379
+   ],
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_side",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.1615,
+     "a": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.128,
+      0.0043
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.1641,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1063,
+      -0.0022
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.1659,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.1329,
+      0.0072
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.1963,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.2111,
+      -0.0415
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.1138,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.4288,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.1138,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.4288,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.0695,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4586,
+      0.0147
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.0695,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4586,
+      0.0147
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.093,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.2511,
+      -0.0033
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.093,
+     "a": [
+      -0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.2511,
+      -0.0033
+     ]
+    }
+   ]
+  },
+  "female": {
+   "label": "Slender frame",
+   "file": "humanoid/female/body.gltf",
+   "pelvis": [
+    0.0,
+    0.9318,
+    -0.0457
+   ],
+   "height": 1.767,
+   "skin_reference": [
+    0.39401793479919434,
+    0.19417804479599,
+    0.10027362406253815
+   ],
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_side",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.1567,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1266,
+      -0.001
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.1407,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1103,
+      -0.0007
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.1472,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.1263,
+      0.0046
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.1636,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1955,
+      -0.0326
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.1112,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.4093,
+      -0.0224
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.1112,
+     "a": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.4093,
+      -0.0224
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.0639,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.466,
+      0.0069
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.0639,
+     "a": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.466,
+      0.0069
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.0694,
+     "a": [
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.2403,
+      -0.0004
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.0694,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.2403,
+      -0.0004
+     ]
+    }
+   ]
+  }
+ },
+ "hair": [
+  {
+   "id": "hair.simple_parted",
+   "kind": "hair",
+   "label": "Short, parted",
+   "files": {
+    "male": "humanoid/male/hair/hair.simple_parted.gltf",
+    "female": "humanoid/female/hair/hair.simple_parted.gltf"
+   }
+  },
+  {
+   "id": "hair.buzzed",
+   "kind": "hair",
+   "label": "Buzzed",
+   "files": {
+    "male": "humanoid/male/hair/hair.buzzed.gltf",
+    "female": "humanoid/female/hair/hair.buzzed.gltf"
+   }
+  },
+  {
+   "id": "hair.buzzed_soft",
+   "kind": "hair",
+   "label": "Buzzed, soft line",
+   "files": {
+    "male": "humanoid/male/hair/hair.buzzed_soft.gltf",
+    "female": "humanoid/female/hair/hair.buzzed_soft.gltf"
+   }
+  },
+  {
+   "id": "hair.buns",
+   "kind": "hair",
+   "label": "Twin buns",
+   "files": {
+    "male": "humanoid/male/hair/hair.buns.gltf",
+    "female": "humanoid/female/hair/hair.buns.gltf"
+   }
+  },
+  {
+   "id": "hair.long",
+   "kind": "hair",
+   "label": "Long",
+   "files": {
+    "male": "humanoid/male/hair/hair.long.gltf",
+    "female": "humanoid/female/hair/hair.long.gltf"
+   }
+  },
+  {
+   "id": "beard.full",
+   "kind": "beard",
+   "label": "Full beard",
+   "files": {
+    "male": "humanoid/male/hair/beard.full.gltf",
+    "female": "humanoid/female/hair/beard.full.gltf"
+   }
+  },
+  {
+   "id": "brows.strong",
+   "kind": "brows",
+   "label": "Strong brows",
+   "files": {
+    "male": "humanoid/male/hair/brows.strong.gltf",
+    "female": "humanoid/female/hair/brows.strong.gltf"
+   }
+  },
+  {
+   "id": "brows.fine",
+   "kind": "brows",
+   "label": "Fine brows",
+   "files": {
+    "male": "humanoid/male/hair/brows.fine.gltf",
+    "female": "humanoid/female/hair/brows.fine.gltf"
+   }
+  }
+ ],
+ "pieces": [
+  {
+   "id": "peasant.top",
+   "slot": "torso_under",
+   "layer": 1.1,
+   "label": "Linen shirt",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/peasant.top.gltf",
+    "female": "humanoid/female/outfits/peasant.top.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "female": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "hips": 0.831,
+     "chest": 0.981,
+     "belly": 1.0,
+     "upperarm_hi": 1.0,
+     "neck": 0.164,
+     "upperarm_lo": 0.989,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "thigh_hi": 0.092,
+     "hand": 0.998
+    },
+    "female": {
+     "neck": 0.244,
+     "chest": 0.999,
+     "belly": 1.0,
+     "hips": 0.349,
+     "upperarm_lo": 1.0,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "upperarm_hi": 1.0,
+     "hand": 0.998
+    }
+   }
+  },
+  {
+   "id": "peasant.trousers",
+   "slot": "legs_under",
+   "layer": 1.0,
+   "label": "Work trousers",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/peasant.trousers.gltf",
+    "female": "humanoid/female/outfits/peasant.trousers.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    },
+    "female": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "hips": 0.688,
+     "shin_hi": 0.91,
+     "thigh_hi": 0.964,
+     "thigh_lo": 1.0
+    },
+    "female": {
+     "belly": 0.152,
+     "hips": 1.0,
+     "shin_hi": 0.788,
+     "thigh_hi": 1.0,
+     "thigh_lo": 1.0
+    }
+   }
+  },
+  {
+   "id": "peasant.shoes",
+   "slot": "feet",
+   "layer": 1.2,
+   "label": "Wrapped shoes",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/peasant.shoes.gltf",
+    "female": "humanoid/female/outfits/peasant.shoes.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "shin_lo",
+      "foot"
+     ]
+    },
+    "female": {
+     "body": [
+      "shin_lo",
+      "foot"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.244,
+     "foot": 0.993
+    },
+    "female": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.463,
+     "foot": 0.996
+    }
+   }
+  },
+  {
+   "id": "ranger.top",
+   "slot": "torso_under",
+   "layer": 1.1,
+   "label": "Ranger jerkin",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/ranger.top.gltf",
+    "female": "humanoid/female/outfits/ranger.top.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "female": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "hips": 0.822,
+     "chest": 0.966,
+     "belly": 1.0,
+     "upperarm_hi": 0.86,
+     "neck": 0.777,
+     "upperarm_lo": 0.872,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "thigh_hi": 0.136,
+     "hand": 0.998
+    },
+    "female": {
+     "neck": 0.585,
+     "chest": 1.0,
+     "belly": 1.0,
+     "hips": 0.678,
+     "upperarm_lo": 1.0,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "upperarm_hi": 1.0,
+     "hand": 0.998,
+     "thigh_hi": 0.062
+    }
+   }
+  },
+  {
+   "id": "ranger.trousers",
+   "slot": "legs_under",
+   "layer": 1.0,
+   "label": "Ranger leggings",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/ranger.trousers.gltf",
+    "female": "humanoid/female/outfits/ranger.trousers.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    },
+    "female": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "hips": 0.709,
+     "shin_hi": 0.874,
+     "thigh_hi": 0.994,
+     "thigh_lo": 1.0
+    },
+    "female": {
+     "hips": 0.952,
+     "shin_hi": 0.964,
+     "thigh_hi": 0.995,
+     "thigh_lo": 1.0
+    }
+   }
+  },
+  {
+   "id": "ranger.boots",
+   "slot": "feet",
+   "layer": 1.2,
+   "label": "Ranger boots",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/ranger.boots.gltf",
+    "female": "humanoid/female/outfits/ranger.boots.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "shin_hi",
+      "shin_lo",
+      "foot"
+     ]
+    },
+    "female": {
+     "body": [
+      "shin_hi",
+      "shin_lo",
+      "foot"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.632,
+     "foot": 0.994
+    },
+    "female": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.56,
+     "foot": 0.995,
+     "thigh_lo": 0.086
+    }
+   }
+  },
+  {
+   "id": "ranger.hood",
+   "slot": "head",
+   "layer": 2.5,
+   "label": "Ranger hood",
+   "covers_hair": true,
+   "files": {
+    "male": "humanoid/male/outfits/ranger.hood.gltf",
+    "female": "humanoid/female/outfits/ranger.hood.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "chest": 0.061,
+     "neck": 0.521,
+     "scalp": 0.812,
+     "face": 0.335,
+     "ears": 0.799
+    },
+    "female": {
+     "neck": 0.126,
+     "scalp": 0.61,
+     "chest": 0.14,
+     "ears": 0.713,
+     "face": 0.294
+    }
+   }
+  },
+  {
+   "id": "ranger.pauldron",
+   "slot": "shoulders",
+   "layer": 3.0,
+   "label": "Ranger pauldron",
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/outfits/ranger.pauldron.gltf",
+    "female": "humanoid/female/outfits/ranger.pauldron.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": []
+    },
+    "female": {
+     "body": []
+    }
+   },
+   "coverage": {
+    "male": {
+     "upperarm_hi": 0.193
+    },
+    "female": {
+     "upperarm_hi": 0.216
+    }
+   }
+  }
+ ],
+ "animations": {
+  "file": "humanoid/anims.glb",
+  "pelvis": [
+   0.0,
+   0.9167,
+   -0.0501
+  ],
+  "fps": 30,
+  "clips": [
+   {
+    "name": "Chest_Open",
+    "seconds": 1.367,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "ClimbUp_1m",
+    "seconds": 0.667,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Consume",
+    "seconds": 1.333,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Crouch_Fwd_Loop",
+    "seconds": 2.0,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Crouch_Idle_Loop",
+    "seconds": 2.933,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Dance_Loop",
+    "seconds": 1.0,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Death01",
+    "seconds": 2.4,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Driving_Loop",
+    "seconds": 1.667,
+    "loop": true,
+    "group": "idle",
+    "tags": [
+     "idle"
+    ]
+   },
+   {
+    "name": "Farm_Harvest",
+    "seconds": 2.5,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Farm_PlantSeed",
+    "seconds": 2.767,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Farm_Watering",
+    "seconds": 3.8,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Fixing_Kneeling",
+    "seconds": 5.2,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Hit_Chest",
+    "seconds": 0.333,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat",
+     "work"
+    ]
+   },
+   {
+    "name": "Hit_Head",
+    "seconds": 0.433,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Hit_Knockback",
+    "seconds": 0.833,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Idle_FoldArms_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Idle_Lantern_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "idle",
+    "tags": [
+     "idle"
+    ]
+   },
+   {
+    "name": "Idle_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "idle",
+    "tags": [
+     "idle"
+    ]
+   },
+   {
+    "name": "Idle_No_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Idle_Rail_Call",
+    "seconds": 2.5,
+    "loop": false,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Idle_Rail_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Idle_Shield_Break",
+    "seconds": 1.067,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Idle_Shield_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Idle_TalkingPhone_Loop",
+    "seconds": 2.933,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Idle_Talking_Loop",
+    "seconds": 2.933,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Idle_Torch_Loop",
+    "seconds": 1.267,
+    "loop": true,
+    "group": "idle",
+    "tags": [
+     "idle"
+    ]
+   },
+   {
+    "name": "Interact",
+    "seconds": 2.0,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Jog_Fwd_Loop",
+    "seconds": 0.933,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Jump_Land",
+    "seconds": 1.267,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Jump_Loop",
+    "seconds": 2.5,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Jump_Start",
+    "seconds": 1.333,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "LayToIdle",
+    "seconds": 1.533,
+    "loop": false,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Melee_Hook",
+    "seconds": 0.467,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Melee_Hook_Rec",
+    "seconds": 0.6,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "NinjaJump_Idle_Loop",
+    "seconds": 2.0,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "NinjaJump_Land",
+    "seconds": 1.267,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "NinjaJump_Start",
+    "seconds": 0.967,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "OverhandThrow",
+    "seconds": 1.333,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "PickUp_Table",
+    "seconds": 0.833,
+    "loop": false,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Pistol_Aim_Down",
+    "seconds": 0.167,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Pistol_Aim_Neutral",
+    "seconds": 0.167,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Pistol_Aim_Up",
+    "seconds": 0.167,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Pistol_Idle_Loop",
+    "seconds": 1.667,
+    "loop": true,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Pistol_Reload",
+    "seconds": 1.667,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Pistol_Shoot",
+    "seconds": 0.633,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Punch_Cross",
+    "seconds": 1.0,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Punch_Jab",
+    "seconds": 0.867,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Push_Loop",
+    "seconds": 2.667,
+    "loop": true,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Roll",
+    "seconds": 1.467,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Shield_Dash",
+    "seconds": 1.1,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Shield_OneShot",
+    "seconds": 0.833,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sitting_Enter",
+    "seconds": 1.3,
+    "loop": false,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Sitting_Exit",
+    "seconds": 1.033,
+    "loop": false,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Sitting_Idle_Loop",
+    "seconds": 1.667,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Sitting_Talking_Loop",
+    "seconds": 2.933,
+    "loop": true,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Slide_Exit",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Slide_Loop",
+    "seconds": 2.0,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Slide_Start",
+    "seconds": 0.833,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Spell_Simple_Enter",
+    "seconds": 0.533,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Spell_Simple_Exit",
+    "seconds": 0.433,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Spell_Simple_Idle_Loop",
+    "seconds": 2.1,
+    "loop": true,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Spell_Simple_Shoot",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sprint_Loop",
+    "seconds": 0.667,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Swim_Fwd_Loop",
+    "seconds": 1.333,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Swim_Idle_Loop",
+    "seconds": 3.333,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Sword_Attack",
+    "seconds": 1.533,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Block",
+    "seconds": 1.233,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Dash",
+    "seconds": 1.567,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Heavy_Combo",
+    "seconds": 4.333,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Idle",
+    "seconds": 1.667,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Regular_A",
+    "seconds": 0.433,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Regular_A_Rec",
+    "seconds": 0.967,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Regular_B",
+    "seconds": 0.533,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Regular_B_Rec",
+    "seconds": 1.033,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Regular_C",
+    "seconds": 2.0,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "Sword_Regular_Combo",
+    "seconds": 3.0,
+    "loop": false,
+    "group": "combat",
+    "tags": [
+     "combat"
+    ]
+   },
+   {
+    "name": "TreeChopping_Loop",
+    "seconds": 0.967,
+    "loop": true,
+    "group": "work",
+    "tags": [
+     "work"
+    ]
+   },
+   {
+    "name": "Walk_Carry_Loop",
+    "seconds": 2.0,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "work"
+    ]
+   },
+   {
+    "name": "Walk_Formal_Loop",
+    "seconds": 1.333,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Walk_Loop",
+    "seconds": 1.333,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ]
+   },
+   {
+    "name": "Yes",
+    "seconds": 2.5,
+    "loop": false,
+    "group": "social",
+    "tags": [
+     "social"
+    ]
+   },
+   {
+    "name": "Zombie_Idle_Loop",
+    "seconds": 1.333,
+    "loop": true,
+    "group": "undead",
+    "tags": [
+     "undead"
+    ]
+   },
+   {
+    "name": "Zombie_Scratch",
+    "seconds": 1.8,
+    "loop": false,
+    "group": "undead",
+    "tags": [
+     "undead"
+    ]
+   },
+   {
+    "name": "Zombie_Walk_Fwd_Loop",
+    "seconds": 1.333,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "undead"
+    ]
+   }
+  ]
+ },
+ "defaults": {
+  "male": {
+   "pieces": [
+    "peasant.top",
+    "peasant.trousers",
+    "peasant.shoes"
+   ],
+   "hair": "hair.simple_parted",
+   "brows": "brows.strong",
+   "beard": "beard.full",
+   "tone": "warm",
+   "hair_colour": "chestnut"
+  },
+  "female": {
+   "pieces": [
+    "peasant.top",
+    "peasant.trousers",
+    "peasant.shoes"
+   ],
+   "hair": "hair.buns",
+   "brows": "brows.fine",
+   "beard": null,
+   "tone": "olive",
+   "hair_colour": "dark brown"
+  }
+ },
+ "texture_variant_labels": {
+  "T_Peasant_BaseColor": "Undyed linen",
+  "T_Peasant_2_BaseColor": "Madder and walnut",
+  "T_Ranger_BaseColor": "Forest green",
+  "T_Ranger_3_BaseColor": "Autumn brown"
+ },
+ "texture_variants": {
+  "T_Peasant_BaseColor": [
+   "T_Peasant_2_BaseColor"
+  ],
+  "T_Ranger_BaseColor": [
+   "T_Ranger_3_BaseColor"
+  ]
+ }
+}

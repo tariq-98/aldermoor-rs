@@ -1,0 +1,7 @@
+{
+  "name": "aldermoor-fetch",
+  "private": true,
+  "type": "module",
+  "description": "Downloads the free tier of itch.io asset packs with headless Chrome",
+  "dependencies": { "playwright-core": "^1" }
+}

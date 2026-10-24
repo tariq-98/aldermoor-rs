@@ -1,2 +1,8 @@
 /target
 .DS_Store
+# Third-party art downloads (re-fetch with art/fetch_vendor.sh; hashes in art/vendor.json)
+/art/vendor/
+# Pipeline scratch output
+/art/out/
+node_modules/
+__pycache__/

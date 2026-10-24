@@ -27,23 +27,19 @@ rendering technique still decides the frame rate. That's why the engine talks to
 3. **Platforms:** the game client runs on Apple-silicon Macs. The server builds for Mac and Linux.
 4. **A fresh repo** (`aldermoor-rs`), ported by feature, not line by line. The Swift game's 169
    simulation checks become the acceptance tests for the Rust simulation.
-5. **The new character design**, not a port of the four classes and talent trees. The ten decisions
-   accepted so far in the Codex design discussion:
-   - races: humans, elves, dwarves and foxfolk;
-   - specialties: warrior, archer, mage, necromancer, rogue and healer;
-   - specialties level up separately through use, RuneScape-style;
-   - loadouts switch anywhere outside combat;
-   - several friendly guilds, but a choice between rival factions;
-   - character creation with faces, hair, builds, colours and markings;
-   - hybrid builds;
-   - free choice of armour, with trade-offs;
-   - visible gear with dyes;
-   - every race can take every specialty.
+5. **The new character design**, not a port of the four classes and talent trees. The whole
+   design interview is settled; see [DESIGN.md](DESIGN.md). In short:
+   - Races (humans, elves, dwarves, foxfolk), with every race open to every specialty.
+   - Specialties (warrior, archer, mage, necromancer, rogue, healer) level through use,
+     RuneScape-style, with hybrids and loadouts.
+   - Visible, correctly fitted gear with dyes; factions and guilds.
+   - Solo and offline first.
 6. **Prove it first.** Milestone 1 is a slice that justifies the switch. It is measured against the
    Swift build.
 7. **Split of work:** one repo.
-   - Claude: simulation, gameplay, AI and server.
-   - Codex: renderer, shaders and the art pipeline.
+   - Claude: simulation, gameplay, AI, server, and since 24 October **the art itself**: characters,
+     gear, creatures, animation and the asset pipeline. See [ASSETS.md](ASSETS.md).
+   - Codex: renderer and shaders. It reads the asset contract in ASSETS.md.
    - Shared: the snapshot contract between simulation and renderer, plus automated checks (tests
      and a frame-time benchmark).
 8. **Disk:** at least 30–40 GB free before heavy building starts. Rust build folders grow to tens
@@ -73,7 +69,7 @@ rendering technique still decides the frame rate. That's why the engine talks to
 | `server` | Runs `sim` at 60 Hz on its own thread; saves; dispatches AI requests | Claude |
 | `ai` | Providers, router, budget and features: talking NPCs, persuasion, moods, companions, events, quest judging | Claude |
 | `render` | Metal renderer: frame graph, lighting, shadows, water, foliage, characters, MetalFX or our own temporal anti-aliasing (TAA) | Codex |
-| `assets` | Build-time tools: glTF to engine format, texture compression, Blender export scripts | Codex |
+| `assets` | Build-time tools: glTF to engine format, texture compression, catalogue checks. The Blender pipeline itself is `art/blender/` | Claude |
 | `client` | The app: window, input, camera, interpolation, HUD, audio | Shared |
 | `apple` | Swift add-on built as a static library behind a C interface: on-device model, and later Game Center | Claude |
 
@@ -108,7 +104,8 @@ rendering technique still decides the frame rate. That's why the engine talks to
 
 ## Still to decide
 
-- The rest of the character design that Codex was asking about (from question 12 on).
-- How specialties relate to the old talent trees: kept as specialty perks, or dropped.
-- Whether the world stays the generated continent or becomes hand-built zones, starting with the
-  Brambleford valley.
+- **Talent trees:** the agreed design (specialties trained through use, with hybrid builds)
+  replaces the classes. Their talent trees are dropped unless Tariq wants them back as specialty
+  perks.
+- **The world:** settled as deliberately designed regions (DESIGN.md), starting with the
+  Brambleford valley. The generated continent is retired.

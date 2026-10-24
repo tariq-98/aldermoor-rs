@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aldermoor character workshop</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./node_modules/three/build/three.module.js",
+        "three/addons/": "./node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main id="stage" aria-label="Character view"></main>
+  <aside id="panel" aria-label="Workshop controls">
+    <header class="title"><h1>Aldermoor</h1><p>Character workshop</p></header>
+    <footer class="status" id="status">Loading…</footer>
+  </aside>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
