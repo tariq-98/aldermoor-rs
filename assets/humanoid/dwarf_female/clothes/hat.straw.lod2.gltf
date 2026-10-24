@@ -1278,9 +1278,12 @@
 		{
 			"doubleSided":true,
 			"name":"cloth.hat.straw",
+			"normalTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":0
+					"index":1
 				},
 				"metallicFactor":0,
 				"roughnessFactor":0.8999999761581421
@@ -1310,9 +1313,18 @@
 		{
 			"sampler":0,
 			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
 		}
 	],
 	"images":[
+		{
+			"mimeType":"image/png",
+			"name":"hat_straw_normal.png",
+			"uri":"../../textures/hat_straw_normal.png"
+		},
 		{
 			"mimeType":"image/jpeg",
 			"name":"hat_straw.jpg",

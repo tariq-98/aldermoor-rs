@@ -1308,9 +1308,12 @@
 		{
 			"doubleSided":true,
 			"name":"cloth.robe.healer",
+			"normalTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":0
+					"index":1
 				},
 				"metallicFactor":0,
 				"roughnessFactor":0.8999999761581421
@@ -1319,9 +1322,12 @@
 		{
 			"doubleSided":true,
 			"name":"cloth.robe.healer.tabard",
+			"normalTexture":{
+				"index":2
+			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":1
+					"index":3
 				},
 				"metallicFactor":0,
 				"roughnessFactor":0.8999999761581421
@@ -1440,13 +1446,31 @@
 		{
 			"sampler":0,
 			"source":1
+		},
+		{
+			"sampler":0,
+			"source":2
+		},
+		{
+			"sampler":0,
+			"source":3
 		}
 	],
 	"images":[
 		{
+			"mimeType":"image/png",
+			"name":"robe_healer_normal.png",
+			"uri":"../../textures/robe_healer_normal.png"
+		},
+		{
 			"mimeType":"image/jpeg",
 			"name":"robe_healer.jpg",
 			"uri":"../../textures/robe_healer.jpg"
+		},
+		{
+			"mimeType":"image/png",
+			"name":"robe_healer_tabard_normal.png",
+			"uri":"../../textures/robe_healer_tabard_normal.png"
 		},
 		{
 			"mimeType":"image/jpeg",

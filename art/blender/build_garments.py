@@ -74,7 +74,7 @@ def build_garment(spec, skel, body):
     parts = []
     tex_path = TEX / spec["id"].replace(".", "_")
     if not Path(f"{tex_path}.jpg").exists() or True:
-        image = gm.cloth_texture(tex_path, 512, spec["base"], spec["trim"], spec["bands"], seed=len(spec["id"]))
+        image = gm.cloth_texture(tex_path, 1024, spec["base"], spec["trim"], spec["bands"], seed=len(spec["id"]))
     mat = gm.cloth_material(f"cloth.{spec['id']}", image)
     rows = 22
     cols = 40
@@ -154,7 +154,8 @@ def build_garment(spec, skel, body):
     # A tabard over the vestments: front and back panels from the shoulders.
     if spec.get("tabard"):
         tmat = gm.cloth_material(f"cloth.{spec['id']}.tabard", gm.cloth_texture(TEX / f"{spec['id'].replace('.', '_')}_tabard", 256,
-                                                                                spec["tabard"], spec["base"], [(0.0, 0.06), (0.94, 1.0)], seed=9))
+                                                                                spec["tabard"], spec["base"], [(0.0, 0.06), (0.94, 1.0)], seed=9,
+                                                                                folds=0.5))
         from mathutils.bvhtree import BVHTree
         robe = parts[0]
         dg = bpy.context.evaluated_depsgraph_get()
@@ -193,7 +194,7 @@ def build_hat(spec, skel, body):
     top = max(p.z for p in pts) if pts else head.z + 0.22
     c = Vector((head.x, head.y + 0.005, top - 0.075))
     ring_r = max(((p - c) * Vector((1, 1, 0))).length for p in pts if abs(p.z - c.z) < 0.01) + 0.012 if pts else 0.1
-    tex = gm.cloth_texture(TEX / spec["id"].replace(".", "_"), 256, spec["base"], spec["trim"], [(0.1, 0.22)], weave=0.12, seed=3)
+    tex = gm.cloth_texture(TEX / spec["id"].replace(".", "_"), 256, spec["base"], spec["trim"], [(0.1, 0.22)], weave=0.12, seed=3, folds=0.0)
     mat = gm.cloth_material(f"cloth.{spec['id']}", tex)
     if spec["kind"] == "wizard":
         prof = [(ring_r * 1.9, -0.005), (ring_r * 1.85, 0.002), (ring_r * 1.02, 0.01), (ring_r * 0.95, 0.05),

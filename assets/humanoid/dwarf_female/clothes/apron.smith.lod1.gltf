@@ -1278,9 +1278,12 @@
 		{
 			"doubleSided":true,
 			"name":"cloth.apron.smith",
+			"normalTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":0
+					"index":1
 				},
 				"metallicFactor":0,
 				"roughnessFactor":0.8999999761581421
@@ -1310,9 +1313,18 @@
 		{
 			"sampler":0,
 			"source":0
+		},
+		{
+			"sampler":0,
+			"source":1
 		}
 	],
 	"images":[
+		{
+			"mimeType":"image/png",
+			"name":"apron_smith_normal.png",
+			"uri":"../../textures/apron_smith_normal.png"
+		},
 		{
 			"mimeType":"image/jpeg",
 			"name":"apron_smith.jpg",

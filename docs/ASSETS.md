@@ -365,7 +365,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
 | `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
-| `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks | `humanoid/<body type>/clothes/` |
+| `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks and normal maps (the weave, and folds hanging from the waist; capes' from the shoulders) | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig: anatomy as a signed distance field with sculpted locks of fur (`aldermoor_art/wolf.py`, `sdf.py`), painted coats and generated gaits | `creatures/`, `catalog/creatures.json` |
 | `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
 

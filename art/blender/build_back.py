@@ -35,9 +35,11 @@ def cape_material(style):
     base = list(sh.PALETTE[style["cloth"]][0])
     trim = list(sh.PALETTE[style["trim"]][0])
     path = TEX / sid
-    if not path.with_suffix(".jpg").exists():
+    if not path.with_suffix(".jpg").exists() or not Path(f"{path}_normal.png").exists():
         TEX.mkdir(parents=True, exist_ok=True)
-        gm.cloth_texture(path, 1024, base, trim, [(0.0, 0.03), (0.975, 1.0)], weave=0.1, seed=7, ubands=[(0.0, 0.018), (0.982, 1.0)])
+        # Capes hang from the shoulders, so their folds run nearly to the collar.
+        gm.cloth_texture(path, 1024, base, trim, [(0.0, 0.03), (0.975, 1.0)], weave=0.1, seed=7, ubands=[(0.0, 0.018), (0.982, 1.0)],
+                         hang_top=1.3)
     img = bpy.data.images.load(str(path.with_suffix(".jpg")), check_existing=True)
     m = gm.cloth_material(f"cloth.{style['id']}", img)
     info = {"dye": str(Path(f"{path}_dye.png").relative_to(sc.OUT)),

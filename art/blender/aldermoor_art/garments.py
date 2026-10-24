@@ -18,7 +18,7 @@ import numpy as np
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
-from . import armour as ar, materials as mt, scene as sc
+from . import armour as ar, materials as mt, scene as sc, tiles
 
 TORSO = ["chest", "belly", "hips", "neck"]
 
@@ -162,15 +162,33 @@ def skirt_weights(h, p, centre_z):
 
 # --- Cloth textures --------------------------------------------------------------------------
 
-def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=1, ubands=()):
-    """Paints base cloth with trim bands at given v ranges (and u ranges), plus a soft weave.
+def drape(size, seed, folds=1.0, hang_top=0.7):
+    """Fold heights (-1..1) over a garment's UVs (u round it, v from hem to collar, rows bottom
+    first): broad folds and finer ones, wandering a little, deepest at the hem and gone by
+    `hang_top`."""
+    rng = np.random.default_rng(seed)
+    v = np.linspace(0, 1, size)[:, None] * np.ones((1, size))
+    u = np.linspace(0, 1, size)[None, :] * np.ones((size, 1))
+    wander = tiles.noise(size, 2, seed + 11) - 0.5
+    h = np.zeros((size, size))
+    for n, amp in ((6, 1.0), (11, 0.55), (19, 0.3)):
+        h += amp * np.sin(2 * np.pi * u * n + rng.uniform(0, 2 * np.pi) + 2.2 * wander * (n / 6) ** 0.5)
+    hang = np.clip(1 - v / hang_top, 0, 1) ** 1.1
+    return h / 1.85 * hang * folds
 
-    Writes `<path>.jpg` (colour) and `<path>_dye.png` (R = main cloth, G = trim). Colours are
+
+def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=1, ubands=(), folds=1.0, hang_top=0.7):
+    """Paints base cloth with trim bands at given v ranges (and u ranges), plus a soft weave and
+    the shading of hanging folds.
+
+    Writes `<path>.jpg` (colour), `<path>_dye.png` (R = main cloth, G = trim) and
+    `<path>_normal.png` (the weave and the folds; cloth_material picks it up). Colours are
     linear RGB; `bands` and `ubands` are (lo, hi) pairs in 0..1.
     """
     rng = np.random.default_rng(seed)
     v = np.linspace(0, 1, size)[:, None] * np.ones((1, size))
     u = np.linspace(0, 1, size)[None, :] * np.ones((size, 1))
+    fold = drape(size, seed, folds, hang_top)
     trim_mask = np.zeros((size, size))
     for v0, v1 in bands:
         trim_mask = np.maximum(trim_mask, ((v >= v0) & (v <= v1)).astype(float))
@@ -189,7 +207,7 @@ def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=
     noise = rng.normal(0, 1, (size // 8, size // 8))
     noise = np.kron(noise, np.ones((8, 8)))[:size, :size]
     threads = 0.5 + 0.5 * np.sin(u * size * 0.9) * np.sin(v * size * 0.9)
-    shade = 1 + weave * (threads - 0.5) * 2 + 0.03 * noise
+    shade = (1 + weave * (threads - 0.5) * 2 + 0.03 * noise) * (1 + 0.14 * fold)
     col = np.empty((size, size, 3))
     for k in range(3):
         col[..., k] = (base[k] * (1 - trim_mask) + trim[k] * trim_mask) * shade * (1 - 0.35 * edge)
@@ -202,10 +220,16 @@ def cloth_texture(path, size, base, trim, bands, weave=0.06, tatter=False, seed=
     dye[..., 1] = trim_mask
     dye[..., 3] = 1
     mt._save(dye, Path(f"{path}_dye.png"), "Non-Color")
+    # The normal map: rows here run bottom first, the way tiles.normals' are flipped.
+    height = 0.5 + 0.22 * fold + 0.006 * (threads - 0.5) * (1 + 2 * weave)
+    nrm = np.ones((size, size, 4), np.float32)
+    nrm[..., :3] = tiles.normals(height[::-1], size / 40.0)[::-1]
+    mt._save(nrm, Path(f"{path}_normal.png"), "Non-Color")
     return colour
 
 
 def cloth_material(name, image, rough=0.9):
+    """Cloth from cloth_texture's colour map, with its normal map when there is one."""
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -214,4 +238,14 @@ def cloth_material(name, image, rough=0.9):
     tex.image = image
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = rough
+    src = Path(bpy.path.abspath(image.filepath))
+    npath = src.with_name(f"{src.stem}_normal.png")
+    if npath.exists():
+        nimg = bpy.data.images.load(str(npath), check_existing=True)
+        nimg.colorspace_settings.name = "Non-Color"
+        tn = nt.nodes.new("ShaderNodeTexImage")
+        tn.image = nimg
+        nm = nt.nodes.new("ShaderNodeNormalMap")
+        nt.links.new(tn.outputs["Color"], nm.inputs["Color"])
+        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
     return m

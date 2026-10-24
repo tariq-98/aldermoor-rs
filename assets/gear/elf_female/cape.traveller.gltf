@@ -1856,9 +1856,12 @@
 		{
 			"doubleSided":true,
 			"name":"cloth.cape.traveller",
+			"normalTexture":{
+				"index":0
+			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":0
+					"index":1
 				},
 				"metallicFactor":0,
 				"roughnessFactor":0.8999999761581421
@@ -1871,14 +1874,14 @@
 			},
 			"name":"kit.brass",
 			"normalTexture":{
-				"index":1
+				"index":2
 			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":2
+					"index":3
 				},
 				"metallicRoughnessTexture":{
-					"index":3
+					"index":4
 				}
 			}
 		},
@@ -1889,14 +1892,14 @@
 			},
 			"name":"kit.wool_red_trim",
 			"normalTexture":{
-				"index":4
+				"index":5
 			},
 			"pbrMetallicRoughness":{
 				"baseColorTexture":{
-					"index":5
+					"index":6
 				},
 				"metallicRoughnessTexture":{
-					"index":6
+					"index":7
 				}
 			}
 		}
@@ -1999,9 +2002,18 @@
 		{
 			"sampler":0,
 			"source":6
+		},
+		{
+			"sampler":0,
+			"source":7
 		}
 	],
 	"images":[
+		{
+			"mimeType":"image/png",
+			"name":"cape_traveller_normal.png",
+			"uri":"../textures/cape_traveller_normal.png"
+		},
 		{
 			"mimeType":"image/jpeg",
 			"name":"cape_traveller.jpg",
