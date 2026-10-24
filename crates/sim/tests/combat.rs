@@ -290,6 +290,23 @@ fn skills_wait_for_their_cooldowns() {
 }
 
 #[test]
+fn a_heavy_blow_is_one_unbroken_swing() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let golem = f.dummy("golem", ROAD + Vec2::new(0.0, 2.5), PI);
+    f.target(hero, golem);
+    f.once(hero, 1); // Rending Blade: winds up for 0.4 s.
+    f.step();
+    let swing = *f.sim.get::<sim::Anim>(hero).unwrap();
+    assert_eq!(swing.pose, protocol::Pose::Attack, "the wind-up isn't shown as a swing");
+    f.run(0.6);
+    assert!(f.damage_to(golem) > 0.0, "the blow never landed");
+    let now = f.sim.get::<sim::Anim>(hero).unwrap();
+    assert_eq!(now.pose, protocol::Pose::Attack, "the swing stopped at the blow");
+    assert_eq!(now.since, swing.since, "the swing started over at the blow");
+}
+
+#[test]
 fn a_skill_pressed_just_before_the_global_cooldown_ends_goes_off_when_it_does() {
     let mut f = Fight::new();
     let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);

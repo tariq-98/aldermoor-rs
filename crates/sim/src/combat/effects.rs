@@ -591,6 +591,21 @@ pub(crate) fn act(world: &mut World, e: Entity, action: protocol::Action) {
     }
 }
 
+/// A heavy blow lands at the end of its wind-up: the swing that began then carries on (the
+/// same pose and action, so its animation doesn't restart), held a little past the blow.
+pub(crate) fn release(world: &mut World, e: Entity, action: protocol::Action) {
+    let t = now(world);
+    let swinging = world.get::<Anim>(e).is_some_and(|a| a.pose == Pose::Attack && t < a.hold_until)
+        && world.get::<Fighter>(e).is_some_and(|f| f.action == action);
+    if !swinging {
+        act(world, e, action);
+        return;
+    }
+    if let Some(mut a) = world.get_mut::<Anim>(e) {
+        a.hold_until = a.hold_until.max(t + ATTACK_POSE);
+    }
+}
+
 /// Records the action without holding a pose (a cast winding up shows the cast pose).
 pub(crate) fn begin(world: &mut World, e: Entity, action: protocol::Action) {
     let t = now(world);

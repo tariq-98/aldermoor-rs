@@ -474,7 +474,11 @@ pub fn resolve(world: &mut World, e: Entity, def: &AbilityDef, target: Option<pr
     let Some(mut src) = source(world, e, Some(def)) else { return };
     let unit = src.unit;
     emit(world, Event::AbilityUsed { unit, ability: def.key.to_string(), target, ground });
-    effects::act(world, e, def.action);
+    if def.is_swing() {
+        effects::release(world, e, def.action);
+    } else {
+        effects::act(world, e, def.action);
+    }
     let te = target.and_then(|id| entity(world, id));
     if def.missile.is_some() && !def.channel_missile && let Some(t) = te.filter(|&t| t != e) {
         let user_side: Vec<_> = def.effects.iter().filter(|x| x.on_user()).cloned().collect();

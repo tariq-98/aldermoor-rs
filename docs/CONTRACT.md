@@ -105,7 +105,7 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 | Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed. Charging is Run |
 | Jump, Fall | Rising, then falling. A skill's leap or vault is Jump |
 | Dodge | A roll: 0.45 s, about 5 m |
-| Attack | Holds 0.5 s after a blow or a release, and through a heavy blow's 0.4 s wind-up |
+| Attack | Holds 0.5 s after a blow or a release. A heavy blow's pose starts with its 0.4 s wind-up and runs on unbroken through the blow (0.9 s in all): time the clip so its strike lands when the wind-up ends (the cast bar gives the wind-up) |
 | Cast | While casting or channelling |
 | Hit | Holds 0.25 s; while thrown by a knockback; 0.5 s when staggered by a parry |
 | Dead | Until respawn. The downed lie as the dead do: check `downed` in the combat view |
@@ -171,7 +171,7 @@ Humanoid clips by pose, from `anims.glb`:
 |---|---|
 | Idle | `Idle_Loop`; with weapons drawn, the main-hand item's `clips.idle` (`Sword_Idle`, `Bow_Idle_Loop`, `Staff_Idle_Loop`, `Spear_Idle_Loop`, `GreatSword_Idle_Loop`); a piece with an `idle` (the robes' `Idle_Robe_Loop`) replaces `Idle_Loop` |
 | Walk | `Walk_Loop`; with weapons drawn, the item's idle on the upper body over it |
-| Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 6 m/s (the same layering when drawn) |
+| Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 7 m/s of ground speed (ignore the vertical part: a normal run is 6 m/s, and slopes add to the full speed), for swiftness and charges (the same layering when drawn) |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
 | Dodge | `Roll` |
 | Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |
