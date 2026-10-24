@@ -109,6 +109,9 @@ pub struct Piece {
     pub hides: BTreeMap<String, BTreeMap<String, Vec<String>>>,
     #[serde(default)]
     pub covers_hair: bool,
+    /// A dye mask texture (R main cloth, G trim), for dyeable pieces.
+    #[serde(default)]
+    pub dye: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -297,6 +300,11 @@ impl Catalog {
         for p in &h.pieces {
             for (bt, rel) in &p.files {
                 check_skinned("piece", &p.id, bt, rel, true, &mut problem);
+            }
+            if let Some(dye) = &p.dye {
+                if !self.root.join(dye).exists() {
+                    problem(format!("piece {}: missing dye mask {dye}", p.id));
+                }
             }
             for (bt, targets) in &p.hides {
                 for (target, list) in targets {

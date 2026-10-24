@@ -22,7 +22,7 @@ equipped correctly.**
 |---|---|---|
 | [Quaternius Universal Base Characters](https://quaternius.itch.io/universal-base-characters) (free tier) | Two bodies, six hairstyles and beards, two eyebrow sets | CC0 |
 | [Quaternius Modular Outfits, Fantasy](https://quaternius.itch.io/modular-character-outfits-fantasy) (free tier) | Peasant and Ranger outfits, 20 parts, two colourways each | CC0 |
-| [Quaternius Universal Animation Library 1 and 2](https://quaternius.itch.io/universal-animation-library) (free tiers) | 85 clips: locomotion, roll, sword combos, block, shield, casting, hits, deaths, farming, chopping, sitting, talking, zombies | CC0 |
+| [Quaternius Universal Animation Library 1 and 2](https://quaternius.itch.io/universal-animation-library) (free tiers) | 84 clips: locomotion, roll, sword combos, block, shield, casting, hits, deaths, farming, chopping, sitting, talking, zombies | CC0 |
 | Our own (built in `art/blender/`) | Weapons, shields, bows, staves, capes, backpacks, armour, race parts, extra animations | Ours |
 
 All of these share one 65-bone humanoid rig with Unreal-mannequin bone names. Downloads are listed,
@@ -31,11 +31,8 @@ stay out of git. Quaternius published a separate Quaternius Asset Licence on 28 
 these packs' pages and their `License.txt` files say CC0. Either licence allows shipping them in
 the game.
 
-**Paid upgrades:** proposed to Tariq with their prices, but nothing bought. Each Quaternius pack
-has a Source tier:
-- base characters, $19.99: six bodies, 20 hairstyles and skin shaders;
-- outfits, $20: twelve outfits and 62 parts;
-- the two animation libraries, $14.99 each: about 230 clips together.
+**No paid packs** (Tariq, 24 October 2026). Everything beyond these free CC0 sources is built
+in `art/blender/`: more hairstyles, outfits, bodies, creatures and clips.
 
 ## The humanoid family
 
@@ -108,7 +105,12 @@ Hair is hidden by any piece with `covers_hair`. Beards and brows are hidden when
   the chosen linear tone (`skin_tones` and `hair_colours` in the catalogue).
 - **Outfits:** they keep their painted textures. The catalogue's `texture_variants` lists
   alternative colourways.
-- **Dyes:** per-item dye masks come next.
+- **Dyes:** a dyeable piece has `dye` (a mask texture: R is the main cloth, G the trim) and
+  `dye_channels`, the linear colour each channel was painted as. To dye channel *k* with linear
+  colour *d* (mask *m*, reference *ref*):
+  `out = mix(out, base * d / max(ref, 0.01), m)`.
+  This keeps the weave, stitching and shading, and gives exactly *d* where the cloth was
+  painted *ref*. Apply it after the base texture is decoded to linear and before lighting.
 
 ## Catalogue: `assets/catalog/humanoid.json`
 
@@ -123,7 +125,7 @@ relative to `assets/`. Positions are glTF (metres, +Y up, +Z forward).
 | `defaults.<body type>` | A starting look: pieces, hair, brows, beard, tone and hair colour |
 | `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`) |
 | `hair[]` | `id`, `kind` (`hair`, `beard` or `brows`), `label`, and `files.<body type>` |
-| `pieces[]` | `id`, `slot`, `layer`, `label`, `files.<body type>`, `hides.<body type>`, `covers_hair`, and `coverage` (diagnostic) |
+| `pieces[]` | `id`, `slot`, `layer`, `label`, `files.<body type>`, `hides.<body type>`, `covers_hair`, `coverage` (diagnostic), and for dyeable pieces `dye` and `dye_channels`. `source` names the build that owns the piece |
 | `texture_variants`, `texture_variant_labels` | Base texture name mapped to its alternatives, and display names for each colourway |
 
 Each entry in `hides.<body type>` maps either `body` or a lower piece's id to the list of regions
@@ -149,6 +151,35 @@ Capes also have `springs`: `chains` of `cape_<column>_<link>` bones rooted on `s
 `stiffness`, `drag`, `gravity` and particle `radius`. A cape's collar copies the body's own skin
 weights, so it can't separate from the shoulders. Only the chains swing, against the body type's
 `colliders`.
+
+## Materials and file details
+
+- **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM
+  and roughness maps are linear. Normal maps follow the glTF convention.
+- **Vertex colours:** where present, `COLOR_0` multiplies the base colour, as the glTF spec says:
+  the skeleton's aged bone and the beasts' painted coats.
+- **Glowing parts:** crystals, flames, runes and undead eyes use emissive colour with
+  `KHR_materials_emissive_strength`.
+- **Transparency:** the lantern's glass is the only blended material (`alphaMode: BLEND`).
+- **Skinning:** every skinned file carries the whole skeleton as nodes. Bind a piece's joints to
+  the body's bones by name and keep the piece's own inverse bind matrices. A piece may add
+  bones the body lacks (`cape_<column>_<link>` chains): parent them under the bone their glTF
+  parent is named after.
+- **Animation clips:** 30 fps and in place (no root motion). Every bone has rotation tracks; only
+  the pelvis has translation.
+- **Beasts:** one `.glb` each, on the same axes (+Y up, facing +Z, metres), with in-place clips.
+- **The reference implementation:** the workshop does all of this in about 1,800 lines of
+  three.js (`tools/workshop/src/`):
+  - `character.js`: assembly, rebinding by bone name, sockets and the drawn/stowed rules;
+  - `regions.js`: the hiding shader;
+  - `anim.js`: clip retargeting and the pelvis remap;
+  - `springs.js`: the cape solver;
+  - `beast.js`: beasts.
+
+  Port the behaviour rather than inventing new rules, and the game will match what Tariq
+  approved in the workshop.
+- **Triangle counts today:** a farmhand is about 30k. A full plate knight with shield and cape is
+  about 84k, so LODs are needed before crowds.
 
 ## Pipeline
 

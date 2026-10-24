@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -53,6 +53,26 @@ pub enum Pose {
     Dead,
 }
 
+/// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
+/// from `assets/catalog/`. Empty or `None` fields mean the body type's defaults.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Look {
+    /// A `body_types` key in `humanoid.json` (e.g. "male", "elf_female", "goblin_male",
+    /// "skeleton"), or a creature id in `creatures.json` (e.g. "wolf.grey").
+    pub art: String,
+    pub tone: Option<String>,
+    pub hair: Option<String>,
+    pub hair_colour: Option<String>,
+    pub brows: Option<String>,
+    pub beard: Option<String>,
+    /// Clothing and armour piece ids, in any order (their layers decide what covers what).
+    pub pieces: Vec<String>,
+    /// Gear item ids by slot: "main_hand", "off_hand", "back" or "ammo".
+    pub gear: Vec<(String, String)>,
+    /// Weapons in hand (true) or put away on their stowed sockets.
+    pub drawn: bool,
+}
+
 /// One unit as the client should draw it this tick.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UnitState {
@@ -72,6 +92,8 @@ pub struct UnitState {
     pub max_health: f32,
     pub hostile: bool,
     pub target: Option<UnitId>,
+    /// What to draw: body, colours, clothing, armour and gear.
+    pub look: Look,
 }
 
 /// The local player's own numbers (only sent to them).
@@ -159,6 +181,13 @@ mod tests {
                 max_health: 100.0,
                 hostile: false,
                 target: None,
+                look: Look {
+                    art: "male".into(),
+                    pieces: vec!["peasant.top".into()],
+                    gear: vec![("main_hand".into(), "sword.arming".into())],
+                    drawn: true,
+                    ..Default::default()
+                },
             }],
             player: Some(PlayerState { unit: 1, endurance: 100.0, max_endurance: 100.0, ..Default::default() }),
             events: vec![Event::Jumped { unit: 1 }],

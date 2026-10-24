@@ -10,3 +10,6 @@ bevy_ecs.workspace = true
 glam.workspace = true
 world.workspace = true
 protocol.workspace = true
+
+[dev-dependencies]
+assets = { path = "../assets" }

@@ -4626,7 +4626,27 @@
    },
    "covers_hair": false,
    "dye": "humanoid/textures/robe_mage_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.035,
+      0.06,
+      0.2
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.55,
+      0.38,
+      0.1
+     ]
+    }
+   ]
   },
   {
    "id": "robe.necro",
@@ -4872,7 +4892,27 @@
    },
    "covers_hair": false,
    "dye": "humanoid/textures/robe_necro_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.03,
+      0.025,
+      0.035
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.22,
+      0.06,
+      0.3
+     ]
+    }
+   ]
   },
   {
    "id": "robe.healer",
@@ -5098,7 +5138,27 @@
    },
    "covers_hair": false,
    "dye": "humanoid/textures/robe_healer_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.6,
+      0.55,
+      0.45
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.6,
+      0.42,
+      0.1
+     ]
+    }
+   ]
   },
   {
    "id": "tunic.villager",
@@ -5320,7 +5380,27 @@
    },
    "covers_hair": false,
    "dye": "humanoid/textures/tunic_villager_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.2,
+      0.12,
+      0.05
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.45,
+      0.4,
+      0.3
+     ]
+    }
+   ]
   },
   {
    "id": "coat.traveller",
@@ -5473,7 +5553,27 @@
    },
    "covers_hair": false,
    "dye": "humanoid/textures/coat_traveller_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.12,
+      0.07,
+      0.035
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.06,
+      0.035,
+      0.02
+     ]
+    }
+   ]
   },
   {
    "id": "apron.smith",
@@ -5542,7 +5642,27 @@
    },
    "covers_hair": false,
    "dye": "humanoid/textures/apron_smith_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.1,
+      0.055,
+      0.025
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.05,
+      0.03,
+      0.015
+     ]
+    }
+   ]
   },
   {
    "id": "hat.wizard",
@@ -5603,7 +5723,27 @@
    },
    "covers_hair": true,
    "dye": "humanoid/textures/hat_wizard_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.035,
+      0.06,
+      0.2
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.55,
+      0.38,
+      0.1
+     ]
+    }
+   ]
   },
   {
    "id": "hat.straw",
@@ -5664,7 +5804,27 @@
    },
    "covers_hair": true,
    "dye": "humanoid/textures/hat_straw_dye.png",
-   "source": "garments"
+   "source": "garments",
+   "dye_channels": [
+    {
+     "channel": "r",
+     "name": "cloth",
+     "reference": [
+      0.5,
+      0.38,
+      0.16
+     ]
+    },
+    {
+     "channel": "g",
+     "name": "trim",
+     "reference": [
+      0.25,
+      0.08,
+      0.04
+     ]
+    }
+   ]
   }
  ],
  "animations": {

@@ -171,6 +171,7 @@ impl Sim {
                 Anim::default(),
                 PlayerControl,
                 Home { pos, yaw },
+                Appearance(components::player_look()),
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
@@ -201,6 +202,7 @@ impl Sim {
                 Anim::default(),
                 Brain::new(at, def.aggro_radius, def.wander),
                 Home { pos, yaw },
+                Appearance(kind.look()),
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
@@ -262,8 +264,8 @@ impl Sim {
         let (tick, time) = (clock.tick, clock.time);
         let center = viewer.and_then(|v| self.get::<Transform>(v)).map(|t| t.pos);
         let mut units = Vec::new();
-        let mut q = self.world.query::<(&Unit, &Transform, &Motion, &Vitals, &Anim, &Fighter)>();
-        for (u, t, m, v, a, f) in q.iter(&self.world) {
+        let mut q = self.world.query::<(&Unit, &Transform, &Motion, &Vitals, &Anim, &Fighter, Option<&Appearance>)>();
+        for (u, t, m, v, a, f, look) in q.iter(&self.world) {
             if let Some(c) = center {
                 if (t.pos - c).length_squared() > 160.0 * 160.0 {
                     continue;
@@ -287,6 +289,12 @@ impl Sim {
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
                 target: f.target,
+                look: {
+                    let mut l = look.map(|a| a.0.clone()).unwrap_or_default();
+                    // Weapons come out for a fight and go away once it's over.
+                    l.drawn = f.target.is_some() || time - v.last_combat < vitals::COMBAT_TIMEOUT;
+                    l
+                },
             });
         }
         units.sort_by_key(|u| u.id);

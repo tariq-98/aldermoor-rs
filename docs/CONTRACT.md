@@ -36,9 +36,11 @@ let events = host.take_events(); // everything since you last asked
 
 Each `Snapshot` has:
 
-- `units`: everyone within 160 m. For each one: `body` (the model and animation set: `"player"`,
-  `"wolf"` or `"goblin"` so far), position, velocity, yaw, `pose` with `pose_time`, health, name,
-  level, `hostile` and target.
+- `units`: everyone within 160 m. For each one:
+  - `body` (the simulation's body name: `"player"`, `"wolf"` or `"goblin"` so far);
+  - `look`, which says exactly what to draw (see "Art for each unit" below);
+  - position, velocity, yaw, `pose` with `pose_time`;
+  - health, name, level, `hostile` and target.
 - `player`: endurance, the bar's cooldowns, auto-attack, in-combat and can-respawn.
 - `events`: damage (0 means evaded), deaths, respawns, jumps, dodges and messages.
 
@@ -61,29 +63,41 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 | Hit | Holds 0.25 s |
 | Dead | Until respawn |
 
-## Art for each unit body
+## Art for each unit
 
-Unit `body` names map to the art catalogue (docs/ASSETS.md):
-- `"player"`: a humanoid body type from `assets/catalog/humanoid.json`, dressed in catalogue
-  pieces.
-- `"wolf"`: `wolf.grey` in `assets/catalog/creatures.json`.
-- `"goblin"`: the `goblin_male` / `goblin_female` body types.
+Each unit's `look` (`protocol::Look`, protocol version 2) names everything in the art
+catalogue (docs/ASSETS.md):
+- `art`: a body type in `assets/catalog/humanoid.json` (`"male"`, `"elf_female"`,
+  `"goblin_male"`, `"skeleton"`…) or a beast in `assets/catalog/creatures.json`
+  (`"wolf.grey"`).
+- `tone`, `hair`, `hair_colour`, `brows`, `beard`: ids from the catalogue. `None` means none
+  (hair and beard) or the body's default (tone and hair colour).
+- `pieces`: clothing and armour ids. Their layers decide what covers what.
+- `gear`: (slot, item id) pairs from `assets/catalog/gear.json`.
+- `drawn`: weapons on their `held` sockets (true), or on their `stowed` sockets, chosen by
+  the back item's `back_kind`.
+
+Today the player is a farmhand with an arming sword and a round shield. Goblins wear the Ranger
+jerkin with a hunting knife and round shield, and wolves are `wolf.grey`. `drawn` turns on
+during a fight. Looks are sent every tick for now; the network version will send them only
+when they change. `tools/workshop/` assembles a look from these names exactly as the game
+should (docs/ASSETS.md, "The reference implementation").
 
 Humanoid clips by pose, from `anims.glb`:
 
 | Pose | Clip |
 |---|---|
-| Idle | `Idle_Loop` |
+| Idle | `Idle_Loop`; with weapons drawn, the main-hand item's `clips.idle` |
 | Walk | `Walk_Loop` |
 | Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 6 m/s |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
 | Dodge | `Roll` |
-| Attack | The weapon's `clips.attacks` (e.g. `Sword_Regular_A`, `B`, `C`) |
+| Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`) |
 | Cast | `Spell_Simple_Shoot` |
 | Hit | `Hit_Chest` |
 | Dead | `Death01` |
 
-Beasts name their clips by role in `clips`.
+Beasts name their clips by role in `clips` (idle, walk, run, attack, hit, death, jump, special).
 
 ## Input the client sends
 

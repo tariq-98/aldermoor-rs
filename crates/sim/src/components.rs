@@ -206,6 +206,11 @@ impl Brain {
     }
 }
 
+/// How a unit looks (see protocol::Look). Only `drawn` changes during play; the snapshot
+/// works it out from the fight.
+#[derive(Component, Clone, Debug, Default)]
+pub struct Appearance(pub protocol::Look);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MonsterKind {
     Wolf,
@@ -225,7 +230,36 @@ pub struct MonsterDef {
     pub wander: f32,
 }
 
+/// The default player: a farmhand with an arming sword and a round shield.
+pub fn player_look() -> protocol::Look {
+    protocol::Look {
+        art: "male".into(),
+        tone: Some("warm".into()),
+        hair: Some("hair.simple_parted".into()),
+        hair_colour: Some("chestnut".into()),
+        brows: Some("brows.strong".into()),
+        beard: Some("beard.full".into()),
+        pieces: ["peasant.top", "peasant.trousers", "peasant.shoes"].map(String::from).to_vec(),
+        gear: vec![("main_hand".into(), "sword.arming".into()), ("off_hand".into(), "shield.round".into())],
+        drawn: false,
+    }
+}
+
 impl MonsterKind {
+    /// What this monster looks like in the art catalogue.
+    pub fn look(self) -> protocol::Look {
+        match self {
+            MonsterKind::Wolf => protocol::Look { art: "wolf.grey".into(), ..Default::default() },
+            MonsterKind::Goblin => protocol::Look {
+                art: "goblin_male".into(),
+                tone: Some("goblin green".into()),
+                pieces: ["ranger.top", "peasant.trousers", "peasant.shoes"].map(String::from).to_vec(),
+                gear: vec![("main_hand".into(), "dagger.hunting".into()), ("off_hand".into(), "shield.round".into())],
+                ..Default::default()
+            },
+        }
+    }
+
     pub fn def(self) -> MonsterDef {
         match self {
             MonsterKind::Wolf => MonsterDef {

@@ -253,7 +253,10 @@ def main():
             export.piece(path, [skel] + parts)
             m = merged.setdefault(spec["id"], {"id": spec["id"], "label": spec["label"], "slot": "head" if is_hat else spec["slot"],
                                                "layer": layer, "files": {}, "hides": {}, "covers_hair": is_hat,
-                                               "dye": f"humanoid/textures/{spec['id'].replace('.', '_')}_dye.png", "source": "garments"})
+                                               "dye": f"humanoid/textures/{spec['id'].replace('.', '_')}_dye.png", "source": "garments",
+                                               # What each dye channel was painted as (linear RGB): a dye recolours it.
+                                               "dye_channels": [{"channel": "r", "name": "cloth", "reference": list(spec["base"])},
+                                                                {"channel": "g", "name": "trim", "reference": list(spec["trim"])}]})
             m["files"][bt] = str(path.relative_to(sc.OUT))
             m["hides"][bt] = hides
             print("BUILT", bt, spec["id"], sh.triangles(parts), "tris; hides body", hides["body"])
