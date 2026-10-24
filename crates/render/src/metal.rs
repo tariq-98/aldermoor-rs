@@ -1,0 +1,1531 @@
+//! Direct Metal: temporal AA, stable cascades, visibility and bounded frames in flight.
+use crate::{
+    character::Draw,
+    model::{Material, Texture},
+    settings::{LookSettings, ToneMap},
+    visibility::{Bounds, Frustum, stable_cascades},
+};
+use anyhow::{Context, Result, ensure};
+use glam::{Mat4, Vec3};
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_foundation::NSString;
+use objc2_metal::*;
+use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    path::Path,
+    ptr::NonNull,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {}
+type Obj<T> = Retained<ProtocolObject<T>>;
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Frame {
+    vp: [[f32; 4]; 4],
+    previous_vp: [[f32; 4]; 4],
+    inverse_vp: [[f32; 4]; 4],
+    shadows: [[[f32; 4]; 4]; 3],
+    eye: [f32; 4],
+    sun: [f32; 4],
+    sun_colour: [f32; 4],
+    ambient: [f32; 4],
+    sky: [f32; 4],
+    fog: [f32; 4],
+    grade: [[f32; 4]; 3],
+    params: [f32; 4],
+    clock: [f32; 4],
+    viewport: [f32; 4],
+    splits: [f32; 4],
+}
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct DrawUniform {
+    model: [[f32; 4]; 4],
+    previous_model: [[f32; 4]; 4],
+    base: [f32; 4],
+    emission: [f32; 4],
+    params: [f32; 4],
+    flags: [u32; 4],
+    morph: [f32; 4],
+    previous_morph: [f32; 4],
+    dyes: [[f32; 4]; 2],
+    references: [[f32; 4]; 2],
+}
+struct GpuMesh {
+    vertices: Obj<dyn MTLBuffer>,
+    indices: Obj<dyn MTLBuffer>,
+    morphs: Obj<dyn MTLBuffer>,
+    count: usize,
+    maps: [Obj<dyn MTLTexture>; 5],
+    material: Material,
+}
+struct Slot {
+    draws: Obj<dyn MTLBuffer>,
+    bones: Obj<dyn MTLBuffer>,
+    pending: Option<Obj<dyn MTLCommandBuffer>>,
+}
+struct Previous {
+    model_key: u64,
+    transform: Mat4,
+    palette: Vec<Mat4>,
+    morph: [f32; 2],
+}
+struct Prepared {
+    uniform: usize,
+    draw: usize,
+    current: usize,
+    previous: usize,
+    bounds: Bounds,
+    scene: bool,
+    shadows: [bool; 3],
+}
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Stats {
+    pub gpu_ms: f64,
+    pub draw_calls: usize,
+    pub triangles: usize,
+    pub culled: usize,
+}
+#[derive(Clone, Copy)]
+pub struct Camera {
+    pub eye: Vec3,
+    pub target: Vec3,
+    pub fov: f32,
+}
+impl Camera {
+    pub fn matrix(&self, aspect: f32) -> Mat4 {
+        glam::camera::rh::proj::directx::perspective(self.fov, aspect, 0.1, 800.)
+            * glam::camera::rh::view::look_at_mat4(self.eye, self.target, Vec3::Y)
+    }
+}
+pub struct Renderer {
+    surface_uniform: crate::surfaces::Uniform,
+    surface_maps: [Obj<dyn MTLTexture>; 5],
+    sky_pipeline: Obj<dyn MTLRenderPipelineState>,
+    presented: Arc<Mutex<Vec<(usize, f64)>>>,
+    pub target_fps: f64,
+    gui: crate::gui::Gui,
+    pub hud: Option<crate::gui::HudFrame>,
+    pub device: Obj<dyn MTLDevice>,
+    pub layer: Option<Retained<CAMetalLayer>>,
+    queue: Obj<dyn MTLCommandQueue>,
+    opaque: Obj<dyn MTLRenderPipelineState>,
+    blend: Obj<dyn MTLRenderPipelineState>,
+    shadow_pipeline: Obj<dyn MTLRenderPipelineState>,
+    taa: Obj<dyn MTLRenderPipelineState>,
+    composite: Obj<dyn MTLRenderPipelineState>,
+    depth_state: Obj<dyn MTLDepthStencilState>,
+    read_depth: Obj<dyn MTLDepthStencilState>,
+    hdr: Obj<dyn MTLTexture>,
+    msaa: Obj<dyn MTLTexture>,
+    motion: Obj<dyn MTLTexture>,
+    motion_msaa: Obj<dyn MTLTexture>,
+    depth: Obj<dyn MTLTexture>,
+    shadow: Obj<dyn MTLTexture>,
+    history: [Obj<dyn MTLTexture>; 2],
+    output: Obj<dyn MTLTexture>,
+    pub width: u32,
+    pub height: u32,
+    pub scale: f32,
+    samples: usize,
+    temporal: bool,
+    pub look: LookSettings,
+    pub scene_time: Option<f32>,
+    pub inline_constants: bool,
+    started: Instant,
+    meshes: HashMap<(u64, usize), GpuMesh>,
+    textures: HashMap<(String, bool), Obj<dyn MTLTexture>>,
+    fallbacks: [Obj<dyn MTLTexture>; 5],
+    slots: Vec<Slot>,
+    frame: usize,
+    pub stats: Stats,
+    previous: HashMap<u64, Previous>,
+    previous_vp: Mat4,
+    previous_camera: Option<Camera>,
+    previous_time: f32,
+    history_valid: bool,
+}
+const BONE_BYTES: usize = 4 * 1024 * 1024;
+const SHADOW_SIZE: usize = 1024;
+fn ptr<T>(v: &T) -> NonNull<c_void> {
+    NonNull::from(v).cast()
+}
+fn buffer<T: bytemuck::Pod>(
+    d: &ProtocolObject<dyn MTLDevice>,
+    data: &[T],
+) -> Result<Obj<dyn MTLBuffer>> {
+    ensure!(!data.is_empty(), "empty GPU buffer");
+    unsafe {
+        d.newBufferWithBytes_length_options(
+            NonNull::new(data.as_ptr() as *mut c_void).unwrap(),
+            std::mem::size_of_val(data),
+            MTLResourceOptions::StorageModeShared,
+        )
+        .context("Metal buffer allocation")
+    }
+}
+fn texture(
+    d: &ProtocolObject<dyn MTLDevice>,
+    w: usize,
+    h: usize,
+    format: MTLPixelFormat,
+    samples: usize,
+    usage: MTLTextureUsage,
+) -> Result<Obj<dyn MTLTexture>> {
+    let desc = MTLTextureDescriptor::new();
+    unsafe { desc.setWidth(w) };
+    unsafe { desc.setHeight(h) };
+    desc.setPixelFormat(format);
+    desc.setStorageMode(MTLStorageMode::Private);
+    desc.setUsage(usage);
+    unsafe { desc.setSampleCount(samples) };
+    if samples > 1 {
+        desc.setTextureType(MTLTextureType::Type2DMultisample);
+    }
+    d.newTextureWithDescriptor(&desc)
+        .context("Metal texture allocation")
+}
+fn image_texture(
+    d: &ProtocolObject<dyn MTLDevice>,
+    queue: &ProtocolObject<dyn MTLCommandQueue>,
+    t: &Texture,
+    srgb: bool,
+) -> Result<Obj<dyn MTLTexture>> {
+    if let Some(k) = &t.compressed {
+        ensure!(
+            k.srgb == srgb,
+            "KTX colour space does not match material slot: {}",
+            t.key
+        );
+        let desc = MTLTextureDescriptor::new();
+        unsafe {
+            desc.setWidth(k.width as usize);
+            desc.setHeight(k.height as usize);
+            desc.setMipmapLevelCount(k.levels.len());
+        }
+        desc.setPixelFormat(if srgb {
+            MTLPixelFormat::ASTC_6x6_sRGB
+        } else {
+            MTLPixelFormat::ASTC_6x6_LDR
+        });
+        desc.setStorageMode(MTLStorageMode::Shared);
+        desc.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::PixelFormatView);
+        let tex = d
+            .newTextureWithDescriptor(&desc)
+            .context("ASTC texture allocation")?;
+        for (i, range) in k.levels.iter().enumerate() {
+            let w = (k.width >> i).max(1) as usize;
+            let h = (k.height >> i).max(1) as usize;
+            unsafe {
+                tex.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                    MTLRegion {
+                        origin: MTLOrigin { x: 0, y: 0, z: 0 },
+                        size: MTLSize {
+                            width: w,
+                            height: h,
+                            depth: 1,
+                        },
+                    },
+                    i,
+                    NonNull::new(k.bytes[range.clone()].as_ptr() as *mut c_void).unwrap(),
+                    w.div_ceil(6) * 16,
+                );
+            }
+        }
+        return Ok(tex);
+    }
+    let desc = MTLTextureDescriptor::new();
+    unsafe { desc.setWidth(t.width as usize) };
+    unsafe { desc.setHeight(t.height as usize) };
+    desc.setPixelFormat(if srgb {
+        MTLPixelFormat::RGBA8Unorm_sRGB
+    } else {
+        MTLPixelFormat::RGBA8Unorm
+    });
+    desc.setStorageMode(MTLStorageMode::Shared);
+    desc.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::PixelFormatView);
+    unsafe { desc.setMipmapLevelCount(1 + (t.width.max(t.height).ilog2() as usize)) };
+    let tex = d
+        .newTextureWithDescriptor(&desc)
+        .context("material texture allocation")?;
+    t.restore_pixels()?;
+    let mut pixels_lock = t.rgba.lock().unwrap();
+    let pixels = pixels_lock
+        .as_ref()
+        .context("texture pixels already uploaded")?;
+    unsafe {
+        tex.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+            MTLRegion {
+                origin: MTLOrigin { x: 0, y: 0, z: 0 },
+                size: MTLSize {
+                    width: t.width as usize,
+                    height: t.height as usize,
+                    depth: 1,
+                },
+            },
+            0,
+            NonNull::new(pixels.as_ptr() as *mut c_void).unwrap(),
+            t.width as usize * 4,
+        );
+    }
+    pixels_lock.take();
+    drop(pixels_lock);
+    if desc.mipmapLevelCount() > 1 {
+        let cb = queue.commandBuffer().context("texture command buffer")?;
+        let blit = cb.blitCommandEncoder().context("mipmap encoder")?;
+        blit.generateMipmapsForTexture(&tex);
+        blit.endEncoding();
+        cb.commit();
+    }
+    Ok(tex)
+}
+impl Renderer {
+    pub fn new(width: u32, height: u32, scale: f32) -> Result<Self> {
+        Self::with_samples(width, height, scale, 0)
+    }
+    /// 0 is temporal AA, 1 is unfiltered (diagnostics), 4 is MSAA (comparison only).
+    pub fn with_samples(width: u32, height: u32, scale: f32, mode: usize) -> Result<Self> {
+        ensure!(
+            [0, 1, 4].contains(&mode),
+            "AA mode must be temporal, none or MSAA"
+        );
+        let temporal = mode == 0;
+        let samples = mode.max(1);
+        ensure!(
+            width > 0 && height > 0 && scale.is_finite() && (0.25..=1.).contains(&scale),
+            "invalid render size or scale"
+        );
+        let device = MTLCreateSystemDefaultDevice().context("No Metal GPU is available")?;
+        let queue = device.newCommandQueue().context("Metal command queue")?;
+        let library = device
+            .newLibraryWithSource_options_error(
+                &NSString::from_str(include_str!("shaders.metal")),
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("Metal shaders: {e}"))?;
+        let pipeline = |vs: &str,
+                        fs: Option<&str>,
+                        samples: usize,
+                        colours: &[MTLPixelFormat],
+                        depth: bool,
+                        blending: bool|
+         -> Result<Obj<dyn MTLRenderPipelineState>> {
+            let p = MTLRenderPipelineDescriptor::new();
+            p.setVertexFunction(
+                library
+                    .newFunctionWithName(&NSString::from_str(vs))
+                    .as_deref(),
+            );
+            if let Some(fs) = fs {
+                p.setFragmentFunction(
+                    library
+                        .newFunctionWithName(&NSString::from_str(fs))
+                        .as_deref(),
+                );
+            }
+            p.setRasterSampleCount(samples);
+            for (i, format) in colours.iter().enumerate() {
+                let c = unsafe { p.colorAttachments().objectAtIndexedSubscript(i) };
+                c.setPixelFormat(*format);
+                if blending && i == 0 {
+                    c.setBlendingEnabled(true);
+                    c.setSourceRGBBlendFactor(MTLBlendFactor::SourceAlpha);
+                    c.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
+                    c.setSourceAlphaBlendFactor(MTLBlendFactor::One);
+                    c.setDestinationAlphaBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
+                }
+            }
+            if depth {
+                p.setDepthAttachmentPixelFormat(MTLPixelFormat::Depth32Float);
+            }
+            device
+                .newRenderPipelineStateWithDescriptor_error(&p)
+                .map_err(|e| anyhow::anyhow!("Metal pipeline {vs}: {e}"))
+        };
+        let scene_formats = [MTLPixelFormat::RGBA16Float; 2];
+        let sky_pipeline = pipeline(
+            "fullscreen",
+            Some("sky_fragment"),
+            samples,
+            &scene_formats,
+            true,
+            false,
+        )?;
+        let opaque = pipeline(
+            "scene_vertex",
+            Some("scene_fragment"),
+            samples,
+            &scene_formats,
+            true,
+            false,
+        )?;
+        let blend = pipeline(
+            "scene_vertex",
+            Some("scene_fragment"),
+            samples,
+            &scene_formats,
+            true,
+            true,
+        )?;
+        let shadow_pipeline = pipeline(
+            "shadow_vertex",
+            Some("shadow_fragment"),
+            1,
+            &[],
+            true,
+            false,
+        )?;
+        let taa = pipeline(
+            "fullscreen",
+            Some("temporal_resolve"),
+            1,
+            &[MTLPixelFormat::RGBA16Float],
+            false,
+            false,
+        )?;
+        let composite = pipeline(
+            "fullscreen",
+            Some("composite"),
+            1,
+            &[MTLPixelFormat::BGRA8Unorm_sRGB],
+            false,
+            false,
+        )?;
+        let desc = MTLDepthStencilDescriptor::new();
+        desc.setDepthCompareFunction(MTLCompareFunction::LessEqual);
+        desc.setDepthWriteEnabled(true);
+        let depth_state = device
+            .newDepthStencilStateWithDescriptor(&desc)
+            .context("depth state")?;
+        desc.setDepthWriteEnabled(false);
+        let read_depth = device
+            .newDepthStencilStateWithDescriptor(&desc)
+            .context("blend depth state")?;
+        let (w, h) = (
+            (width as f32 * scale).round() as usize,
+            (height as f32 * scale).round() as usize,
+        );
+        let rt = MTLTextureUsage::RenderTarget;
+        let read = MTLTextureUsage::ShaderRead;
+        let hdr = texture(&device, w, h, MTLPixelFormat::RGBA16Float, 1, rt | read)?;
+        let msaa = texture(&device, w, h, MTLPixelFormat::RGBA16Float, samples, rt)?;
+        let motion = texture(&device, w, h, MTLPixelFormat::RGBA16Float, 1, rt | read)?;
+        let motion_msaa = texture(&device, w, h, MTLPixelFormat::RGBA16Float, samples, rt)?;
+        let depth = texture(
+            &device,
+            w,
+            h,
+            MTLPixelFormat::Depth32Float,
+            samples,
+            rt | read,
+        )?;
+        let sd = MTLTextureDescriptor::new();
+        unsafe {
+            sd.setWidth(SHADOW_SIZE);
+            sd.setHeight(SHADOW_SIZE);
+            sd.setArrayLength(3);
+        }
+        sd.setTextureType(MTLTextureType::Type2DArray);
+        sd.setPixelFormat(MTLPixelFormat::Depth32Float);
+        sd.setStorageMode(MTLStorageMode::Private);
+        sd.setUsage(rt | read);
+        let shadow = device
+            .newTextureWithDescriptor(&sd)
+            .context("cascade array")?;
+        let history = [
+            texture(&device, w, h, MTLPixelFormat::RGBA16Float, 1, rt | read)?,
+            texture(&device, w, h, MTLPixelFormat::RGBA16Float, 1, rt | read)?,
+        ];
+        let output = texture(
+            &device,
+            width as usize,
+            height as usize,
+            MTLPixelFormat::BGRA8Unorm_sRGB,
+            1,
+            rt | read,
+        )?;
+        let mut fallback = Vec::new();
+        for (i, pixel) in [
+            [255, 255, 255, 255],
+            [128, 128, 255, 255],
+            [255, 255, 255, 255],
+            [255, 255, 255, 255],
+            [255, 255, 255, 255],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            fallback.push(image_texture(
+                &device,
+                &queue,
+                &Texture {
+                    key: format!("engine-default{i}"),
+                    width: 1,
+                    height: 1,
+                    rgba: Mutex::new(Some(pixel.to_vec())),
+                    compressed: None,
+                },
+                i == 0 || i == 3,
+            )?);
+        }
+        let mut slots = Vec::new();
+        for _ in 0..1 {
+            slots.push(Slot {
+                draws: device
+                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .context("draw ring buffer")?,
+                bones: device
+                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .context("bone ring buffer")?,
+                pending: None,
+            });
+        }
+        eprintln!(
+            "Metal: {} | {w}x{h} -> {width}x{height} | {samples}x samples | {} | cascades=3x{SHADOW_SIZE}",
+            device.name(),
+            if temporal { "TAA" } else { "no temporal AA" }
+        );
+        let gui = crate::gui::Gui::new(&device, &library)?;
+        let surface_maps = [
+            texture_array(&device, &queue, &[fallback[0].clone()])?,
+            texture_array(&device, &queue, &[fallback[1].clone()])?,
+            fallback[0].clone(),
+            fallback[1].clone(),
+            fallback[0].clone(),
+        ];
+        Ok(Self {
+            gui,
+            surface_uniform: Default::default(),
+            surface_maps,
+            sky_pipeline,
+            hud: None,
+            presented: Arc::new(Mutex::new(Vec::new())),
+            target_fps: 60.,
+            device,
+            queue,
+            layer: None,
+            opaque,
+            blend,
+            shadow_pipeline,
+            taa,
+            composite,
+            depth_state,
+            read_depth,
+            hdr,
+            msaa,
+            motion,
+            motion_msaa,
+            depth,
+            shadow,
+            history,
+            output,
+            width,
+            height,
+            scale,
+            samples,
+            temporal,
+            look: LookSettings::default(),
+            scene_time: None,
+            inline_constants: true,
+            started: Instant::now(),
+            meshes: HashMap::new(),
+            textures: HashMap::new(),
+            fallbacks: fallback.try_into().ok().unwrap(),
+            slots,
+            frame: 0,
+            stats: Stats::default(),
+            previous: HashMap::new(),
+            previous_vp: Mat4::IDENTITY,
+            previous_camera: None,
+            previous_time: 0.,
+            history_valid: false,
+        })
+    }
+    pub fn load_surface_assets(&mut self, path: &Path, root: &Path) -> Result<()> {
+        self.wait()?;
+        let inputs = crate::surfaces::SurfaceAssets::load(path)?;
+        let mut u = crate::surfaces::Uniform::default();
+        if let Some(t) = inputs.terrain {
+            let mut colours = Vec::new();
+            let mut normals = Vec::new();
+            for (i, layer) in t.layers.iter().enumerate() {
+                colours.push(self.image(&*Texture::load(&root.join(&layer.colour))?, true)?);
+                normals.push(self.image(&*Texture::load(&root.join(&layer.normal))?, false)?);
+                u.scales[i] = 1. / layer.uv_metres;
+                u.roughness[i] = layer.roughness;
+            }
+            self.surface_maps[0] = texture_array(&self.device, &self.queue, &colours)?;
+            self.surface_maps[1] = texture_array(&self.device, &self.queue, &normals)?;
+            self.surface_maps[2] = self.image(&*Texture::load(&root.join(t.weights))?, false)?;
+            u.bounds = t.bounds;
+            u.flags[0] = t.layers.len() as u32;
+        }
+        if let Some(w) = inputs.water {
+            self.surface_maps[3] = self.image(&*Texture::load(&root.join(w.normal))?, false)?;
+            u.water_deep = [
+                w.deep_colour[0],
+                w.deep_colour[1],
+                w.deep_colour[2],
+                w.opacity,
+            ];
+            u.water_shallow = [
+                w.shallow_colour[0],
+                w.shallow_colour[1],
+                w.shallow_colour[2],
+                w.normal_strength,
+            ];
+            u.water_absorption = [
+                w.absorption[0],
+                w.absorption[1],
+                w.absorption[2],
+                w.reflection_strength,
+            ];
+            u.water_flow = [1. / w.uv_metres, w.flow[0], w.flow[1], w.roughness];
+            u.sky[2] = w.ior;
+            u.flags[1] = 1;
+        }
+        if let Some(s) = inputs.sky {
+            self.surface_maps[4] = self.image(&*Texture::load(&root.join(s.texture))?, true)?;
+            u.sky[0] = s.rotation_radians / std::f32::consts::TAU;
+            u.sky[1] = s.intensity;
+            u.flags[2] = 1;
+        }
+        self.surface_uniform = u;
+        self.reset_temporal_history();
+        Ok(())
+    }
+    fn blended(&self, d: &Draw) -> bool {
+        let m = &d.model.primitives[d.primitive].material;
+        m.alpha_mode == 2
+            || (m.name == "__water_placeholder"
+                && self.surface_uniform.flags[1] > 0
+                && self.surface_uniform.water_deep[3] < 1.)
+    }
+    pub fn reset_temporal_history(&mut self) {
+        self.history_valid = false;
+        self.previous.clear();
+    }
+    pub fn set_frames_in_flight(&mut self, n: usize) -> Result<()> {
+        ensure!((1..=3).contains(&n), "frames in flight must be 1..3");
+        self.wait()?;
+        self.slots.clear();
+        for _ in 0..n {
+            self.slots.push(Slot {
+                draws: self
+                    .device
+                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .context("draw ring buffer")?,
+                bones: self
+                    .device
+                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .context("bone ring buffer")?,
+                pending: None,
+            });
+        }
+        Ok(())
+    }
+    pub fn attach(&mut self, view: &objc2_app_kit::NSView) {
+        let layer = CAMetalLayer::layer();
+        layer.setDevice(Some(&self.device));
+        layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm_sRGB);
+        layer.setFramebufferOnly(false);
+        layer.setMaximumDrawableCount(3);
+        layer.setDrawableSize(objc2_core_foundation::CGSize::new(
+            self.width as f64,
+            self.height as f64,
+        ));
+        view.setWantsLayer(true);
+        view.setLayer(Some(&layer));
+        self.layer = Some(layer);
+    }
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
+        if width == 0 || height == 0 {
+            return Ok(());
+        }
+        self.wait()?;
+        self.width = width;
+        self.height = height;
+        let (w, h) = (
+            (width as f32 * self.scale).round().max(1.) as usize,
+            (height as f32 * self.scale).round().max(1.) as usize,
+        );
+        let rt = MTLTextureUsage::RenderTarget;
+        let read = MTLTextureUsage::ShaderRead;
+        self.hdr = texture(
+            &self.device,
+            w,
+            h,
+            MTLPixelFormat::RGBA16Float,
+            1,
+            rt | read,
+        )?;
+        self.msaa = texture(
+            &self.device,
+            w,
+            h,
+            MTLPixelFormat::RGBA16Float,
+            self.samples,
+            rt,
+        )?;
+        self.motion = texture(
+            &self.device,
+            w,
+            h,
+            MTLPixelFormat::RGBA16Float,
+            1,
+            rt | read,
+        )?;
+        self.motion_msaa = texture(
+            &self.device,
+            w,
+            h,
+            MTLPixelFormat::RGBA16Float,
+            self.samples,
+            rt,
+        )?;
+        self.depth = texture(
+            &self.device,
+            w,
+            h,
+            MTLPixelFormat::Depth32Float,
+            self.samples,
+            rt | read,
+        )?;
+        self.history = [
+            texture(
+                &self.device,
+                w,
+                h,
+                MTLPixelFormat::RGBA16Float,
+                1,
+                rt | read,
+            )?,
+            texture(
+                &self.device,
+                w,
+                h,
+                MTLPixelFormat::RGBA16Float,
+                1,
+                rt | read,
+            )?,
+        ];
+        self.output = texture(
+            &self.device,
+            width as usize,
+            height as usize,
+            MTLPixelFormat::BGRA8Unorm_sRGB,
+            1,
+            rt | read,
+        )?;
+        self.history_valid = false;
+        self.previous.clear();
+        if let Some(l) = &self.layer {
+            l.setDrawableSize(objc2_core_foundation::CGSize::new(
+                width as f64,
+                height as f64,
+            ));
+        }
+        Ok(())
+    }
+    fn image(&mut self, t: &Texture, srgb: bool) -> Result<Obj<dyn MTLTexture>> {
+        let key = (t.key.clone(), srgb);
+        if let Some(texture) = self.textures.get(&key) {
+            return Ok(texture.clone());
+        }
+        let texture = if let Some(other) = self.textures.get(&(t.key.clone(), !srgb)) {
+            let format = if t.compressed.is_some() {
+                if srgb {
+                    MTLPixelFormat::ASTC_6x6_sRGB
+                } else {
+                    MTLPixelFormat::ASTC_6x6_LDR
+                }
+            } else if srgb {
+                MTLPixelFormat::RGBA8Unorm_sRGB
+            } else {
+                MTLPixelFormat::RGBA8Unorm
+            };
+            other
+                .newTextureViewWithPixelFormat(format)
+                .context("texture colour-space view")?
+        } else {
+            image_texture(&self.device, &self.queue, t, srgb)?
+        };
+        self.textures.insert(key, texture.clone());
+        Ok(texture)
+    }
+    fn upload(&mut self, draw: &Draw) -> Result<()> {
+        if let Some(t) = &draw.base_map {
+            self.image(t, true)?;
+        }
+        if let Some(dye) = &draw.dye {
+            self.image(&dye.mask, false)?;
+        }
+        let key = (draw.model.id, draw.primitive);
+        if self.meshes.contains_key(&key) {
+            return Ok(());
+        }
+        let p = &draw.model.primitives[draw.primitive];
+        let mut maps = self.fallbacks.clone();
+        for (i, map) in p.material.maps.iter().enumerate() {
+            if let Some(t) = map {
+                maps[i] = self.image(t, i == 0 || i == 3)?;
+            }
+        }
+        let mut morphs = vec![[0f32; 4]; p.vertices.len() * 2];
+        for (j, name) in ["arrow", "draw"].iter().enumerate() {
+            if let Some(mi) = p.morph_names.iter().position(|n| n == name) {
+                for (i, v) in p.morphs[mi].iter().enumerate() {
+                    morphs[i * 2 + j] = [v[0], v[1], v[2], 0.];
+                }
+            }
+        }
+        self.meshes.insert(
+            key,
+            GpuMesh {
+                vertices: buffer(&self.device, &p.vertices)?,
+                indices: buffer(&self.device, &p.indices)?,
+                morphs: buffer(&self.device, &morphs)?,
+                count: p.indices.len(),
+                maps,
+                material: p.material.clone(),
+            },
+        );
+        Ok(())
+    }
+    pub fn draw(
+        &mut self,
+        camera: Camera,
+        draws: &[Draw],
+        capture: Option<&Path>,
+    ) -> Result<Stats> {
+        self.look.validate()?;
+        let slot = self.frame % self.slots.len();
+        if let Some(cb) = self.slots[slot].pending.take() {
+            cb.waitUntilCompleted();
+            if let Some(e) = cb.error() {
+                anyhow::bail!("GPU command failed: {e}")
+            }
+            self.stats.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
+        }
+        let hud = self.hud.take();
+        if let Some(hud) = &hud {
+            if !hud.textures.set.is_empty() {
+                self.wait()?;
+            }
+            self.gui.upload(&self.device, hud)?;
+        }
+        let width = self.hdr.width() as f32;
+        let height = self.hdr.height() as f32;
+        let aspect = self.width as f32 / self.height as f32;
+        let unjittered = camera.matrix(aspect);
+        let jitter = if self.temporal {
+            let i = self.frame % 16 + 1;
+            Vec3::new(
+                (halton(i, 2) - 0.5) * 2. / width,
+                (halton(i, 3) - 0.5) * 2. / height,
+                0.,
+            )
+        } else {
+            Vec3::ZERO
+        };
+        let vp = Mat4::from_translation(jitter) * unjittered;
+        let cut = self.previous_camera.is_none_or(|p| {
+            p.eye.distance(camera.eye) > 5.
+                || (p.target - p.eye)
+                    .normalize()
+                    .dot((camera.target - camera.eye).normalize())
+                    < 0.75
+        });
+        let valid = self.history_valid && !cut;
+        let previous_vp = if valid { self.previous_vp } else { vp };
+        let sun = Vec3::from_array(self.look.sun_direction).normalize();
+        let cascades = stable_cascades(
+            camera.eye,
+            camera.target,
+            camera.fov,
+            aspect,
+            sun,
+            SHADOW_SIZE as u32,
+        );
+        let view = Frustum::new(unjittered);
+        let shadow_views = cascades.map(Frustum::new);
+        let time = self
+            .scene_time
+            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
+        let f = Frame {
+            vp: vp.to_cols_array_2d(),
+            previous_vp: previous_vp.to_cols_array_2d(),
+            inverse_vp: vp.inverse().to_cols_array_2d(),
+            shadows: cascades.map(|m| m.to_cols_array_2d()),
+            eye: camera.eye.extend(1.).to_array(),
+            sun: sun.extend(self.look.sun_intensity).to_array(),
+            sun_colour: Vec3::from_array(self.look.sun_colour).extend(1.).to_array(),
+            ambient: Vec3::from_array(self.look.ambient).extend(1.).to_array(),
+            sky: Vec3::from_array(self.look.sky).extend(1.).to_array(),
+            fog: Vec3::from_array(self.look.fog_colour)
+                .extend(self.look.fog_density)
+                .to_array(),
+            grade: self.look.grade.map(|r| [r[0], r[1], r[2], 0.]),
+            params: [
+                self.look.exposure,
+                (self.look.tone_map == ToneMap::Aces) as u32 as f32,
+                0.,
+                0.,
+            ],
+            clock: [
+                time,
+                self.previous_time,
+                self.look.wind_strength,
+                valid as u32 as f32,
+            ],
+            viewport: [width, height, 1. / width, 1. / height],
+            splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
+        };
+        let bones = self.slots[slot].bones.clone();
+        let uniform_buffer = self.slots[slot].draws.clone();
+        let mut uniform_used = 0;
+        let mut used = 0;
+        let mut prepared = Vec::new();
+        let mut new_previous = HashMap::new();
+        let mut calls = 0;
+        let mut triangles = 0;
+        let mut culled = 0;
+        for (i, d) in draws.iter().enumerate() {
+            let p = &d.model.primitives[d.primitive];
+            let mut bounds = p.bounds.transformed(d.transform);
+            if !d.palette.is_empty() {
+                bounds = bounds.padded(1.5);
+            } else {
+                bounds = bounds.padded(0.2 + self.look.wind_strength * 0.12);
+            }
+            let scene = view.intersects(bounds);
+            let swept = Bounds {
+                center: bounds.center - sun * 50.,
+                half: bounds.half + sun.abs() * 50.,
+            };
+            let shadows = shadow_views
+                .each_ref()
+                .map(|v| v.intersects(bounds) && view.intersects(swept));
+            if !scene && !shadows.iter().any(|v| *v) {
+                culled += 1;
+                continue;
+            }
+            self.upload(d)?;
+            let old = self.previous.get(&d.instance).filter(|old| {
+                valid && old.model_key == d.model.id && old.palette.len() == d.palette.len()
+            });
+            let identity = [Mat4::IDENTITY];
+            let current = if d.palette.is_empty() {
+                &identity[..]
+            } else {
+                &d.palette
+            };
+            let prev = old.map_or(current, |o| {
+                if o.palette.is_empty() {
+                    &identity[..]
+                } else {
+                    &o.palette
+                }
+            });
+            let mut put = |data: &[Mat4]| -> Result<usize> {
+                let size = std::mem::size_of_val(data);
+                ensure!(used + size <= BONE_BYTES, "frame bone budget exceeded");
+                let at = used;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        data.as_ptr().cast::<u8>(),
+                        bones.contents().as_ptr().cast::<u8>().add(at),
+                        size,
+                    );
+                }
+                used = (used + size + 255) & !255;
+                Ok(at)
+            };
+            let current = put(current)?;
+            let previous = put(prev)?;
+            let m = &p.material;
+            let u = DrawUniform {
+                model: d.transform.to_cols_array_2d(),
+                previous_model: old.map_or(d.transform, |o| o.transform).to_cols_array_2d(),
+                base: d.base,
+                emission: [m.emissive[0], m.emissive[1], m.emissive[2], m.roughness],
+                params: [
+                    m.metallic,
+                    m.normal_scale,
+                    m.occlusion_strength,
+                    m.alpha_cutoff,
+                ],
+                flags: [
+                    d.hidden,
+                    (!d.palette.is_empty()) as u32,
+                    if self.blended(d) { 2 } else { m.alpha_mode },
+                    match m.name.as_str() {
+                        "__terrain_placeholder" => 1,
+                        "__water_placeholder" => 2,
+                        _ => 0,
+                    },
+                ],
+                morph: [
+                    d.morph[0],
+                    d.morph[1],
+                    (!p.morphs.is_empty()) as u32 as f32,
+                    m.double_sided as u32 as f32,
+                ],
+                previous_morph: [
+                    old.map_or(d.morph, |o| o.morph)[0],
+                    old.map_or(d.morph, |o| o.morph)[1],
+                    0.,
+                    0.,
+                ],
+                dyes: d.dye.as_ref().map_or([[0.; 4]; 2], |dye| dye.colours),
+                references: d.dye.as_ref().map_or([[1.; 4]; 2], |dye| dye.references),
+            };
+
+            ensure!(
+                uniform_used + std::mem::size_of::<DrawUniform>() <= BONE_BYTES,
+                "draw constant budget exceeded"
+            );
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr(&u).as_ptr().cast::<u8>(),
+                    uniform_buffer
+                        .contents()
+                        .as_ptr()
+                        .cast::<u8>()
+                        .add(uniform_used),
+                    std::mem::size_of::<DrawUniform>(),
+                );
+            }
+            prepared.push(Prepared {
+                uniform: uniform_used,
+                draw: i,
+                current,
+                previous,
+                bounds,
+                scene,
+                shadows,
+            });
+            uniform_used = (uniform_used + std::mem::size_of::<DrawUniform>() + 255) & !255;
+            new_previous.insert(
+                d.instance,
+                Previous {
+                    model_key: d.model.id,
+                    transform: d.transform,
+                    palette: d.palette.clone(),
+                    morph: d.morph,
+                },
+            );
+            if scene {
+                triangles += p.indices.len() / 3;
+            }
+        }
+        let cb = self.queue.commandBuffer().context("frame command buffer")?;
+        for cascade in 0..3 {
+            let pass = MTLRenderPassDescriptor::new();
+            let depth = pass.depthAttachment();
+            depth.setTexture(Some(&self.shadow));
+            depth.setSlice(cascade);
+            depth.setLoadAction(MTLLoadAction::Clear);
+            depth.setStoreAction(MTLStoreAction::Store);
+            depth.setClearDepth(1.);
+            let enc = cb
+                .renderCommandEncoderWithDescriptor(&pass)
+                .context("cascade encoder")?;
+            enc.setRenderPipelineState(&self.shadow_pipeline);
+            enc.setDepthStencilState(Some(&self.depth_state));
+            enc.setDepthBias_slopeScale_clamp(0.001, 1.25, 0.01);
+            calls += self.encode(
+                &enc,
+                draws,
+                &prepared,
+                (&bones, &uniform_buffer, &mut uniform_used),
+                &f,
+                Some(cascade),
+            )?;
+            enc.endEncoding();
+        }
+        let pass = MTLRenderPassDescriptor::new();
+        for i in 0..2 {
+            let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(i) };
+            let single = if i == 0 { &self.hdr } else { &self.motion };
+            let multi = if i == 0 {
+                &self.msaa
+            } else {
+                &self.motion_msaa
+            };
+            c.setTexture(Some(if self.samples == 1 { single } else { multi }));
+            if self.samples > 1 {
+                c.setResolveTexture(Some(single));
+            }
+            c.setLoadAction(MTLLoadAction::Clear);
+            c.setStoreAction(if self.samples > 1 {
+                MTLStoreAction::MultisampleResolve
+            } else {
+                MTLStoreAction::Store
+            });
+            c.setClearColor(if i == 0 {
+                MTLClearColor {
+                    red: self.look.sky[0] as f64,
+                    green: self.look.sky[1] as f64,
+                    blue: self.look.sky[2] as f64,
+                    alpha: 1.,
+                }
+            } else {
+                MTLClearColor {
+                    red: 0.,
+                    green: 0.,
+                    blue: 800.,
+                    alpha: 0.,
+                }
+            });
+        }
+        pass.depthAttachment().setTexture(Some(&self.depth));
+        pass.depthAttachment().setClearDepth(1.);
+        pass.depthAttachment().setLoadAction(MTLLoadAction::Clear);
+        pass.depthAttachment().setStoreAction(MTLStoreAction::Store);
+        let enc = cb
+            .renderCommandEncoderWithDescriptor(&pass)
+            .context("scene encoder")?;
+        if self.surface_uniform.flags[2] > 0 {
+            enc.setRenderPipelineState(&self.sky_pipeline);
+            enc.setDepthStencilState(Some(&self.read_depth));
+            unsafe {
+                enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
+                enc.setFragmentBytes_length_atIndex(
+                    ptr(&self.surface_uniform),
+                    std::mem::size_of::<crate::surfaces::Uniform>(),
+                    3,
+                );
+                enc.setFragmentTexture_atIndex(Some(&self.surface_maps[4]), 11);
+                enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+            }
+            calls += 1;
+        }
+
+        calls += self.encode(
+            &enc,
+            draws,
+            &prepared,
+            (&bones, &uniform_buffer, &mut uniform_used),
+            &f,
+            None,
+        )?;
+        enc.endEncoding();
+        let history_index = self.frame % 2;
+        if self.temporal {
+            let pass = MTLRenderPassDescriptor::new();
+            let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+            c.setTexture(Some(&self.history[history_index]));
+            c.setLoadAction(MTLLoadAction::DontCare);
+            c.setStoreAction(MTLStoreAction::Store);
+            let enc = cb
+                .renderCommandEncoderWithDescriptor(&pass)
+                .context("temporal encoder")?;
+            enc.setRenderPipelineState(&self.taa);
+            unsafe {
+                enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
+                enc.setFragmentTexture_atIndex(Some(&self.hdr), 0);
+                enc.setFragmentTexture_atIndex(Some(&self.motion), 1);
+                enc.setFragmentTexture_atIndex(Some(&self.depth), 2);
+                enc.setFragmentTexture_atIndex(Some(&self.history[1 - history_index]), 3);
+                enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+            }
+            enc.endEncoding();
+            calls += 1;
+        }
+        let output = MTLRenderPassDescriptor::new();
+        let c = unsafe { output.colorAttachments().objectAtIndexedSubscript(0) };
+        c.setTexture(Some(&self.output));
+        c.setLoadAction(MTLLoadAction::DontCare);
+        c.setStoreAction(MTLStoreAction::Store);
+        let enc = cb
+            .renderCommandEncoderWithDescriptor(&output)
+            .context("composite encoder")?;
+        enc.setRenderPipelineState(&self.composite);
+        unsafe {
+            enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
+            enc.setFragmentTexture_atIndex(
+                Some(if self.temporal {
+                    &self.history[history_index]
+                } else {
+                    &self.hdr
+                }),
+                0,
+            );
+            enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+        }
+        enc.endEncoding();
+        calls += 1;
+        if let Some(hud) = &hud {
+            calls += self.gui.paint(&cb, &self.output, hud, self.frame)?;
+        }
+        let drawable = self.layer.as_ref().and_then(|l| l.nextDrawable());
+        if let Some(drawable) = &drawable {
+            let blit = cb.blitCommandEncoder().context("present blit")?;
+            unsafe {
+                blit.copyFromTexture_toTexture(&self.output, &drawable.texture());
+            }
+            blit.endEncoding();
+            let samples = self.presented.clone();
+            let number = self.frame;
+            let handler =
+                block2::RcBlock::new(move |drawable: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+                    let t = unsafe { drawable.as_ref() }.presentedTime();
+                    let mut times = samples.lock().unwrap();
+                    if times.len() >= 16384 {
+                        times.drain(..8192);
+                    }
+                    times.push((number, t));
+                });
+            let base: &ProtocolObject<dyn MTLDrawable> = ProtocolObject::from_ref(&**drawable);
+            unsafe {
+                base.addPresentedHandler(block2::RcBlock::as_ptr(&handler) as *mut _);
+            }
+            cb.presentDrawable_afterMinimumDuration(base, 1. / self.target_fps);
+        }
+        let row = (self.width as usize * 4 + 255) & !255;
+        let readback = if capture.is_some() {
+            let b = self
+                .device
+                .newBufferWithLength_options(
+                    row * self.height as usize,
+                    MTLResourceOptions::StorageModeShared,
+                )
+                .context("capture readback")?;
+            let blit = cb.blitCommandEncoder().context("capture encoder")?;
+            unsafe {
+                blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(&self.output,0,0,MTLOrigin{x:0,y:0,z:0},MTLSize{width:self.width as usize,height:self.height as usize,depth:1},&b,0,row,row*self.height as usize);
+            }
+            blit.endEncoding();
+            Some(b)
+        } else {
+            None
+        };
+        cb.commit();
+        if let (Some(path), Some(b)) = (capture, readback) {
+            cb.waitUntilCompleted();
+            if let Some(e) = cb.error() {
+                anyhow::bail!("GPU capture failed: {e}")
+            }
+            let src = unsafe {
+                std::slice::from_raw_parts(
+                    b.contents().as_ptr().cast::<u8>(),
+                    row * self.height as usize,
+                )
+            };
+            let mut rgba = Vec::with_capacity(self.width as usize * self.height as usize * 4);
+            for y in 0..self.height as usize {
+                for p in src[y * row..y * row + self.width as usize * 4]
+                    .as_chunks::<4>()
+                    .0
+                {
+                    rgba.extend([p[2], p[1], p[0], p[3]]);
+                }
+            }
+            image::save_buffer(
+                path,
+                &rgba,
+                self.width,
+                self.height,
+                image::ColorType::Rgba8,
+            )?;
+            self.stats.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
+        }
+        self.slots[slot].pending = Some(cb);
+        self.previous = new_previous;
+        self.previous_vp = vp;
+        self.previous_camera = Some(camera);
+        self.previous_time = time;
+        self.history_valid = true;
+        self.frame += 1;
+        self.stats.draw_calls = calls;
+        self.stats.triangles = triangles;
+        self.stats.culled = culled;
+        Ok(self.stats)
+    }
+    fn encode(
+        &self,
+        enc: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+        draws: &[Draw],
+        prepared: &[Prepared],
+        buffers: (
+            &ProtocolObject<dyn MTLBuffer>,
+            &ProtocolObject<dyn MTLBuffer>,
+            &mut usize,
+        ),
+        f: &Frame,
+        cascade: Option<usize>,
+    ) -> Result<usize> {
+        let (bones, uniform_buffer, packed_used) = buffers;
+        unsafe {
+            enc.setVertexBytes_length_atIndex(ptr(f), std::mem::size_of::<Frame>(), 1);
+            if let Some(c) = cascade {
+                let index = c as u32;
+                enc.setVertexBytes_length_atIndex(ptr(&index), 4, 5);
+            } else {
+                enc.setFragmentBytes_length_atIndex(ptr(f), std::mem::size_of::<Frame>(), 1);
+                enc.setFragmentTexture_atIndex(Some(&self.shadow), 5);
+                enc.setFragmentBytes_length_atIndex(
+                    ptr(&self.surface_uniform),
+                    std::mem::size_of::<crate::surfaces::Uniform>(),
+                    3,
+                );
+                for (i, texture) in self.surface_maps.iter().enumerate() {
+                    enc.setFragmentTexture_atIndex(Some(texture), 7 + i);
+                }
+            }
+        }
+        let mut count = 0;
+        let mut visible: Vec<_> = prepared
+            .iter()
+            .filter(|p| cascade.map_or(p.scene, |c| p.shadows[c]))
+            .collect();
+        // Repeated opaque rigid meshes share an instanced draw. Each instance keeps its
+        // own current/previous transforms (including spinning scenery) in packed constants.
+        let mut groups: Vec<Vec<&Prepared>> = Vec::new();
+        let mut rigid = HashMap::new();
+        for p in visible.drain(..) {
+            let d = &draws[p.draw];
+            let batchable =
+                d.palette.is_empty() && !self.blended(d) && d.dye.is_none() && d.base_map.is_none();
+            if batchable {
+                let index = *rigid.entry((d.model.id, d.primitive)).or_insert_with(|| {
+                    groups.push(Vec::new());
+                    groups.len() - 1
+                });
+                groups[index].push(p);
+            } else {
+                groups.push(vec![p]);
+            }
+        }
+        let eye = Vec3::from_slice(&f.eye[..3]);
+        let distance = |group: &Vec<&Prepared>| {
+            group
+                .iter()
+                .map(|p| p.bounds.center.distance_squared(eye))
+                .fold(f32::INFINITY, f32::min)
+        };
+        // Opaque batches front-to-back; transparent objects remain individual and back-to-front.
+        groups.sort_by(|a, b| {
+            let ba = self.blended(&draws[a[0].draw]);
+            let bb = self.blended(&draws[b[0].draw]);
+            ba.cmp(&bb).then_with(|| {
+                if ba {
+                    distance(b).total_cmp(&distance(a))
+                } else {
+                    distance(a).total_cmp(&distance(b))
+                }
+            })
+        });
+        let mut last_pipeline = None;
+        let mut last_cull = None;
+        for group in groups {
+            let p = group[0];
+            let d = &draws[p.draw];
+            let g = &self.meshes[&(d.model.id, d.primitive)];
+            let m = &g.material;
+            let blended = self.blended(d);
+            if cascade.is_some() && (blended || m.name == "__water_placeholder") {
+                continue;
+            }
+            if cascade.is_none() && last_pipeline != Some(blended) {
+                enc.setRenderPipelineState(if blended { &self.blend } else { &self.opaque });
+                enc.setDepthStencilState(Some(if blended {
+                    &self.read_depth
+                } else {
+                    &self.depth_state
+                }));
+                last_pipeline = Some(blended);
+            }
+            let cull = if m.double_sided || d.model.key.starts_with("world:") {
+                MTLCullMode::None
+            } else {
+                MTLCullMode::Back
+            };
+            if last_cull != Some(cull) {
+                enc.setCullMode(cull);
+                last_cull = Some(cull);
+            }
+            enc.setFrontFacingWinding(MTLWinding::CounterClockwise);
+            let instanced = group.len() > 1;
+            let uniform = if instanced {
+                let at = *packed_used;
+                let stride = std::mem::size_of::<DrawUniform>();
+                ensure!(
+                    at + group.len() * stride <= BONE_BYTES,
+                    "instanced draw constant budget exceeded"
+                );
+                unsafe {
+                    let bytes = uniform_buffer.contents().as_ptr().cast::<u8>();
+                    for (i, instance) in group.iter().enumerate() {
+                        std::ptr::copy_nonoverlapping(
+                            bytes.add(instance.uniform),
+                            bytes.add(at + i * stride),
+                            stride,
+                        );
+                    }
+                }
+                *packed_used = (at + group.len() * stride + 255) & !255;
+                at
+            } else {
+                p.uniform
+            };
+            unsafe {
+                enc.setVertexBuffer_offset_atIndex(Some(&g.vertices), 0, 0);
+                if self.inline_constants && !instanced {
+                    enc.setVertexBytes_length_atIndex(
+                        NonNull::new(
+                            uniform_buffer
+                                .contents()
+                                .as_ptr()
+                                .cast::<u8>()
+                                .add(uniform)
+                                .cast::<c_void>(),
+                        )
+                        .unwrap(),
+                        std::mem::size_of::<DrawUniform>(),
+                        2,
+                    );
+                } else {
+                    enc.setVertexBuffer_offset_atIndex(Some(uniform_buffer), uniform, 2);
+                }
+                enc.setVertexBuffer_offset_atIndex(Some(bones), p.current, 3);
+                enc.setVertexBuffer_offset_atIndex(Some(&g.morphs), 0, 4);
+                enc.setVertexBuffer_offset_atIndex(Some(bones), p.previous, 6);
+                if self.inline_constants && !instanced {
+                    enc.setFragmentBytes_length_atIndex(
+                        NonNull::new(
+                            uniform_buffer
+                                .contents()
+                                .as_ptr()
+                                .cast::<u8>()
+                                .add(uniform)
+                                .cast::<c_void>(),
+                        )
+                        .unwrap(),
+                        std::mem::size_of::<DrawUniform>(),
+                        2,
+                    );
+                } else {
+                    enc.setFragmentBuffer_offset_atIndex(Some(uniform_buffer), uniform, 2);
+                }
+                for (j, t) in g.maps.iter().enumerate() {
+                    if cascade.is_some() && j > 0 {
+                        break;
+                    }
+                    let t = if j == 0 {
+                        d.base_map
+                            .as_ref()
+                            .and_then(|t| self.textures.get(&(t.key.clone(), true)))
+                            .unwrap_or(t)
+                    } else {
+                        t
+                    };
+                    enc.setFragmentTexture_atIndex(Some(t), j);
+                }
+                if cascade.is_none() {
+                    let mask = d
+                        .dye
+                        .as_ref()
+                        .and_then(|dye| self.textures.get(&(dye.mask.key.clone(), false)))
+                        .unwrap_or(&self.fallbacks[4]);
+                    enc.setFragmentTexture_atIndex(Some(mask), 6);
+                }
+                enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
+                    MTLPrimitiveType::Triangle,
+                    g.count,
+                    MTLIndexType::UInt32,
+                    &g.indices,
+                    0,
+                    group.len(),
+                );
+            }
+            count += 1;
+        }
+        Ok(count)
+    }
+    pub fn presentation_times(&self, warmup: usize) -> Vec<f64> {
+        let mut samples = self.presented.lock().unwrap().clone();
+        samples.sort_by_key(|(frame, _)| *frame);
+        samples
+            .into_iter()
+            .filter(|(frame, t)| *frame >= warmup && *t > 0.)
+            .map(|(_, t)| t)
+            .collect()
+    }
+    pub fn wait(&mut self) -> Result<()> {
+        for s in &mut self.slots {
+            if let Some(cb) = s.pending.take() {
+                cb.waitUntilCompleted();
+                self.stats.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
+                if let Some(e) = cb.error() {
+                    anyhow::bail!("GPU command failed: {e}")
+                }
+            }
+        }
+        Ok(())
+    }
+}
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        let _ = self.wait();
+    }
+}
+fn halton(mut i: usize, base: usize) -> f32 {
+    let (mut f, mut value) = (1f32, 0f32);
+    while i > 0 {
+        f /= base as f32;
+        value += f * (i % base) as f32;
+        i /= base;
+    }
+    value
+}
+
+fn texture_array(
+    device: &ProtocolObject<dyn MTLDevice>,
+    queue: &ProtocolObject<dyn MTLCommandQueue>,
+    sources: &[Obj<dyn MTLTexture>],
+) -> Result<Obj<dyn MTLTexture>> {
+    ensure!(
+        !sources.is_empty() && sources.len() <= 4,
+        "terrain requires 1..4 supplied layers"
+    );
+    let first = &sources[0];
+    ensure!(
+        sources.iter().all(|t| t.width() == first.width()
+            && t.height() == first.height()
+            && t.pixelFormat() == first.pixelFormat()
+            && t.mipmapLevelCount() == first.mipmapLevelCount()),
+        "terrain array layers must share size, format and mip count"
+    );
+    let d = MTLTextureDescriptor::new();
+    unsafe {
+        d.setWidth(first.width());
+        d.setHeight(first.height());
+        d.setArrayLength(sources.len());
+        d.setMipmapLevelCount(first.mipmapLevelCount());
+    }
+    d.setTextureType(MTLTextureType::Type2DArray);
+    d.setPixelFormat(first.pixelFormat());
+    d.setStorageMode(MTLStorageMode::Private);
+    d.setUsage(MTLTextureUsage::ShaderRead);
+    let array = device
+        .newTextureWithDescriptor(&d)
+        .context("terrain texture array")?;
+    let cb = queue.commandBuffer().context("terrain upload")?;
+    let blit = cb.blitCommandEncoder().context("terrain upload encoder")?;
+    for (slice, source) in sources.iter().enumerate() {
+        for level in 0..first.mipmapLevelCount() {
+            unsafe {
+                blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(source,0,level,MTLOrigin{x:0,y:0,z:0},MTLSize{width:(first.width()>>level).max(1),height:(first.height()>>level).max(1),depth:1},&array,slice,level,MTLOrigin{x:0,y:0,z:0});
+            }
+        }
+    }
+    blit.endEncoding();
+    cb.commit();
+    Ok(array)
+}

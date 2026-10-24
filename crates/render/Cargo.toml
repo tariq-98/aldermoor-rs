@@ -5,3 +5,23 @@ version.workspace = true
 publish.workspace = true
 
 [dependencies]
+egui = { version = "0.33", default-features = false, features = ["default_fonts"] }
+anyhow = "1"
+assets = { path = "../assets" }
+glam.workspace = true
+protocol.workspace = true
+world.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+gltf = { version = "1.4", features = ["extras", "names", "KHR_materials_emissive_strength", "utils"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+bytemuck = { version = "1", features = ["derive"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-metal = "0.3"
+objc2-quartz-core = "0.3"
+objc2-app-kit = "0.3"
+objc2-core-foundation = "0.3"
+block2 = "0.6"
