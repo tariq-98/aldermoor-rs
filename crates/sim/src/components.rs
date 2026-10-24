@@ -1,6 +1,8 @@
 use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
-use protocol::{Pose, UnitId, UnitKind};
+use protocol::{Action, Pose, ResourceKind, UnitId, UnitKind};
+
+use crate::content::{AbilityId, AuraId, Specialty};
 
 /// Who a unit is.
 #[derive(Component, Clone, Debug)]
@@ -37,6 +39,10 @@ impl Transform {
     pub fn forward(&self) -> Vec2 {
         Vec2::new(self.yaw.sin(), self.yaw.cos())
     }
+
+    pub fn xz(&self) -> Vec2 {
+        Vec2::new(self.pos.x, self.pos.z)
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -55,9 +61,21 @@ pub struct MoveIntent {
     pub face_yaw: Option<f32>,
 }
 
-/// A move the body is carried through (a dodge roll), ignoring the controls until it ends.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ForcedKind {
+    Dodge,
+    /// Thrown: can't act until it lands.
+    Knockback,
+    /// A lunge, vault or leap from a skill.
+    Leap,
+    /// Rushing at a target; the rest of the ability lands on arrival.
+    Charge { target: UnitId, ability: AbilityId },
+}
+
+/// A move the body is carried through (a roll, a leap, being thrown), ignoring the controls.
 #[derive(Clone, Copy, Debug)]
 pub struct Forced {
+    pub kind: ForcedKind,
     pub from: Vec3,
     pub to: Vec3,
     pub start: f64,
@@ -90,6 +108,11 @@ impl Motion {
             forced: None,
         }
     }
+
+    /// Trying to move this step (a cast that needs stillness stops).
+    pub fn moving(&self) -> bool {
+        self.intent.direction.length_squared() > 0.01 || !self.grounded || self.forced.is_some()
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -99,7 +122,12 @@ pub struct Vitals {
     pub endurance: f32,
     pub dead: bool,
     pub died_at: f64,
+    /// Down but not out: health ran out and the downed pool is bleeding away.
+    pub downed: bool,
+    pub downed_health: f32,
+    pub downed_max: f32,
     pub last_combat: f64,
+    /// Rolling: blows and missiles pass through until then.
     pub invulnerable_until: f64,
     /// Monsters come back this long after dying; `None` for players (they choose when).
     pub respawn_at: Option<f64>,
@@ -113,34 +141,258 @@ impl Vitals {
             endurance: crate::vitals::ENDURANCE_MAX,
             dead: false,
             died_at: 0.0,
+            downed: false,
+            downed_health: 0.0,
+            downed_max: 0.0,
             last_combat: -100.0,
             invulnerable_until: 0.0,
             respawn_at: None,
         }
     }
+
+    pub fn alive(&self) -> bool {
+        !self.dead && !self.downed
+    }
+
+    pub fn fraction(&self) -> f32 {
+        if self.max_health > 0.0 { self.health / self.max_health } else { 0.0 }
+    }
 }
 
-/// A basic attack: how far it reaches, how often it swings and how hard it hits.
+/// A unit's numbers, from its level, specialty or monster type (and later its gear).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Stats {
+    pub power: f32,
+    pub armor: f32,
+    pub crit: f32,
+    pub haste: f32,
+}
+
+/// A cast or channel in progress. Area abilities keep the aim they started with, so a warned
+/// blow lands where it was warned of.
 #[derive(Clone, Copy, Debug)]
-pub struct Attack {
-    pub range: f32,
-    pub interval: f64,
-    pub damage: f32,
+pub struct Cast {
+    pub ability: AbilityId,
+    pub target: Option<UnitId>,
+    pub ground: Option<Vec3>,
+    pub yaw: f32,
+    pub start: f64,
+    pub duration: f64,
+    pub channel: bool,
+    pub next_tick: f64,
+    pub ticks_done: u8,
 }
 
+/// A skill pressed just before the global cooldown ended: it goes off the moment it does.
+#[derive(Clone, Copy, Debug)]
+pub struct Queued {
+    pub ability: AbilityId,
+    pub ground: Option<Vec3>,
+    pub until: f64,
+}
+
+/// Everything about how a unit fights.
 #[derive(Component, Clone, Debug)]
 pub struct Fighter {
     pub target: Option<UnitId>,
     pub auto_attack: bool,
-    pub attack: Attack,
-    pub next_swing: f64,
-    /// When each bar slot is ready again (simulation time).
-    pub cooldowns: [f64; 2],
+    /// The bar, slot 0 being key 1: 1–5 weapon skills, 6 heal, 7–9 utilities, 0 elite.
+    pub bar: [Option<AbilityId>; 10],
+    /// Skills 6–0, chosen from the specialty (kept across weapon swaps).
+    pub kit: [Option<AbilityId>; 5],
+    /// Weapon sets (main or two-handed item, off-hand item), and which is in hand.
+    pub sets: Vec<(Option<String>, Option<String>)>,
+    pub active_set: usize,
+    pub swap_ready_at: f64,
+    /// The basic attack that repeats while there's a target.
+    pub auto: Option<AbilityId>,
+    pub specialty: Option<Specialty>,
+    /// When each ability is ready again (simulation time).
+    pub cooldowns: Vec<(AbilityId, f64)>,
+    pub gcd_until: f64,
+    pub cast: Option<Cast>,
+    pub queued: Option<Queued>,
+    /// Interrupted: no skills until then.
+    pub lockout_until: f64,
+    pub resource_kind: ResourceKind,
+    pub resource: f32,
+    pub max_resource: f32,
+    /// When the guard went up (a blow soon after is parried); `None` when it's down.
+    pub guard_since: Option<f64>,
+    /// The action being animated, and when it began.
+    pub action: Action,
+    pub action_time: f64,
+    /// Enemies this unit hurt recently (felling one rallies you if you're downed).
+    pub recent_victims: Vec<(UnitId, f64)>,
+    /// Helping someone up: who, and since when.
+    pub reviving: Option<(UnitId, f64)>,
 }
 
 impl Fighter {
-    pub fn new(attack: Attack) -> Fighter {
-        Fighter { target: None, auto_attack: false, attack, next_swing: 0.0, cooldowns: [0.0; 2] }
+    pub fn new() -> Fighter {
+        Fighter {
+            target: None,
+            auto_attack: false,
+            bar: [None; 10],
+            kit: [None; 5],
+            sets: Vec::new(),
+            active_set: 0,
+            swap_ready_at: 0.0,
+            auto: None,
+            specialty: None,
+            cooldowns: Vec::new(),
+            gcd_until: 0.0,
+            cast: None,
+            queued: None,
+            lockout_until: 0.0,
+            resource_kind: ResourceKind::None,
+            resource: 0.0,
+            max_resource: 0.0,
+            guard_since: None,
+            action: Action::None,
+            action_time: 0.0,
+            recent_victims: Vec::new(),
+            reviving: None,
+        }
+    }
+
+    pub fn ready_at(&self, ability: AbilityId) -> f64 {
+        self.cooldowns.iter().find(|(a, _)| *a == ability).map_or(0.0, |(_, t)| *t)
+    }
+
+    pub fn set_cooldown(&mut self, ability: AbilityId, until: f64) {
+        match self.cooldowns.iter_mut().find(|(a, _)| *a == ability) {
+            Some(c) => c.1 = until,
+            None => self.cooldowns.push((ability, until)),
+        }
+    }
+}
+
+impl Default for Fighter {
+    fn default() -> Self {
+        Fighter::new()
+    }
+}
+
+/// One aura on a unit, with what it needs to keep working after its source is gone.
+#[derive(Clone, Copy, Debug)]
+pub struct AuraInstance {
+    pub aura: AuraId,
+    pub source: UnitId,
+    pub power: f32,
+    pub level: u8,
+    pub expires: f64,
+    pub duration: f64,
+    pub stacks: u8,
+    pub next_tick: f64,
+    pub absorb_left: f32,
+}
+
+/// Diminishing returns in one category of crowd control.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Dr {
+    pub count: u8,
+    pub reset_at: f64,
+}
+
+#[derive(Component, Clone, Debug, Default)]
+pub struct Auras {
+    pub list: Vec<AuraInstance>,
+    pub dr: [Dr; 4],
+    /// Elites and bosses: crowd control chips this bar instead of landing.
+    pub defiance: f32,
+    pub defiance_max: f32,
+    pub defiance_back_at: f64,
+}
+
+/// What a unit's auras and situation allow this step (worked out before it moves).
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Control {
+    pub stunned: bool,
+    pub rooted: bool,
+    /// Feared: running from here.
+    pub fleeing: Option<Vec2>,
+    pub dazed: bool,
+    pub silenced: bool,
+    pub blocking: bool,
+    pub reflecting: bool,
+    pub cc_immune: bool,
+    pub invulnerable: bool,
+    /// Movement speed multiplier.
+    pub speed: f32,
+}
+
+impl Control {
+    pub fn can_move(&self) -> bool {
+        !self.stunned && !self.rooted && self.fleeing.is_none()
+    }
+
+    pub fn can_act(&self) -> bool {
+        !self.stunned && self.fleeing.is_none() && !self.dazed && !self.silenced
+    }
+}
+
+/// A monster's grudges: who it wants to hit, and how much.
+#[derive(Component, Clone, Debug, Default)]
+pub struct Threat {
+    pub entries: Vec<(UnitId, f32)>,
+    pub taunted_by: Option<UnitId>,
+    pub taunt_until: f64,
+}
+
+impl Threat {
+    pub fn add(&mut self, id: UnitId, amount: f32) {
+        match self.entries.iter_mut().find(|(e, _)| *e == id) {
+            Some(e) => e.1 += amount,
+            None => self.entries.push((id, amount.max(0.0))),
+        }
+    }
+
+    pub fn of(&self, id: UnitId) -> f32 {
+        self.entries.iter().find(|(e, _)| *e == id).map_or(0.0, |e| e.1)
+    }
+
+    pub fn contains(&self, id: UnitId) -> bool {
+        self.entries.iter().any(|(e, _)| *e == id)
+    }
+
+    pub fn remove(&mut self, id: UnitId) {
+        self.entries.retain(|(e, _)| *e != id);
+        if self.taunted_by == Some(id) {
+            self.taunted_by = None;
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.taunted_by = None;
+    }
+
+    /// Forced to the top of the list for a while.
+    pub fn taunt(&mut self, by: UnitId, until: f64) {
+        let top = self.entries.iter().map(|e| e.1).fold(0.0f32, f32::max);
+        match self.entries.iter_mut().find(|(e, _)| *e == by) {
+            Some(e) => e.1 = e.1.max(top * 1.1 + 1.0),
+            None => self.entries.push((by, top * 1.1 + 1.0)),
+        }
+        self.taunted_by = Some(by);
+        self.taunt_until = until;
+    }
+
+    /// Who to attack: the taunter while it lasts, else the most threat, but only switching
+    /// from the current target when someone pulls ahead by 10% (in melee) or 30% (at range).
+    pub fn pick(&self, current: Option<UnitId>, now: f64, valid: impl Fn(UnitId) -> bool, melee: impl Fn(UnitId) -> bool) -> Option<UnitId> {
+        if let Some(t) = self.taunted_by && now < self.taunt_until && valid(t) {
+            return Some(t);
+        }
+        let best = self.entries.iter().filter(|(e, _)| valid(*e)).max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))?;
+        match current {
+            Some(cur) if valid(cur) && cur != best.0 => {
+                let needed = self.of(cur) * if melee(best.0) { 1.1 } else { 1.3 };
+                Some(if best.1 > needed { best.0 } else { cur })
+            }
+            _ => Some(best.0),
+        }
     }
 }
 
@@ -169,6 +421,13 @@ pub struct Home {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerControl;
 
+/// Called up by someone (a necromancer's skeleton): fights for its owner until `until`.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Summoned {
+    pub owner: UnitId,
+    pub until: f64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Idle,
@@ -180,6 +439,8 @@ pub enum Mode {
 /// A monster's mind.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Brain {
+    /// Its definition in the content tables.
+    pub mob: &'static str,
     pub mode: Mode,
     pub home: Vec2,
     pub aggro_radius: f32,
@@ -192,8 +453,9 @@ pub struct Brain {
 }
 
 impl Brain {
-    pub fn new(home: Vec2, aggro_radius: f32, wander: f32) -> Brain {
+    pub fn new(mob: &'static str, home: Vec2, aggro_radius: f32, wander: f32) -> Brain {
         Brain {
+            mob,
             mode: Mode::Idle,
             home,
             aggro_radius,
@@ -206,28 +468,25 @@ impl Brain {
     }
 }
 
-/// How a unit looks (see protocol::Look). Only `drawn` changes during play; the snapshot
-/// works it out from the fight.
+/// How a unit looks (see protocol::Look). The snapshot works `drawn` out from the fight, and
+/// swapping weapons changes the gear.
 #[derive(Component, Clone, Debug, Default)]
 pub struct Appearance(pub protocol::Look);
 
+/// The monsters in the content tables that the valley spawns by name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MonsterKind {
     Wolf,
     Goblin,
 }
 
-pub struct MonsterDef {
-    pub name: &'static str,
-    pub body: &'static str,
-    pub level: u8,
-    pub health: f32,
-    pub attack: Attack,
-    pub run_speed: f32,
-    pub radius: f32,
-    pub height: f32,
-    pub aggro_radius: f32,
-    pub wander: f32,
+impl MonsterKind {
+    pub fn key(self) -> &'static str {
+        match self {
+            MonsterKind::Wolf => "wolf",
+            MonsterKind::Goblin => "goblin",
+        }
+    }
 }
 
 /// The default player: a farmhand with an arming sword and a round shield.
@@ -243,55 +502,5 @@ pub fn player_look() -> protocol::Look {
         gear: vec![("main_hand".into(), "sword.arming".into()), ("off_hand".into(), "shield.round".into())],
         drawn: false,
         ..Default::default()
-    }
-}
-
-impl MonsterKind {
-    /// What this monster looks like in the art catalogue.
-    pub fn look(self) -> protocol::Look {
-        match self {
-            MonsterKind::Wolf => protocol::Look { art: "wolf.grey".into(), ..Default::default() },
-            MonsterKind::Goblin => protocol::Look {
-                art: "goblin_male".into(),
-                tone: Some("goblin green".into()),
-                pieces: ["ranger.top", "peasant.trousers", "peasant.shoes"].map(String::from).to_vec(),
-                gear: vec![("main_hand".into(), "dagger.hunting".into()), ("off_hand".into(), "shield.round".into())],
-                // Scavenged clothes, dyed dull: not mistaken for a ranger at a distance.
-                dyes: vec![
-                    ("ranger.top".into(), Some("rust".into()), Some("walnut".into())),
-                    ("peasant.trousers".into(), Some("slate".into()), Some("charcoal".into())),
-                ],
-                ..Default::default()
-            },
-        }
-    }
-
-    pub fn def(self) -> MonsterDef {
-        match self {
-            MonsterKind::Wolf => MonsterDef {
-                name: "Grey wolf",
-                body: "wolf",
-                level: 2,
-                health: 70.0,
-                attack: Attack { range: 1.9, interval: 1.8, damage: 7.0 },
-                run_speed: 6.4,
-                radius: 0.5,
-                height: 0.9,
-                aggro_radius: 12.0,
-                wander: 7.0,
-            },
-            MonsterKind::Goblin => MonsterDef {
-                name: "Goblin",
-                body: "goblin",
-                level: 3,
-                health: 90.0,
-                attack: Attack { range: 2.0, interval: 2.2, damage: 9.0 },
-                run_speed: 5.4,
-                radius: 0.4,
-                height: 1.3,
-                aggro_radius: 10.0,
-                wander: 6.0,
-            },
-        }
     }
 }

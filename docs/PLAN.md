@@ -86,6 +86,9 @@ rendering technique still decides the frame rate. That's why the engine talks to
 2. **Combat core.** Abilities, auras, projectiles, area attacks, threat, crowd control with
    diminishing returns, defiance bars, downed state and revives. The Swift checks are the bar to
    pass.
+   - **Built 24 October 2026:** see [COMBAT.md](COMBAT.md), with guarding, parrying, aimed shots
+     and the duel checks for the balance target. The combat tables live in `sim::content` for
+     now, and move to the `content` crate when Cargo.lock is free to change.
 3. **Characters.** Races, customisation, specialties and their training, gear and loadouts, and
    correctly fitted equipment.
 4. **World and story.** The Brambleford zone, quests, dialogue, NPC routines, day and night,

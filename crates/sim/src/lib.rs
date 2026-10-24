@@ -4,24 +4,30 @@
 //! units are visited in the order they were created. The same seed and the same commands always
 //! give the same world, which is what replays, tests and multiplayer rely on.
 //!
-//! Milestone 1 covers movement (running, walking, backpedalling, jumping, dodging, sliding along
-//! walls), monsters that wander, notice you, chase, fight and give up, and a simple fight.
+//! Milestone 1 covered movement (running, walking, backpedalling, jumping, dodging, sliding along
+//! walls) and monsters that wander, notice you, chase and give up. Milestone 2 is the fight:
+//! skills from weapons and specialties, casts and channels, auras and crowd control, projectiles
+//! and warned blows, guarding and parrying, threat, and being downed (docs/DESIGN.md).
 
 mod brain;
-mod combat;
+pub mod combat;
 mod components;
+pub mod content;
 mod movement;
 mod rng;
 mod spatial;
+pub mod stats;
 mod vitals;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
 use glam::{Vec2, Vec3};
-use protocol::{Command, Event, PlayerState, Snapshot, UnitId, UnitKind};
+use protocol::{CombatView, Command, Event, Snapshot, UnitId, UnitKind};
 
 pub use components::*;
+pub use content::Specialty;
 pub use rng::Rng;
+pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
 
 /// Steps per second.
 pub const TICK_RATE: u32 = 60;
@@ -71,6 +77,18 @@ impl Units {
     pub fn entity(&self, id: UnitId) -> Option<Entity> {
         self.entities.get(id as usize).copied().flatten()
     }
+
+    /// Every unit, in ID order.
+    pub fn all(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.entities.iter().filter_map(|e| *e)
+    }
+
+    /// A unit that's gone for good (a summon's remains).
+    pub(crate) fn forget(&mut self, id: UnitId) {
+        if let Some(slot) = self.entities.get_mut(id as usize) {
+            *slot = None;
+        }
+    }
 }
 
 pub struct Sim {
@@ -89,15 +107,23 @@ impl Sim {
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());
         world.insert_resource(spatial::Spatial::default());
+        world.insert_resource(combat::missiles::Missiles::default());
+        world.insert_resource(combat::missiles::Areas::default());
+        world.insert_resource(combat::abilities::Arrivals::default());
         let mut schedule = Schedule::new(Step);
         schedule.set_executor(SingleThreadedExecutor::new());
         schedule.add_systems(
             (
                 combat::apply_commands,
                 brain::think,
+                combat::auras::refresh_control,
                 movement::move_units,
-                combat::fight,
-                vitals::update_vitals,
+                combat::abilities::land_charges,
+                combat::abilities::update,
+                combat::missiles::update,
+                combat::missiles::update_areas,
+                combat::auras::update,
+                vitals::update,
                 spatial::rebuild,
                 movement::update_poses,
             )
@@ -116,6 +142,7 @@ impl Sim {
         for (dx, dz) in [(0.0, 0.0), (4.0, -3.0)] {
             sim.spawn_monster(MonsterKind::Goblin, Vec2::new(52.0 + dx, 8.0 + dz));
         }
+        sim.spawn_mob("goblin_archer", Vec2::new(57.0, 11.0));
         sim
     }
 
@@ -153,21 +180,37 @@ impl Sim {
         }
     }
 
-    fn place(&self, at: Vec2) -> Vec3 {
-        Vec3::new(at.x, self.land().ground(at.x, at.y), at.y)
+    /// Adds a level-1 warrior at `at`, facing `yaw`: a farmhand with an arming sword and a round
+    /// shield, and a greatsword to swap to.
+    pub fn spawn_player(&mut self, name: &str, at: Vec2, yaw: f32) -> UnitId {
+        self.spawn_hero(name, Specialty::Warrior, 1, at, yaw)
     }
 
-    /// Adds a player at `at`, facing `yaw`.
-    pub fn spawn_player(&mut self, name: &str, at: Vec2, yaw: f32) -> UnitId {
-        let pos = self.place(at);
+    /// Adds a player of `specialty` and `level`, with its default weapons and skills.
+    pub fn spawn_hero(&mut self, name: &str, specialty: Specialty, level: u8, at: Vec2, yaw: f32) -> UnitId {
+        let cat = content::catalog();
+        let def = cat.specialty(specialty);
+        let pos = place(&self.world, at);
+        let (stats, health) = stats::for_specialty(def, level);
+        let mut f = Fighter::new();
+        f.specialty = Some(specialty);
+        f.resource_kind = def.resource;
+        f.max_resource = def.max_resource;
+        f.resource = def.start;
+        f.sets = def.sets.iter().map(|(m, o)| (m.map(String::from), o.map(String::from))).collect();
+        let first = |list: &[&str], n: usize| list.get(n).and_then(|k| cat.ability_id(k));
+        f.kit = [first(&def.heals, 0), first(&def.utilities, 0), first(&def.utilities, 1), first(&def.utilities, 2), first(&def.elites, 0)];
         let e = self
             .world
             .spawn((
                 Transform { pos, yaw },
                 Motion::new(6.0),
                 Body { radius: 0.4, height: 1.8 },
-                Vitals::new(250.0),
-                Fighter::new(Attack { range: 2.4, interval: 1.6, damage: 18.0 }),
+                Vitals::new(health),
+                stats,
+                f,
+                Auras::default(),
+                Control { speed: 1.0, ..Default::default() },
                 Anim::default(),
                 PlayerControl,
                 Home { pos, yaw },
@@ -180,43 +223,50 @@ impl Sim {
             kind: UnitKind::Player,
             body: "player",
             name: name.to_string(),
-            level: 1,
+            level,
             faction: Faction::Player,
         });
+        combat::abilities::equip(&mut self.world, e);
         id
+    }
+
+    /// Puts a specialty skill in slot 6–0 (`slot` 5–9): the heal, a utility or the elite.
+    /// Returns false if the specialty has no such skill for that slot.
+    pub fn set_skill(&mut self, id: UnitId, slot: usize, key: &str) -> bool {
+        let cat = content::catalog();
+        let Some(e) = self.entity(id) else { return false };
+        let Some(spec) = self.world.get::<Fighter>(e).and_then(|f| f.specialty) else { return false };
+        let def = cat.specialty(spec);
+        let allowed = match slot {
+            5 => def.heals.contains(&key),
+            6..=8 => def.utilities.contains(&key),
+            9 => def.elites.contains(&key),
+            _ => false,
+        };
+        let Some(ability) = cat.ability_id(key).filter(|_| allowed) else { return false };
+        if let Some(mut f) = self.world.get_mut::<Fighter>(e) {
+            if f.kit.contains(&Some(ability)) {
+                return false;
+            }
+            f.kit[slot - 5] = Some(ability);
+        }
+        combat::abilities::equip(&mut self.world, e);
+        true
     }
 
     /// Adds a monster that wanders around `at`.
     pub fn spawn_monster(&mut self, kind: MonsterKind, at: Vec2) -> UnitId {
-        let pos = self.place(at);
-        let def = kind.def();
-        let yaw = self.world.resource_mut::<Rng>().range(-std::f32::consts::PI, std::f32::consts::PI);
-        let e = self
-            .world
-            .spawn((
-                Transform { pos, yaw },
-                Motion::new(def.run_speed),
-                Body { radius: def.radius, height: def.height },
-                Vitals::new(def.health),
-                Fighter::new(def.attack),
-                Anim::default(),
-                Brain::new(at, def.aggro_radius, def.wander),
-                Home { pos, yaw },
-                Appearance(kind.look()),
-            ))
-            .id();
-        let id = self.world.resource_mut::<Units>().issue(e);
-        // Spread monsters' decisions across the quarter-second so they don't all think at once.
-        self.world.get_mut::<Brain>(e).unwrap().next_think = brain::think_offset(id);
-        self.world.entity_mut(e).insert(Unit {
-            id,
-            kind: UnitKind::Monster,
-            body: def.body,
-            name: def.name.to_string(),
-            level: def.level,
-            faction: Faction::Hostile,
-        });
-        id
+        self.spawn_mob(kind.key(), at).expect("the valley's monsters are in the content tables")
+    }
+
+    /// Adds a monster from the content tables (by key, e.g. "dire_wolf") at its usual level.
+    pub fn spawn_mob(&mut self, key: &str, at: Vec2) -> Option<UnitId> {
+        spawn_mob(&mut self.world, key, at, None, Faction::Hostile)
+    }
+
+    /// A monster at another level than its usual one.
+    pub fn spawn_mob_at_level(&mut self, key: &str, at: Vec2, level: u8) -> Option<UnitId> {
+        spawn_mob(&mut self.world, key, at, Some(level), Faction::Hostile)
     }
 
     /// Fills the valley with `n` wandering monsters, for stress tests and benchmarks.
@@ -266,10 +316,8 @@ impl Sim {
         let mut units = Vec::new();
         let mut q = self.world.query::<(&Unit, &Transform, &Motion, &Vitals, &Anim, &Fighter, Option<&Appearance>)>();
         for (u, t, m, v, a, f, look) in q.iter(&self.world) {
-            if let Some(c) = center {
-                if (t.pos - c).length_squared() > 160.0 * 160.0 {
-                    continue;
-                }
+            if let Some(c) = center && (t.pos - c).length_squared() > combat::view::VIEW_RANGE * combat::view::VIEW_RANGE {
+                continue;
             }
             if v.dead && time - v.died_at > 8.0 && u.kind != UnitKind::Player {
                 continue;
@@ -292,26 +340,63 @@ impl Sim {
                 look: {
                     let mut l = look.map(|a| a.0.clone()).unwrap_or_default();
                     // Weapons come out for a fight and go away once it's over.
-                    l.drawn = f.target.is_some() || time - v.last_combat < vitals::COMBAT_TIMEOUT;
+                    l.drawn = f.target.is_some() || f.guard_since.is_some() || time - v.last_combat < COMBAT_TIMEOUT;
                     l
                 },
             });
         }
         units.sort_by_key(|u| u.id);
-        let player = viewer.and_then(|id| {
-            let v = self.get::<Vitals>(id)?;
-            let f = self.get::<Fighter>(id)?;
-            Some(PlayerState {
-                unit: id,
-                endurance: v.endurance,
-                max_endurance: vitals::ENDURANCE_MAX,
-                cooldowns: f.cooldowns.iter().map(|&c| (c - time).max(0.0) as f32).collect(),
-                auto_attack: f.auto_attack,
-                in_combat: time - v.last_combat < vitals::COMBAT_TIMEOUT,
-                can_respawn: v.dead,
-            })
-        });
+        let player = viewer.and_then(|id| combat::view::player_state(&self.world, id));
         let events = std::mem::take(&mut self.world.resource_mut::<Outbox>().0);
         Snapshot { tick, time, units, player, events }
     }
+
+    /// Combat detail for everything `viewer` can see (actions, casts, auras, projectiles,
+    /// warnings and fields), published beside each snapshot.
+    pub fn combat_view(&self, viewer: Option<UnitId>) -> CombatView {
+        combat::view::combat_view(&self.world, viewer)
+    }
+}
+
+fn place(world: &World, at: Vec2) -> Vec3 {
+    Vec3::new(at.x, world.resource::<Land>().0.ground(at.x, at.y), at.y)
+}
+
+/// Adds a monster from the content tables at `at`. `level` and `faction` override its own:
+/// summons fight at their owner's level, on their owner's side.
+pub(crate) fn spawn_mob(world: &mut World, key: &str, at: Vec2, level: Option<u8>, faction: Faction) -> Option<UnitId> {
+    let cat = content::catalog();
+    let def = cat.mob(key)?;
+    let level = level.unwrap_or(def.level);
+    let pos = place(world, at);
+    let yaw = world.resource_mut::<Rng>().range(-std::f32::consts::PI, std::f32::consts::PI);
+    let (stats, health) = stats::for_mob(def, level);
+    let mut f = Fighter::new();
+    f.auto = cat.ability_id(def.auto);
+    let auras = Auras { defiance: def.defiance, defiance_max: def.defiance, ..Default::default() };
+    let e = world
+        .spawn((
+            Transform { pos, yaw },
+            Motion::new(def.speed),
+            Body { radius: def.radius, height: def.height },
+            Vitals::new(health),
+            stats,
+            f,
+            auras,
+            Control { speed: 1.0, ..Default::default() },
+        ))
+        .id();
+    world.entity_mut(e).insert((
+        Threat::default(),
+        Anim::default(),
+        Brain::new(def.key, at, def.aggro, def.wander),
+        Home { pos, yaw },
+        Appearance((def.look)()),
+    ));
+    let id = world.resource_mut::<Units>().issue(e);
+    // Spread monsters' decisions across the quarter-second so they don't all think at once.
+    let first = world.resource::<Clock>().time + brain::think_offset(id);
+    world.get_mut::<Brain>(e).unwrap().next_think = first;
+    world.entity_mut(e).insert(Unit { id, kind: UnitKind::Monster, body: def.body, name: def.name.to_string(), level, faction });
+    Some(id)
 }

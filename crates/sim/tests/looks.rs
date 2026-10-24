@@ -28,7 +28,17 @@ fn every_look_names_real_art() {
     let gear: Vec<String> = cat.gear.as_ref().map(|g| g.items.iter().map(|i| i.id.clone()).collect()).unwrap_or_default();
     let creatures: Vec<String> = cat.creatures.as_ref().map(|c| c.creatures.iter().map(|c| c.id.clone()).collect()).unwrap_or_default();
     let mut looks = vec![sim::player_look()];
-    looks.extend([sim::MonsterKind::Wolf, sim::MonsterKind::Goblin].map(|k| k.look()));
+    looks.extend(sim::content::catalog().mobs.iter().map(|m| (m.look)()));
+    // Every specialty, with each of its weapon sets in hand.
+    let mut sim = Sim::new(1);
+    for s in sim::Specialty::ALL {
+        let id = sim.spawn_hero("Hero", s, 1, Vec2::new(5.0, 10.0), 0.0);
+        looks.push(sim.get::<sim::Appearance>(id).unwrap().0.clone());
+        sim.get_mut::<sim::Fighter>(id).unwrap().swap_ready_at = 0.0;
+        sim.command(id, protocol::Command::SwapWeapons);
+        sim.step();
+        looks.push(sim.get::<sim::Appearance>(id).unwrap().0.clone());
+    }
     for look in looks {
         let body = cat.humanoid.body_types.get(&look.art);
         assert!(body.is_some() || creatures.contains(&look.art), "no art called {}", look.art);

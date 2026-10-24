@@ -5,7 +5,7 @@
 //! session later, with `protocol` messages on the wire.
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use protocol::{Command, Snapshot, UnitId};
+use protocol::{CombatView, Command, Snapshot, UnitId};
 use sim::Sim;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +26,7 @@ pub struct HostStats {
 
 struct Shared {
     snapshot: Mutex<Option<Arc<Snapshot>>>,
+    combat: Mutex<Option<Arc<CombatView>>>,
     events: Mutex<Vec<protocol::Event>>,
     stats: Mutex<HostStats>,
     running: AtomicBool,
@@ -45,6 +46,7 @@ impl Host {
         let (tx, rx) = unbounded();
         let shared = Arc::new(Shared {
             snapshot: Mutex::new(None),
+            combat: Mutex::new(None),
             events: Mutex::new(Vec::new()),
             stats: Mutex::new(HostStats::default()),
             running: AtomicBool::new(true),
@@ -71,6 +73,12 @@ impl Host {
     /// The most recent snapshot.
     pub fn snapshot(&self) -> Option<Arc<Snapshot>> {
         self.shared.snapshot.lock().unwrap().clone()
+    }
+
+    /// Combat detail for everything the player can see, from the same step as `snapshot`:
+    /// actions, casts, auras, projectiles, warnings and fields.
+    pub fn combat(&self) -> Option<Arc<CombatView>> {
+        self.shared.combat.lock().unwrap().clone()
     }
 
     /// Events since the last call, in order (snapshots only carry their own tick's events).
@@ -116,8 +124,11 @@ fn run(mut world: Sim, player: UnitId, commands: Receiver<(UnitId, Command)>, sh
         let t0 = Instant::now();
         world.step();
         let snapshot = world.snapshot(Some(player));
+        let combat = world.combat_view(Some(player));
         let spent = t0.elapsed().as_secs_f64() * 1000.0;
         shared.events.lock().unwrap().extend(snapshot.events.iter().cloned());
+        // The combat view first, so whoever sees a snapshot finds its combat detail beside it.
+        *shared.combat.lock().unwrap() = Some(Arc::new(combat));
         *shared.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
         window = (window.0 + 1, window.1 + spent);
         {
@@ -149,6 +160,8 @@ mod tests {
         assert!((54..=66).contains(&ticks), "{ticks} ticks in a second");
         let moved = (now.unit(host.player).unwrap().position - p0).length();
         assert!(moved > 4.0, "moved {moved} m");
+        let combat = host.combat().expect("a combat view beside the snapshot");
+        assert!(combat.units.iter().any(|u| u.id == host.player));
         host.stop();
     }
 }

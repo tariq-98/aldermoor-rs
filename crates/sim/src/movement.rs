@@ -2,7 +2,8 @@ use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
 use protocol::{Event, Pose};
 
-use crate::{Anim, Body, Clock, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
+use crate::combat::abilities::Arrivals;
+use crate::{Anim, Body, Clock, Control, Fighter, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
 
 pub const GRAVITY: f32 = 20.0;
 /// About a 1.1 m jump, landing after 0.66 s.
@@ -12,6 +13,8 @@ pub const DODGE_DISTANCE: f32 = 5.0;
 pub const DODGE_DURATION: f64 = 0.45;
 pub const DODGE_INVULNERABLE: f64 = 0.4;
 pub const DODGE_COST: f32 = 50.0;
+/// Downed: a crawl.
+pub const CRAWL_SPEED: f32 = 1.0;
 /// Backpedalling while strafing runs at this fraction of full speed.
 const BACKPEDAL: f32 = 0.6;
 /// The most a walker steps down without leaving the ground.
@@ -41,23 +44,22 @@ pub fn approach_angle(a: f32, b: f32, step: f32) -> f32 {
     if d.abs() <= step { b } else { wrap_angle(a + step * d.signum()) }
 }
 
-pub fn move_units(
-    clock: Res<Clock>,
-    land: Res<Land>,
-    mut out: ResMut<Outbox>,
-    mut q: Query<(&Unit, &mut Transform, &mut Motion, &Body, &Vitals)>,
-) {
+/// What moving a unit reads and writes.
+type Mover<'a> = (Entity, &'a Unit, &'a mut Transform, &'a mut Motion, &'a Body, &'a Vitals, Option<&'a Control>, Option<&'a Fighter>);
+
+pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, mut arrivals: ResMut<Arrivals>, mut q: Query<Mover>) {
     let land = &land.0;
-    for (u, mut t, mut m, body, v) in &mut q {
+    for (e, u, mut t, mut m, body, v, ctl, fighter) in &mut q {
         let start = t.pos;
         if v.dead {
             m.vel = Vec3::ZERO;
             m.observed = Vec3::ZERO;
             m.jump_queued = false;
+            m.forced = None;
             continue;
         }
         if let Some(f) = m.forced {
-            // Carried through a dodge: ease out, with a small hop in the middle.
+            // Carried through a roll, leap or throw: ease out, with a hop in the middle.
             let k = ((clock.time - f.start) / f.duration).clamp(0.0, 1.0) as f32;
             let eased = 1.0 - (1.0 - k) * (1.0 - k);
             let p = f.from.lerp(f.to, eased);
@@ -66,24 +68,50 @@ pub fn move_units(
                 m.forced = None;
                 m.grounded = true;
                 m.vel = Vec3::ZERO;
+                if let ForcedKind::Charge { target, ability } = f.kind {
+                    arrivals.0.push((e, target, ability));
+                }
             }
             m.observed = (t.pos - start) / DT;
             m.jump_queued = false;
             continue;
         }
 
+        let ctl = ctl.copied().unwrap_or(Control { speed: 1.0, ..Default::default() });
         let mut dir = m.intent.direction;
+        let mut face = m.intent.face_yaw;
+        let mut walk = m.intent.walk;
+        if let Some(from) = ctl.fleeing {
+            // Feared: running blindly away.
+            let away = Vec2::new(t.pos.x, t.pos.z) - from;
+            dir = if away.length_squared() > 1e-4 { away.normalize() } else { t.forward() };
+            face = None;
+            walk = false;
+        } else if !ctl.can_move() {
+            dir = Vec2::ZERO;
+        }
         if dir.length_squared() > 1.0 {
             dir = dir.normalize();
         }
-        // Facing: strafing locks to the requested yaw; otherwise turn toward travel.
-        if let Some(fy) = m.intent.face_yaw {
-            t.yaw = fy;
-        } else if dir.length_squared() > 0.0025 {
-            t.yaw = approach_angle(t.yaw, heading(dir), DT * 14.0);
+        // Facing: strafing locks to the requested yaw; otherwise turn toward travel. The
+        // stunned can't turn at all.
+        if !ctl.stunned {
+            if let Some(fy) = face {
+                t.yaw = fy;
+            } else if dir.length_squared() > 0.0025 {
+                t.yaw = approach_angle(t.yaw, heading(dir), DT * 14.0);
+            }
         }
-        let mut speed = if m.intent.walk { WALK_SPEED } else { m.run_speed };
-        if dir.length_squared() > 0.0025 && m.intent.face_yaw.is_some() && t.forward().dot(dir.normalize()) < -0.35 {
+        let mut speed = if walk { WALK_SPEED } else { m.run_speed };
+        if fighter.is_some_and(|f| f.guard_since.is_some()) {
+            // Behind a raised guard you can only edge along.
+            speed = speed.min(WALK_SPEED);
+        }
+        if v.downed {
+            speed = CRAWL_SPEED;
+        }
+        speed *= ctl.speed;
+        if dir.length_squared() > 0.0025 && face.is_some() && t.forward().dot(dir.normalize()) < -0.35 {
             speed *= BACKPEDAL;
         }
         let desired = dir * speed;
@@ -96,7 +124,7 @@ pub fn move_units(
             m.vel.x += (desired.x - m.vel.x) * k;
             m.vel.z += (desired.y - m.vel.z) * k;
         }
-        if m.jump_queued && m.grounded {
+        if m.jump_queued && m.grounded && ctl.can_move() && !v.downed {
             m.vel.y = JUMP_SPEED;
             m.grounded = false;
             out.0.push(Event::Jumped { unit: u.id });
@@ -134,15 +162,23 @@ pub fn move_units(
 pub const ATTACK_POSE: f64 = 0.5;
 pub const HIT_POSE: f64 = 0.25;
 
-/// Picks each unit's pose from what its body is doing, unless an action pose is holding.
-pub fn update_poses(clock: Res<Clock>, mut q: Query<(&Motion, &Vitals, &mut Anim)>) {
-    for (m, v, mut a) in &mut q {
-        let pose = if v.dead {
+/// Picks each unit's pose from what its body is doing, unless an action pose is holding. The
+/// downed lie as the dead do (the combat view says they're only down).
+pub fn update_poses(clock: Res<Clock>, mut q: Query<(&Motion, &Vitals, &mut Anim, Option<&Fighter>)>) {
+    for (m, v, mut a, f) in &mut q {
+        let pose = if v.dead || v.downed {
             Pose::Dead
         } else if clock.time < a.hold_until {
             a.pose
-        } else if m.forced.is_some() {
-            Pose::Dodge
+        } else if let Some(forced) = m.forced {
+            match forced.kind {
+                ForcedKind::Dodge => Pose::Dodge,
+                ForcedKind::Knockback => Pose::Hit,
+                ForcedKind::Leap => Pose::Jump,
+                ForcedKind::Charge { .. } => Pose::Run,
+            }
+        } else if let Some(c) = f.and_then(|f| f.cast) {
+            if crate::content::catalog().ability(c.ability).is_swing() { Pose::Attack } else { Pose::Cast }
         } else if !m.grounded {
             if m.vel.y > 0.0 { Pose::Jump } else { Pose::Fall }
         } else {
@@ -164,13 +200,14 @@ pub fn update_poses(clock: Res<Clock>, mut q: Query<(&Motion, &Vitals, &mut Anim
 
 /// Starts a dodge roll if there's enough endurance. Returns whether it rolled.
 pub fn start_dodge(land: &world::Valley, now: f64, t: &mut Transform, m: &mut Motion, v: &mut Vitals, body: &Body, direction: Vec2) -> bool {
-    if v.dead || m.forced.is_some() || v.endurance < DODGE_COST {
+    if !v.alive() || m.forced.is_some() || v.endurance < DODGE_COST {
         return false;
     }
     let dir = if direction.length_squared() > 0.01 { direction.normalize() } else { -t.forward() };
     v.endurance -= DODGE_COST;
     let end = land.slide(Vec2::new(t.pos.x, t.pos.z), dir * DODGE_DISTANCE, body.radius);
     m.forced = Some(crate::Forced {
+        kind: ForcedKind::Dodge,
         from: t.pos,
         to: Vec3::new(end.x, t.pos.y, end.y),
         start: now,

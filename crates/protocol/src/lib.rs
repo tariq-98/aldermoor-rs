@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -24,11 +24,104 @@ pub enum Command {
     /// A quick roll in a world-space direction (zero rolls backwards).
     Dodge { direction: Vec2 },
     SetTarget(Option<UnitId>),
-    /// Use the ability in a bar slot (0 is slot 1). `ground` aims area abilities.
+    /// Use the ability in a bar slot (0 is slot 1). `ground` is where the player is aiming:
+    /// the spot for ground attacks, and the point aimed shots fly at (lead a moving target).
     UseSlot { slot: u8, ground: Option<Vec3> },
     SetAutoAttack(bool),
     /// Get back up after being defeated.
     Respawn,
+    /// Raise (true) or lower (false) your guard. Raised, it blocks blows from the front at a
+    /// cost in endurance; raised just before a blow lands, it parries it.
+    Guard(bool),
+    /// Change to the other weapon set.
+    SwapWeapons,
+    /// Help a downed ally up (or a defeated one, out of combat). Hold still while it works.
+    Revive { target: UnitId },
+}
+
+/// Schools of damage and magic. Armour only stops physical blows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum School {
+    #[default]
+    Physical,
+    Fire,
+    Frost,
+    Arcane,
+    Nature,
+    Holy,
+    Shadow,
+}
+
+/// What a unit's skills spend.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceKind {
+    #[default]
+    None,
+    /// Builds by hitting and being hit; ebbs away out of combat (warriors).
+    Rage,
+    /// Refills steadily (mages and healers).
+    Mana,
+    /// Refills steadily (archers).
+    Focus,
+    /// Refills quickly from a small pool (rogues).
+    Energy,
+    /// Gathered from the harm you do; fades out of combat (necromancers).
+    Essence,
+}
+
+/// What a unit's body is doing in an action, coarse enough for any rig to map to a clip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Action {
+    #[default]
+    None,
+    Slash,
+    Slash2,
+    Thrust,
+    Overhead,
+    Spin,
+    Bash,
+    Block,
+    Parry,
+    Shoot,
+    CastBolt,
+    CastArea,
+    Channel,
+    CastSelf,
+    Kick,
+    Leap,
+    Charge,
+    Bite,
+    Claw,
+    Slam,
+    Roar,
+    /// Thrown off balance by a parry.
+    Stagger,
+    Downed,
+    Revive,
+}
+
+/// Why a blow did no harm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Avoid {
+    /// Rolled through it.
+    Evaded,
+    Blocked,
+    /// Blocked at the last moment: the attacker staggers.
+    Parried,
+    /// Taken by a shield aura.
+    Absorbed,
+    Immune,
+    Reflected,
+    /// An aimed shot that flew past.
+    Missed,
+}
+
+/// The ground an area covers. Cones and lines point along the area's yaw.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Shape {
+    Circle { radius: f32 },
+    Cone { range: f32, angle: f32 },
+    Line { length: f32, width: f32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,22 +203,159 @@ pub struct PlayerState {
     pub unit: UnitId,
     pub endurance: f32,
     pub max_endurance: f32,
-    /// Seconds left on each bar slot's cooldown.
+    /// Seconds left on each bar slot's cooldown (ten slots: keys 1–9 and 0).
     pub cooldowns: Vec<f32>,
     pub auto_attack: bool,
     pub in_combat: bool,
     pub can_respawn: bool,
+    pub resource_kind: ResourceKind,
+    pub resource: f32,
+    pub max_resource: f32,
+    /// The skill bar: 1–5 from the weapons in hand, 6 a heal, 7–9 utilities, 0 an elite skill
+    /// (while downed, the downed skills instead).
+    pub bar: Vec<Slot>,
+    /// Seconds left on the global cooldown.
+    pub gcd: f32,
+    pub cast: Option<CastBar>,
+    pub auras: Vec<AuraView>,
+    pub guarding: bool,
+    pub downed: bool,
+    /// 0 or 1: which weapon set is in hand, and seconds until you can swap again.
+    pub weapon_set: u8,
+    pub swap_ready: f32,
+}
+
+/// One skill on the bar.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Slot {
+    /// The ability's key in the content tables (its icon name too); empty for an empty slot.
+    pub ability: String,
+    pub name: String,
+    /// Seconds left before it's ready, and its full recharge.
+    pub cooldown: f32,
+    pub recharge: f32,
+    pub cost: f32,
+    pub range: f32,
+    /// True when it's aimed at the ground (send `UseSlot::ground`).
+    pub ground: bool,
+    /// True when it repeats on its own while you have a target (the basic attack).
+    pub auto: bool,
+}
+
+/// A cast or channel in progress.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CastBar {
+    pub ability: String,
+    pub name: String,
+    pub elapsed: f32,
+    pub duration: f32,
+    pub channel: bool,
+    pub interruptible: bool,
+}
+
+/// A buff, debuff or condition on a unit.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AuraView {
+    /// Its key in the content tables (and its icon name).
+    pub key: String,
+    pub name: String,
+    pub stacks: u8,
+    pub remaining: f32,
+    pub duration: f32,
+    pub debuff: bool,
+}
+
+/// Combat detail for everyone in view: actions, casts, auras, projectiles and areas. The host
+/// publishes one beside each snapshot (`server::Host::combat`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CombatView {
+    pub tick: u64,
+    pub units: Vec<UnitCombat>,
+    pub projectiles: Vec<ProjectileView>,
+    pub areas: Vec<AreaView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UnitCombat {
+    pub id: UnitId,
+    /// The action to animate and how long ago it began.
+    pub action: Action,
+    pub action_time: f32,
+    pub cast: Option<CastBar>,
+    pub auras: Vec<AuraView>,
+    pub resource_kind: ResourceKind,
+    pub resource: f32,
+    pub max_resource: f32,
+    pub guarding: bool,
+    /// Down but not out: crawling, fighting on, waiting for help.
+    pub downed: bool,
+    /// Elites and bosses shrug off crowd control until their defiance bar breaks.
+    pub defiance: Option<(f32, f32)>,
+}
+
+/// An arrow or bolt in flight.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProjectileView {
+    pub id: u32,
+    pub position: Vec3,
+    pub velocity: Vec3,
+    /// What it looks like (e.g. "arrow", "fire_bolt"): an effect asset's name.
+    pub visual: String,
+    pub school: School,
+}
+
+/// Something on the ground: a warning of a blow about to land, or a lasting field.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AreaView {
+    pub id: u32,
+    /// True for a warning (it lands when `elapsed` reaches `duration`); false for a field.
+    pub warning: bool,
+    pub shape: Shape,
+    pub center: Vec3,
+    pub yaw: f32,
+    pub elapsed: f32,
+    pub duration: f32,
+    /// True when it threatens the viewer.
+    pub hostile: bool,
+    pub school: School,
+    /// The combo field it is, if any ("fire", "ice", "light", "water", "poison", "lightning").
+    pub field: Option<String>,
 }
 
 /// Things that happened this tick, for effects, sounds and floating numbers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Event {
-    Damage { target: UnitId, source: UnitId, amount: f32, crit: bool },
+    /// `periodic` damage comes from a condition (bleeding, burning…), not a blow.
+    Damage { target: UnitId, source: UnitId, amount: f32, crit: bool, school: School, periodic: bool },
+    Heal { target: UnitId, source: UnitId, amount: f32, crit: bool },
+    /// A blow or effect that did no harm, and why.
+    Avoided { target: UnitId, source: UnitId, how: Avoid },
     Died { unit: UnitId, killer: Option<UnitId> },
     Respawned { unit: UnitId },
     Jumped { unit: UnitId },
     Dodged { unit: UnitId },
     Message { text: String },
+    AbilityUsed { unit: UnitId, ability: String, target: Option<UnitId>, ground: Option<Vec3> },
+    CastStarted { unit: UnitId, ability: String, duration: f32, channel: bool },
+    CastInterrupted { unit: UnitId },
+    AuraApplied { unit: UnitId, aura: String },
+    AuraRemoved { unit: UnitId, aura: String },
+    ProjectileLaunched { id: u32, from: UnitId, visual: String },
+    /// A projectile's flight ended: on `hit`, or against the world.
+    ProjectileEnded { id: u32, at: Vec3, hit: Option<UnitId> },
+    /// A warned-of blow landed.
+    AreaImpact { id: u32, at: Vec3, radius: f32, school: School },
+    /// Knocked off balance by a parry.
+    Staggered { unit: UnitId, by: UnitId },
+    Downed { unit: UnitId },
+    /// Back up from downed (by help, a bandage, or felling an attacker).
+    Rallied { unit: UnitId },
+    /// Back from defeat, by another's hand.
+    Revived { unit: UnitId },
+    DefianceBroken { unit: UnitId },
+    /// A finisher went through a combo field.
+    Combo { unit: UnitId, name: String, at: Vec3 },
+    WeaponsSwapped { unit: UnitId },
 }
 
 /// Everything a client needs for one tick.
@@ -198,9 +428,52 @@ mod tests {
                     ..Default::default()
                 },
             }],
-            player: Some(PlayerState { unit: 1, endurance: 100.0, max_endurance: 100.0, ..Default::default() }),
-            events: vec![Event::Jumped { unit: 1 }],
+            player: Some(PlayerState {
+                unit: 1,
+                endurance: 100.0,
+                max_endurance: 100.0,
+                resource_kind: ResourceKind::Rage,
+                bar: vec![Slot { ability: "sword_chain".into(), name: "Sword Chain".into(), auto: true, ..Default::default() }],
+                cast: Some(CastBar { ability: "fire_bolt".into(), name: "Fire Bolt".into(), elapsed: 0.2, duration: 1.0, channel: false, interruptible: true }),
+                ..Default::default()
+            }),
+            events: vec![
+                Event::Jumped { unit: 1 },
+                Event::Damage { target: 2, source: 1, amount: 12.0, crit: false, school: School::Fire, periodic: true },
+                Event::Avoided { target: 1, source: 2, how: Avoid::Parried },
+            ],
         };
         assert_eq!(Snapshot::from_bytes(&s.to_bytes()).unwrap(), s);
+        let v = CombatView {
+            tick: 42,
+            units: vec![UnitCombat {
+                id: 2,
+                action: Action::Bite,
+                action_time: 0.1,
+                cast: None,
+                auras: vec![AuraView { key: "bleeding".into(), name: "Bleeding".into(), stacks: 2, remaining: 3.0, duration: 6.0, debuff: true }],
+                resource_kind: ResourceKind::None,
+                resource: 0.0,
+                max_resource: 0.0,
+                guarding: false,
+                downed: false,
+                defiance: Some((300.0, 400.0)),
+            }],
+            projectiles: vec![ProjectileView { id: 7, position: Vec3::ONE, velocity: Vec3::X, visual: "arrow".into(), school: School::Physical }],
+            areas: vec![AreaView {
+                id: 9,
+                warning: true,
+                shape: Shape::Cone { range: 4.0, angle: 1.5 },
+                center: Vec3::ZERO,
+                yaw: 0.5,
+                elapsed: 0.2,
+                duration: 0.8,
+                hostile: true,
+                school: School::Physical,
+                field: None,
+            }],
+        };
+        let bytes = postcard::to_stdvec(&v).unwrap();
+        assert_eq!(postcard::from_bytes::<CombatView>(&bytes).unwrap(), v);
     }
 }

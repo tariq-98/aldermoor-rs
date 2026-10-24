@@ -19,7 +19,8 @@ fn a_wolf_pack_notices_you_and_bites() {
     let pack = wolves(&sim);
     assert_eq!(pack.len(), 3);
     assert!(pack.iter().any(|&w| sim.get::<Fighter>(w).unwrap().target == Some(hero)), "nobody noticed");
-    assert!(sim.get::<Vitals>(hero).unwrap().health < 250.0, "nobody bit");
+    let v = sim.get::<Vitals>(hero).unwrap();
+    assert!(v.health < v.max_health, "nobody bit");
 }
 
 #[test]

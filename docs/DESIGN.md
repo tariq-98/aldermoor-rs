@@ -49,8 +49,10 @@ until a coherent draft is reviewed.
     - positioning: flanking and attacking from behind, range, line of sight;
     - spending cooldowns and crowd control well, and breaking out of it.
   - **Balance target:** within about five levels, the better-played fighter should usually win;
-    ten or more levels apart, the higher level should. Each level of difference is a modest,
-    capped edge, checked by simulated duels between skilled and unskilled fighters.
+    ten or more levels apart, the higher level should. Each level is a modest edge (6% more health
+    and power, compounding), and a stronger foe's blows wear a guard down faster. Simulated duels
+    between skilled and unskilled fighters check it: skill reliably beats up to five levels and
+    loses from seven (COMBAT.md, "Balance").
 - **Magic gear:** two-handed staves, one-handed wands, and off-hand spellbooks and focuses.
   Necromancers get their own recognisable designs.
 - **Necromancy:** controversial in the world, but a necromancer can still be a hero; reputation

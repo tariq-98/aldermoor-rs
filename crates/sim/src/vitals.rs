@@ -1,53 +1,120 @@
+//! Upkeep every step: endurance, health and resource come back, the downed bleed, monsters walk
+//! home healing and come back after dying, revives progress, and summons run out.
+
 use bevy_ecs::prelude::*;
 use glam::Vec2;
 use protocol::Event;
 
-use crate::{Brain, Clock, Fighter, Home, Mode, Motion, Outbox, Transform, Unit, Vitals, DT};
+use crate::combat::{emit, life, now};
+use crate::content::catalog;
+use crate::stats::DOWNED_TIME;
+use crate::{Anim, Auras, Brain, Control, Fighter, Home, Mode, Motion, Threat, Transform, Unit, Units, Vitals, DT};
 
 pub const ENDURANCE_MAX: f32 = 100.0;
 pub const ENDURANCE_REGEN: f32 = 8.0;
 /// Seconds after the last blow before a unit counts as out of combat.
 pub const COMBAT_TIMEOUT: f64 = 6.0;
-/// Monsters come back this long after dying.
-pub const MONSTER_RESPAWN: f64 = 20.0;
 
-/// Endurance and health regeneration, monsters healing on the way home, and monster respawns.
-pub fn update_vitals(
-    clock: Res<Clock>,
-    mut out: ResMut<Outbox>,
-    mut q: Query<(&Unit, &mut Vitals, &mut Transform, &mut Motion, &mut Fighter, &Home, Option<&mut Brain>)>,
-) {
-    let now = clock.time;
-    for (u, mut v, mut t, mut m, mut f, home, brain) in &mut q {
+pub fn update(world: &mut World) {
+    let t = now(world);
+    let entities: Vec<Entity> = world.resource::<Units>().all().collect();
+    for e in entities {
+        let Some(v) = world.get::<Vitals>(e).copied() else { continue };
         if v.dead {
-            if let Some(at) = v.respawn_at {
-                if now >= at {
-                    *v = Vitals::new(v.max_health);
-                    t.pos = home.pos;
-                    t.yaw = home.yaw;
-                    *m = Motion::new(m.run_speed);
-                    f.target = None;
-                    f.auto_attack = false;
-                    if let Some(mut b) = brain {
-                        *b = Brain::new(Vec2::new(home.pos.x, home.pos.z), b.aggro_radius, b.wander);
-                        b.next_think = now + crate::brain::think_offset(u.id);
-                    }
-                    out.0.push(Event::Respawned { unit: u.id });
-                }
+            if v.respawn_at.is_some_and(|at| t >= at) {
+                respawn_mob(world, e);
             }
             continue;
         }
-        if m.forced.is_none() {
-            v.endurance = (v.endurance + ENDURANCE_REGEN * DT).min(ENDURANCE_MAX);
+        if v.downed {
+            let out = {
+                let mut v = world.get_mut::<Vitals>(e).unwrap();
+                v.downed_health -= v.downed_max / DOWNED_TIME as f32 * DT;
+                v.downed_health <= 0.0
+            };
+            if out {
+                life::die(world, e, None);
+            }
+            continue;
         }
-        let returning = brain.as_ref().is_some_and(|b| b.mode == Mode::Return);
-        if returning {
-            // Giving up a fight heals a monster as it walks home, so pulling and dropping it
-            // can't wear it down.
-            v.health = (v.health + v.max_health * 0.25 * DT).min(v.max_health);
-            v.invulnerable_until = now + 0.1;
-        } else if now - v.last_combat > COMBAT_TIMEOUT {
-            v.health = (v.health + v.max_health * 0.04 * DT).min(v.max_health);
+        let guarding = world.get::<Fighter>(e).is_some_and(|f| f.guard_since.is_some());
+        let rolling = world.get::<Motion>(e).is_some_and(|m| m.forced.is_some());
+        let returning = world.get::<Brain>(e).is_some_and(|b| b.mode == Mode::Return);
+        let in_combat = t - v.last_combat < COMBAT_TIMEOUT;
+        if let Some(mut v) = world.get_mut::<Vitals>(e) {
+            // Endurance waits while you roll or hold up your guard.
+            if !rolling && !guarding {
+                v.endurance = (v.endurance + ENDURANCE_REGEN * DT).min(ENDURANCE_MAX);
+            }
+            if returning {
+                // Giving up a fight heals a monster as it walks home, so pulling and dropping it
+                // can't wear it down.
+                v.health = (v.health + v.max_health * 0.25 * DT).min(v.max_health);
+            } else if !in_combat {
+                v.health = (v.health + v.max_health * 0.04 * DT).min(v.max_health);
+            }
+        }
+        if let Some(mut f) = world.get_mut::<Fighter>(e) {
+            if let Some(s) = f.specialty {
+                let d = catalog().specialty(s);
+                let rate = if in_combat { d.regen_in } else { d.regen_out };
+                f.resource = (f.resource + rate * DT).clamp(0.0, f.max_resource);
+            }
+            if !f.recent_victims.is_empty() {
+                f.recent_victims.retain(|&(_, at)| t - at <= life::RALLY_WINDOW);
+            }
         }
     }
+    life::update_revives(world);
+    life::expire_summons(world);
+    life::clear_remains(world);
+}
+
+/// A monster comes back where it started, as it was.
+fn respawn_mob(world: &mut World, e: Entity) {
+    let t = now(world);
+    let (Some(b), Some(home), Some(id)) = (world.get::<Brain>(e).copied(), world.get::<Home>(e).copied(), world.get::<Unit>(e).map(|u| u.id)) else {
+        return;
+    };
+    if let Some(mut v) = world.get_mut::<Vitals>(e) {
+        *v = Vitals::new(v.max_health);
+    }
+    if let Some(mut tr) = world.get_mut::<Transform>(e) {
+        tr.pos = home.pos;
+        tr.yaw = home.yaw;
+    }
+    if let Some(mut m) = world.get_mut::<Motion>(e) {
+        *m = Motion::new(m.run_speed);
+    }
+    if let Some(mut f) = world.get_mut::<Fighter>(e) {
+        f.target = None;
+        f.auto_attack = false;
+        f.cast = None;
+        f.queued = None;
+        f.cooldowns.clear();
+        f.gcd_until = 0.0;
+        f.lockout_until = 0.0;
+        f.guard_since = None;
+        f.action = protocol::Action::None;
+        f.recent_victims.clear();
+    }
+    if let Some(mut a) = world.get_mut::<Auras>(e) {
+        a.list.clear();
+        a.dr = Default::default();
+        a.defiance = a.defiance_max;
+    }
+    if let Some(mut th) = world.get_mut::<Threat>(e) {
+        th.clear();
+    }
+    if let Some(mut c) = world.get_mut::<Control>(e) {
+        *c = Control { speed: 1.0, ..Default::default() };
+    }
+    if let Some(mut a) = world.get_mut::<Anim>(e) {
+        *a = Anim::default();
+    }
+    if let Some(mut brain) = world.get_mut::<Brain>(e) {
+        *brain = Brain::new(b.mob, Vec2::new(home.pos.x, home.pos.z), b.aggro_radius, b.wander);
+        brain.next_think = t + crate::brain::think_offset(id);
+    }
+    emit(world, Event::Respawned { unit: id });
 }
