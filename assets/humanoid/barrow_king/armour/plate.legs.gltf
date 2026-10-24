@@ -1727,7 +1727,7 @@
 			]
 		},
 		{
-			"name":"rivet.010",
+			"name":"rivet.030",
 			"primitives":[
 				{
 					"attributes":{
@@ -1743,7 +1743,7 @@
 			]
 		},
 		{
-			"name":"rivet.011",
+			"name":"rivet.031",
 			"primitives":[
 				{
 					"attributes":{

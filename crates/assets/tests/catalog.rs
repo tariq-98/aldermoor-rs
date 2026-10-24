@@ -131,3 +131,9 @@ fn foxfolk_have_fur_and_a_tail() {
         assert!(hides.iter().any(|r| r == "ears"), "{} hides foxfolk ears", p.id);
     }
 }
+
+#[test]
+fn levels_of_detail_sit_beside_their_files() {
+    assert_eq!(assets::lod_path("humanoid/male/body.gltf", 1), "humanoid/male/body.lod1.gltf");
+    assert_eq!(assets::lod_path("gear/sword.arming.gltf", 2), "gear/sword.arming.lod2.gltf");
+}

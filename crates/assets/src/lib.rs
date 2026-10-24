@@ -135,6 +135,16 @@ impl Clip {
     }
 }
 
+/// The levels of detail beside every piece and item: `x.gltf` has `x.lod1.gltf` and `x.lod2.gltf`.
+pub const LODS: usize = 2;
+
+pub fn lod_path(file: &str, n: usize) -> String {
+    match file.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}.lod{n}.{ext}"),
+        None => format!("{file}.lod{n}"),
+    }
+}
+
 /// A clip curve's value at `t`: linear between keys, held before the first and after the last.
 /// Two keys at the same time make a step; at that instant the later key wins.
 pub fn curve(keys: &[[f32; 2]], t: f32) -> f32 {
@@ -343,6 +353,25 @@ impl Catalog {
                 .clone()
         };
 
+        // Levels of detail: present, readable, and on the same skeleton as the full mesh.
+        let check_lods = |what: &str, rel: &str, problem: &mut dyn FnMut(String)| {
+            let Ok(full) = open(rel) else { return };
+            if !full.morph_target_names().is_empty() {
+                return; // Bows: no levels of detail.
+            }
+            for n in 1..=LODS {
+                let lod = lod_path(rel, n);
+                match open(&lod) {
+                    Err(e) => problem(format!("{what}: level of detail {n}: {e}")),
+                    Ok(g) => {
+                        if g.joint_names() != full.joint_names() {
+                            problem(format!("{what}: {lod} has a different skeleton from {rel}"));
+                        }
+                    }
+                }
+            }
+        };
+
         // Bodies: the shared rig plus their sockets.
         let mut skeletons: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
         for (id, bt) in &h.body_types {
@@ -379,6 +408,7 @@ impl Catalog {
                     skeletons.insert(id, names);
                 }
             }
+            check_lods(&format!("body type {id}"), &bt.file, &mut problem);
         }
         match open(&h.animations.file) {
             Err(e) => problem(format!("animations: {e}")),
@@ -441,6 +471,7 @@ impl Catalog {
         for p in &h.pieces {
             for (bt, rel) in &p.files {
                 check_skinned("piece", &p.id, bt, rel, true, &mut problem);
+                check_lods(&format!("piece {} ({bt})", p.id), rel, &mut problem);
             }
             if let Some(dye) = &p.dye {
                 if !self.root.join(dye).exists() {
@@ -471,6 +502,7 @@ impl Catalog {
         for hair in &h.hair {
             for (bt, rel) in &hair.files {
                 check_skinned("hair", &hair.id, bt, rel, false, &mut problem);
+                check_lods(&format!("hair {} ({bt})", hair.id), rel, &mut problem);
             }
         }
 
@@ -487,9 +519,11 @@ impl Catalog {
                     if let Err(e) = open(rel) {
                         problem(format!("item {}: {e}", item.id));
                     }
+                    check_lods(&format!("item {}", item.id), rel, &mut problem);
                 }
                 for (bt, rel) in &item.files {
                     check_skinned("item", &item.id, bt, rel, false, &mut problem);
+                    check_lods(&format!("item {} ({bt})", item.id), rel, &mut problem);
                 }
                 for s in item.held.iter().chain(item.stowed.values()) {
                     if !human_sockets.contains(s) {

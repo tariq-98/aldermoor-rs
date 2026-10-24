@@ -32,6 +32,7 @@ const DEFAULTS = {
   turn: false,
   debug: [],
   beast: null,
+  lod: 0,
 };
 
 // --- URL hash ---------------------------------------------------------------------------------
@@ -67,6 +68,7 @@ function parseHash(hash) {
     else if (k === 'turn') s.turn = v === '1';
     else if (k === 'dbg') s.debug = v ? v.split(',') : [];
     else if (k === 'beast') s.beast = none(v);
+    else if (k === 'lod') s.lod = Number(v) || 0;
   }
   return s;
 }
@@ -97,6 +99,7 @@ function writeHash(s) {
   if (s.turn) p.set('turn', '1');
   if (s.debug.length) p.set('dbg', s.debug.join(','));
   if (s.beast) p.set('beast', s.beast);
+  if (s.lod) p.set('lod', String(s.lod));
   const hash = `#${p.toString()}`;
   if (location.hash !== hash) history.replaceState(null, '', hash);
 }
@@ -179,7 +182,7 @@ class App {
     const s = this.state;
     if (s.beast && this.creatures) return this.buildBeast();
     this.status('Loading character…');
-    const next = await Character.create({ humanoid: this.humanoid, gear: this.gear, loader: this.loader, library: this.library }, s.body);
+    const next = await Character.create({ humanoid: this.humanoid, gear: this.gear, loader: this.loader, library: this.library, lod: s.lod }, s.body);
     next.setTone(this.tone(s.tone), this.toneEntry(s.tone));
     next.setHairColour(this.hairColour(s.haircol));
     next.variants = { ...s.variants };
@@ -419,6 +422,10 @@ class App {
       setCamera: (name) => this.run(async () => {
         s().cam = name;
         this.view.preset(name, this.frameHeight(), this.headY());
+      }),
+      setLod: (lod) => this.run(async () => {
+        s().lod = lod;
+        await this.build();
       }),
       setTurntable: (on) => this.run(async () => {
         s().turn = on;

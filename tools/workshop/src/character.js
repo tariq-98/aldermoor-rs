@@ -12,6 +12,11 @@ import { SpringBones, defaultColliders, resolveColliders } from './springs.js';
 
 export const ASSETS = '/assets/';
 
+/** A mesh file at a level of detail: `x.gltf` is level 0, `x.lod1.gltf` level 1 and so on. */
+export function lodFile(file, lod) {
+  return lod ? file.replace(/\.gltf$/, `.lod${lod}.gltf`) : file;
+}
+
 function disposeObject(root) {
   root.traverse((o) => {
     if (!o.isMesh) return;
@@ -55,7 +60,7 @@ function loadTexture(name, like) {
 }
 
 export class Character {
-  /** ctx: { humanoid, gear, loader, library, anisotropy } */
+  /** ctx: { humanoid, gear, loader, library, lod } */
   static async create(ctx, bodyType) {
     const c = new Character(ctx, bodyType);
     await c.loadBody();
@@ -83,7 +88,7 @@ export class Character {
   }
 
   async loadBody() {
-    const gltf = await this.ctx.loader.loadAsync(ASSETS + this.def.file);
+    const gltf = await this.ctx.loader.loadAsync(ASSETS + lodFile(this.def.file, this.ctx.lod));
     this.root = gltf.scene;
     this.group.add(this.root);
     this.armature = this.root.getObjectByName('skeleton') || this.root.children[0];
@@ -123,7 +128,7 @@ export class Character {
   // --- Skinned pieces ---------------------------------------------------------------------
 
   async loadSkinned(file) {
-    const gltf = await this.ctx.loader.loadAsync(ASSETS + file);
+    const gltf = await this.ctx.loader.loadAsync(ASSETS + lodFile(file, this.ctx.lod));
     const scene = gltf.scene;
     scene.updateMatrixWorld(true);
     const pieceBones = new Map();
@@ -386,8 +391,9 @@ export class Character {
     return (this.gearCat?.items || []).find((g) => g.id === id);
   }
 
-  async loadRigid(file) {
-    const gltf = await this.ctx.loader.loadAsync(ASSETS + file);
+  async loadRigid(file, morphs = false) {
+    // Bows keep their full mesh: their morph targets have no levels of detail.
+    const gltf = await this.ctx.loader.loadAsync(ASSETS + (morphs ? file : lodFile(file, this.ctx.lod)));
     const obj = gltf.scene;
     obj.traverse((o) => {
       if (o.isMesh) {
@@ -453,7 +459,7 @@ export class Character {
     for (const s of clear) this.removeGear(s);
     if (def) {
       const rec = { def };
-      if (def.file) rec.object = await this.loadRigid(def.file);
+      if (def.file) rec.object = await this.loadRigid(def.file, !!def.string);
       if (def.sheath) rec.sheath = await this.loadRigid(def.sheath);
       const skinnedFile = def.files?.[this.bodyType];
       if (skinnedFile) {

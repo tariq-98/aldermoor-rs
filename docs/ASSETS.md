@@ -275,8 +275,16 @@ always meets the hand, whatever the archer's size. The drawing hand is the one n
 
   Port the behaviour rather than inventing new rules, and the game will match what Tariq
   approved in the workshop.
+- **Levels of detail:** every body, piece, hairstyle, cape, pack and rigid item has
+  `<name>.lod1.gltf` (half the triangles) and `<name>.lod2.gltf` (a fifth) beside it, on the same
+  skeleton, materials and texture coordinates. Region borders and open edges don't move, so
+  hiding and the `hides` lists apply unchanged. Bows (morph targets) have only the full mesh.
+  Switch a whole character at once, by its height on screen: the full meshes above about 300
+  pixels, LOD 1 above about 100, LOD 2 below (about 10 m and 30 m at 1440p). `lod_path` in the
+  `assets` crate names the files, and the workshop's View section previews each level.
 - **Triangle counts today:** a farmhand is about 30k. A full plate knight with shield and cape is
-  about 84k, so LODs are needed before crowds.
+  about 84k at full detail, 46k at LOD 1 and 28k at LOD 2 (region borders and open edges stay,
+  so the reduction is less than the meshes' own halves and fifths).
 
 ## Pipeline
 
@@ -312,6 +320,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - every file, bone, socket, collider, region, hide target and clip;
   - clip curves and events (known names, inside the clip, values 0 to 1), and that what a
     clip asks of an item (an off-hand grip, a bowstring, a `grab` or `stow` event) the item has;
+  - both levels of detail beside every file, on the same skeleton;
   - `_REGION` on every skinned piece;
   - that every dressable body type has a fit for every piece;
   - that no id or label mentions spiders, arachnids or webs.
@@ -335,7 +344,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
 - more beasts and hostile humanoid outfits;
 - the same surface pass for plate armour;
-- level-of-detail meshes.
+- levels of detail for beasts.
 
 ## Milestones
 
@@ -368,4 +377,4 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | One fully dressed character | About 40k triangles |
 | Character textures | 2K |
 | Gear textures | 1K |
-| A crowd NPC | Under 15k triangles, once LODs exist |
+| A crowd NPC | Under 15k triangles at LOD 2 (a farmhand is about 11k) |

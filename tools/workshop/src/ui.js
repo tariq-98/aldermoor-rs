@@ -274,6 +274,7 @@ function appendView(root, state, actions) {
   }
   view.body.append(
     cams,
+    row('Detail', segmented([{ value: 0, label: 'Full' }, { value: 1, label: 'LOD 1' }, { value: 2, label: 'LOD 2' }], state.lod || 0, actions.setLod)),
     el('div', { class: 'row' }, toggle('Turntable', state.turn, actions.setTurntable)),
     el('div', { class: 'row' }, toggle('Region colours', state.debug.includes('regions'), (on) => actions.setDebug('regions', on))),
     el('div', { class: 'row' }, toggle('Wireframe', state.debug.includes('wire'), (on) => actions.setDebug('wire', on))),
