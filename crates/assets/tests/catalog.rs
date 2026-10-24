@@ -154,3 +154,14 @@ fn the_valley_has_scenery_for_everything_world_places() {
     assert!(prop("windmill").parts.iter().any(|p| p.spin.is_some()), "the sails turn");
     assert!(env.props.iter().filter(|p| p.kind == "tree").all(|p| p.wind), "trees sway");
 }
+
+#[test]
+fn the_valley_has_ground_water_sky_and_light() {
+    let root = root();
+    assert!(root.join("catalog/surfaces.json").exists() && root.join("catalog/look.json").exists());
+    let cat = assets::Catalog::load(&root).unwrap();
+    let problems: Vec<String> = cat.check().iter().map(|p| p.0.clone()).filter(|p| p.starts_with("surfaces.json") || p.starts_with("look.json")).collect();
+    assert!(problems.is_empty(), "{problems:#?}");
+    assert_eq!(assets::image_size(&root.join("terrain/grass_colour.jpg")).unwrap(), (1024, 1024));
+    assert_eq!(assets::image_size(&root.join("terrain/brambleford_weights.png")).unwrap(), (2048, 2048));
+}

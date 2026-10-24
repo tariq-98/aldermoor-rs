@@ -11,6 +11,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 mod gltf;
+mod surfaces;
+pub use surfaces::image_size;
 
 pub use gltf::Gltf;
 
@@ -730,6 +732,7 @@ impl Catalog {
                 problem(format!("forbidden content: {w}"));
             }
         }
+        out.extend(surfaces::check(&self.root));
         out
     }
 }
