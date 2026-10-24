@@ -310,3 +310,289 @@ def wand(crystal="crystal_violet"):
                                  sh.ring(Vector((0, 0, 0.278)), Vector((1, 0, 0)), Vector((0, 1, 0)), 0.008, 0.008, 6),
                                  [Vector((0, 0, 0.3))]]), crystal, smooth=False)
     return [body, collar, tip]
+
+
+# --- More weapon families ----------------------------------------------------------------------
+
+def _haft(z0, z1, r0, r1, mat="wood", name="haft", wobble=0.0):
+    path = [Vector((wobble * math.sin(i * 0.9), 0, z0 + (z1 - z0) * i / 20)) for i in range(21)]
+    return sh.finish(sh.obj(name, sh.sweep(path, lambda t: r0 + (r1 - r0) * t, n=12, up=Vector((1, 0, 0))), mat), bevel=0)
+
+
+def _flat_blade(outline, thickness, mat="steel", name="head", bevel=0.0006):
+    """Extrudes a 2D outline in the YZ plane (edge towards -Y) by `thickness` along X."""
+    import bmesh
+    bm = bmesh.new()
+    front = [bm.verts.new(Vector((thickness / 2, y, z))) for y, z in outline]
+    back = [bm.verts.new(Vector((-thickness / 2, y, z))) for y, z in outline]
+    n = len(outline)
+    bm.faces.new(front)
+    bm.faces.new(list(reversed(back)))
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new((front[i], back[i], back[j], front[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = sh.obj(name, bm, mat, smooth=False)
+    return sh.finish(ob, bevel=bevel, segments=1, angle=30)
+
+
+def hand_axe():
+    """A bearded axe: the edge faces front (-Y), the haft runs along Z."""
+    parts = [_haft(-0.17, 0.44, 0.015, 0.013, "wood"), _grip(-0.16, -0.04, 0.0165, ridges=6, mat="leather")]
+    outline = [(-0.02, 0.36), (-0.06, 0.39), (-0.115, 0.43), (-0.13, 0.36), (-0.125, 0.29), (-0.1, 0.25),
+               (-0.07, 0.29), (-0.03, 0.33), (0.018, 0.33), (0.018, 0.42), (-0.01, 0.43)]
+    parts.append(_flat_blade(outline, 0.012))
+    edge = _flat_blade([(-0.112, 0.425), (-0.13, 0.36), (-0.125, 0.295), (-0.118, 0.3), (-0.123, 0.36), (-0.106, 0.418)], 0.0125, "silver", "edge")
+    parts.append(edge)
+    parts.append(_knob(-0.17, 0.02, 0.016, "iron", "cap"))
+    return parts
+
+
+def mace():
+    parts = [_haft(-0.16, 0.42, 0.014, 0.016, "wood_dark"), _grip(-0.15, -0.02, 0.016, ridges=6, mat="leather")]
+    for k in range(7):
+        a = 2 * math.pi * k / 7
+        d = Vector((math.cos(a), math.sin(a), 0))
+        flange = _flat_blade([(0.0, 0.38), (0.045, 0.40), (0.05, 0.44), (0.036, 0.49), (0.0, 0.51)], 0.008, "dark_steel", "flange")
+        flange.rotation_euler = (0, 0, a + math.pi / 2)
+        parts.append(flange)
+    parts.append(sh.obj("core", sh.lathe([(0.012, 0.37), (0.024, 0.39), (0.026, 0.45), (0.02, 0.5), (0.0, 0.525)], 14), "iron"))
+    parts.append(_knob(-0.16, 0.025, 0.018, "iron", "cap"))
+    return parts
+
+
+def spear():
+    """Held a third of the way up the shaft; the point is at +Z."""
+    parts = [_haft(-0.62, 1.32, 0.0145, 0.0135, "wood_light")]
+    parts.append(_grip(-0.1, 0.1, 0.0165, ridges=7, mat="leather"))
+    leaf = []
+    n = 16
+    for i in range(n + 1):
+        t = i / n
+        z = 1.3 + t * 0.32
+        w = 0.036 * math.sin(math.pi * t ** 0.6) * (1 - t) ** 0.15
+        th = 0.006 * (1 - t) + 0.001
+        leaf.append([Vector((0, -w, z)), Vector((th, 0, z)), Vector((0, w, z)), Vector((-th, 0, z))] if w > 1e-4 else [Vector((0, 0, z))])
+    parts.append(sh.finish(sh.obj("point", sh.loft(leaf), "steel", smooth=False), bevel=0))
+    parts.append(sh.obj("socket", sh.lathe([(0.015, 1.24), (0.019, 1.27), (0.017, 1.31), (0.009, 1.33)], 12), "iron"))
+    parts.append(sh.obj("butt", sh.lathe([(0.015, -0.6), (0.016, -0.63), (0.009, -0.65), (0.0, -0.66)], 12), "iron"))
+    return parts
+
+
+def greatsword():
+    parts = [_blade(1.05, 0.12, 0.028, 0.022, 0.0045, 0.002, tip=0.14)]
+    parts += [_grip(-0.15, 0.1, 0.016, ridges=14, mat="leather_dark")]
+    parts += _guard(0.15, 0.11, 0.011, drop=0.018)
+    parts += [_knob(-0.15, 0.05, 0.026, "steel")]
+    ricasso = sh.obj("ricasso", sh.lathe([(0.012, 0.12), (0.014, 0.15), (0.012, 0.18)], 10), "leather")
+    parts.append(ricasso)
+    return parts
+
+
+def kite_shield(face="paint_blue", charge="paint_cream"):
+    """A tall kite shield, curved across its width. Back plane on the origin; it bulges to -Y."""
+    import bmesh
+    H, W = 0.9, 0.44
+    bm = bmesh.new()
+    rows, cols = 18, 13
+    grid = []
+    for j in range(rows + 1):
+        v = j / rows
+        z = 0.3 - H * v
+        half = W / 2 * (math.sin(math.pi * min(1.0, (1 - v) * 1.25) / 2) if v > 0.2 else 1.0) * (1 - 0.12 * max(0.0, 0.2 - v) / 0.2)
+        if v >= 0.999:
+            half = 0.0
+        row = []
+        for i in range(cols + 1):
+            u = -1 + 2 * i / cols
+            x = u * max(half, 1e-4)
+            y = -0.012 - 0.045 * (1 - u * u) * max(0.2, 1 - v * 0.6)
+            row.append(bm.verts.new(Vector((x, y, z + 0.035 * (1 - u * u) * (1 - v)))))
+        grid.append(row)
+    for j in range(rows):
+        for i in range(cols):
+            bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]))
+    # The outline, read before the tip's vertices are merged.
+    outline = [grid[0][i].co.copy() for i in range(cols + 1)] + [grid[j][-1].co.copy() for j in range(1, rows + 1)]
+    outline += [grid[j][0].co.copy() for j in range(rows - 1, 0, -1)]
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = sh.obj("kite", bm, face)
+    mod = ob.modifiers.new("t", "SOLIDIFY")
+    mod.thickness = 0.014
+    mod.offset = 1
+    sh.finish(ob, bevel=0)
+    parts = [ob]
+    # Rim along the outline.
+    parts.append(sh.obj("kite_rim", sh.sweep(outline + [outline[0]], lambda t: 0.009, n=8, up=Vector((0, 1, 0))), "iron"))
+    # A pale chevron across the face.
+    chev = []
+    for t in (0.0, 0.5, 1.0):
+        x = -W * 0.42 + W * 0.84 * t
+        z = 0.02 - 0.16 * (1 - abs(2 * t - 1))
+        chev.append(Vector((x, -0.06 + 0.04 * abs(2 * t - 1) ** 2, z)))
+    parts.append(sh.obj("chevron", sh.ribbon(chev, [Vector((0, -1, 0))] * 3, 0.07, 0.002), charge))
+    boss = sh.lathe([(0.04, 0.0), (0.036, -0.012), (0.02, -0.024), (0.0, -0.028)], 18)
+    sh.transform(boss, Matrix.Translation((0, -0.057, 0.09)) @ Matrix.Rotation(math.radians(-90), 4, "X"))
+    parts.append(sh.obj("kite_boss", boss, "brass"))
+    for z in (-0.12, 0.1):
+        parts.append(sh.obj("strap", sh.sweep([Vector((x, 0.006 + 0.03 * math.sin(math.pi * (x + 0.07) / 0.14), z))
+                                                for x in [(-0.07 + 0.14 * i / 10) for i in range(11)]],
+                                               lambda t: 0.012, n=8, power=4, ratio=0.25, up=Vector((0, 1, 0))), "leather"))
+    return parts
+
+
+def longbow():
+    parts = hunting_bow()
+    for p in parts:
+        p.scale = (1.0, 1.05, 1.28)
+    return parts
+
+
+def skull(scale=1.0, mat="bone"):
+    """A stylised skull: cranium, brow, cheekbones and a jaw, with dark sockets."""
+    cran = sh.obj("skull", sh.lathe([(0.0, 0.07), (0.03, 0.065), (0.048, 0.045), (0.054, 0.015), (0.05, -0.01),
+                                     (0.038, -0.03), (0.03, -0.04), (0.0, -0.042)], 18), mat)
+    cran.scale = (0.9 * scale, 1.05 * scale, scale)
+    jaw = sh.obj("jaw", sh.lathe([(0.0, -0.035), (0.03, -0.038), (0.033, -0.055), (0.024, -0.07), (0.0, -0.072)], 14), mat)
+    jaw.scale = (0.8 * scale, 0.85 * scale, scale)
+    jaw.location = (0, -0.012 * scale, 0)
+    parts = [cran, jaw]
+    for sx in (-1, 1):
+        eye = sh.obj("socket", sh.lathe([(0.0, -0.012), (0.012, -0.006), (0.013, 0.006), (0.0, 0.012)], 10), "leather_dark")
+        eye.location = (sx * 0.02 * scale, -0.047 * scale, 0.004 * scale)
+        parts.append(eye)
+    nose = sh.obj("nose", sh.lathe([(0.0, -0.008), (0.007, 0.0), (0.0, 0.008)], 6), "leather_dark")
+    nose.location = (0, -0.05 * scale, -0.018 * scale)
+    parts.append(nose)
+    return parts
+
+
+def necro_staff():
+    """Blackened wood with a skull, bone charms and a violet crystal. Necromancy, not horror."""
+    parts = []
+    path = [Vector((0.007 * math.sin(i * 0.5), 0.005 * math.cos(i * 0.4), -0.6 + 1.55 * i / 30)) for i in range(31)]
+    parts.append(sh.finish(sh.obj("shaft", sh.sweep(path, lambda t: 0.015 + 0.004 * math.sin(t * 30) ** 2, n=10, up=Vector((1, 0, 0))), "wood_dark"), bevel=0))
+    parts.append(_grip(-0.1, 0.12, 0.018, ridges=8, mat="leather_dark"))
+    top = path[-1]
+    for piece in skull(1.15):
+        piece.location += top + Vector((0, 0, 0.05))
+        parts.append(piece)
+    gem = sh.obj("crystal", sh.loft([[top + Vector((0, 0, 0.115))],
+                                     sh.ring(top + Vector((0, 0, 0.15)), Vector((1, 0, 0)), Vector((0, 1, 0)), 0.018, 0.018, 5),
+                                     [top + Vector((0, 0, 0.2))]]), "crystal_violet", smooth=False)
+    parts.append(gem)
+    for k, z in enumerate((0.78, 0.7)):
+        charm = sh.obj("charm", sh.lathe([(0.0, -0.02), (0.006, -0.012), (0.007, 0.0), (0.0, 0.012)], 8), "bone")
+        charm.location = (0.03 * (1 if k else -1), 0.0, z)
+        parts.append(charm)
+        cord = sh.obj("cord", sh.sweep([Vector((0.0, 0, z + 0.06)), Vector((0.03 * (1 if k else -1), 0, z + 0.012))], lambda t: 0.0015, n=5, up=Vector((0, 1, 0))), "cord")
+        parts.append(cord)
+    return parts
+
+
+def healer_staff():
+    """Pale ash with a sun ring cradling a green crystal, and a cloth ribbon."""
+    parts = [_haft(-0.6, 0.96, 0.0155, 0.014, "wood_light"), _grip(-0.08, 0.12, 0.0175, ridges=8, mat="linen")]
+    ring_path = [Vector((math.cos(a) * 0.075, 0, 1.06 + math.sin(a) * 0.075)) for a in (2 * math.pi * i / 32 for i in range(33))]
+    parts.append(sh.obj("sun", sh.sweep(ring_path, lambda t: 0.007, n=8, up=Vector((0, 1, 0))), "gold"))
+    for k in range(8):
+        a = 2 * math.pi * k / 8
+        ray = sh.obj("ray", sh.loft([[Vector((math.cos(a) * 0.08, 0.002, 1.06 + math.sin(a) * 0.08)), Vector((math.cos(a) * 0.08, -0.002, 1.06 + math.sin(a) * 0.08))],
+                                     [Vector((math.cos(a) * 0.11, 0, 1.06 + math.sin(a) * 0.11))]], closed=False), "gold", smooth=False)
+        parts.append(ray)
+    gem = sh.obj("crystal", sh.loft([[Vector((0, 0, 1.01))],
+                                     sh.ring(Vector((0, 0, 1.06)), Vector((1, 0, 0)), Vector((0, 1, 0)), 0.026, 0.026, 6),
+                                     [Vector((0, 0, 1.11))]]), "crystal_green", smooth=False)
+    parts.append(gem)
+    parts.append(sh.obj("ribbon", sh.ribbon([Vector((0.012, 0, 0.94)), Vector((0.03, -0.01, 0.85)), Vector((0.025, 0.0, 0.74)), Vector((0.04, 0.01, 0.66))],
+                                            [Vector((1, -0.3, 0))] * 4, 0.025, 0.002), "wool_cream"))
+    return parts
+
+
+def spellbook():
+    """A closed book held in the off hand: the grip is the middle of the spine."""
+    W, H, T = 0.17, 0.23, 0.05
+    cover = sh.obj("book", sh.loft([sh.ring(Vector((0, -W / 2 + 0.01, z)), Vector((1, 0, 0)), Vector((0, 1, 0)), T / 2, W / 2, 16, 6.0)
+                                    for z in (-H / 2, H / 2)]), "leather")
+    pages = sh.obj("pages", sh.loft([sh.ring(Vector((0, -W / 2 + 0.006, z)), Vector((1, 0, 0)), Vector((0, 1, 0)), T / 2 - 0.004, W / 2 - 0.004, 16, 8.0)
+                                     for z in (-H / 2 + 0.006, H / 2 - 0.006)]), "linen")
+    pages.location.y -= 0.003
+    corners = []
+    for sz in (-1, 1):
+        c = sh.obj("corner", sh.lathe([(0.0, -0.01), (0.012, -0.006), (0.012, 0.006), (0.0, 0.01)], 8), "brass")
+        c.location = (0, -W + 0.012, sz * (H / 2 - 0.012))
+        c.scale = (T * 11, 1, 1)
+        corners.append(c)
+    clasp = sh.obj("clasp", sh.ribbon([Vector((T / 2, -W + 0.01, 0)), Vector((T / 2 + 0.003, -W - 0.004, 0)), Vector((-T / 2 - 0.003, -W - 0.004, 0)), Vector((-T / 2, -W + 0.01, 0))],
+                                      [Vector((0, -1, 0))] * 4, 0.03, 0.003), "brass")
+    gem = sh.obj("sigil", sh.lathe([(0.0, -0.004), (0.016, 0.0), (0.0, 0.004)], 6), "crystal_blue")
+    gem.rotation_euler = (0, math.pi / 2, 0)
+    gem.location = (T / 2 + 0.003, -W / 2, 0.02)
+    return [cover, pages, clasp, gem] + corners
+
+
+def focus_orb(crystal="crystal_blue"):
+    """An orb in a gilded cage, cupped in the off hand."""
+    orb = sh.obj("orb", sh.lathe([(0.0, -0.045), (0.032, -0.032), (0.045, 0.0), (0.032, 0.032), (0.0, 0.045)], 18), crystal)
+    orb.location = (0, -0.02, 0.07)
+    parts = [orb]
+    for k in range(4):
+        a = math.pi * k / 4
+        hoop = [Vector((math.cos(a) * math.cos(t) * 0.05, math.sin(a) * math.cos(t) * 0.05 - 0.02, 0.07 + math.sin(t) * 0.05))
+                for t in (math.pi * (i / 16 - 0.5) for i in range(17))]
+        parts.append(sh.obj("cage", sh.sweep(hoop, lambda t: 0.003, n=6, up=Vector((0, 0, 1))), "gold"))
+    base = sh.obj("base", sh.lathe([(0.0, 0.0), (0.02, 0.004), (0.03, 0.02), (0.022, 0.028)], 14), "gold")
+    base.location = (0, -0.02, 0.0)
+    parts.append(base)
+    return parts
+
+
+# --- Work tools ----------------------------------------------------------------------------------
+
+def smith_hammer():
+    parts = [_haft(-0.12, 0.3, 0.014, 0.016, "wood"), _grip(-0.11, 0.0, 0.016, ridges=5, mat="leather")]
+    head = sh.obj("head", sh.loft([sh.ring(Vector((0, y, 0.32)), Vector((1, 0, 0)), Vector((0, 0, 1)), 0.022, 0.024, 12, 4.0) for y in (-0.06, 0.05)]
+                                  + [sh.ring(Vector((0, 0.075, 0.32)), Vector((1, 0, 0)), Vector((0, 0, 1)), 0.008, 0.016, 12, 2.0)]), "iron")
+    parts.append(sh.finish(head, bevel=0.002))
+    return parts
+
+
+def hoe():
+    parts = [_haft(-0.5, 0.95, 0.015, 0.014, "wood_light")]
+    blade = _flat_blade([(-0.02, 0.92), (-0.13, 0.9), (-0.14, 0.97), (-0.02, 0.985)], 0.006, "iron", "blade")
+    blade.rotation_euler = (0, 0, 0)
+    parts.append(blade)
+    parts.append(sh.obj("collar", sh.lathe([(0.016, 0.9), (0.019, 0.92), (0.016, 0.99)], 10), "iron"))
+    return parts
+
+
+def watering_can():
+    body = sh.obj("can", sh.lathe([(0.0, -0.13), (0.08, -0.13), (0.085, -0.02), (0.07, 0.02), (0.0, 0.02)], 20), "brass")
+    body.location = (0, -0.0, -0.12)
+    spout = sh.obj("spout", sh.sweep([Vector((0, -0.07, -0.2)), Vector((0, -0.16, -0.12)), Vector((0, -0.23, -0.07))],
+                                     lambda t: 0.012 - 0.004 * t, n=8, up=Vector((1, 0, 0))), "brass")
+    rose = sh.obj("rose", sh.lathe([(0.0, 0.0), (0.02, 0.005), (0.022, 0.015), (0.0, 0.012)], 12), "brass")
+    rose.location = (0, -0.235, -0.065)
+    rose.rotation_euler = (math.radians(-60), 0, 0)
+    handle = sh.obj("handle", sh.sweep([Vector((0, 0.05, -0.12)), Vector((0, 0.02, 0.0)), Vector((0, -0.03, 0.0)), Vector((0, -0.05, -0.06))],
+                                       lambda t: 0.007, n=8, up=Vector((1, 0, 0))), "brass")
+    return [body, spout, rose, handle]
+
+
+def lantern():
+    """Carried by its ring: the body hangs below the origin."""
+    top = sh.obj("cap", sh.lathe([(0.0, -0.02), (0.012, -0.022), (0.05, -0.06), (0.054, -0.068), (0.0, -0.066)], 6), "dark_steel")
+    base = sh.obj("base", sh.lathe([(0.0, -0.205), (0.056, -0.205), (0.056, -0.19), (0.048, -0.185), (0.0, -0.186)], 6), "dark_steel")
+    parts = [top, base]
+    for k in range(6):
+        a = 2 * math.pi * (k + 0.5) / 6
+        bar = sh.obj("bar", sh.sweep([Vector((math.cos(a) * 0.05, math.sin(a) * 0.05, -0.19)), Vector((math.cos(a) * 0.05, math.sin(a) * 0.05, -0.066))],
+                                     lambda t: 0.0028, n=6, up=Vector((1, 0, 0))), "dark_steel")
+        parts.append(bar)
+    parts.append(sh.obj("glass", sh.lathe([(0.0, -0.186), (0.046, -0.186), (0.046, -0.07), (0.0, -0.07)], 6), "glass"))
+    parts.append(sh.obj("candle", sh.lathe([(0.0, -0.186), (0.012, -0.186), (0.012, -0.15), (0.0, -0.15)], 10), "linen"))
+    parts.append(sh.obj("flame", sh.lathe([(0.0, -0.15), (0.008, -0.138), (0.0, -0.115)], 10), "flame"))
+    parts.append(sh.obj("ring", sh.sweep([Vector((math.cos(a) * 0.016, 0, -0.004 + math.sin(a) * 0.016)) for a in (2 * math.pi * i / 16 for i in range(17))],
+                                         lambda t: 0.0028, n=6, up=Vector((0, 1, 0))), "dark_steel"))
+    return parts

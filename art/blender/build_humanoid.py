@@ -404,6 +404,10 @@ def main():
             q["coverage"][key] = p["coverage"]
     catalog["hair"] = list(hair_index.values())
     catalog["pieces"] = list(piece_index.values())
+    # Keep pieces other builds own (build_armour.py marks its own with a source).
+    out_path = sc.OUT / "catalog" / "humanoid.json"
+    if out_path.exists():
+        catalog["pieces"] += [p for p in json.loads(out_path.read_text())["pieces"] if p.get("source")]
     catalog["defaults"] = {
         "male": {"pieces": ["peasant.top", "peasant.trousers", "peasant.shoes"], "hair": "hair.simple_parted",
                  "brows": "brows.strong", "beard": "beard.full", "tone": "warm", "hair_colour": "chestnut"},

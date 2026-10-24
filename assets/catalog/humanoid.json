@@ -961,6 +961,279 @@
      "upperarm_hi": 0.216
     }
    }
+  },
+  {
+   "id": "plate.cuirass",
+   "label": "Plate cuirass",
+   "slot": "torso",
+   "layer": 2.0,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.cuirass.gltf",
+    "female": "humanoid/female/armour/plate.cuirass.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "hips": 0.792,
+     "chest": 0.564,
+     "belly": 1.0,
+     "thigh_hi": 0.132
+    },
+    "female": {
+     "chest": 0.59,
+     "belly": 0.997,
+     "hips": 0.733,
+     "thigh_hi": 0.14
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.pauldrons",
+   "label": "Plate pauldrons",
+   "slot": "shoulders",
+   "layer": 3.0,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.pauldrons.gltf",
+    "female": "humanoid/female/armour/plate.pauldrons.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": []
+    },
+    "female": {
+     "body": []
+    }
+   },
+   "coverage": {
+    "male": {
+     "chest": 0.118,
+     "upperarm_hi": 0.261,
+     "upperarm_lo": 0.524,
+     "forearm_hi": 0.122
+    },
+    "female": {
+     "scalp": 0.082,
+     "ears": 0.093,
+     "upperarm_lo": 0.57,
+     "forearm_hi": 0.112,
+     "upperarm_hi": 0.089
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.gauntlets",
+   "label": "Plate gauntlets",
+   "slot": "hands",
+   "layer": 2.2,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.gauntlets.gltf",
+    "female": "humanoid/female/armour/plate.gauntlets.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.122,
+     "hand": 1.0
+    },
+    "female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.11,
+     "hand": 1.0
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.legs",
+   "label": "Plate legs",
+   "slot": "legs",
+   "layer": 2.1,
+   "covers_hair": false,
+   "files": {
+    "male": "humanoid/male/armour/plate.legs.gltf",
+    "female": "humanoid/female/armour/plate.legs.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "shin_lo": 0.937,
+     "shin_hi": 0.79,
+     "thigh_hi": 0.377,
+     "thigh_lo": 0.568
+    },
+    "female": {
+     "shin_lo": 0.921,
+     "shin_hi": 0.781,
+     "thigh_hi": 0.402,
+     "thigh_lo": 0.597
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.helm_norman",
+   "label": "Nasal helm",
+   "slot": "head",
+   "layer": 2.5,
+   "covers_hair": true,
+   "files": {
+    "male": "humanoid/male/armour/plate.helm_norman.gltf",
+    "female": "humanoid/female/armour/plate.helm_norman.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "neck": 0.13,
+     "scalp": 0.889,
+     "face": 0.601,
+     "ears": 0.811
+    },
+    "female": {
+     "scalp": 0.844,
+     "ears": 0.875,
+     "face": 0.62
+    }
+   },
+   "source": "armour"
+  },
+  {
+   "id": "plate.helm_kettle",
+   "label": "Kettle hat",
+   "slot": "head",
+   "layer": 2.5,
+   "covers_hair": true,
+   "files": {
+    "male": "humanoid/male/armour/plate.helm_kettle.gltf",
+    "female": "humanoid/female/armour/plate.helm_kettle.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    }
+   },
+   "coverage": {
+    "male": {
+     "neck": 0.381,
+     "scalp": 0.889,
+     "face": 0.627,
+     "ears": 0.811
+    },
+    "female": {
+     "scalp": 0.86,
+     "ears": 0.875,
+     "face": 0.652
+    }
+   },
+   "source": "armour"
   }
  ],
  "animations": {

@@ -15,7 +15,7 @@ _materials = {}
 
 # Shared stylised palette: linear base colour, metallic, roughness.
 PALETTE = {
-    "steel": ((0.62, 0.64, 0.68), 1.0, 0.32),
+    "steel": ((0.46, 0.47, 0.5), 1.0, 0.4),
     "dark_steel": ((0.22, 0.23, 0.26), 1.0, 0.42),
     "iron": ((0.30, 0.30, 0.31), 1.0, 0.55),
     "brass": ((0.78, 0.55, 0.22), 1.0, 0.35),
@@ -45,8 +45,11 @@ PALETTE = {
     "crystal_green": ((0.25, 0.85, 0.45), 0.0, 0.08),
     "crystal_violet": ((0.55, 0.25, 0.95), 0.0, 0.08),
     "bone": ((0.78, 0.74, 0.62), 0.0, 0.6),
+    "glass": ((0.75, 0.8, 0.78), 0.0, 0.05),
+    "flame": ((1.0, 0.62, 0.22), 0.0, 0.5),
 }
-GLOW = {"crystal_blue": 1.5, "crystal_green": 1.5, "crystal_violet": 1.5}
+GLOW = {"crystal_blue": 1.5, "crystal_green": 1.5, "crystal_violet": 1.5, "flame": 6.0}
+TRANSLUCENT = {"glass": 0.25}
 
 
 def material(name):
@@ -68,6 +71,12 @@ def material(name):
         bsdf.inputs["Emission Strength"].default_value = GLOW[name]
     if name.startswith("crystal"):
         bsdf.inputs["Coat Weight"].default_value = 0.6
+    if name in TRANSLUCENT:
+        bsdf.inputs["Alpha"].default_value = TRANSLUCENT[name]
+        if hasattr(m, "surface_render_method"):
+            m.surface_render_method = "BLENDED"
+        else:
+            m.blend_method = "BLEND"
     _materials[name] = m
     return m
 
@@ -94,6 +103,8 @@ def loft(sections, closed=True, cap_start=True, cap_end=True):
     for a, b in zip(rings, rings[1:]):
         n = len(a)
         m = len(b)
+        if m == 1 and n == 1:
+            continue
         if m == 1 or n == 1:
             tip, ring = (b[0], a) if m == 1 else (a[0], b)
             for i in range(len(ring) if closed else len(ring) - 1):

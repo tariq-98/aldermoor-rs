@@ -135,6 +135,250 @@
    "triangles": 340
   },
   {
+   "id": "axe.bearded",
+   "label": "Bearded axe",
+   "family": "axe",
+   "slot": "main_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_hip_l"
+   },
+   "clips": {
+    "idle": "Sword_Idle",
+    "attacks": [
+     "Sword_Regular_A",
+     "Sword_Regular_B",
+     "Melee_Hook"
+    ],
+    "work": "TreeChopping_Loop"
+   },
+   "file": "gear/axe.bearded.gltf",
+   "triangles": 1710
+  },
+  {
+   "id": "mace.flanged",
+   "label": "Flanged mace",
+   "family": "mace",
+   "slot": "main_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_hip_l"
+   },
+   "clips": {
+    "idle": "Sword_Idle",
+    "attacks": [
+     "Sword_Regular_A",
+     "Sword_Regular_C"
+    ]
+   },
+   "file": "gear/mace.flanged.gltf",
+   "triangles": 2012
+  },
+  {
+   "id": "spear.ash",
+   "label": "Ash spear",
+   "family": "spear",
+   "slot": "main_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Sword_Idle",
+    "attacks": [
+     "Sword_Dash",
+     "Sword_Regular_A"
+    ]
+   },
+   "file": "gear/spear.ash.gltf",
+   "triangles": 1770
+  },
+  {
+   "id": "sword.great",
+   "label": "Greatsword",
+   "family": "greatsword",
+   "slot": "two_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Sword_Idle",
+    "attacks": [
+     "Sword_Heavy_Combo",
+     "Sword_Regular_C"
+    ],
+    "block": "Sword_Block"
+   },
+   "file": "gear/sword.great.gltf",
+   "triangles": 3806
+  },
+  {
+   "id": "shield.kite",
+   "label": "Kite shield",
+   "family": "shield",
+   "slot": "off_hand",
+   "held": "socket_shield_l",
+   "stowed": {
+    "default": "socket_back_2",
+    "backpack": "socket_pack",
+    "cape": "socket_back_2"
+   },
+   "clips": {
+    "idle": "Idle_Shield_Loop",
+    "block": "Idle_Shield_Loop",
+    "bash": "Shield_OneShot"
+   },
+   "file": "gear/shield.kite.gltf",
+   "triangles": 2326
+  },
+  {
+   "id": "bow.long",
+   "label": "Longbow",
+   "family": "bow",
+   "slot": "two_hand",
+   "held": "socket_hand_l",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Idle_Loop"
+   },
+   "file": "gear/bow.long.gltf",
+   "triangles": 2564
+  },
+  {
+   "id": "staff.necro",
+   "label": "Gravecaller's staff",
+   "family": "staff",
+   "slot": "two_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Spell_Simple_Idle_Loop",
+    "attacks": [
+     "Spell_Simple_Shoot"
+    ]
+   },
+   "file": "gear/staff.necro.gltf",
+   "triangles": 2230
+  },
+  {
+   "id": "staff.healer",
+   "label": "Sunward staff",
+   "family": "staff",
+   "slot": "two_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_back_1",
+    "backpack": "socket_pack_side"
+   },
+   "clips": {
+    "idle": "Spell_Simple_Idle_Loop",
+    "attacks": [
+     "Spell_Simple_Shoot"
+    ]
+   },
+   "file": "gear/staff.healer.gltf",
+   "triangles": 2188
+  },
+  {
+   "id": "book.spells",
+   "label": "Spellbook",
+   "family": "book",
+   "slot": "off_hand",
+   "held": "socket_hand_l",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "idle": "Spell_Simple_Idle_Loop"
+   },
+   "file": "gear/book.spells.gltf",
+   "triangles": 224
+  },
+  {
+   "id": "orb.focus",
+   "label": "Focus orb",
+   "family": "focus",
+   "slot": "off_hand",
+   "held": "socket_hand_l",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "idle": "Spell_Simple_Idle_Loop"
+   },
+   "file": "gear/orb.focus.gltf",
+   "triangles": 990
+  },
+  {
+   "id": "tool.hammer",
+   "label": "Smith's hammer",
+   "family": "tool",
+   "slot": "main_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "work": "Fixing_Kneeling"
+   },
+   "file": "gear/tool.hammer.gltf",
+   "triangles": 1532
+  },
+  {
+   "id": "tool.hoe",
+   "label": "Hoe",
+   "family": "tool",
+   "slot": "two_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_back_1"
+   },
+   "clips": {
+    "work": "Farm_Harvest"
+   },
+   "file": "gear/tool.hoe.gltf",
+   "triangles": 600
+  },
+  {
+   "id": "tool.watering_can",
+   "label": "Watering can",
+   "family": "tool",
+   "slot": "off_hand",
+   "held": "socket_hand_r",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "work": "Farm_Watering"
+   },
+   "file": "gear/tool.watering_can.gltf",
+   "triangles": 272
+  },
+  {
+   "id": "tool.lantern",
+   "label": "Lantern",
+   "family": "tool",
+   "slot": "off_hand",
+   "held": "socket_hand_l",
+   "stowed": {
+    "default": "socket_hip_r"
+   },
+   "clips": {
+    "idle": "Idle_Lantern_Loop"
+   },
+   "file": "gear/tool.lantern.gltf",
+   "triangles": 476
+  },
+  {
    "id": "cape.traveller",
    "label": "Traveller's cape",
    "family": "cape",
