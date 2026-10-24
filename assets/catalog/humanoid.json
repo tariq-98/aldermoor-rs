@@ -4388,6 +4388,1283 @@
     }
    },
    "source": "armour"
+  },
+  {
+   "id": "robe.mage",
+   "label": "Mage's robe",
+   "slot": "torso_under",
+   "layer": 1.25,
+   "files": {
+    "male": "humanoid/male/clothes/robe.mage.gltf",
+    "female": "humanoid/female/clothes/robe.mage.gltf",
+    "elf_male": "humanoid/elf_male/clothes/robe.mage.gltf",
+    "elf_female": "humanoid/elf_female/clothes/robe.mage.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/robe.mage.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/robe.mage.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/robe.mage.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/robe.mage.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    },
+    "female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    }
+   },
+   "covers_hair": false,
+   "dye": "humanoid/textures/robe_mage_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "robe.necro",
+   "label": "Gravecaller's robe",
+   "slot": "torso_under",
+   "layer": 1.25,
+   "files": {
+    "male": "humanoid/male/clothes/robe.necro.gltf",
+    "female": "humanoid/female/clothes/robe.necro.gltf",
+    "elf_male": "humanoid/elf_male/clothes/robe.necro.gltf",
+    "elf_female": "humanoid/elf_female/clothes/robe.necro.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/robe.necro.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/robe.necro.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/robe.necro.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/robe.necro.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    },
+    "female": {
+     "body": [
+      "neck",
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "neck",
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "neck",
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ]
+    }
+   },
+   "covers_hair": false,
+   "dye": "humanoid/textures/robe_necro_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "robe.healer",
+   "label": "Sunward vestments",
+   "slot": "torso_under",
+   "layer": 1.25,
+   "files": {
+    "male": "humanoid/male/clothes/robe.healer.gltf",
+    "female": "humanoid/female/clothes/robe.healer.gltf",
+    "elf_male": "humanoid/elf_male/clothes/robe.healer.gltf",
+    "elf_female": "humanoid/elf_female/clothes/robe.healer.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/robe.healer.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/robe.healer.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/robe.healer.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/robe.healer.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    }
+   },
+   "covers_hair": false,
+   "dye": "humanoid/textures/robe_healer_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "tunic.villager",
+   "label": "Belted tunic",
+   "slot": "torso_under",
+   "layer": 1.15,
+   "files": {
+    "male": "humanoid/male/clothes/tunic.villager.gltf",
+    "female": "humanoid/female/clothes/tunic.villager.gltf",
+    "elf_male": "humanoid/elf_male/clothes/tunic.villager.gltf",
+    "elf_female": "humanoid/elf_female/clothes/tunic.villager.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/tunic.villager.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/tunic.villager.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/tunic.villager.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/tunic.villager.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "ranger.trousers": [
+      "hips"
+     ]
+    },
+    "female": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "ranger.trousers": [
+      "hips"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    }
+   },
+   "covers_hair": false,
+   "dye": "humanoid/textures/tunic_villager_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "coat.traveller",
+   "label": "Traveller's coat",
+   "slot": "torso",
+   "layer": 2.05,
+   "files": {
+    "male": "humanoid/male/clothes/coat.traveller.gltf",
+    "female": "humanoid/female/clothes/coat.traveller.gltf",
+    "elf_male": "humanoid/elf_male/clothes/coat.traveller.gltf",
+    "elf_female": "humanoid/elf_female/clothes/coat.traveller.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/coat.traveller.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/coat.traveller.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/coat.traveller.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/coat.traveller.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "female": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    }
+   },
+   "covers_hair": false,
+   "dye": "humanoid/textures/coat_traveller_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "apron.smith",
+   "label": "Smith's apron",
+   "slot": "torso",
+   "layer": 2.05,
+   "files": {
+    "male": "humanoid/male/clothes/apron.smith.gltf",
+    "female": "humanoid/female/clothes/apron.smith.gltf",
+    "elf_male": "humanoid/elf_male/clothes/apron.smith.gltf",
+    "elf_female": "humanoid/elf_female/clothes/apron.smith.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/apron.smith.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/apron.smith.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/apron.smith.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/apron.smith.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "female": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "elf_male": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "elf_female": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "dwarf_male": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "dwarf_female": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "goblin_male": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "goblin_female": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    }
+   },
+   "covers_hair": false,
+   "dye": "humanoid/textures/apron_smith_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "hat.wizard",
+   "label": "Wizard's hat",
+   "slot": "head",
+   "layer": 2.5,
+   "files": {
+    "male": "humanoid/male/clothes/hat.wizard.gltf",
+    "female": "humanoid/female/clothes/hat.wizard.gltf",
+    "elf_male": "humanoid/elf_male/clothes/hat.wizard.gltf",
+    "elf_female": "humanoid/elf_female/clothes/hat.wizard.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/hat.wizard.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/hat.wizard.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/hat.wizard.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/hat.wizard.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "scalp"
+     ]
+    }
+   },
+   "covers_hair": true,
+   "dye": "humanoid/textures/hat_wizard_dye.png",
+   "source": "garments"
+  },
+  {
+   "id": "hat.straw",
+   "label": "Straw hat",
+   "slot": "head",
+   "layer": 2.5,
+   "files": {
+    "male": "humanoid/male/clothes/hat.straw.gltf",
+    "female": "humanoid/female/clothes/hat.straw.gltf",
+    "elf_male": "humanoid/elf_male/clothes/hat.straw.gltf",
+    "elf_female": "humanoid/elf_female/clothes/hat.straw.gltf",
+    "dwarf_male": "humanoid/dwarf_male/clothes/hat.straw.gltf",
+    "dwarf_female": "humanoid/dwarf_female/clothes/hat.straw.gltf",
+    "goblin_male": "humanoid/goblin_male/clothes/hat.straw.gltf",
+    "goblin_female": "humanoid/goblin_female/clothes/hat.straw.gltf"
+   },
+   "hides": {
+    "male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "female": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "elf_male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "elf_female": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "dwarf_male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "dwarf_female": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "goblin_male": {
+     "body": [
+      "scalp"
+     ]
+    },
+    "goblin_female": {
+     "body": [
+      "scalp"
+     ]
+    }
+   },
+   "covers_hair": true,
+   "dye": "humanoid/textures/hat_straw_dye.png",
+   "source": "garments"
   }
  ],
  "animations": {

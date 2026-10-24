@@ -58,6 +58,10 @@ const LOOKS = {
   skeleton: 'body=skeleton&hair=none&brows=none&beard=none&p.torso_under=none&p.head=plate.helm_kettle&g.main_hand=sword.arming&g.off_hand=shield.round&clip=Zombie_Walk_Fwd_Loop&paused=1&t=0.4&cam=three_quarter',
   barrow_king: 'body=barrow_king&hair=none&brows=none&beard=none&p.torso_under=none&p.torso=plate.cuirass&p.shoulders=plate.pauldrons&g.main_hand=sword.great&g.back=cape.traveller&clip=Sword_Idle&paused=1&t=0.4&cam=three_quarter',
   golem: 'body=golem&hair=none&brows=none&beard=none&p.torso_under=none&clip=Punch_Cross&paused=1&t=0.3&cam=three_quarter',
+  mage_robe: 'body=male&tone=fair&hair=hair.long&haircol=white&brows=brows.strong&beard=beard.full&p.torso_under=robe.mage&p.head=hat.wizard&p.feet=peasant.shoes&g.main_hand=staff.oak&g.off_hand=book.spells&clip=Spell_Simple_Idle_Loop&paused=1&t=0.5&cam=three_quarter',
+  necromancer: 'body=elf_female&tone=porcelain&hair=hair.long&haircol=black&brows=brows.fine&beard=none&p.torso_under=robe.necro&p.feet=peasant.shoes&g.main_hand=staff.necro&clip=Walk_Loop&paused=1&t=0.4&cam=three_quarter',
+  smith: 'body=dwarf_male&tone=tan&hair=hair.buzzed&haircol=auburn&brows=brows.strong&beard=beard.dwarven&p.torso_under=peasant.top&p.legs_under=peasant.trousers&p.feet=peasant.shoes&p.torso=apron.smith&g.main_hand=tool.hammer&clip=Idle_Loop&paused=1&t=0.5&cam=three_quarter',
+  traveller: 'body=female&tone=brown&hair=hair.buns&haircol=black&brows=brows.fine&beard=none&p.torso_under=peasant.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&p.torso=coat.traveller&p.head=hat.straw&g.back=backpack.travel&clip=Walk_Loop&paused=1&t=0.4&cam=three_quarter',
   bearded_head: 'body=male&tone=fair&hair=hair.long&haircol=auburn&brows=brows.strong&beard=beard.full&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&clip=Idle_Loop&paused=1&t=0.5&cam=head',
 };
 

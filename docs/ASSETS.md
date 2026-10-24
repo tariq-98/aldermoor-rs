@@ -170,6 +170,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
 | `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
+| `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig, with generated gaits | `creatures/`, `catalog/creatures.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
@@ -190,7 +191,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 |---|---|
 | Body types | Human, elf, dwarf and goblin, each on a broad and a slender frame; skeleton warrior, the Barrow King (boss) and stone golem |
 | Appearance | 8 skin tones plus 4 goblin greens, 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard |
-| Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron; two colourways each |
+| Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron (two colourways each); mage's, gravecaller's and sunward robes; belted tunic; traveller's coat; smith's apron; wizard's and straw hats. Each garment has a `dye` mask: R for the main cloth, G for the trim |
 | Plate | Cuirass with faulds, pauldrons, gauntlets, leg plates, nasal helm, kettle hat |
 | Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow, longbow and quiver |
 | Caster gear | Oak, gravecaller's and sunward staves; wand, spellbook and focus orb |
@@ -201,7 +202,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 
 **Gaps, next in line:**
 - clips for archery, two-handed weapons, spears, staves, and drawing and sheathing;
-- robes and more clothing designs, with dye masks;
+- dyes in the workshop (the masks exist);
+- a robe idle with the arms held slightly out, so hands don't push through skirts;
 - foxfolk;
 - more beasts and hostile humanoid outfits;
 - a material and texture pass on gear;
