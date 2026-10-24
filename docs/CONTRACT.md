@@ -22,8 +22,10 @@ with. It's a port of `aldermoor-wild/Sources/World.swift`, tested against values
   (49, −84) and the shed at (−26, −48).
 - `world::BOUNDS`: the map's edge, ±280 m.
 
-The renderer's decorative scatter (rocks, flowers, grass) can stay renderer-only, since nothing
-collides with it.
+Draw the buildings, trees, bridge and landmarks from `assets/catalog/environment.json`
+(docs/ASSETS.md, "Scenery"): its `placements` map each house, tree and landmark `world` places
+onto a prop, and list the props for decorative scatter (rocks, flowers, grass, bushes), which
+can stay renderer-only, since nothing collides with it.
 
 ## Running the game: `server::Host`
 

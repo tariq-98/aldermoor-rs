@@ -6,6 +6,7 @@ import { SkeletonHelper } from 'three';
 import { View } from './view.js';
 import { ASSETS, Character } from './character.js';
 import { Beast } from './beast.js';
+import { Scenery } from './scenery.js';
 import { loadLibrary } from './anim.js';
 import { regionDebug } from './regions.js';
 import { renderPanel } from './ui.js';
@@ -32,6 +33,7 @@ const DEFAULTS = {
   turn: false,
   debug: [],
   beast: null,
+  prop: null,
   lod: 0,
 };
 
@@ -68,6 +70,7 @@ function parseHash(hash) {
     else if (k === 'turn') s.turn = v === '1';
     else if (k === 'dbg') s.debug = v ? v.split(',') : [];
     else if (k === 'beast') s.beast = none(v);
+    else if (k === 'prop') s.prop = none(v);
     else if (k === 'lod') s.lod = Number(v) || 0;
   }
   return s;
@@ -99,6 +102,7 @@ function writeHash(s) {
   if (s.turn) p.set('turn', '1');
   if (s.debug.length) p.set('dbg', s.debug.join(','));
   if (s.beast) p.set('beast', s.beast);
+  if (s.prop) p.set('prop', s.prop);
   if (s.lod) p.set('lod', String(s.lod));
   const hash = `#${p.toString()}`;
   if (location.hash !== hash) history.replaceState(null, '', hash);
@@ -136,6 +140,7 @@ class App {
     this.humanoid = await fetchJson(`${ASSETS}catalog/humanoid.json`);
     this.gear = await optionalCatalog('gear.json');
     this.creatures = await optionalCatalog('creatures.json');
+    this.environment = await optionalCatalog('environment.json');
     this.loader = new GLTFLoader();
     this.library = await loadLibrary(this.loader, ASSETS + this.humanoid.animations.file);
     this.view = new View(document.getElementById('stage'));
@@ -164,9 +169,14 @@ class App {
     this.statusText = text;
   }
 
-  /** The height the camera frames: beasts are long, so frame their length too. */
+  /** The height the camera frames: beasts are long, and scenery is often wide. */
   frameHeight() {
     const c = this.character;
+    if (c instanceof Scenery) {
+      const box = new THREE.Box3().setFromObject(c.group);
+      const size = box.getSize(new THREE.Vector3());
+      return Math.max(size.y, Math.max(size.x, size.z) * 0.75);
+    }
     return c instanceof Beast ? c.def.height * 1.9 : c.def.height;
   }
 
@@ -180,6 +190,7 @@ class App {
   /** Builds the character for the current state from scratch. */
   async build() {
     const s = this.state;
+    if (s.prop && this.environment) return this.buildScenery();
     if (s.beast && this.creatures) return this.buildBeast();
     this.status('Loading character…');
     const next = await Character.create({ humanoid: this.humanoid, gear: this.gear, loader: this.loader, library: this.library, lod: s.lod }, s.body);
@@ -236,6 +247,18 @@ class App {
     this.status('');
   }
 
+  /** A piece of scenery replaces the character. */
+  async buildScenery() {
+    const s = this.state;
+    this.status('Loading scenery…');
+    const next = await Scenery.create({ environment: this.environment, loader: this.loader, lod: s.lod }, s.prop);
+    if (this.character) this.character.dispose();
+    this.character = next;
+    this.view.scene.add(next.group);
+    this.applyDebug();
+    this.status('');
+  }
+
   tone(id) {
     return this.toneEntry(id).linear;
   }
@@ -250,6 +273,7 @@ class App {
 
   playClip(name, fade = 0.25) {
     const c = this.character;
+    if (c instanceof Scenery) return;
     if (c instanceof Beast) {
       if (!c.player.play(name, fade)) c.player.play(c.clipNames()[0], fade);
       return;
@@ -289,8 +313,15 @@ class App {
         await this.build();
         this.view.preset(s().cam, this.frameHeight(), this.headY());
       }),
+      setProp: (id) => this.run(async () => {
+        s().prop = id || null;
+        if (id) s().beast = null;
+        await this.build();
+        this.view.preset(s().cam, this.frameHeight(), this.headY());
+      }),
       setBeast: (id) => this.run(async () => {
         s().beast = id || null;
+        if (id) s().prop = null;
         if (!id) s().clip = 'Idle_Loop';
         await this.build();
         this.view.preset(s().cam, this.frameHeight(), this.headY());
@@ -478,6 +509,7 @@ class App {
       humanoid: this.humanoid,
       gear: this.gear,
       creatures: this.creatures,
+      environment: this.environment,
       character: this.character,
       actions: this.actions,
     });

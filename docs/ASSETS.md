@@ -243,6 +243,35 @@ the grip otherwise); set it from the `arrow` curve. `draw` pulls the string's mi
 set it to `clamp(dot(h − rest, pull) / dot(pull, pull), 0, 1) × string curve`, so the string
 always meets the hand, whatever the archer's size. The drawing hand is the one not holding the bow.
 
+## Scenery: `assets/catalog/environment.json`
+
+`build_environment.py` builds the valley's buildings, trees, rocks, plants and props, the
+same kit the Swift village used, remade at the characters' quality.
+- **Props** (`props[]`): `id`, `label`, `kind` (house, landmark, bridge, tree, plant, rock,
+  grass, flower, prop or part), `file`, `height`, `triangles`, and, for obstacles, `footprint`
+  (width and depth in metres at scale 1). Each is centred on its footprint at ground level,
+  facing +Z, with levels of detail beside it like everything else.
+- **Placements** (`placements`) say which prop stands where `world::Valley` puts things:
+  - `houses[i]` take `placements.houses[i % len]` and `trees[i]` take `placements.trees[i % len]`,
+    at the placement's position (on the terrain), yaw and scale;
+  - `bridge` stands at `(world::BRIDGE_X, 0, world::river_z(BRIDGE_X))` with yaw 0. Its deck is
+    exactly `Valley::ground` there, so walkers and the stone agree;
+  - `landmarks` and `dressing` are fixed props: `at` is (x, z) on the terrain, plus `yaw` and
+    `scale`. The landmarks match `world`'s obstacles (the windmill and the shed); dressing
+    (market stall, fences, lamps, well, woodpile…) is walked through;
+  - `scatter` lists, by kind, the props the renderer may scatter itself: rocks, grass, flowers,
+    bushes, riverbank reeds and forest pines.
+- **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
+  `spin.axis` at `spin.rpm`: the windmill's sails.
+- **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
+  thatch, clay tiles, cobbles, bark, rock, foliage, needles), each a colour map and a normal
+  map, with UVs in metres, so samplers repeat. `COLOR_0` multiplies the base colour, as glTF
+  says: grime at the foot of walls, shade under the eaves, canopies darker inside.
+- **Wind:** swaying meshes carry `_WIND` (glTF `_WIND`; three.js `_wind`), 0 where the plant
+  is rooted and 1 at its tips. The workshop moves each vertex along the wind by
+  `_WIND × strength × (gust + flutter) × 0.12 m`, phased by world position (`scenery.js`).
+  Props with `wind: true` have it on every mesh.
+
 ## Materials and file details
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM
@@ -309,6 +338,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
 | `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig, with generated gaits | `creatures/`, `catalog/creatures.json` |
+| `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
   share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
@@ -338,11 +368,14 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: idle, walk, run, attack, hit, death, jump, howl |
+| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
 **Gaps, next in line:**
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
-- more beasts and hostile humanoid outfits;
+- beasts rebuilt to the characters' standard (the wolves are the first draft), then boars,
+  bears and deer, and hostile humanoid outfits;
+- terrain materials and the dungeon's kit;
 - the same surface pass for plate armour;
 - levels of detail for beasts.
 

@@ -75,6 +75,9 @@ def render(path, objects, yaw=25.0, size=(900, 1100), pad=1.0, look=None, height
     else:
         c = (lo + hi) / 2
         h = (hi.z - lo.z) * pad
+        # Wide things (rocks, bridges) are framed by their width too.
+        span = max(hi.x - lo.x, hi.y - lo.y) * pad
+        h = max(h, span * size[1] / size[0] * 0.9)
     if "review_floor" in bpy.data.objects:
         bpy.data.objects["review_floor"].location.z = lo.z
     a = math.radians(yaw)

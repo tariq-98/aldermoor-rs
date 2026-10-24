@@ -82,6 +82,17 @@ impl Gltf {
         out
     }
 
+    /// True when every primitive of every mesh carries the attribute.
+    pub fn all_meshes_have(&self, attribute: &str) -> bool {
+        self.array("meshes").iter().all(|m| {
+            m.get("primitives")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .all(|p| p.get("attributes").and_then(|a| a.get(attribute)).is_some())
+        })
+    }
+
     /// True when every primitive of every skinned mesh carries the attribute.
     pub fn all_skinned_have(&self, attribute: &str) -> bool {
         let meshes = self.array("meshes");

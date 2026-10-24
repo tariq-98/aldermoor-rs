@@ -137,3 +137,20 @@ fn levels_of_detail_sit_beside_their_files() {
     assert_eq!(assets::lod_path("humanoid/male/body.gltf", 1), "humanoid/male/body.lod1.gltf");
     assert_eq!(assets::lod_path("gear/sword.arming.gltf", 2), "gear/sword.arming.lod2.gltf");
 }
+
+#[test]
+fn the_valley_has_scenery_for_everything_world_places() {
+    let cat = assets::Catalog::load(root()).unwrap();
+    let env = cat.environment.as_ref().expect("an environment catalogue");
+    let prop = |id: &str| env.props.iter().find(|p| p.id == id).unwrap_or_else(|| panic!("no prop {id}"));
+    assert!(!env.placements.houses.is_empty() && !env.placements.trees.is_empty());
+    for id in &env.placements.houses {
+        let fp = prop(id).footprint.expect("houses give their footprint");
+        // world::Valley's house obstacle is 7 x 6.2 m at scale 1.
+        assert!((fp[0] - 7.0).abs() < 0.01 && (fp[1] - 6.2).abs() < 0.01, "{id} fits the house obstacle");
+    }
+    let mill = env.placements.landmarks.iter().find(|p| p.prop == "windmill").expect("the windmill");
+    assert_eq!(mill.at, [49.0, -84.0], "where world::Valley's windmill obstacle is");
+    assert!(prop("windmill").parts.iter().any(|p| p.spin.is_some()), "the sails turn");
+    assert!(env.props.iter().filter(|p| p.kind == "tree").all(|p| p.wind), "trees sway");
+}

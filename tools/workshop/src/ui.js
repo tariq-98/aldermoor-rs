@@ -107,9 +107,26 @@ function toggle(label, value, onChange) {
  * Builds (or rebuilds) the panel. `app` provides: state, humanoid, gear, character, actions.
  */
 export function renderPanel(root, app) {
-  const { state, humanoid, gear, creatures, character, actions } = app;
+  const { state, humanoid, gear, creatures, environment, character, actions } = app;
   root.replaceChildren();
   root.append(el('header', { class: 'title' }, el('h1', {}, 'Aldermoor'), el('p', {}, 'Character workshop')));
+
+  // Scenery replaces the character entirely, like beasts.
+  if (environment?.props?.length) {
+    const scenery = section('Scenery', !!state.prop);
+    const kinds = [...new Set(environment.props.map((p) => p.kind))];
+    const options = [{ value: '', label: 'None (characters)' }];
+    for (const k of kinds) {
+      options.push({ group: k.replace(/^\w/, (c) => c.toUpperCase()), options: environment.props.filter((p) => p.kind === k).map((p) => ({ value: p.id, label: `${p.label} (${p.id})` })) });
+    }
+    scenery.body.append(row('Prop', select(options, state.prop || '', (v) => actions.setProp(v))));
+    root.append(scenery.sec);
+  }
+  if (state.prop) {
+    appendView(root, state, actions);
+    root.append(el('footer', { class: 'status', id: 'status' }, ''));
+    return { setTime() {}, setPlaying() {} };
+  }
 
   // Beasts on their own rigs replace the character entirely.
   if (creatures?.creatures?.length) {

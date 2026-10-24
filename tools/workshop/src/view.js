@@ -115,10 +115,38 @@ export class View {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * Scales the stage to the subject: a cottage or a windmill needs the camera, fog, shadows and
+   * floor several times further out than a character does.
+   */
+  fitStage(height) {
+    const k = Math.max(1, height / 2.2);
+    if (this.stageScale === k) return;
+    this.stageScale = k;
+    this.controls.maxDistance = 12 * k;
+    this.scene.fog.near = 9 * k;
+    this.scene.fog.far = 22 * k;
+    this.camera.far = 60 * k;
+    this.camera.updateProjectionMatrix();
+    const { key, fill, rim } = this.lights;
+    key.position.set(-2.6, 3.6, 3.2).multiplyScalar(k);
+    fill.position.set(3.2, 1.6, 1.6).multiplyScalar(k);
+    rim.position.set(0.6, 2.6, -3.4).multiplyScalar(k);
+    const cam = key.shadow.camera;
+    cam.left = -1.6 * k;
+    cam.right = 1.6 * k;
+    cam.top = 2.4 * k;
+    cam.bottom = -0.6 * k;
+    cam.far = 12 * k;
+    cam.updateProjectionMatrix();
+    this.ground.scale.setScalar(k);
+  }
+
   /** Moves the camera to a named preset, framing a character of the given height. */
   preset(name, height = this.fitHeight, headY = null) {
     const p = PRESETS[name] || PRESETS.three_quarter;
     this.fitHeight = height;
+    this.fitStage(height);
     const dir = new THREE.Vector3(...p.dir).normalize();
     let target;
     let span;

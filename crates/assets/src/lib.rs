@@ -288,11 +288,87 @@ pub struct CreatureCatalog {
     pub creatures: Vec<Creature>,
 }
 
+/// A piece of scenery: a building, tree, rock, plant or prop (`assets/catalog/environment.json`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Prop {
+    pub id: String,
+    pub label: String,
+    /// house, landmark, bridge, tree, plant, rock, grass, flower, prop or part.
+    pub kind: String,
+    pub file: String,
+    #[serde(default)]
+    pub height: f32,
+    #[serde(default)]
+    pub triangles: u32,
+    /// Width and depth at scale 1 (metres), for props the `world` crate treats as obstacles.
+    #[serde(default)]
+    pub footprint: Option<[f32; 2]>,
+    /// Sways in the wind by its `_WIND` vertex attribute.
+    #[serde(default)]
+    pub wind: bool,
+    /// Moving parts (the windmill's sails): a file placed at `at`, spinning about `spin.axis`.
+    #[serde(default)]
+    pub parts: Vec<PropPart>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PropPart {
+    pub file: String,
+    pub at: [f32; 3],
+    #[serde(default)]
+    pub spin: Option<Spin>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Spin {
+    pub axis: [f32; 3],
+    pub rpm: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Placed {
+    pub prop: String,
+    /// x and z on the ground (world metres); y comes from the terrain.
+    pub at: [f32; 2],
+    #[serde(default)]
+    pub yaw: f32,
+    #[serde(default = "one")]
+    pub scale: f32,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// Which props stand where `world::Valley` puts things.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Placements {
+    /// `Valley::houses[i]` takes `houses[i % len]`; trees likewise.
+    pub houses: Vec<String>,
+    pub trees: Vec<String>,
+    pub bridge: String,
+    #[serde(default)]
+    pub landmarks: Vec<Placed>,
+    #[serde(default)]
+    pub dressing: Vec<Placed>,
+    /// Props the renderer scatters itself, by kind.
+    #[serde(default)]
+    pub scatter: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EnvironmentCatalog {
+    pub version: u32,
+    pub props: Vec<Prop>,
+    pub placements: Placements,
+}
+
 pub struct Catalog {
     pub root: PathBuf,
     pub humanoid: Humanoid,
     pub gear: Option<GearCatalog>,
     pub creatures: Option<CreatureCatalog>,
+    pub environment: Option<EnvironmentCatalog>,
 }
 
 /// Something a catalogue entry promises that the files don't deliver.
@@ -329,7 +405,9 @@ impl Catalog {
         let optional = |name: &str| root.join("catalog").join(name);
         let gear = if optional("gear.json").exists() { Some(read_json(&optional("gear.json"))?) } else { None };
         let creatures = if optional("creatures.json").exists() { Some(read_json(&optional("creatures.json"))?) } else { None };
-        Ok(Catalog { root, humanoid, gear, creatures })
+        let environment =
+            if optional("environment.json").exists() { Some(read_json(&optional("environment.json"))?) } else { None };
+        Ok(Catalog { root, humanoid, gear, creatures, environment })
     }
 
     pub fn path(&self, rel: &str) -> PathBuf {
@@ -592,6 +670,38 @@ impl Catalog {
             }
         }
 
+        // Scenery: files, levels of detail, moving parts and the placements' props.
+        if let Some(env) = &self.environment {
+            let ids: BTreeSet<&str> = env.props.iter().map(|p| p.id.as_str()).collect();
+            for prop in &env.props {
+                if let Err(e) = open(&prop.file) {
+                    problem(format!("prop {}: {e}", prop.id));
+                }
+                check_lods(&format!("prop {}", prop.id), &prop.file, &mut problem);
+                for part in &prop.parts {
+                    if let Err(e) = open(&part.file) {
+                        problem(format!("prop {}: part {e}", prop.id));
+                    }
+                }
+                if prop.wind {
+                    if let Ok(g) = open(&prop.file) {
+                        if !g.all_meshes_have("_WIND") {
+                            problem(format!("prop {}: sways in the wind but a mesh lacks _WIND", prop.id));
+                        }
+                    }
+                }
+            }
+            let pl = &env.placements;
+            let named = pl.houses.iter().chain(&pl.trees).chain(std::iter::once(&pl.bridge))
+                .chain(pl.landmarks.iter().chain(&pl.dressing).map(|p| &p.prop))
+                .chain(pl.scatter.values().flatten());
+            for id in named {
+                if !ids.contains(id.as_str()) {
+                    problem(format!("environment placements name {id}, which isn't a prop"));
+                }
+            }
+        }
+
         // The hard content rule.
         let mut words: Vec<String> = Vec::new();
         words.extend(h.pieces.iter().flat_map(|p| [p.id.clone(), p.label.clone()]));
@@ -601,6 +711,9 @@ impl Catalog {
         }
         if let Some(c) = &self.creatures {
             words.extend(c.creatures.iter().flat_map(|c| [c.id.clone(), c.label.clone(), c.family.clone()]));
+        }
+        if let Some(e) = &self.environment {
+            words.extend(e.props.iter().flat_map(|p| [p.id.clone(), p.label.clone(), p.kind.clone()]));
         }
         for w in words {
             let lower = w.to_lowercase();

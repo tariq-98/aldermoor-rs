@@ -84,6 +84,12 @@ const LOOKS = {
   knight_lod2: 'body=male&tone=fair&hair=hair.simple_parted&haircol=dark%20brown&brows=brows.strong&beard=beard.full&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&p.torso=plate.cuirass&p.shoulders=plate.pauldrons&p.hands=plate.gauntlets&p.legs=plate.legs&p.head=plate.helm_norman&g.main_hand=sword.arming&g.off_hand=shield.round&g.back=cape.traveller&clip=Sword_Idle&paused=1&t=0.4&cam=three_quarter&lod=2',
   fox_lod2: 'body=foxfolk_female&tone=red%20fox&hair=hair.long&haircol=copper&brows=none&beard=none&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&g.main_hand=bow.hunting&g.ammo=quiver.leather&clip=Bow_Aim_Loop&paused=1&t=0.4&cam=three_quarter&lod=2',
   farmhand_lod2: 'body=male&tone=tan&hair=hair.simple_parted&haircol=dark%20brown&brows=brows.strong&beard=beard.full&p.torso_under=peasant.top&p.legs_under=peasant.trousers&p.feet=peasant.shoes&clip=Idle_Loop&paused=1&t=0.6&cam=three_quarter&lod=2',
+  // Scenery: buildings, the windmill's turning sails, swaying trees.
+  scene_cottage: 'prop=cottage.thatch&cam=three_quarter',
+  scene_windmill: 'prop=windmill&cam=three_quarter',
+  scene_oak: 'prop=tree.oak.2&cam=three_quarter',
+  scene_bridge: 'prop=bridge.stone&cam=left',
+  scene_market: 'prop=market.stall&cam=three_quarter',
   bearded_head: 'body=male&tone=fair&hair=hair.long&haircol=auburn&brows=brows.strong&beard=beard.full&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&clip=Idle_Loop&paused=1&t=0.5&cam=head',
 };
 
@@ -160,6 +166,8 @@ async function main() {
           hair: [...c.hair.keys()].map((k) => `${k}:${c.hair.get(k).entries.every((e) => e.mesh.visible) ? 'shown' : 'hidden'}`),
           bodyMask: c.masks.body.toString(2),
           triangles: c.triangles(),
+          frame: Number(w.frameHeight().toFixed(2)),
+          camera: w.view.camera.position.toArray().map((v) => Number(v.toFixed(2))),
           webgl: w.view.renderer.getContext().getParameter(w.view.renderer.getContext().RENDERER),
         };
       });

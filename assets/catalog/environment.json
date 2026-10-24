@@ -1,0 +1,609 @@
+{
+ "version": 1,
+ "props": [
+  {
+   "id": "barrel",
+   "label": "Barrel",
+   "kind": "prop",
+   "file": "environment/barrel.gltf",
+   "height": 0.9,
+   "triangles": 656
+  },
+  {
+   "id": "bench",
+   "label": "Bench",
+   "kind": "prop",
+   "file": "environment/bench.gltf",
+   "height": 0.86,
+   "triangles": 648
+  },
+  {
+   "id": "bridge.stone",
+   "label": "Stone bridge",
+   "kind": "bridge",
+   "footprint": [
+    5.3,
+    18.8
+   ],
+   "file": "environment/bridge.stone.gltf",
+   "height": 3.932,
+   "triangles": 11592
+  },
+  {
+   "id": "bush.1",
+   "label": "Bush",
+   "kind": "plant",
+   "wind": true,
+   "file": "environment/bush.1.gltf",
+   "height": 1.252,
+   "triangles": 1280
+  },
+  {
+   "id": "bush.2",
+   "label": "Bush",
+   "kind": "plant",
+   "wind": true,
+   "file": "environment/bush.2.gltf",
+   "height": 1.28,
+   "triangles": 1280
+  },
+  {
+   "id": "cottage.stone",
+   "label": "Stone cottage",
+   "kind": "house",
+   "footprint": [
+    7.0,
+    6.2
+   ],
+   "file": "environment/cottage.stone.gltf",
+   "height": 7.55,
+   "triangles": 11056
+  },
+  {
+   "id": "cottage.thatch",
+   "label": "Thatched cottage",
+   "kind": "house",
+   "footprint": [
+    7.0,
+    6.2
+   ],
+   "file": "environment/cottage.thatch.gltf",
+   "height": 7.95,
+   "triangles": 11108
+  },
+  {
+   "id": "cottage.tiles",
+   "label": "Tiled cottage",
+   "kind": "house",
+   "footprint": [
+    7.0,
+    6.2
+   ],
+   "file": "environment/cottage.tiles.gltf",
+   "height": 7.45,
+   "triangles": 10948
+  },
+  {
+   "id": "crate",
+   "label": "Crate",
+   "kind": "prop",
+   "file": "environment/crate.gltf",
+   "height": 0.81,
+   "triangles": 1404
+  },
+  {
+   "id": "fence",
+   "label": "Fence",
+   "kind": "prop",
+   "footprint": [
+    6.2,
+    0.2
+   ],
+   "file": "environment/fence.gltf",
+   "height": 1.3,
+   "triangles": 540
+  },
+  {
+   "id": "flowers.1",
+   "label": "Flowers",
+   "kind": "flower",
+   "wind": true,
+   "file": "environment/flowers.1.gltf",
+   "height": 0.339,
+   "triangles": 242
+  },
+  {
+   "id": "flowers.2",
+   "label": "Flowers",
+   "kind": "flower",
+   "wind": true,
+   "file": "environment/flowers.2.gltf",
+   "height": 0.287,
+   "triangles": 242
+  },
+  {
+   "id": "flowers.3",
+   "label": "Flowers",
+   "kind": "flower",
+   "wind": true,
+   "file": "environment/flowers.3.gltf",
+   "height": 0.314,
+   "triangles": 242
+  },
+  {
+   "id": "flowers.4",
+   "label": "Flowers",
+   "kind": "flower",
+   "wind": true,
+   "file": "environment/flowers.4.gltf",
+   "height": 0.343,
+   "triangles": 242
+  },
+  {
+   "id": "grass.1",
+   "label": "Grass",
+   "kind": "grass",
+   "wind": true,
+   "file": "environment/grass.1.gltf",
+   "height": 0.538,
+   "triangles": 56
+  },
+  {
+   "id": "grass.2",
+   "label": "Grass",
+   "kind": "grass",
+   "wind": true,
+   "file": "environment/grass.2.gltf",
+   "height": 0.593,
+   "triangles": 80
+  },
+  {
+   "id": "grass.3",
+   "label": "Grass",
+   "kind": "grass",
+   "wind": true,
+   "file": "environment/grass.3.gltf",
+   "height": 0.562,
+   "triangles": 104
+  },
+  {
+   "id": "hay.bale",
+   "label": "Hay bale",
+   "kind": "prop",
+   "file": "environment/hay.bale.gltf",
+   "height": 0.919,
+   "triangles": 320
+  },
+  {
+   "id": "lamp.post",
+   "label": "Lamp post",
+   "kind": "prop",
+   "file": "environment/lamp.post.gltf",
+   "height": 3.4,
+   "triangles": 360
+  },
+  {
+   "id": "market.stall",
+   "label": "Market stall",
+   "kind": "prop",
+   "footprint": [
+    4.4,
+    2.6
+   ],
+   "file": "environment/market.stall.gltf",
+   "height": 3.05,
+   "triangles": 2584
+  },
+  {
+   "id": "reeds",
+   "label": "Reeds",
+   "kind": "plant",
+   "wind": true,
+   "file": "environment/reeds.gltf",
+   "height": 1.593,
+   "triangles": 380
+  },
+  {
+   "id": "rock.1",
+   "label": "Rock",
+   "kind": "rock",
+   "file": "environment/rock.1.gltf",
+   "height": 1.486,
+   "triangles": 1280
+  },
+  {
+   "id": "rock.2",
+   "label": "Rock",
+   "kind": "rock",
+   "file": "environment/rock.2.gltf",
+   "height": 1.169,
+   "triangles": 1280
+  },
+  {
+   "id": "rock.3",
+   "label": "Rock",
+   "kind": "rock",
+   "file": "environment/rock.3.gltf",
+   "height": 1.046,
+   "triangles": 1280
+  },
+  {
+   "id": "rock.4",
+   "label": "Rock",
+   "kind": "rock",
+   "file": "environment/rock.4.gltf",
+   "height": 1.393,
+   "triangles": 1280
+  },
+  {
+   "id": "shed",
+   "label": "Shed",
+   "kind": "landmark",
+   "footprint": [
+    8.8,
+    7.4
+   ],
+   "file": "environment/shed.gltf",
+   "height": 5.57,
+   "triangles": 4000
+  },
+  {
+   "id": "signpost",
+   "label": "Signpost",
+   "kind": "prop",
+   "file": "environment/signpost.gltf",
+   "height": 2.4,
+   "triangles": 324
+  },
+  {
+   "id": "tree.oak.1",
+   "label": "Oak",
+   "kind": "tree",
+   "wind": true,
+   "file": "environment/tree.oak.1.gltf",
+   "height": 7.843,
+   "triangles": 3830
+  },
+  {
+   "id": "tree.oak.2",
+   "label": "Oak",
+   "kind": "tree",
+   "wind": true,
+   "file": "environment/tree.oak.2.gltf",
+   "height": 8.334,
+   "triangles": 3830
+  },
+  {
+   "id": "tree.oak.3",
+   "label": "Oak",
+   "kind": "tree",
+   "wind": true,
+   "file": "environment/tree.oak.3.gltf",
+   "height": 9.011,
+   "triangles": 3830
+  },
+  {
+   "id": "tree.pine.1",
+   "label": "Pine",
+   "kind": "tree",
+   "wind": true,
+   "file": "environment/tree.pine.1.gltf",
+   "height": 8.873,
+   "triangles": 428
+  },
+  {
+   "id": "tree.pine.2",
+   "label": "Pine",
+   "kind": "tree",
+   "wind": true,
+   "file": "environment/tree.pine.2.gltf",
+   "height": 10.373,
+   "triangles": 428
+  },
+  {
+   "id": "well",
+   "label": "Well",
+   "kind": "prop",
+   "footprint": [
+    1.9,
+    1.9
+   ],
+   "file": "environment/well.gltf",
+   "height": 2.75,
+   "triangles": 620
+  },
+  {
+   "id": "windmill",
+   "label": "Windmill",
+   "kind": "landmark",
+   "footprint": [
+    5.0,
+    5.0
+   ],
+   "parts": [
+    {
+     "file": "environment/windmill.sails.gltf",
+     "at": [
+      0.0,
+      7.2,
+      1.9
+     ],
+     "spin": {
+      "axis": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "rpm": 5.0
+     }
+    }
+   ],
+   "file": "environment/windmill.gltf",
+   "height": 11.0,
+   "triangles": 2002
+  },
+  {
+   "id": "windmill.sails",
+   "label": "Windmill sails",
+   "kind": "part",
+   "file": "environment/windmill.sails.gltf",
+   "height": 5.8,
+   "triangles": 5272
+  },
+  {
+   "id": "woodpile",
+   "label": "Woodpile",
+   "kind": "prop",
+   "file": "environment/woodpile.gltf",
+   "height": 0.725,
+   "triangles": 420
+  }
+ ],
+ "placements": {
+  "houses": [
+   "cottage.thatch",
+   "cottage.tiles",
+   "cottage.stone"
+  ],
+  "trees": [
+   "tree.oak.1",
+   "tree.oak.2",
+   "tree.oak.3"
+  ],
+  "bridge": "bridge.stone",
+  "landmarks": [
+   {
+    "prop": "windmill",
+    "at": [
+     49.0,
+     -84.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "shed",
+    "at": [
+     -26.0,
+     -48.0
+    ],
+    "yaw": 0.0
+   }
+  ],
+  "dressing": [
+   {
+    "prop": "market.stall",
+    "at": [
+     -4.0,
+     -26.0
+    ],
+    "yaw": 0.1
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -28.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -22.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -16.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     18.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     24.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     30.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     36.0,
+     -47.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -8.0,
+     12.0
+    ],
+    "yaw": 1.5708
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -8.0,
+     6.0
+    ],
+    "yaw": 1.5708
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -8.0,
+     0.0
+    ],
+    "yaw": 1.5708
+   },
+   {
+    "prop": "fence",
+    "at": [
+     -8.0,
+     -6.0
+    ],
+    "yaw": 1.5708
+   },
+   {
+    "prop": "lamp.post",
+    "at": [
+     9.0,
+     1.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "lamp.post",
+    "at": [
+     -3.0,
+     -24.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "lamp.post",
+    "at": [
+     9.0,
+     -40.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "lamp.post",
+    "at": [
+     9.0,
+     -70.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "well",
+    "at": [
+     6.0,
+     -30.0
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "woodpile",
+    "at": [
+     -17.5,
+     -9.5
+    ],
+    "yaw": 1.75
+   },
+   {
+    "prop": "barrel",
+    "at": [
+     -1.6,
+     -24.6
+    ],
+    "yaw": 0.0
+   },
+   {
+    "prop": "crate",
+    "at": [
+     -6.6,
+     -24.9
+    ],
+    "yaw": 0.3
+   },
+   {
+    "prop": "hay.bale",
+    "at": [
+     -22.0,
+     -44.0
+    ],
+    "yaw": 0.4
+   },
+   {
+    "prop": "signpost",
+    "at": [
+     4.0,
+     -50.0
+    ],
+    "yaw": 0.6
+   },
+   {
+    "prop": "bench",
+    "at": [
+     -9.0,
+     -16.5
+    ],
+    "yaw": 0.18
+   }
+  ],
+  "scatter": {
+   "rocks": [
+    "rock.1",
+    "rock.2",
+    "rock.3",
+    "rock.4"
+   ],
+   "grass": [
+    "grass.1",
+    "grass.2",
+    "grass.3"
+   ],
+   "flowers": [
+    "flowers.1",
+    "flowers.2",
+    "flowers.3",
+    "flowers.4"
+   ],
+   "bushes": [
+    "bush.1",
+    "bush.2"
+   ],
+   "riverbank": [
+    "reeds"
+   ],
+   "forest": [
+    "tree.pine.1",
+    "tree.pine.2"
+   ]
+  }
+ }
+}

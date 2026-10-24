@@ -16,3 +16,4 @@ step build_back.py       # capes and packs for every body type
 step build_armour.py     # plate for every body type
 step build_garments.py   # robes, tunic, coat, apron and hats for every body type
 step build_beasts.py     # wolves on their own rig
+step build_environment.py # buildings, trees, rocks, plants and village props
