@@ -1,10 +1,11 @@
-"""Builds the races from the human bodies: elves, dwarves and goblins, on both frames.
+"""Builds the races from the human bodies: elves, dwarves, foxfolk and goblins, on both frames.
 
     art/blender.sh -P art/blender/build_races.py [-- --review]
 
 Needs build_humanoid.py's output. For each race and frame it deforms the body, eyes, every
 outfit and every hairstyle by the race's bone-segment scales (aldermoor_art/races.py), adds race
-features (pointed ears, a bigger nose, a dwarven beard), rebuilds the skeleton's joint positions
+features (pointed ears, a bigger nose, a dwarven beard; foxfolk's muzzle, ears, tail and fur,
+aldermoor_art/fox.py), rebuilds the skeleton's joint positions
 and exports everything under assets/humanoid/<race>_<frame>/. It records the new body types,
 races and files in assets/catalog/humanoid.json. Run build_armour.py and build_back.py
 afterwards; they fit plate and capes to every body type, races included.
@@ -18,15 +19,28 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import cloth, export, races as rc, regions as rg, review, scene as sc  # noqa: E402
+from aldermoor_art import cloth, export, fox, races as rc, regions as rg, review, scene as sc  # noqa: E402
 
 OUT = sc.OUT / "humanoid"
 CAT_PATH = sc.OUT / "catalog" / "humanoid.json"
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+# `--only=foxfolk` rebuilds just those races and keeps the others in the catalogue.
+ONLY = next((a.split("=", 1)[1].split(",") for a in ARGS if a.startswith("--only=")), None)
 
 FRAMES = {"male": "broad frame", "female": "slender frame"}
 GOBLIN_TONES = [("goblin green", [0.10, 0.17, 0.05]), ("bog", [0.07, 0.11, 0.045]), ("ashen", [0.14, 0.15, 0.11]),
                 ("moss", [0.13, 0.22, 0.07])]
+# Fur: the coat, then the light fur (muzzle, throat, bib, inner ears, tail tip) and the dark
+# (nose, ear backs, socks and gloves), all linear RGB. The body's markings mask places them.
+FOX_TONES = [
+    ("red fox", [0.40, 0.12, 0.028], [0.62, 0.55, 0.46], [0.022, 0.016, 0.012]),
+    ("ember", [0.24, 0.05, 0.018], [0.55, 0.45, 0.36], [0.015, 0.01, 0.008]),
+    ("sand", [0.48, 0.32, 0.15], [0.72, 0.64, 0.52], [0.2, 0.12, 0.06]),
+    ("silver", [0.13, 0.13, 0.14], [0.62, 0.62, 0.63], [0.015, 0.015, 0.016]),
+    ("arctic", [0.66, 0.66, 0.68], [0.78, 0.78, 0.8], [0.22, 0.22, 0.24]),
+]
+# The tail swings on springs, held up more than a cape hangs.
+FOX_TAIL_SPRINGS = {"stiffness": 2.2, "drag": 0.3, "gravity": 1.6, "radius": 0.055}
 
 
 def gl(v):
@@ -90,6 +104,20 @@ def build(race_id, race, frame, cat):
         rc.pointed_ears(body, regions, None, race["ears"], head)
     if race.get("nose"):
         rc.bigger_nose(body, regions, race["nose"], head)
+    extra = {}
+    if race.get("fox"):
+        face = fox.Face(skel, body, eyes)
+        fox.muzzle(face, [body] + outfits + [m for ms in hair.values() for m in ms])
+        fox.fold_ears(body)
+        parts = [fox.fox_ear(face, side) for side in (1, -1)]
+        pts = fox.tail_points(skel, body)
+        fox.add_tail_bones(skel, pts)
+        parts.append(fox.tail_mesh(pts))
+        fox.join_parts(body, parts)
+        sc.bind(body, skel)
+        _, marks = fox.paint(body, face, skel, OUT / "textures", f"fox_{frame}")
+        extra["markings"] = f"humanoid/textures/{marks}"
+        extra["springs"] = dict(FOX_TAIL_SPRINGS, chains=[fox.TAIL])
     extra_hair = []
     if race_id == "dwarf":
         src = hair["beard.full"][0]
@@ -121,9 +149,11 @@ def build(race_id, race, frame, cat):
         "height": round(max((body.matrix_world @ v.co).z for v in body.data.vertices), 3),
         "skin_reference": base["skin_reference"],
         "sockets": base["sockets"],
-        "colliders": cloth.colliders(skel, body),
+        "colliders": cloth.colliders(skel, body, extra=[(b, nb, 0.012) for b, nb in zip(fox.TAIL, fox.TAIL[1:] + [None])]
+                                     if race.get("fox") else ()),
         # Held and stowed items scale with the race (a goblin's shield is goblin-sized).
         "gear_scale": race.get("gear_scale", 1.0),
+        **extra,
     }
     if "--review" in ARGS:
         review.render(sc.ROOT / "art" / "out" / "review" / "races" / f"{bt}-0.png", [body, eyes], yaw=20, size=(500, 800))
@@ -132,18 +162,26 @@ def build(race_id, race, frame, cat):
 
 def main():
     cat = json.loads(CAT_PATH.read_text())
-    # Start from the human-only catalogue each time.
-    for k in [k for k, v in cat["body_types"].items() if v.get("race") not in (None, "human")]:
+    # Start from the human-only catalogue each time (or drop just the races being rebuilt).
+    for k in [k for k, v in cat["body_types"].items() if v.get("race") not in (None, "human")
+              and (not ONLY or v.get("race") in ONLY)]:
         del cat["body_types"][k]
     for k, v in cat["body_types"].items():
-        v["race"], v["frame"] = "human", k
-        v["label"] = f"Human, {FRAMES[k]}"
-    cat["races"] = {"human": {"label": "Human", "frames": {f: f for f in FRAMES}}}
+        if k in FRAMES:
+            v["race"], v["frame"] = "human", k
+            v["label"] = f"Human, {FRAMES[k]}"
+    cat["races"] = {"human": {"label": "Human", "frames": {f: f for f in FRAMES}},
+                    **({k: v for k, v in cat.get("races", {}).items() if k not in ONLY} if ONLY else {})}
     tones = {t["id"] for t in cat["skin_tones"]}
     for tid, lin in GOBLIN_TONES:
         if tid not in tones:
             cat["skin_tones"].append({"id": tid, "linear": lin, "races": ["goblin"]})
+    for tid, lin, light, dark in FOX_TONES:
+        if tid not in tones:
+            cat["skin_tones"].append({"id": tid, "linear": lin, "light": light, "dark": dark, "races": ["foxfolk"]})
     for race_id, race in rc.RACES.items():
+        if ONLY and race_id not in ONLY:
+            continue
         cat["races"][race_id] = {"label": race["label"], "frames": {}, "npc_only": bool(race.get("npc_only"))}
         for frame in FRAMES:
             bt, entry, files, extra = build(race_id, race, frame, cat)
@@ -172,6 +210,8 @@ def main():
                 d.update(tone="goblin green", hair="hair.buzzed", beard=None)
             if race_id == "elf":
                 d.update(hair="hair.long", beard=None, tone="fair" if frame == "male" else "porcelain")
+            if race_id == "foxfolk":
+                d.update(hair="hair.buzzed" if frame == "male" else "hair.long", beard=None, brows=None, tone="red fox")
             cat["defaults"][bt] = d
             print("RACE", bt, entry["height"], "m tall")
     CAT_PATH.write_text(json.dumps(cat, indent=1))

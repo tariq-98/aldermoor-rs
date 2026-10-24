@@ -128,6 +128,111 @@
    "races": [
     "goblin"
    ]
+  },
+  {
+   "id": "red fox",
+   "linear": [
+    0.4,
+    0.12,
+    0.028
+   ],
+   "light": [
+    0.62,
+    0.55,
+    0.46
+   ],
+   "dark": [
+    0.022,
+    0.016,
+    0.012
+   ],
+   "races": [
+    "foxfolk"
+   ]
+  },
+  {
+   "id": "ember",
+   "linear": [
+    0.24,
+    0.05,
+    0.018
+   ],
+   "light": [
+    0.55,
+    0.45,
+    0.36
+   ],
+   "dark": [
+    0.015,
+    0.01,
+    0.008
+   ],
+   "races": [
+    "foxfolk"
+   ]
+  },
+  {
+   "id": "sand",
+   "linear": [
+    0.48,
+    0.32,
+    0.15
+   ],
+   "light": [
+    0.72,
+    0.64,
+    0.52
+   ],
+   "dark": [
+    0.2,
+    0.12,
+    0.06
+   ],
+   "races": [
+    "foxfolk"
+   ]
+  },
+  {
+   "id": "silver",
+   "linear": [
+    0.13,
+    0.13,
+    0.14
+   ],
+   "light": [
+    0.62,
+    0.62,
+    0.63
+   ],
+   "dark": [
+    0.015,
+    0.015,
+    0.016
+   ],
+   "races": [
+    "foxfolk"
+   ]
+  },
+  {
+   "id": "arctic",
+   "linear": [
+    0.66,
+    0.66,
+    0.68
+   ],
+   "light": [
+    0.78,
+    0.78,
+    0.8
+   ],
+   "dark": [
+    0.22,
+    0.22,
+    0.24
+   ],
+   "races": [
+    "foxfolk"
+   ]
   }
  ],
  "hair_colours": [
@@ -1445,6 +1550,568 @@
    ],
    "gear_scale": 0.92
   },
+  "foxfolk_male": {
+   "label": "Foxfolk, broad frame",
+   "race": "foxfolk",
+   "frame": "male",
+   "file": "humanoid/foxfolk_male/body.gltf",
+   "pelvis": [
+    0.0,
+    0.93973,
+    -0.043
+   ],
+   "height": 1.878,
+   "skin_reference": [
+    0.37912195920944214,
+    0.19172488152980804,
+    0.1066417470574379
+   ],
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_back_bow",
+    "socket_back_pole",
+    "socket_back_shield",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_blade",
+    "socket_pack_side",
+    "socket_pack_side_r",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.1484,
+     "a": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.1242,
+      0.0038
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.1506,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.1031,
+      -0.002
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.1523,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.1289,
+      0.0065
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.1795,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.2047,
+      -0.0373
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.1044,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.4202,
+      -0.0026
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.1044,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.4202,
+      -0.0026
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.064,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.4494,
+      0.0132
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.064,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.4494,
+      0.0132
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.0851,
+     "a": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.2461,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.0851,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.2461,
+      -0.0029
+     ]
+    },
+    {
+     "bone": "tail_01",
+     "radius": 0.0644,
+     "a": [
+      0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_02",
+     "radius": 0.0927,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_03",
+     "radius": 0.0977,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_04",
+     "radius": 0.088,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      -0.0
+     ]
+    },
+    {
+     "bone": "tail_05",
+     "radius": 0.067,
+     "a": [
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      -0.0
+     ]
+    },
+    {
+     "bone": "tail_06",
+     "radius": 0.0345,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    }
+   ],
+   "gear_scale": 0.97,
+   "markings": "humanoid/textures/fox_male_markings.png",
+   "springs": {
+    "stiffness": 2.2,
+    "drag": 0.3,
+    "gravity": 1.6,
+    "radius": 0.055,
+    "chains": [
+     [
+      "tail_01",
+      "tail_02",
+      "tail_03",
+      "tail_04",
+      "tail_05",
+      "tail_06"
+     ]
+    ]
+   }
+  },
+  "foxfolk_female": {
+   "label": "Foxfolk, slender frame",
+   "race": "foxfolk",
+   "frame": "female",
+   "file": "humanoid/foxfolk_female/body.gltf",
+   "pelvis": [
+    0.0,
+    0.92171,
+    -0.0457
+   ],
+   "height": 1.833,
+   "skin_reference": [
+    0.39401793479919434,
+    0.19417804479599,
+    0.10027362406253815
+   ],
+   "sockets": [
+    "socket_back",
+    "socket_back_1",
+    "socket_back_2",
+    "socket_back_bow",
+    "socket_back_pole",
+    "socket_back_shield",
+    "socket_hand_l",
+    "socket_hand_r",
+    "socket_head",
+    "socket_hip_l",
+    "socket_hip_r",
+    "socket_pack",
+    "socket_pack_blade",
+    "socket_pack_side",
+    "socket_pack_side_r",
+    "socket_quiver",
+    "socket_quiver_hip",
+    "socket_shield_l"
+   ],
+   "colliders": [
+    {
+     "bone": "pelvis",
+     "radius": 0.1443,
+     "a": [
+      0.0,
+      0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.1228,
+      -0.0009
+     ]
+    },
+    {
+     "bone": "spine_01",
+     "radius": 0.1297,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.107,
+      -0.0007
+     ]
+    },
+    {
+     "bone": "spine_02",
+     "radius": 0.1356,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.1225,
+      0.0042
+     ]
+    },
+    {
+     "bone": "spine_03",
+     "radius": 0.1503,
+     "a": [
+      -0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.1896,
+      -0.0293
+     ]
+    },
+    {
+     "bone": "thigh_l",
+     "radius": 0.1021,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.4011,
+      -0.0201
+     ]
+    },
+    {
+     "bone": "thigh_r",
+     "radius": 0.1021,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.4011,
+      -0.0201
+     ]
+    },
+    {
+     "bone": "calf_l",
+     "radius": 0.0596,
+     "a": [
+      0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.4567,
+      0.0062
+     ]
+    },
+    {
+     "bone": "calf_r",
+     "radius": 0.0596,
+     "a": [
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      0.0,
+      0.4567,
+      0.0062
+     ]
+    },
+    {
+     "bone": "upperarm_l",
+     "radius": 0.0635,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.2355,
+      -0.0003
+     ]
+    },
+    {
+     "bone": "upperarm_r",
+     "radius": 0.0635,
+     "a": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "b": [
+      0.0,
+      0.2355,
+      -0.0003
+     ]
+    },
+    {
+     "bone": "tail_01",
+     "radius": 0.0644,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_02",
+     "radius": 0.0927,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_03",
+     "radius": 0.0977,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_04",
+     "radius": 0.088,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    },
+    {
+     "bone": "tail_05",
+     "radius": 0.067,
+     "a": [
+      -0.0,
+      -0.0,
+      -0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      -0.0
+     ]
+    },
+    {
+     "bone": "tail_06",
+     "radius": 0.0345,
+     "a": [
+      -0.0,
+      -0.0,
+      0.0
+     ],
+     "b": [
+      -0.0,
+      0.12,
+      0.0
+     ]
+    }
+   ],
+   "gear_scale": 0.97,
+   "markings": "humanoid/textures/fox_female_markings.png",
+   "springs": {
+    "stiffness": 2.2,
+    "drag": 0.3,
+    "gravity": 1.6,
+    "radius": 0.055,
+    "chains": [
+     [
+      "tail_01",
+      "tail_02",
+      "tail_03",
+      "tail_04",
+      "tail_05",
+      "tail_06"
+     ]
+    ]
+   }
+  },
   "goblin_male": {
    "label": "Goblin, broad frame",
    "race": "goblin",
@@ -2351,6 +3018,8 @@
     "elf_female": "humanoid/elf_female/hair/hair.simple_parted.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/hair.simple_parted.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/hair.simple_parted.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/hair.simple_parted.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/hair.simple_parted.gltf",
     "goblin_male": "humanoid/goblin_male/hair/hair.simple_parted.gltf",
     "goblin_female": "humanoid/goblin_female/hair/hair.simple_parted.gltf"
    }
@@ -2366,6 +3035,8 @@
     "elf_female": "humanoid/elf_female/hair/hair.buzzed.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/hair.buzzed.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/hair.buzzed.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/hair.buzzed.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/hair.buzzed.gltf",
     "goblin_male": "humanoid/goblin_male/hair/hair.buzzed.gltf",
     "goblin_female": "humanoid/goblin_female/hair/hair.buzzed.gltf"
    }
@@ -2381,6 +3052,8 @@
     "elf_female": "humanoid/elf_female/hair/hair.buzzed_soft.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/hair.buzzed_soft.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/hair.buzzed_soft.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/hair.buzzed_soft.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/hair.buzzed_soft.gltf",
     "goblin_male": "humanoid/goblin_male/hair/hair.buzzed_soft.gltf",
     "goblin_female": "humanoid/goblin_female/hair/hair.buzzed_soft.gltf"
    }
@@ -2396,6 +3069,8 @@
     "elf_female": "humanoid/elf_female/hair/hair.buns.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/hair.buns.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/hair.buns.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/hair.buns.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/hair.buns.gltf",
     "goblin_male": "humanoid/goblin_male/hair/hair.buns.gltf",
     "goblin_female": "humanoid/goblin_female/hair/hair.buns.gltf"
    }
@@ -2411,6 +3086,8 @@
     "elf_female": "humanoid/elf_female/hair/hair.long.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/hair.long.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/hair.long.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/hair.long.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/hair.long.gltf",
     "goblin_male": "humanoid/goblin_male/hair/hair.long.gltf",
     "goblin_female": "humanoid/goblin_female/hair/hair.long.gltf"
    }
@@ -2426,6 +3103,8 @@
     "elf_female": "humanoid/elf_female/hair/beard.full.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/beard.full.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/beard.full.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/beard.full.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/beard.full.gltf",
     "goblin_male": "humanoid/goblin_male/hair/beard.full.gltf",
     "goblin_female": "humanoid/goblin_female/hair/beard.full.gltf"
    }
@@ -2441,6 +3120,8 @@
     "elf_female": "humanoid/elf_female/hair/brows.strong.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/brows.strong.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/brows.strong.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/brows.strong.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/brows.strong.gltf",
     "goblin_male": "humanoid/goblin_male/hair/brows.strong.gltf",
     "goblin_female": "humanoid/goblin_female/hair/brows.strong.gltf"
    }
@@ -2456,6 +3137,8 @@
     "elf_female": "humanoid/elf_female/hair/brows.fine.gltf",
     "dwarf_male": "humanoid/dwarf_male/hair/brows.fine.gltf",
     "dwarf_female": "humanoid/dwarf_female/hair/brows.fine.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/hair/brows.fine.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/hair/brows.fine.gltf",
     "goblin_male": "humanoid/goblin_male/hair/brows.fine.gltf",
     "goblin_female": "humanoid/goblin_female/hair/brows.fine.gltf"
    }
@@ -2484,6 +3167,8 @@
     "elf_female": "humanoid/elf_female/outfits/peasant.top.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/peasant.top.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/peasant.top.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/peasant.top.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/peasant.top.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/peasant.top.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/peasant.top.gltf"
    },
@@ -2572,6 +3257,34 @@
       "belly"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
     "goblin_male": {
      "body": [
       "chest",
@@ -2661,6 +3374,29 @@
      "hand": 0.998
     },
     "dwarf_female": {
+     "neck": 0.244,
+     "chest": 0.999,
+     "belly": 1.0,
+     "hips": 0.349,
+     "upperarm_lo": 1.0,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "upperarm_hi": 1.0,
+     "hand": 0.998
+    },
+    "foxfolk_male": {
+     "hips": 0.831,
+     "chest": 0.981,
+     "belly": 1.0,
+     "upperarm_hi": 1.0,
+     "neck": 0.164,
+     "upperarm_lo": 0.989,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "thigh_hi": 0.092,
+     "hand": 0.998
+    },
+    "foxfolk_female": {
      "neck": 0.244,
      "chest": 0.999,
      "belly": 1.0,
@@ -2730,6 +3466,8 @@
     "elf_female": "humanoid/elf_female/outfits/peasant.trousers.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/peasant.trousers.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/peasant.trousers.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/peasant.trousers.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/peasant.trousers.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/peasant.trousers.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/peasant.trousers.gltf"
    },
@@ -2775,6 +3513,22 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "hips",
       "thigh_hi",
@@ -2833,6 +3587,19 @@
      "thigh_lo": 1.0
     },
     "dwarf_female": {
+     "belly": 0.152,
+     "hips": 1.0,
+     "shin_hi": 0.788,
+     "thigh_hi": 1.0,
+     "thigh_lo": 1.0
+    },
+    "foxfolk_male": {
+     "hips": 0.688,
+     "shin_hi": 0.91,
+     "thigh_hi": 0.964,
+     "thigh_lo": 1.0
+    },
+    "foxfolk_female": {
      "belly": 0.152,
      "hips": 1.0,
      "shin_hi": 0.788,
@@ -2888,6 +3655,8 @@
     "elf_female": "humanoid/elf_female/outfits/peasant.shoes.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/peasant.shoes.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/peasant.shoes.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/peasant.shoes.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/peasant.shoes.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/peasant.shoes.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/peasant.shoes.gltf"
    },
@@ -2923,6 +3692,18 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "shin_lo",
+      "foot"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "shin_lo",
+      "foot"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "shin_lo",
       "foot"
@@ -2968,6 +3749,16 @@
      "foot": 0.993
     },
     "dwarf_female": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.463,
+     "foot": 0.996
+    },
+    "foxfolk_male": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.244,
+     "foot": 0.993
+    },
+    "foxfolk_female": {
      "shin_lo": 1.0,
      "shin_hi": 0.463,
      "foot": 0.996
@@ -3018,6 +3809,8 @@
     "elf_female": "humanoid/elf_female/outfits/ranger.top.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/ranger.top.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/ranger.top.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/ranger.top.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/ranger.top.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/ranger.top.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/ranger.top.gltf"
    },
@@ -3106,6 +3899,34 @@
       "belly"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "chest",
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
     "goblin_male": {
      "body": [
       "chest",
@@ -3197,6 +4018,30 @@
      "hand": 0.998
     },
     "dwarf_female": {
+     "neck": 0.585,
+     "chest": 1.0,
+     "belly": 1.0,
+     "hips": 0.678,
+     "upperarm_lo": 1.0,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "upperarm_hi": 1.0,
+     "hand": 0.998,
+     "thigh_hi": 0.062
+    },
+    "foxfolk_male": {
+     "hips": 0.822,
+     "chest": 0.966,
+     "belly": 1.0,
+     "upperarm_hi": 0.86,
+     "neck": 0.777,
+     "upperarm_lo": 0.872,
+     "forearm_lo": 1.0,
+     "forearm_hi": 1.0,
+     "thigh_hi": 0.136,
+     "hand": 0.998
+    },
+    "foxfolk_female": {
      "neck": 0.585,
      "chest": 1.0,
      "belly": 1.0,
@@ -3268,6 +4113,8 @@
     "elf_female": "humanoid/elf_female/outfits/ranger.trousers.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/ranger.trousers.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/ranger.trousers.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/ranger.trousers.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/ranger.trousers.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/ranger.trousers.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/ranger.trousers.gltf"
    },
@@ -3313,6 +4160,22 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo",
+      "shin_hi"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "hips",
       "thigh_hi",
@@ -3369,6 +4232,18 @@
      "thigh_lo": 1.0
     },
     "dwarf_female": {
+     "hips": 0.952,
+     "shin_hi": 0.964,
+     "thigh_hi": 0.995,
+     "thigh_lo": 1.0
+    },
+    "foxfolk_male": {
+     "hips": 0.709,
+     "shin_hi": 0.874,
+     "thigh_hi": 0.994,
+     "thigh_lo": 1.0
+    },
+    "foxfolk_female": {
      "hips": 0.952,
      "shin_hi": 0.964,
      "thigh_hi": 0.995,
@@ -3422,6 +4297,8 @@
     "elf_female": "humanoid/elf_female/outfits/ranger.boots.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/ranger.boots.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/ranger.boots.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/ranger.boots.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/ranger.boots.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/ranger.boots.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/ranger.boots.gltf"
    },
@@ -3462,6 +4339,20 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "shin_hi",
+      "shin_lo",
+      "foot"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "shin_hi",
+      "shin_lo",
+      "foot"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "shin_hi",
       "shin_lo",
@@ -3512,6 +4403,17 @@
      "foot": 0.994
     },
     "dwarf_female": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.56,
+     "foot": 0.995,
+     "thigh_lo": 0.086
+    },
+    "foxfolk_male": {
+     "shin_lo": 1.0,
+     "shin_hi": 0.632,
+     "foot": 0.994
+    },
+    "foxfolk_female": {
      "shin_lo": 1.0,
      "shin_hi": 0.56,
      "foot": 0.995,
@@ -3564,6 +4466,8 @@
     "elf_female": "humanoid/elf_female/outfits/ranger.hood.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/ranger.hood.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/ranger.hood.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/ranger.hood.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/ranger.hood.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/ranger.hood.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/ranger.hood.gltf"
    },
@@ -3599,6 +4503,18 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "scalp",
       "ears"
@@ -3654,6 +4570,20 @@
      "ears": 0.799
     },
     "dwarf_female": {
+     "neck": 0.126,
+     "scalp": 0.61,
+     "chest": 0.14,
+     "ears": 0.713,
+     "face": 0.294
+    },
+    "foxfolk_male": {
+     "chest": 0.061,
+     "neck": 0.521,
+     "scalp": 0.812,
+     "face": 0.335,
+     "ears": 0.799
+    },
+    "foxfolk_female": {
      "neck": 0.126,
      "scalp": 0.61,
      "chest": 0.14,
@@ -3710,6 +4640,8 @@
     "elf_female": "humanoid/elf_female/outfits/ranger.pauldron.gltf",
     "dwarf_male": "humanoid/dwarf_male/outfits/ranger.pauldron.gltf",
     "dwarf_female": "humanoid/dwarf_female/outfits/ranger.pauldron.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/outfits/ranger.pauldron.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/outfits/ranger.pauldron.gltf",
     "goblin_male": "humanoid/goblin_male/outfits/ranger.pauldron.gltf",
     "goblin_female": "humanoid/goblin_female/outfits/ranger.pauldron.gltf"
    },
@@ -3730,6 +4662,12 @@
      "body": []
     },
     "dwarf_female": {
+     "body": []
+    },
+    "foxfolk_male": {
+     "body": []
+    },
+    "foxfolk_female": {
      "body": []
     },
     "goblin_male": {
@@ -3756,6 +4694,12 @@
      "upperarm_hi": 0.193
     },
     "dwarf_female": {
+     "upperarm_hi": 0.216
+    },
+    "foxfolk_male": {
+     "upperarm_hi": 0.193
+    },
+    "foxfolk_female": {
      "upperarm_hi": 0.216
     },
     "goblin_male": {
@@ -3800,6 +4744,8 @@
     "elf_female": "humanoid/elf_female/armour/plate.cuirass.gltf",
     "dwarf_male": "humanoid/dwarf_male/armour/plate.cuirass.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.cuirass.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.cuirass.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.cuirass.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.cuirass.gltf",
     "goblin_female": "humanoid/goblin_female/armour/plate.cuirass.gltf",
     "skeleton": "humanoid/skeleton/armour/plate.cuirass.gltf",
@@ -3863,6 +4809,28 @@
       "belly"
      ],
      "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "belly"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
       "belly"
      ]
     },
@@ -3933,6 +4901,18 @@
      "hips": 0.73,
      "thigh_hi": 0.182
     },
+    "foxfolk_male": {
+     "hips": 0.792,
+     "chest": 0.558,
+     "belly": 1.0,
+     "thigh_hi": 0.131
+    },
+    "foxfolk_female": {
+     "chest": 0.616,
+     "belly": 1.0,
+     "hips": 0.75,
+     "thigh_hi": 0.14
+    },
     "goblin_male": {
      "hips": 0.829,
      "chest": 0.602,
@@ -3972,6 +4952,8 @@
     "elf_female": "humanoid/elf_female/armour/plate.pauldrons.gltf",
     "dwarf_male": "humanoid/dwarf_male/armour/plate.pauldrons.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.pauldrons.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.pauldrons.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.pauldrons.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.pauldrons.gltf",
     "goblin_female": "humanoid/goblin_female/armour/plate.pauldrons.gltf",
     "skeleton": "humanoid/skeleton/armour/plate.pauldrons.gltf",
@@ -3994,6 +4976,12 @@
      "body": []
     },
     "dwarf_female": {
+     "body": []
+    },
+    "foxfolk_male": {
+     "body": []
+    },
+    "foxfolk_female": {
      "body": []
     },
     "goblin_male": {
@@ -4047,6 +5035,18 @@
      "forearm_hi": 0.31,
      "face": 0.052
     },
+    "foxfolk_male": {
+     "chest": 0.138,
+     "upperarm_hi": 0.285,
+     "upperarm_lo": 0.535,
+     "forearm_hi": 0.128
+    },
+    "foxfolk_female": {
+     "scalp": 0.09,
+     "upperarm_lo": 0.576,
+     "forearm_hi": 0.125,
+     "upperarm_hi": 0.088
+    },
     "goblin_male": {
      "chest": 0.155,
      "upperarm_hi": 0.206,
@@ -4086,6 +5086,8 @@
     "elf_female": "humanoid/elf_female/armour/plate.gauntlets.gltf",
     "dwarf_male": "humanoid/dwarf_male/armour/plate.gauntlets.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.gauntlets.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.gauntlets.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.gauntlets.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.gauntlets.gltf",
     "goblin_female": "humanoid/goblin_female/armour/plate.gauntlets.gltf",
     "skeleton": "humanoid/skeleton/armour/plate.gauntlets.gltf",
@@ -4176,6 +5178,34 @@
       "hand"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "forearm_lo",
+      "hand"
+     ],
+     "peasant.top": [
+      "forearm_lo",
+      "hand"
+     ],
+     "ranger.top": [
+      "forearm_lo",
+      "hand"
+     ]
+    },
     "goblin_male": {
      "body": [
       "forearm_lo",
@@ -4248,6 +5278,16 @@
      "forearm_hi": 0.194,
      "hand": 1.0
     },
+    "foxfolk_male": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.122,
+     "hand": 1.0
+    },
+    "foxfolk_female": {
+     "forearm_lo": 1.0,
+     "forearm_hi": 0.11,
+     "hand": 1.0
+    },
     "goblin_male": {
      "forearm_lo": 1.0,
      "forearm_hi": 0.123,
@@ -4284,6 +5324,8 @@
     "elf_female": "humanoid/elf_female/armour/plate.legs.gltf",
     "dwarf_male": "humanoid/dwarf_male/armour/plate.legs.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.legs.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.legs.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.legs.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.legs.gltf",
     "goblin_female": "humanoid/goblin_female/armour/plate.legs.gltf",
     "skeleton": "humanoid/skeleton/armour/plate.legs.gltf",
@@ -4361,6 +5403,34 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "peasant.shoes": [
+      "shin_hi",
+      "shin_lo"
+     ],
+     "ranger.boots": [
+      "shin_hi",
+      "shin_lo"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "shin_hi",
       "shin_lo"
@@ -4452,6 +5522,18 @@
      "thigh_hi": 0.417,
      "thigh_lo": 0.605
     },
+    "foxfolk_male": {
+     "shin_lo": 0.935,
+     "shin_hi": 0.789,
+     "thigh_hi": 0.378,
+     "thigh_lo": 0.568
+    },
+    "foxfolk_female": {
+     "shin_lo": 0.919,
+     "shin_hi": 0.789,
+     "thigh_hi": 0.4,
+     "thigh_lo": 0.601
+    },
     "goblin_male": {
      "shin_lo": 0.928,
      "shin_hi": 0.811,
@@ -4492,6 +5574,8 @@
     "elf_female": "humanoid/elf_female/armour/plate.helm_norman.gltf",
     "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_norman.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_norman.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.helm_norman.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.helm_norman.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.helm_norman.gltf",
     "goblin_female": "humanoid/goblin_female/armour/plate.helm_norman.gltf",
     "skeleton": "humanoid/skeleton/armour/plate.helm_norman.gltf",
@@ -4529,6 +5613,18 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "scalp",
       "ears"
@@ -4594,6 +5690,16 @@
      "ears": 0.87,
      "face": 0.614
     },
+    "foxfolk_male": {
+     "scalp": 0.602,
+     "face": 0.357,
+     "ears": 0.558
+    },
+    "foxfolk_female": {
+     "scalp": 0.614,
+     "face": 0.367,
+     "ears": 0.561
+    },
     "goblin_male": {
      "neck": 0.064,
      "scalp": 0.561,
@@ -4631,6 +5737,8 @@
     "elf_female": "humanoid/elf_female/armour/plate.helm_kettle.gltf",
     "dwarf_male": "humanoid/dwarf_male/armour/plate.helm_kettle.gltf",
     "dwarf_female": "humanoid/dwarf_female/armour/plate.helm_kettle.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/armour/plate.helm_kettle.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/armour/plate.helm_kettle.gltf",
     "goblin_male": "humanoid/goblin_male/armour/plate.helm_kettle.gltf",
     "goblin_female": "humanoid/goblin_female/armour/plate.helm_kettle.gltf",
     "skeleton": "humanoid/skeleton/armour/plate.helm_kettle.gltf",
@@ -4668,6 +5776,18 @@
      ]
     },
     "dwarf_female": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
      "body": [
       "scalp",
       "ears"
@@ -4734,6 +5854,16 @@
      "ears": 0.87,
      "face": 0.643
     },
+    "foxfolk_male": {
+     "scalp": 0.602,
+     "face": 0.477,
+     "ears": 0.569
+    },
+    "foxfolk_female": {
+     "scalp": 0.614,
+     "face": 0.476,
+     "ears": 0.574
+    },
     "goblin_male": {
      "neck": 0.064,
      "scalp": 0.561,
@@ -4770,6 +5900,8 @@
     "elf_female": "humanoid/elf_female/clothes/robe.mage.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/robe.mage.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/robe.mage.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/robe.mage.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/robe.mage.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/robe.mage.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/robe.mage.gltf"
    },
@@ -4986,6 +6118,81 @@
       "thigh_lo"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ]
+    },
     "goblin_male": {
      "body": [
       "belly",
@@ -5099,6 +6306,8 @@
     "elf_female": "humanoid/elf_female/clothes/robe.necro.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/robe.necro.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/robe.necro.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/robe.necro.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/robe.necro.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/robe.necro.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/robe.necro.gltf"
    },
@@ -5319,6 +6528,82 @@
       "thigh_lo"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ]
+    },
     "goblin_male": {
      "body": [
       "chest",
@@ -5435,6 +6720,8 @@
     "elf_female": "humanoid/elf_female/clothes/robe.healer.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/robe.healer.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/robe.healer.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/robe.healer.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/robe.healer.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/robe.healer.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/robe.healer.gltf"
    },
@@ -5644,6 +6931,77 @@
       "thigh_lo"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "chest",
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "thigh_hi",
+      "thigh_lo"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "thigh_hi"
+     ],
+     "ranger.trousers": [
+      "hips",
+      "thigh_hi",
+      "thigh_lo"
+     ]
+    },
     "goblin_male": {
      "body": [
       "belly",
@@ -5751,6 +7109,8 @@
     "elf_female": "humanoid/elf_female/clothes/tunic.villager.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/tunic.villager.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/tunic.villager.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/tunic.villager.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/tunic.villager.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/tunic.villager.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/tunic.villager.gltf"
    },
@@ -5907,6 +7267,58 @@
       "forearm_hi"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "thigh_hi"
+     ],
+     "peasant.trousers": [
+      "belly",
+      "hips"
+     ],
+     "ranger.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "ranger.trousers": [
+      "hips"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "belly",
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "peasant.trousers": [
+      "belly"
+     ],
+     "ranger.top": [
+      "belly",
+      "hips",
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
     "goblin_male": {
      "body": [
       "belly",
@@ -5993,6 +7405,8 @@
     "elf_female": "humanoid/elf_female/clothes/coat.traveller.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/coat.traveller.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/coat.traveller.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/coat.traveller.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/coat.traveller.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/coat.traveller.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/coat.traveller.gltf"
    },
@@ -6095,6 +7509,39 @@
       "forearm_hi"
      ]
     },
+    "foxfolk_male": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi",
+      "forearm_lo"
+     ],
+     "peasant.top": [
+      "upperarm_hi",
+      "upperarm_lo"
+     ],
+     "ranger.top": [
+      "upperarm_hi",
+      "upperarm_lo",
+      "forearm_hi"
+     ]
+    },
     "goblin_male": {
      "body": [
       "upperarm_hi",
@@ -6166,6 +7613,8 @@
     "elf_female": "humanoid/elf_female/clothes/apron.smith.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/apron.smith.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/apron.smith.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/apron.smith.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/apron.smith.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/apron.smith.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/apron.smith.gltf"
    },
@@ -6201,6 +7650,18 @@
      ]
     },
     "dwarf_female": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [],
+     "peasant.trousers": [
+      "belly"
+     ]
+    },
+    "foxfolk_female": {
      "body": [],
      "peasant.trousers": [
       "belly"
@@ -6255,6 +7716,8 @@
     "elf_female": "humanoid/elf_female/clothes/hat.wizard.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/hat.wizard.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/hat.wizard.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/hat.wizard.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/hat.wizard.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/hat.wizard.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/hat.wizard.gltf"
    },
@@ -6287,6 +7750,18 @@
     "dwarf_female": {
      "body": [
       "scalp"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "scalp",
+      "ears"
      ]
     },
     "goblin_male": {
@@ -6336,6 +7811,8 @@
     "elf_female": "humanoid/elf_female/clothes/hat.straw.gltf",
     "dwarf_male": "humanoid/dwarf_male/clothes/hat.straw.gltf",
     "dwarf_female": "humanoid/dwarf_female/clothes/hat.straw.gltf",
+    "foxfolk_male": "humanoid/foxfolk_male/clothes/hat.straw.gltf",
+    "foxfolk_female": "humanoid/foxfolk_female/clothes/hat.straw.gltf",
     "goblin_male": "humanoid/goblin_male/clothes/hat.straw.gltf",
     "goblin_female": "humanoid/goblin_female/clothes/hat.straw.gltf"
    },
@@ -6368,6 +7845,18 @@
     "dwarf_female": {
      "body": [
       "scalp"
+     ]
+    },
+    "foxfolk_male": {
+     "body": [
+      "scalp",
+      "ears"
+     ]
+    },
+    "foxfolk_female": {
+     "body": [
+      "scalp",
+      "ears"
      ]
     },
     "goblin_male": {
@@ -8113,6 +9602,30 @@
    "tone": "olive",
    "hair_colour": "dark brown"
   },
+  "foxfolk_male": {
+   "pieces": [
+    "peasant.top",
+    "peasant.trousers",
+    "peasant.shoes"
+   ],
+   "hair": "hair.buzzed",
+   "brows": null,
+   "beard": null,
+   "tone": "red fox",
+   "hair_colour": "chestnut"
+  },
+  "foxfolk_female": {
+   "pieces": [
+    "peasant.top",
+    "peasant.trousers",
+    "peasant.shoes"
+   ],
+   "hair": "hair.long",
+   "brows": null,
+   "beard": null,
+   "tone": "red fox",
+   "hair_colour": "dark brown"
+  },
   "goblin_male": {
    "pieces": [
     "peasant.top",
@@ -8197,6 +9710,14 @@
    "frames": {
     "male": "dwarf_male",
     "female": "dwarf_female"
+   },
+   "npc_only": false
+  },
+  "foxfolk": {
+   "label": "Foxfolk",
+   "frames": {
+    "male": "foxfolk_male",
+    "female": "foxfolk_female"
    },
    "npc_only": false
   },

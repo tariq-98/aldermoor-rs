@@ -73,6 +73,12 @@ const LOOKS = {
   // Dyes: painted outfits by colour masks, garments by their painted masks.
   dyed_ranger: 'body=female&tone=olive&hair=hair.long&haircol=black&brows=brows.fine&beard=none&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&p.head=ranger.hood&d.ranger.top=woad,walnut&d.ranger.trousers=charcoal,&d.ranger.hood=woad,&clip=Idle_Loop&paused=1&t=0.5&cam=three_quarter',
   dyed_robe: 'body=male&tone=deep&hair=hair.buzzed&haircol=black&brows=brows.strong&beard=beard.full&p.torso_under=robe.mage&p.feet=peasant.shoes&d.robe.mage=madder,ochre&g.main_hand=staff.oak&drawn=0&clip=Idle_Robe_Loop&paused=1&t=0.5&cam=three_quarter',
+  // Foxfolk: markings follow the fur tone, the tail swings, hats and hoods hide the ears.
+  fox_ranger: 'body=foxfolk_female&tone=red%20fox&hair=hair.long&haircol=copper&brows=none&beard=none&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&g.main_hand=bow.hunting&g.ammo=quiver.leather&clip=Bow_Aim_Loop&paused=1&t=0.4&cam=three_quarter',
+  fox_back: 'body=foxfolk_male&tone=silver&hair=hair.buzzed&haircol=white&brows=none&beard=none&p.torso_under=peasant.top&p.legs_under=peasant.trousers&p.feet=peasant.shoes&clip=Jog_Fwd_Loop&paused=1&t=0.3&cam=back',
+  fox_mage: 'body=foxfolk_male&tone=arctic&hair=none&brows=none&beard=none&p.torso_under=robe.mage&p.head=hat.wizard&p.feet=peasant.shoes&g.main_hand=staff.oak&g.back=cape.traveller&drawn=0&clip=Idle_Robe_Loop&paused=1&t=0.5&cam=three_quarter',
+  fox_cape_back: 'body=foxfolk_female&tone=ember&hair=hair.long&haircol=black&brows=none&beard=none&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&g.main_hand=sword.arming&g.back=cape.ranger&drawn=0&clip=Walk_Loop&paused=1&t=0.4&cam=back',
+  fox_head: 'body=foxfolk_female&tone=sand&hair=hair.buns&haircol=honey&brows=none&beard=none&p.torso_under=peasant.top&p.legs_under=peasant.trousers&p.feet=peasant.shoes&clip=Idle_Loop&paused=1&t=0.5&cam=head',
   bearded_head: 'body=male&tone=fair&hair=hair.long&haircol=auburn&brows=brows.strong&beard=beard.full&p.torso_under=ranger.top&p.legs_under=ranger.trousers&p.feet=ranger.boots&clip=Idle_Loop&paused=1&t=0.5&cam=head',
 };
 

@@ -108,6 +108,14 @@ export class Character {
     this.player = new Player(this.root, this.clips);
     this.performer = new Performer(this);
     this.root.updateMatrixWorld(true);
+    // Fur: a markings mask on the body, and a tail on springs.
+    if (this.def.markings) {
+      const tex = textureLoader.load(ASSETS + this.def.markings);
+      tex.flipY = false;
+      tex.colorSpace = THREE.NoColorSpace;
+      for (const e of this.bodyMeshes) if (e.dye) e.dye.markings.value = tex;
+    }
+    if (this.def.springs) this.bodySprings = this.makeSprings(this.def.springs);
     // Rest-pose snapshot of the socket frames, for the helper display.
     this.sockets = this.def.sockets || [...this.bones.keys()].filter((n) => n.startsWith('socket_'));
   }
@@ -208,8 +216,19 @@ export class Character {
 
   // --- Tints and colourways ----------------------------------------------------------------
 
-  setTone(rgb) {
+  /** The skin or fur tone: `linear`, plus `light` and `dark` for bodies with fur markings. */
+  setTone(rgb, tone = null) {
     this.tone = rgb;
+    const on = this.def.markings && tone?.light && tone?.dark ? 1 : 0;
+    for (const e of this.bodyMeshes) {
+      if (!e.dye) continue;
+      e.dye.markOn.value = on;
+      if (on) {
+        // Doubled like the tone itself: the fur detail map averages 0.5.
+        e.dye.light.value.setRGB(...tone.light.map((c) => 2 * c), THREE.LinearSRGBColorSpace);
+        e.dye.dark.value.setRGB(...tone.dark.map((c) => 2 * c), THREE.LinearSRGBColorSpace);
+      }
+    }
     this.applyTints();
   }
 
@@ -525,7 +544,9 @@ export class Character {
   makeSprings(spec) {
     this.root.updateMatrixWorld(true);
     const chains = (spec.chains || []).map((names) => names.map((n) => this.bones.get(n) || this.findBone(n)));
-    const system = new SpringBones(chains, spec, this.colliders());
+    // A chain never collides with capsules on its own bones (a tail with the tail's capsules).
+    const own = new Set(chains.flat());
+    const system = new SpringBones(chains, spec, this.colliders().filter((c) => !own.has(c.bone)));
     this.springs.push(system);
     return system;
   }

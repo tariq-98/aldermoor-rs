@@ -143,8 +143,9 @@ export function renderPanel(root, app) {
   } else {
     who.body.append(row('Body', segmented(Object.entries(humanoid.body_types).map(([id, b]) => ({ value: id, label: b.label })), state.body, actions.setBody)));
   }
-  // Race-specific tones (goblin greens) show only for their race; the rest show for everyone else.
-  const tones = humanoid.skin_tones.filter((t) => (t.races ? t.races.includes(raceId) : !(races?.[raceId]?.npc_only && humanoid.skin_tones.some((x) => x.races?.includes(raceId)))));
+  // A race with tones of its own (goblin greens, foxfolk fur) offers only those.
+  const own = humanoid.skin_tones.filter((t) => t.races?.includes(raceId));
+  const tones = own.length ? own : humanoid.skin_tones.filter((t) => !t.races);
   who.body.append(row('Skin', swatches(tones, state.tone, actions.setTone)));
   const hairOf = (kind) => [{ value: '', label: 'None' }, ...humanoid.hair.filter((h) => h.kind === kind).map((h) => ({ value: h.id, label: h.label }))];
   who.body.append(

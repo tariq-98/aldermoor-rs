@@ -259,10 +259,11 @@ def cape(skel, env, style):
     return parts, chains
 
 
-def colliders(skel, body):
+def colliders(skel, body, extra=()):
     """Capsules for cloth collision, in each bone's local frame (= the glTF node frame).
 
     Radii come from the body's own vertices around each segment, plus room for clothing.
+    `extra` adds (bone, next bone or None for the bone's own tail, room) segments: a tail.
     """
     specs = [
         ("pelvis", "spine_01", 0.03), ("spine_01", "spine_02", 0.03), ("spine_02", "spine_03", 0.03),
@@ -270,7 +271,7 @@ def colliders(skel, body):
         ("thigh_l", "calf_l", 0.02), ("thigh_r", "calf_r", 0.02),
         ("calf_l", "foot_l", 0.015), ("calf_r", "foot_r", 0.015),
         ("upperarm_l", "lowerarm_l", 0.02), ("upperarm_r", "lowerarm_r", 0.02),
-    ]
+    ] + list(extra)
     groups = {g.index: g.name for g in body.vertex_groups}
     world = [body.matrix_world @ v.co for v in body.data.vertices]
     by_bone = {}
@@ -284,7 +285,7 @@ def colliders(skel, body):
         m = skel.matrix_world @ b.matrix_local
         inv = m.inverted()
         a = skel.matrix_world @ b.head_local
-        e = skel.matrix_world @ skel.data.bones[nxt].head_local
+        e = skel.matrix_world @ (skel.data.bones[nxt].head_local if nxt else b.tail_local)
         seg = e - a
         dists = []
         for p in by_bone.get(bone, []):

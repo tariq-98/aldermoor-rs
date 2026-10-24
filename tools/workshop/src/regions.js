@@ -40,6 +40,10 @@ const VERTEX_TAIL = `#include <project_vertex>
 const FRAGMENT_HEAD = `#include <common>
 uniform int uRegionDebug;
 uniform sampler2D uDyeMap;
+uniform sampler2D uMarkings;
+uniform vec3 uMarkLight;
+uniform vec3 uMarkDark;
+uniform float uMarkOn;
 uniform vec2 uDyeOn;
 uniform vec3 uDyeR;
 uniform vec3 uDyeRefR;
@@ -49,6 +53,15 @@ varying float vRegion;
 ${PALETTE_GLSL}`;
 
 const FRAGMENT_DYE = `#include <map_fragment>
+#if defined(USE_MAP) && !defined(DYEABLE)
+	// Fur markings: the tint (the coat) gives way to the light and dark fur where the mask says.
+	if (uMarkOn > 0.0) {
+		vec4 marks = texture2D(uMarkings, vMapUv);
+		vec3 coat = diffuse;
+		vec3 fur = mix(mix(coat, uMarkLight, marks.r), uMarkDark, marks.g);
+		diffuseColor.rgb *= fur / max(coat, vec3(0.001));
+	}
+#endif
 #if defined(USE_MAP) && defined(DYEABLE)
 	if (uDyeOn.x > 0.0 || uDyeOn.y > 0.0) {
 		vec4 dyeMask = texture2D(uDyeMap, vMapUv);
@@ -86,6 +99,10 @@ export function patchMaterial(material, hidden, dye) {
     shader.uniforms.uHidden = hidden;
     shader.uniforms.uRegionDebug = regionDebug;
     shader.uniforms.uDyeMap = dye.map;
+    shader.uniforms.uMarkings = dye.markings;
+    shader.uniforms.uMarkLight = dye.light;
+    shader.uniforms.uMarkDark = dye.dark;
+    shader.uniforms.uMarkOn = dye.markOn;
     shader.uniforms.uDyeOn = dye.on;
     shader.uniforms.uDyeR = dye.r;
     shader.uniforms.uDyeRefR = dye.refR;
@@ -142,6 +159,10 @@ export function prepareMesh(obj) {
     refR: { value: new THREE.Color(1, 1, 1) },
     g: { value: new THREE.Color(1, 1, 1) },
     refG: { value: new THREE.Color(1, 1, 1) },
+    markings: { value: null },
+    light: { value: new THREE.Color(1, 1, 1) },
+    dark: { value: new THREE.Color(0, 0, 0) },
+    markOn: { value: 0 },
   };
   if (hasRegion) {
     for (const m of cloned) patchMaterial(m, hidden, dye);

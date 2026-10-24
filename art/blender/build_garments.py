@@ -238,6 +238,9 @@ def main():
             hides = {"body": fit.hides(cov, 0.9)}
             if is_hat:
                 hides["body"] = sorted(set(hides["body"]) | {"scalp"}, key=rg.INDEX.get)
+                # Foxfolk ears stand on top of the head, where a hat goes.
+                if cat["body_types"][bt].get("race") == "foxfolk":
+                    hides["body"] = sorted(set(hides["body"]) | {"ears"}, key=rg.INDEX.get)
             # A long skirt hangs clear of the thighs, so rays miss them, yet any stance pushes
             # them through its sides: robes hide the thighs under them outright.
             under_skirt = {"thigh_hi", "thigh_lo"} if spec.get("kind") == "robe" else set()

@@ -111,3 +111,23 @@ fn the_checker_catches_broken_clip_promises() {
     assert!(problems.iter().any(|p| p.contains("sword.great") && p.contains("off-hand grip")), "{problems:?}");
     assert!(problems.iter().any(|p| p.contains("bow.hunting") && p.contains("bowstring")), "{problems:?}");
 }
+
+#[test]
+fn foxfolk_have_fur_and_a_tail() {
+    let cat = assets::Catalog::load(root()).unwrap();
+    let h = &cat.humanoid;
+    for frame in ["foxfolk_male", "foxfolk_female"] {
+        let bt = h.body_types.get(frame).unwrap_or_else(|| panic!("no {frame}"));
+        assert!(bt.markings.is_some(), "{frame} has fur markings");
+        assert!(bt.springs.is_some(), "{frame}'s tail swings");
+        assert!(bt.colliders.iter().any(|c| c.bone.starts_with("tail_")), "capes drape over {frame}'s tail");
+    }
+    let fur: Vec<_> = h.skin_tones.iter().filter(|t| t.races.iter().any(|r| r == "foxfolk")).collect();
+    assert!(fur.len() >= 4, "a choice of fur");
+    assert!(fur.iter().all(|t| t.light.is_some() && t.dark.is_some()), "every fur tone has light and dark fur");
+    // Hats sit where foxfolk ears stand, so every head piece hides them.
+    for p in h.pieces.iter().filter(|p| p.slot == "head") {
+        let hides = &p.hides["foxfolk_male"]["body"];
+        assert!(hides.iter().any(|r| r == "ears"), "{} hides foxfolk ears", p.id);
+    }
+}

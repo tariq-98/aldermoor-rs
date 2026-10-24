@@ -27,6 +27,12 @@ RACES = {
         "upperarm": (0.86, 1.22), "lowerarm": (0.86, 1.22), "hands": 1.12, "feet": 1.12, "head": 1.07,
         "ears": None, "gear_scale": 0.92,
     },
+    "foxfolk": {
+        "label": "Foxfolk",
+        "legs": (0.98, 0.9), "spine": (0.97, 0.9), "neck": (1.12, 0.86), "clavicle": (0.95, 0.9),
+        "upperarm": (0.98, 0.88), "lowerarm": (1.0, 0.86), "hands": 0.95, "feet": 0.98, "head": 1.0,
+        "ears": None, "fox": True, "gear_scale": 0.97,
+    },
     "goblin": {
         "label": "Goblin",
         "legs": (0.6, 0.86), "spine": (0.78, 0.9), "neck": (0.8, 0.85), "clavicle": (0.85, 0.85),

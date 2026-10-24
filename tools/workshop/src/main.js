@@ -180,7 +180,7 @@ class App {
     if (s.beast && this.creatures) return this.buildBeast();
     this.status('Loading character…');
     const next = await Character.create({ humanoid: this.humanoid, gear: this.gear, loader: this.loader, library: this.library }, s.body);
-    next.setTone(this.tone(s.tone));
+    next.setTone(this.tone(s.tone), this.toneEntry(s.tone));
     next.setHairColour(this.hairColour(s.haircol));
     next.variants = { ...s.variants };
     next.dyes = structuredClone(s.dyes);
@@ -234,7 +234,11 @@ class App {
   }
 
   tone(id) {
-    return (this.humanoid.skin_tones.find((t) => t.id === id) || this.humanoid.skin_tones[0]).linear;
+    return this.toneEntry(id).linear;
+  }
+
+  toneEntry(id) {
+    return this.humanoid.skin_tones.find((t) => t.id === id) || this.humanoid.skin_tones[0];
   }
 
   hairColour(id) {
@@ -290,7 +294,7 @@ class App {
       }),
       setTone: (id) => this.run(async () => {
         s().tone = id;
-        this.character.setTone(this.tone(id));
+        this.character.setTone(this.tone(id), this.toneEntry(id));
       }),
       setHairColour: (id) => this.run(async () => {
         s().haircol = id;

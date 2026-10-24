@@ -46,6 +46,20 @@ rest orientations for every bone; only joint positions differ between bodies, ra
 **Body types.** "Broad frame" and "Slender frame", built from the Quaternius male and female
 bodies. Every outfit and hairstyle is offered on both; nothing is gendered in the game.
 
+**Races** are the human frames rescaled bone by bone, so every piece of clothing follows. Elves,
+dwarves and goblins add pointed ears, a bigger nose or a dwarven beard. **Foxfolk** have a
+muzzle (the same shaping moves beards, brows and hoods), fox ears on top of the head, a tail on
+six bones (`tail_01` to `tail_06`, rooted on the pelvis) and fur instead of skin:
+- **Fur:** the body's material is one tintable `skin.*` material whose detail map is fur. Its
+  `markings` mask (R the light fur: muzzle, throat, bib, inner ears, tail tip; G the dark: nose,
+  ear backs, socks and gloves) shares the body's UVs. Fur tones have `light` and `dark` colours
+  as well as `linear`. With `c` = 2 × linear, `l` = 2 × light and `d` = 2 × dark, the base colour
+  is `detail × mix(mix(c, l, R), d, G)`.
+- **The tail** swings on springs: the body type's `springs` (chains, stiffness, drag, gravity,
+  radius) work like a cape's, and the body's `colliders` include capsules on the tail bones, so
+  capes drape over it. A chain never collides with capsules on its own bones.
+- **Headwear** hides the fox ears (every head piece hides `ears` on foxfolk).
+
 **Body regions.** Every skinned piece carries a per-vertex float attribute `_REGION` (glTF
 `_REGION`; three.js `_region`), assigned from the skeleton:
 - the head: `scalp`, `face`, `ears`, `neck`;
@@ -144,7 +158,7 @@ Each entry in `hides.<body type>` maps either `body` or a lower piece's id to th
 to drop.
 
 Race and creature body types add `race`, `frame`, `gear_scale` (how much to scale held and
-stowed rigid items), and `creature` / `dress` flags. `races.<id>.frames` maps the frame
+stowed rigid items), and `creature` / `dress` flags; foxfolk add `markings` and `springs`. `races.<id>.frames` maps the frame
 choices to body types. The beast catalogue, `assets/catalog/creatures.json`, lists beasts on
 their own rigs: `file` (one glb with mesh, skeleton and clips), `clips` by role (idle, walk,
 run, attack, hit, death, jump, special), `speeds`, and `sim_body` (the simulation's body name).
@@ -275,7 +289,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 |---|---|---|
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
 | `build_clips.py` | The clip library: the 84 vendor clips plus our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
-| `build_races.py` | Elves, dwarves and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling | `humanoid/<race>_<frame>/` |
+| `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`) | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
 | `build_back.py` | Capes on spring chains and the travel pack, fitted per body type | `gear/<body type>/` |
@@ -301,8 +315,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 
 | Area | Contents |
 |---|---|
-| Body types | Human, elf, dwarf and goblin, each on a broad and a slender frame; skeleton warrior, the Barrow King (boss) and stone golem |
-| Appearance | 8 skin tones plus 4 goblin greens, 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard |
+| Body types | Human, elf, dwarf, foxfolk and goblin, each on a broad and a slender frame; skeleton warrior, the Barrow King (boss) and stone golem |
+| Appearance | 8 skin tones, 4 goblin greens and 5 fox furs (red fox, ember, sand, silver, arctic), 11 hair colours, 5 hairstyles, 2 brow styles, a full beard and a dwarven beard; 16 dyes |
 | Clothing | Peasant shirt, trousers and shoes; Ranger jerkin, leggings, boots, hood and pauldron (two colourways each); mage's, gravecaller's and sunward robes; belted tunic; traveller's coat; smith's apron; wizard's and straw hats. Each garment has a `dye` mask: R for the main cloth, G for the trim |
 | Plate | Cuirass with faulds, pauldrons, gauntlets, leg plates, nasal helm, kettle hat |
 | Weapons | Arming sword and greatsword; dagger, bearded axe, flanged mace and spear; round and kite shields; hunting bow and longbow (drawable strings, nocked arrows) and quiver |
@@ -313,8 +327,6 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
 **Gaps, next in line:**
-- dye masks for the Quaternius outfits (the garments have theirs);
-- foxfolk;
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
 - more beasts and hostile humanoid outfits;
 - a material and texture pass on gear;
@@ -331,7 +343,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 2. **Races:**
    - elves: taller and slimmer, with their own ears;
    - dwarves: shorter and stockier;
-   - foxfolk: their own head with a muzzle, ears, a tail and fur patterns.
+   - foxfolk: their own head with a muzzle, ears, a tail and fur patterns (done).
    Each race is built by scaling bone segments in the rest pose, so every piece of gear follows
    automatically, and then the result is baked into per-race files.
 3. **NPC wardrobe:** outfits by occupation, region and faction, and visible work tools.

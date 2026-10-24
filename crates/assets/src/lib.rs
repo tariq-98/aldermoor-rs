@@ -38,6 +38,11 @@ pub struct Tone {
     pub linear: [f32; 3],
     #[serde(default)]
     pub races: Vec<String>,
+    /// Fur tones: the light and dark fur a body's `markings` mask places.
+    #[serde(default)]
+    pub light: Option<[f32; 3]>,
+    #[serde(default)]
+    pub dark: Option<[f32; 3]>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +80,12 @@ pub struct BodyType {
     pub creature: bool,
     #[serde(default)]
     pub dress: Option<bool>,
+    /// Fur bodies: a mask (R light fur, G dark fur) on the body's UVs.
+    #[serde(default)]
+    pub markings: Option<String>,
+    /// Spring chains on the body itself (a tail), as for capes.
+    #[serde(default)]
+    pub springs: Option<Value>,
 }
 
 /// The curves a clip may carry, each a list of `[seconds, value]` keys (see [`curve`]):
@@ -352,6 +363,17 @@ impl Catalog {
                     for c in &bt.colliders {
                         if !names.contains(c.bone.as_str()) {
                             problem(format!("body type {id}: collider on missing bone {}", c.bone));
+                        }
+                    }
+                    if let Some(m) = &bt.markings {
+                        if !self.root.join(m).exists() {
+                            problem(format!("body type {id}: missing markings {m}"));
+                        }
+                    }
+                    let chains = bt.springs.as_ref().and_then(|s| s.get("chains")).and_then(Value::as_array);
+                    for bone in chains.into_iter().flatten().filter_map(Value::as_array).flatten().filter_map(Value::as_str) {
+                        if !names.contains(bone) {
+                            problem(format!("body type {id}: spring chain bone {bone} isn't in {}", bt.file));
                         }
                     }
                     skeletons.insert(id, names);
