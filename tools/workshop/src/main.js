@@ -226,6 +226,12 @@ class App {
     return {
       setBody: (id) => this.run(async () => {
         s().body = id;
+        // Keep the tone valid for the race: goblins have their own greens.
+        const race = this.humanoid.body_types[id]?.race;
+        const tone = this.humanoid.skin_tones.find((t) => t.id === s().tone);
+        const raceTones = this.humanoid.skin_tones.filter((t) => t.races?.includes(race));
+        if (raceTones.length && !raceTones.includes(tone)) s().tone = raceTones[0].id;
+        if (!raceTones.length && tone?.races) s().tone = this.humanoid.defaults?.[id]?.tone || 'warm';
         await this.build();
         this.view.preset(s().cam, this.character.def.height, this.headY());
       }),

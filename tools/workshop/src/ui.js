@@ -113,10 +113,23 @@ export function renderPanel(root, app) {
 
   // Character.
   const who = section('Character');
-  who.body.append(
-    row('Body', segmented(Object.entries(humanoid.body_types).map(([id, b]) => ({ value: id, label: b.label })), state.body, actions.setBody)),
-    row('Skin', swatches(humanoid.skin_tones, state.tone, actions.setTone)),
-  );
+  const races = humanoid.races || null;
+  const current = humanoid.body_types[state.body] || {};
+  const raceId = current.race || 'human';
+  const frameId = current.frame || state.body;
+  if (races) {
+    const raceOptions = Object.entries(races).map(([id, r]) => ({ value: id, label: r.npc_only ? `${r.label} (NPC)` : r.label }));
+    const frameOptions = Object.keys(races[raceId]?.frames || {}).map((f) => ({ value: f, label: f === 'male' ? 'Broad frame' : f === 'female' ? 'Slender frame' : f }));
+    who.body.append(
+      row('Race', segmented(raceOptions, raceId, (r) => actions.setBody(races[r].frames[frameId] || Object.values(races[r].frames)[0]))),
+      row('Frame', segmented(frameOptions, frameId, (f) => actions.setBody(races[raceId].frames[f]))),
+    );
+  } else {
+    who.body.append(row('Body', segmented(Object.entries(humanoid.body_types).map(([id, b]) => ({ value: id, label: b.label })), state.body, actions.setBody)));
+  }
+  // Race-specific tones (goblin greens) show only for their race; the rest show for everyone else.
+  const tones = humanoid.skin_tones.filter((t) => (t.races ? t.races.includes(raceId) : !(races?.[raceId]?.npc_only && humanoid.skin_tones.some((x) => x.races?.includes(raceId)))));
+  who.body.append(row('Skin', swatches(tones, state.tone, actions.setTone)));
   const hairOf = (kind) => [{ value: '', label: 'None' }, ...humanoid.hair.filter((h) => h.kind === kind).map((h) => ({ value: h.id, label: h.label }))];
   who.body.append(
     row('Hair', select(hairOf('hair'), state.hair, (v) => actions.setHair('hair', v))),

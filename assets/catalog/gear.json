@@ -387,13 +387,37 @@
    "layer": 2.8,
    "files": {
     "male": "gear/male/cape.traveller.gltf",
-    "female": "gear/female/cape.traveller.gltf"
+    "female": "gear/female/cape.traveller.gltf",
+    "elf_male": "gear/elf_male/cape.traveller.gltf",
+    "elf_female": "gear/elf_female/cape.traveller.gltf",
+    "dwarf_male": "gear/dwarf_male/cape.traveller.gltf",
+    "dwarf_female": "gear/dwarf_female/cape.traveller.gltf",
+    "goblin_male": "gear/goblin_male/cape.traveller.gltf",
+    "goblin_female": "gear/goblin_female/cape.traveller.gltf"
    },
    "hides": {
     "male": {
      "body": []
     },
     "female": {
+     "body": []
+    },
+    "elf_male": {
+     "body": []
+    },
+    "elf_female": {
+     "body": []
+    },
+    "dwarf_male": {
+     "body": []
+    },
+    "dwarf_female": {
+     "body": []
+    },
+    "goblin_male": {
+     "body": []
+    },
+    "goblin_female": {
      "body": []
     }
    },
@@ -450,13 +474,37 @@
    "layer": 2.8,
    "files": {
     "male": "gear/male/cape.ranger.gltf",
-    "female": "gear/female/cape.ranger.gltf"
+    "female": "gear/female/cape.ranger.gltf",
+    "elf_male": "gear/elf_male/cape.ranger.gltf",
+    "elf_female": "gear/elf_female/cape.ranger.gltf",
+    "dwarf_male": "gear/dwarf_male/cape.ranger.gltf",
+    "dwarf_female": "gear/dwarf_female/cape.ranger.gltf",
+    "goblin_male": "gear/goblin_male/cape.ranger.gltf",
+    "goblin_female": "gear/goblin_female/cape.ranger.gltf"
    },
    "hides": {
     "male": {
      "body": []
     },
     "female": {
+     "body": []
+    },
+    "elf_male": {
+     "body": []
+    },
+    "elf_female": {
+     "body": []
+    },
+    "dwarf_male": {
+     "body": []
+    },
+    "dwarf_female": {
+     "body": []
+    },
+    "goblin_male": {
+     "body": []
+    },
+    "goblin_female": {
      "body": []
     }
    },
@@ -513,13 +561,37 @@
    "layer": 2.9,
    "files": {
     "male": "gear/male/backpack.travel.gltf",
-    "female": "gear/female/backpack.travel.gltf"
+    "female": "gear/female/backpack.travel.gltf",
+    "elf_male": "gear/elf_male/backpack.travel.gltf",
+    "elf_female": "gear/elf_female/backpack.travel.gltf",
+    "dwarf_male": "gear/dwarf_male/backpack.travel.gltf",
+    "dwarf_female": "gear/dwarf_female/backpack.travel.gltf",
+    "goblin_male": "gear/goblin_male/backpack.travel.gltf",
+    "goblin_female": "gear/goblin_female/backpack.travel.gltf"
    },
    "hides": {
     "male": {
      "body": []
     },
     "female": {
+     "body": []
+    },
+    "elf_male": {
+     "body": []
+    },
+    "elf_female": {
+     "body": []
+    },
+    "dwarf_male": {
+     "body": []
+    },
+    "dwarf_female": {
+     "body": []
+    },
+    "goblin_male": {
+     "body": []
+    },
+    "goblin_female": {
      "body": []
     }
    }

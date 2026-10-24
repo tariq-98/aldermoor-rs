@@ -358,7 +358,9 @@ export class Character {
     socket.add(obj);
     obj.position.set(0, 0, 0);
     obj.quaternion.identity();
-    obj.scale.set(1, 1, 1);
+    // Rigid gear scales with the race (body_types.<id>.gear_scale).
+    const s = this.def?.gear_scale || 1;
+    obj.scale.set(s, s, s);
   }
 
   placeGear() {

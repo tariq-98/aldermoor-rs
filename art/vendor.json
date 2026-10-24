@@ -60,6 +60,22 @@
       "extract": {
         "Universal Animation Library 2[Standard]/Unreal-Godot/UAL2_Standard.glb": "anims/UAL2_Standard.glb"
       }
+    },
+    {
+      "id": "human-base-meshes",
+      "author": "Blender Studio and the Blender community",
+      "page": "https://www.blender.org/download/demo-files/#assets",
+      "url": "https://download.blender.org/demo/asset-bundles/human-base-meshes/human-base-meshes-bundle-v1.4.1.zip",
+      "tier": "Asset bundle v1.4.1 (we use the realistic skeleton)",
+      "file": "human-base-meshes-bundle-v1.4.1.zip",
+      "bytes": 50643039,
+      "sha256": "811f43accbb31a88266d932f8f5563b2d13586fca0ba2693aad1f5fe582b3515",
+      "licence": "CC0-1.0 (the bundle's README text: 'All provided assets are public domain under the CC0 license')",
+      "fetched": "2026-10-23",
+      "dest": "blender-studio",
+      "extract": {
+        "human-base-meshes-bundle-v1.4.1/human_base_meshes_bundle.blend": "human_base_meshes_bundle.blend"
+      }
     }
   ]
 }

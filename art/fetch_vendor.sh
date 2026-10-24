@@ -9,9 +9,10 @@ mkdir -p $CACHE "$ROOT/art/vendor/quaternius"
 python3 -I - "$ROOT" "$CACHE" <<'PY'
 import json, hashlib, subprocess, sys, zipfile, shutil, pathlib, time
 root, cache = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-dest = root / "art/vendor/quaternius"
 for pack in json.load(open(root / "art/vendor.json"))["packs"]:
     zpath = cache / pack["file"]
+    if pack.get("url") and (not zpath.exists() or hashlib.sha256(zpath.read_bytes()).hexdigest() != pack["sha256"]):
+        subprocess.run(["curl", "-sL", "-o", str(zpath), pack["url"]], check=True)
     if not zpath.exists() or hashlib.sha256(zpath.read_bytes()).hexdigest() != pack["sha256"]:
         slug = pack["page"].rstrip("/").rsplit("/", 1)[1]
         out = cache / f"dl-{slug}"
@@ -23,6 +24,7 @@ for pack in json.load(open(root / "art/vendor.json"))["packs"]:
     digest = hashlib.sha256(zpath.read_bytes()).hexdigest()
     if digest != pack["sha256"]:
         sys.exit(f"{pack['file']}: SHA-256 {digest} does not match art/vendor.json (a new upstream version?)")
+    dest = root / "art/vendor" / pack.get("dest", "quaternius")
     with zipfile.ZipFile(zpath) as z:
         for src, dst in pack["extract"].items():
             for name in z.namelist():
