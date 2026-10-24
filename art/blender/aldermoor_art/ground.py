@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .tiles import noise, normals, voronoi
+from .tiles import noise, normals, stretched, voronoi
 
 
 def _smooth(a, b, x):
@@ -126,13 +126,15 @@ def meadow(size=1024, seed=37):
 
 # --- Earth and rock ------------------------------------------------------------------------------
 
-def _cells(size, points, seed, jitter=0.9, warp=0.0):
+def _cells(size, points, seed, jitter=0.9, warp=0.0, aspect=1.0):
     """Periodic Voronoi like tiles.voronoi, plus each pixel's offset (x, y, in pixels, across
-    the wrap) from its cell's centre, so cells can carry tilted faces and still tile."""
+    the wrap) from its cell's centre, so cells can carry tilted faces and still tile. `aspect`
+    above 1 makes the cells that much wider than tall."""
     rng = np.random.default_rng(seed)
-    g = max(1, int(round(np.sqrt(points))))
-    centres = np.array([((i + 0.5 + (rng.random() - 0.5) * jitter) / g * size,
-                         (j + 0.5 + (rng.random() - 0.5) * jitter) / g * size) for j in range(g) for i in range(g)])
+    gx = max(1, int(round(np.sqrt(points / aspect))))
+    gy = max(1, int(round(points / gx)))
+    centres = np.array([((i + 0.5 + (rng.random() - 0.5) * jitter) / gx * size,
+                         (j + 0.5 + (rng.random() - 0.5) * jitter) / gy * size) for j in range(gy) for i in range(gx)])
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float64)
     if warp:
         xx = (xx + (noise(size, 3, seed + 101) - 0.5) * 2 * warp) % size
@@ -227,40 +229,63 @@ def earth(size=1024, seed=41):
     return colour, height, 6.0, 0.9 - 0.15 * damp
 
 
-def limestone(size=1024, seed=47):
-    """Weathered limestone for the ledges and steep slopes: irregular blocks split along
-    fractures (some wide, some only part-way), each face tilted and mottled differently, the
-    edges worn round, moss in the cracks, iron staining, pits, and soft crusts of lichen."""
+def _partings(size, seed, spacing):
+    """Distance (pixels) from each pixel to the nearest bedding parting: near-horizontal lines at
+    uneven spacing (`spacing` = (min, max) pixels) that undulate along their length."""
     rng = np.random.default_rng(seed)
-    _, edge, idx, n, ox, oy = _cells(size, 18, seed, jitter=1.0, warp=45)
-    _, edge2, _, _, _, _ = _cells(size, 70, seed + 9, jitter=1.0, warp=25)
-    tilt = rng.normal(0.0, 1.0, (n, 2)) * 0.007
-    lift = rng.uniform(0.0, 1.0, n)
-    tone = rng.uniform(0.84, 1.1, n)
-    broad = noise(size, 2, seed + 1)
-    mid = noise(size, 9, seed + 2)
-    mottle = noise(size, 20, seed + 12)
-    grit = noise(size, 160, seed + 3, power=0.7)
-    stain = noise(size, 4, seed + 4)
-    crack = np.exp(-(edge / (1.6 + 2.2 * noise(size, 5, seed + 10))) ** 2)
-    fracture = np.exp(-(edge2 / 1.1) ** 2) * _smooth(0.45, 0.7, noise(size, 4, seed + 11)) * 0.7
-    worn = np.exp(-(edge / 9.0) ** 2)
-    pits = _smooth(0.16, 0.06, noise(size, 110, seed + 5, power=1.0))
-    k = tone[idx] * (0.78 + 0.22 * broad + 0.14 * mid + 0.16 * (mottle - 0.5) + 0.12 * grit)
-    k = k * (1.0 - 0.65 * crack) * (1.0 - 0.4 * fracture) * (1.0 - 0.18 * worn) * (1.0 - 0.3 * pits)
+    gaps = []
+    while sum(gaps) < size:
+        gaps.append(rng.uniform(*spacing))
+    lines = np.cumsum(np.array(gaps) * size / sum(gaps))
+    yy = np.mgrid[0:size, 0:size][0].astype(np.float64)
+    wave = (noise(size, 2, seed + 1) - 0.5) * 70 + (noise(size, 9, seed + 2) - 0.5) * 16
+    y = (yy + wave) % size
+    d = np.full((size, size), 1e9)
+    for line in lines:
+        dy = np.abs(y - line)
+        d = np.minimum(d, np.minimum(dy, size - dy))
+    return d
+
+
+def limestone(size=1024, seed=47):
+    """Weathered limestone for the ledges and steep slopes: irregular blocks, wider than tall,
+    split by joints and by bedding partings that undulate and fade in and out. Each block is
+    toned and tilted a little differently and its edges are broken and worn; moss and dirt
+    gather in the partings, rain streaks run down, and there are pits and lichen. Reads as a
+    bedded cliff from the side and as limestone pavement from above."""
+    rng = np.random.default_rng(seed)
+    _, edge, idx, n, ox, oy = _cells(size, 30, seed, jitter=1.0, warp=45, aspect=2.4)
+    tone = rng.uniform(0.82, 1.12, n)
+    tilt = rng.normal(0.0, 1.0, (n, 2)) * 0.006
+    broad = noise(size, 2, seed + 3)
+    mid = noise(size, 9, seed + 4)
+    mottle = noise(size, 22, seed + 5)
+    grit = noise(size, 160, seed + 6, power=0.7)
+    rain = stretched(size, 1.0, 12.0, seed + 7, power=1.2)
+    parting = _partings(size, seed + 20, (80, 200))
+    bed = np.exp(-(parting / (2.2 + 2.8 * noise(size, 6, seed + 21))) ** 2) * _smooth(0.22, 0.5, noise(size, 3, seed + 22))
+    joint = np.exp(-(edge / (1.2 + 1.8 * noise(size, 5, seed + 23))) ** 2) * _smooth(0.2, 0.45, noise(size, 4, seed + 24))
+    crack = np.maximum(bed, joint)
+    chip = noise(size, 40, seed + 25)
+    worn = np.exp(-(np.minimum(edge, parting) / (5.0 + 8.0 * chip)) ** 2)
+    pits = _smooth(0.16, 0.06, noise(size, 110, seed + 8, power=1.0))
+    k = tone[idx] * (0.8 + 0.2 * broad + 0.12 * mid + 0.16 * (mottle - 0.5) + 0.12 * grit)
+    k = k * (1.0 - 0.66 * crack) * (1.0 - 0.22 * worn) * (1.0 - 0.28 * pits)
+    k = k * (1.0 - 0.16 * _smooth(0.55, 0.82, rain))
     colour = np.array((0.245, 0.228, 0.195))[None, None, :] * k[..., None]
-    iron = (_smooth(0.6, 0.85, stain) * 0.35)[..., None]
+    iron = (_smooth(0.62, 0.86, noise(size, 4, seed + 9)) * 0.3)[..., None]
     colour = colour * (1 - iron) + np.array((0.28, 0.2, 0.115))[None, None, :] * k[..., None] * iron
-    moss = (np.maximum(crack, fracture) * _smooth(0.4, 0.7, noise(size, 6, seed + 6)) * 0.75)[..., None]
-    colour = colour * (1 - moss) + np.array((0.045, 0.07, 0.022))[None, None, :] * moss
-    lichen = (_smooth(0.6, 0.72, noise(size, 12, seed + 13)) * (0.5 + 0.5 * grit) * 0.5)[..., None]
+    # Grime in the partings and joints, with moss here and there.
+    mossy = _smooth(0.45, 0.7, noise(size, 5, seed + 11))[..., None]
+    grime = np.array((0.06, 0.055, 0.042))[None, None, :] * (1 - mossy) + np.array((0.05, 0.068, 0.028))[None, None, :] * mossy
+    dirt = (crack * 0.75)[..., None]
+    colour = colour * (1 - dirt) + grime * dirt
+    lichen = (_smooth(0.62, 0.74, noise(size, 12, seed + 12)) * (0.5 + 0.5 * grit) * 0.45)[..., None]
     colour = colour * (1 - lichen) + np.array((0.2, 0.22, 0.085))[None, None, :] * lichen
-    crust = (_smooth(0.72, 0.82, noise(size, 16, seed + 14)) * 0.22)[..., None]
-    colour = colour * (1 - crust) + np.array((0.4, 0.4, 0.36))[None, None, :] * crust
-    height = lift[idx] * 0.5 + tilt[idx, 0] * ox + tilt[idx, 1] * oy + 0.22 * mid + 0.1 * mottle + 0.12 * grit
-    height = height - 0.9 * crack - 0.45 * fracture - 0.35 * worn - 0.3 * pits
-    _spots(colour, height, seed + 7, 70, (3.0, 11.0), [(0.2, 0.22, 0.08), (0.2, 0.22, 0.08), (0.34, 0.34, 0.3)], 0.35)
-    return colour, height, 7.0, 0.84 + 0.06 * grit
+    height = 0.5 * tone[idx] + tilt[idx, 0] * ox + tilt[idx, 1] * oy + 0.18 * mid + 0.1 * mottle + 0.1 * grit
+    height = height - 1.0 * bed - 0.8 * joint - 0.4 * worn - 0.25 * pits
+    _spots(colour, height, seed + 13, 60, (3.0, 10.0), [(0.2, 0.22, 0.08), (0.2, 0.22, 0.08), (0.34, 0.34, 0.3)], 0.32)
+    return colour, height, 8.0, 0.84 + 0.06 * grit
 
 
 LAYERS = {
@@ -316,8 +341,9 @@ def weights(fields, places, sun, seed=61):
 
     # Rock: steep ground, the odd outcrop on the high tops, and stones in the riverbed.
     rock = _smooth(0.1, 0.22, slope + 0.05 * (fine - 0.5) + 0.03 * (grain - 0.5))
+    rock *= _smooth(10.0, 16.0, np.abs(river) + 2.0 * (fine - 0.5))
     rock += _smooth(0.74, 0.84, fine) * _smooth(30.0, 45.0, h) * slope_ok(slope) * 0.6
-    rock += (np.abs(river) < 6.0) * _smooth(0.58, 0.72, fine) * 0.5
+    rock += (np.abs(river) < 6.0) * _smooth(0.62, 0.74, fine) * 0.35
     rock = np.clip(rock, 0, 1)
 
     # Earth: the roads and the square, the riverbanks, yards round the houses, bare ground
