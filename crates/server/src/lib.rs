@@ -143,17 +143,6 @@ fn run(mut world: Sim, player: UnitId, commands: Receiver<(UnitId, Command)>, sh
     }
 }
 
-/// Local content bridge until slot radii become part of a future wire protocol version.
-/// This reads the same immutable table the simulation uses; clients must not guess radii.
-pub fn ground_skill_radius(ability: &str) -> Option<f32> {
-    let catalog = sim::content::catalog();
-    let def = catalog.ability(catalog.ability_id(ability)?);
-    match def.targeting {
-        sim::content::Targeting::Ground { radius } => Some(radius),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

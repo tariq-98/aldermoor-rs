@@ -81,9 +81,10 @@ otherwise use the laptop panel even with an ultrawide attached. Capture reads ou
   scatter is generated. Building footprints/heights provide expanded camera collision boxes.
 - Terrain, river, sky and lighting use Claude’s supplied catalogues by default. Terrain layers
   are triplanar, weighted by the geometric normal, with the supplied horizontal layer-control
-  map retaining road/river placement. Normal-map slopes are blended in world space; flat maps
-  preserve the geometric normal. Texture gradients remain explicit when unused projections
-  are skipped. Derivative tangent frames use the requested negative-v bitangent for image-top
+  map retaining road/river placement. The side projections stand upright (u along the face, v
+  down it), so a layer's rows lie level on cliffs. Normal-map slopes are blended in world
+  space; flat maps preserve the geometric normal. Texture gradients remain explicit when unused
+  projections are skipped. Derivative tangent frames use the requested negative-v bitangent for image-top
   green normals; explicitly supplied mesh tangents retain their authored handedness.
 - Shared GPU textures and numeric mesh identities reduce duplicate uploads. Decoded image bytes
   are released after upload. Native ASTC KTX2 loading is implemented; actual compressed asset
@@ -214,12 +215,12 @@ measured 12.63 ms GPU median and 13.52 ms p95. This is not the current scene or 
 Each frame reads `host.combat()` alongside the snapshot; only matching tick pairs replace the
 client's current pair. Combat units are indexed by ID. The Action-to-clip table is applied with
 upper-body guard/parry (respecting the supplied loop flag and combat clock), horizontal-speed sprint selection, held Death01 for downed and LayToIdle
-on rally/revive. Heavy swings retain their cast wind-up across the release and remap a single
-strike to that boundary, then recover over 0.5 s. The vendor `Sword_Heavy_Combo` has several
-swings and no strike marker: the final overhead segment (2.30–4.333 s, downward strike around
-2.67 s) is the playback fallback, derived with `cargo run -p render --example inspect_strikes`.
-Authored clips use their supplied `hit` event. Missing exact vendor markers remain an asset
-request; the fallback is not an authored animation change.
+on rally/revive. Heavy swings retain their cast wind-up across the release and remap the clip
+so its `hit` marker lands on that boundary, then recover over 0.5 s. Every attack clip carries
+`hit` markers (vendor clips included), and Overhead plays `Sword_Overhead`, the heavy combo's
+last blow cut on its own, so no clip needs a playback range of its own.
+`cargo run -p render --example inspect_strikes -- <clip>` prints a clip's markers and its
+blade tip's path, to check the markers against the renderer's own skeleton solve.
 
 Temporary combat overlays project the sim's live projectile positions/velocity and circle,
 cone and yaw-aligned line areas, with warning progress, hostile red and friendly blue, field
@@ -228,11 +229,9 @@ not substitute art. These diagnostic overlays currently draw above scene occlude
 world-space effect/decal assets should replace them. Clip events never spawn duplicate missiles.
 Damage/Heal/Avoided events produce bounded, expiring floating text with critical/periodic labels.
 
-Protocol v4's Slot has a ground flag but no radius. `server::ground_skill_radius` is a small
-read-only bridge to the same immutable simulation content table, used only for the local aim
-preview. No wire type or protocol version changed. A future remote client needs that radius
-published as content or in the slot contract. Guard release is sent even if egui consumes the
-release, and on focus loss. Revive only selects a nearby friendly downed/defeated unit.
+Protocol v5's Slot carries a ground skill's `radius` (0 for every other skill), which the
+local aim preview draws, so a remote client needs nothing beyond the wire. Guard release is
+sent even if egui consumes the release, and on focus loss. Revive only selects a nearby friendly downed/defeated unit.
 
 ## Current validation and comparison method
 
@@ -374,6 +373,4 @@ not generate substitute scenery, textures, scatter, effects, icons or visual pre
 - **Protocol v4 effects:** projectile/trail/particle/decal meshes, textures and visual/timing
   parameters keyed by `ProjectileView.visual` and area school/field. The protocol now drives
   functional projected diagnostics; replace those with supplied depth-aware world effects.
-- **Strike timing:** explicit hit markers and single-swing playback ranges for the vendor
-  sword clips, especially `Sword_Heavy_Combo`; a dedicated single overhead is preferable.
-  Also supply a dedicated roar/shout clip, as already listed in CONTRACT.md.
+- **Shout:** a dedicated roar/shout clip, as already listed in CONTRACT.md.

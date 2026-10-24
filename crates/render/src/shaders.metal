@@ -37,8 +37,10 @@ struct TerrainSample {float3 colour;float3 perturbation;};
 TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float> normals,
     float3 position,float3 dx,float3 dy,float3 weights,uint layer,float mip_bias) {
     constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
-    float2 uv[3]={position.yz,position.xz,position.xy};
-    float2 gx[3]={dx.yz,dx.xz,dx.xy},gy[3]={dy.yz,dy.xz,dy.xy};
+    // Side projections stand upright: u runs along the face and v down it, so a layer's rows
+    // lie level on a cliff (the limestone's bedding) and its columns hang plumb.
+    float2 uv[3]={float2(position.z,-position.y),position.xz,float2(position.x,-position.y)};
+    float2 gx[3]={float2(dx.z,-dx.y),dx.xz,float2(dx.x,-dx.y)},gy[3]={float2(dy.z,-dy.y),dy.xz,float2(dy.x,-dy.y)};
     TerrainSample result={float3(0),float3(0)};
     for(uint axis=0;axis<3;axis++) {
         if(weights[axis]<0.001)continue;
@@ -47,8 +49,8 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
         float3 nm=normals.sample(s,uv[axis],layer,grad).rgb*2.-1.;
         float2 slope=nm.xy/max(nm.z,0.1);
         // Green points towards the image top (-v), matching the supplied normal maps.
-        float3 perturb=axis==0?float3(0,slope.x,-slope.y):
-            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x,-slope.y,0));
+        float3 perturb=axis==0?float3(0,slope.y,slope.x):
+            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x,slope.y,0));
         result.perturbation+=perturb*weights[axis];
     }
     return result;

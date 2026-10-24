@@ -1,13 +1,34 @@
-//! Read-only timing diagnostic for unmarked vendor clips. Never modifies assets.
+//! Read-only strike diagnostic: a clip's catalogue markers, then its blade tip's path at
+//! 60 samples a second, to check the markers against the renderer's own skeleton solve.
+//! Never modifies assets.
+//!
+//!     cargo run -p render --example inspect_strikes -- Sword_Overhead
 use glam::{Quat, Vec3};
 use render::model::{ModelCache, Property, world_matrices};
 fn main() -> anyhow::Result<()> {
+    let name = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "Sword_Overhead".into());
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     let cat = assets::Catalog::load(&root)?;
     let mut cache = ModelCache::default();
     let rig = cache.get(&cat.path(&cat.humanoid.body_types["male"].file))?;
     let model = cache.get(&cat.path(&cat.humanoid.animations.file))?;
-    let clip = &model.clips["Sword_Heavy_Combo"];
+    let clip = model
+        .clips
+        .get(&name)
+        .ok_or_else(|| anyhow::anyhow!("no clip named {name}"))?;
+    for meta in cat
+        .humanoid
+        .animations
+        .clips
+        .iter()
+        .filter(|c| c.name == name)
+    {
+        for e in &meta.events {
+            println!("# {} {:.3}", e.name, e.t);
+        }
+    }
     let names: std::collections::HashMap<_, _> = rig
         .nodes
         .iter()

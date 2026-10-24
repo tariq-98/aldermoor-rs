@@ -698,8 +698,8 @@ impl Game {
         let radius = self
             .aim_slot
             .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
-            .filter(|s| s.ground)
-            .and_then(|s| server::ground_skill_radius(&s.ability));
+            .filter(|s| s.ground && s.radius > 0.)
+            .map(|s| s.radius);
         let projection = combat::Projection {
             matrix: camera.matrix(r.width as f32 / r.height as f32),
             size: self.viewport

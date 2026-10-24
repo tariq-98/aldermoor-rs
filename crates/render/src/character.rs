@@ -661,7 +661,7 @@ impl Character {
                 if family == "greatsword" {
                     "GreatSword_Overhead".into()
                 } else {
-                    "Sword_Heavy_Combo".into()
+                    "Sword_Overhead".into()
                 }
             }
             Action::Spin => {
@@ -911,30 +911,14 @@ impl Character {
             } else if let Some(t) = self.rally_time {
                 clip_time = t;
             } else if let Some(windup) = self.windup.filter(|_| u.pose == Pose::Attack) {
+                // The blow lands on the clip's `hit` marker just as the wind-up ends.
                 let duration = self.clips.clips.get(&name).map_or(1., |a| a.duration);
-                // The supplied vendor combo contains several swings. Its final overhead
-                // starts at 2.30 s and crosses down through the strike at 2.67 s (see the
-                // read-only inspect_strikes diagnostic). Play that single swing only.
-                // Explicit asset hit/range metadata is requested in RENDERER.md.
-                let start = if name == "Sword_Heavy_Combo" {
-                    2.30
-                } else {
-                    0.
-                };
                 let hit = self
                     .clip_meta
                     .get(&name)
-                    .and_then(|m| m.events.iter().find(|e| e.name == "hit"))
-                    .map_or(
-                        if name == "Sword_Heavy_Combo" {
-                            2.67
-                        } else {
-                            duration * 0.5
-                        },
-                        |e| e.t,
-                    );
-                clip_time =
-                    start + swing_time(c.action_time, windup, hit - start, duration - start);
+                    .and_then(|m| m.event("hit"))
+                    .unwrap_or(duration * 0.5);
+                clip_time = swing_time(c.action_time, windup, hit, duration);
             } else if self.action_clip(u).is_some() {
                 clip_time = if c.action == Action::Parry {
                     c.action_time * 2.
@@ -1317,7 +1301,7 @@ mod combat_tests {
             (Action::Slash, "Sword_Regular_A"),
             (Action::Slash2, "Sword_Regular_B"),
             (Action::Thrust, "Sword_Regular_C"),
-            (Action::Overhead, "Sword_Heavy_Combo"),
+            (Action::Overhead, "Sword_Overhead"),
             (Action::Bash, "Shield_OneShot"),
             (Action::Channel, "Spell_Simple_Idle_Loop"),
             (Action::Revive, "Fixing_Kneeling"),
@@ -1374,5 +1358,70 @@ mod combat_tests {
             .map(|i| super::swing_time(i as f32 / 100., 0.4, 0.6, 1.2))
             .collect();
         assert!(values.windows(2).all(|w| w[1] >= w[0]));
+    }
+    #[test]
+    fn wound_up_overhead_strikes_on_its_hit_marker() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let look = Look {
+            art: "male".into(),
+            drawn: true,
+            gear: vec![("main_hand".into(), "sword.arming".into())],
+            ..Default::default()
+        };
+        let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+        let u = UnitState {
+            id: 1,
+            kind: protocol::UnitKind::Player,
+            body: "player".into(),
+            name: "test".into(),
+            level: 1,
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            yaw: 0.,
+            pose: Pose::Attack,
+            pose_time: 0.,
+            health: 100.,
+            max_health: 100.,
+            hostile: false,
+            target: None,
+            look,
+        };
+        let mut fight = UnitCombat {
+            id: 1,
+            action: Action::Overhead,
+            action_time: 0.,
+            cast: Some(protocol::CastBar {
+                ability: "sword_overhead".into(),
+                name: "Overhead".into(),
+                elapsed: 0.,
+                duration: 0.4,
+                channel: false,
+                interruptible: true,
+            }),
+            auras: vec![],
+            resource_kind: protocol::ResourceKind::Rage,
+            resource: 0.,
+            max_resource: 100.,
+            guarding: false,
+            downed: false,
+            defiance: None,
+        };
+        for frame in 0..=24 {
+            fight.action_time = frame as f32 / 60.;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        assert_eq!(c.last_clip, "Sword_Overhead");
+        let hit = c.clip_meta["Sword_Overhead"].event("hit").unwrap();
+        let arm = c.names["upperarm_r"];
+        let struck = c.local[arm].rotation;
+        c.apply_clip("Sword_Overhead", hit, false, false);
+        assert!(
+            struck.abs_diff_eq(c.local[arm].rotation, 1e-4),
+            "the blade must reach its strike as the wind-up ends"
+        );
     }
 }

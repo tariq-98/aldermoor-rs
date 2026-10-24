@@ -319,7 +319,7 @@ writes the two files the renderer takes as `--surface-assets` and `--look-settin
   | `grass` | 4 | 0.9 | Lush turf for the valley floor: dense blades in clumps, the odd clover flower |
   | `meadow` | 5 | 0.92 | Drier straw-and-olive grass with buttercups, daisies and clover |
   | `earth` | 3.5 | 0.88 | Packed earth for roads, yards and banks: dusty and damp patches, gravel, pebbles |
-  | `limestone` | 6 | 0.82 | Weathered blocks split along fractures, moss in the cracks, lichen, iron staining |
+  | `limestone` | 6 | 0.82 | Bedded limestone: irregular blocks wider than tall, crossed by undulating bedding partings, with grime and moss in the partings, rain streaks, pits, lichen and iron staining |
 
 - **Weights** (`terrain/brambleford_weights.png`, 2048 px, linear): the share of each layer
   in R, G, B and A, in the order above, over `bounds` [−280, −280, 280, 280]: row 0 is the
@@ -347,15 +347,13 @@ writes the two files the renderer takes as `--surface-assets` and `--look-settin
   8% saturation lift.
 - **Normal maps** here follow glTF like every other asset: +Y toward the top of the image.
 
-Asks of the renderer, to make the most of these:
-1. Load `catalog/surfaces.json` and `catalog/look.json` by default when they exist (the flags
-   override them), so the game starts in this light without arguments.
-2. Sample the terrain layers triplanar (or blend in side projections where the ground is
-   steep). Projected straight down, the limestone smears down the ledges' faces into vertical
-   streaks.
-3. The tangent frame built from screen derivatives (for meshes without tangents, which
-   includes the terrain and the river) has its bitangent along +v, the opposite of glTF's
-   convention, so those normal maps' green channel comes out inverted. It should be −∂P/∂v.
+The renderer loads `catalog/surfaces.json` and `catalog/look.json` by default when they exist
+(its flags override them). It samples the terrain layers triplanar, and the side projections
+stand upright: u runs along the face and v down it. So paint a layer the right way up: its rows
+lie level on a cliff (the limestone's bedding runs along them) and its columns hang plumb (the
+rain streaks run down them). Tangent frames built from screen derivatives, for meshes without
+tangents such as the terrain and the river, have their bitangent along −∂P/∂v, as glTF's normal
+maps expect.
 
 ## Materials and file details
 
