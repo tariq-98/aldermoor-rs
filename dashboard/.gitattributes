@@ -1,0 +1,3 @@
+# The dashboard's own icons are a few KB and must be real files when Vercel and CI build it, so
+# they stay out of Git LFS (which the root .gitattributes uses for art).
+*.png -filter -diff -merge -text
