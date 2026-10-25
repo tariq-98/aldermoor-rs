@@ -235,6 +235,8 @@ struct Game {
     intervals: Vec<f64>,
     finished_at: Instant,
     smoke_stage: usize,
+    /// Sim tick the last smoke stage went out on.
+    smoke_tick: Option<u64>,
     events: usize,
     smoke_start: Vec3,
     smoke_checks: [bool; 4],
@@ -297,6 +299,7 @@ impl Game {
             intervals: Vec::new(),
             finished_at: Instant::now(),
             smoke_stage: 0,
+            smoke_tick: None,
             events: 0,
             smoke_start,
             smoke_checks: [false; 4],
@@ -694,20 +697,20 @@ impl Game {
             })
             .map(|u| u.id)
     }
+    /// Seconds of sim time since the last smoke stage went out.
+    fn smoke_wait(&self) -> f32 {
+        let tick = self.snaps.current.tick;
+        self.smoke_tick
+            .map_or(f32::INFINITY, |t| tick.saturating_sub(t) as f32 / 60.)
+    }
     fn smoke(&mut self) {
-        let elapsed = self.start.elapsed().as_secs_f32();
-        let schedule = [
-            (0., 0),
-            (0.8, 1),
-            (2.0, 2),
-            (3.0, 3),
-            (6.0, 4),
-            (7.0, 5),
-            (8.0, 6),
-            (9.0, 7),
-        ];
-        while self.smoke_stage < schedule.len() && elapsed >= schedule[self.smoke_stage].0 {
-            match schedule[self.smoke_stage].1 {
+        // Seconds of sim time each stage waits after the one before. Waiting from the previous
+        // stage, one stage a frame, means a slow frame (the first can take seconds under GPU
+        // load) delays the rest instead of sending several stages on the same tick.
+        let schedule = [0., 0.8, 1.2, 1.0, 3.0, 1.0, 1.0, 1.0];
+        if self.smoke_stage < schedule.len() && self.smoke_wait() >= schedule[self.smoke_stage] {
+            self.smoke_tick = Some(self.snaps.current.tick);
+            match self.smoke_stage {
                 0 => self.host.send(Command::Move {
                     direction: Vec2::new(-1., 0.),
                     walk: false,
@@ -735,6 +738,14 @@ impl Game {
                 }),
             }
             self.smoke_stage += 1;
+        }
+        // The sim drops a jump on a tick the player isn't grounded and a swap it refuses, so keep
+        // asking until the event arrives (jump until the dodge, swap until the run ends).
+        if (2..=3).contains(&self.smoke_stage) && !self.smoke_checks[0] {
+            self.host.send(Command::Jump);
+        }
+        if self.smoke_stage == schedule.len() && !self.smoke_checks[3] {
+            self.host.send(Command::SwapWeapons);
         }
     }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
@@ -930,7 +941,10 @@ impl Game {
             .find(|u| u.id == self.host.player)
             .context("no local player in snapshot")?;
         self.frame += 1;
-        let done = self.options.frames.is_some_and(|n| self.frame >= n);
+        // A smoke run also lasts until its schedule has played out, plus a second for the last
+        // events, so a short --frames or slow frames can't end it early.
+        let done = self.options.frames.is_some_and(|n| self.frame >= n)
+            && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.);
         let capture = if done {
             self.options.capture.as_deref()
         } else {
@@ -1093,11 +1107,16 @@ impl Game {
             }
             if self.options.smoke {
                 let moved = player.position.distance(self.smoke_start);
+                let missing: Vec<_> = ["jump", "dodge", "damage", "swap"]
+                    .into_iter()
+                    .zip(self.smoke_checks)
+                    .filter(|(_, seen)| !seen)
+                    .map(|(name, _)| name)
+                    .collect();
                 ensure!(
-                    moved > 2. && self.smoke_checks.iter().all(|x| *x),
-                    "smoke did not exercise simulation: moved={moved}, events={}, jump/dodge/damage/swap={:?}",
-                    self.events,
-                    self.smoke_checks
+                    moved > 2. && missing.is_empty(),
+                    "smoke did not exercise simulation: moved={moved:.2}m (needs 2), events={}, no event for {missing:?}",
+                    self.events
                 );
                 eprintln!("SMOKE PASS moved={moved:.2}m events={}", self.events);
             }
