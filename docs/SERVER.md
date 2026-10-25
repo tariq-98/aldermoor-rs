@@ -185,6 +185,27 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
   every step. Views from the interest grid, deltas and a 20 to 30 Hz send rate (#34) are what
   bring that down before more than a handful of players join.
 
+## Load test
+
+`cargo run -p server --release --example load_test -- --players 50,200,500` joins that many bots
+(`server::bots`) over the real transport into a valley with 2,000 monsters. The bots wander, then
+chase, target and fight the nearest monster, use skills and respawn. It prints p50/p99 of the step,
+building views, encoding them and the whole tick, and bytes out (#74). Measured 25 October 2026 on
+a 4-core cloud Linux box, with the bots' own reader threads competing for the same cores:
+
+| Players | Ticks/s | Step p50 / p99 ms | Build views p50 / p99 | Encode p50 / p99 | Tick p50 / p99 | Out per player | Out total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 16.8 | 1.24 / 2.11 | 32.05 / 45.58 | 24.10 / 34.06 | 57.35 / 81.43 | 2994 KB/s | 149.7 MB/s |
+| 200 | 3.3 | 1.45 / 2.81 | 166.57 / 215.97 | 121.22 / 142.96 | 291.75 / 360.73 | 699 KB/s | 139.7 MB/s |
+| 500 | 1.2 | 1.59 / 5.46 | 482.86 / 591.31 | 381.46 / 429.91 | 869.01 / 1026.68 | 340 KB/s | 170.1 MB/s |
+
+The step itself stays under 2 ms even at 500 players; the ticks are slow because of the views.
+A full snapshot and combat view for every player, every tick, is nearly all of it. Out per player
+falls only because the server manages fewer ticks a second. #34 (views from the interest grid,
+deltas, 20 to 30 Hz) is the fix, and this table is the before. The `players` scene in
+`crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
+the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
+
 ## Follow-up work
 
 - #167 (done): each map's land is shared between sims.
