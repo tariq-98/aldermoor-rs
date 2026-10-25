@@ -53,6 +53,7 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
     let e = world.resource::<Units>().entity(id)?;
     let v = world.get::<Vitals>(e)?;
     let f = world.get::<Fighter>(e)?;
+    let progress = world.get::<crate::Progress>(e);
     let t = now(world);
     let cat = catalog();
     let bar_ids = current_bar(world, e);
@@ -100,6 +101,11 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         swap_ready: (f.swap_ready_at - t).max(0.0) as f32,
         swimming: world.get::<crate::Motion>(e).is_some_and(|m| m.swimming),
         sprinting: world.get::<crate::Motion>(e).is_some_and(|m| m.sprinting),
+        specialty: f.specialty.map_or("", |s| s.key()).to_string(),
+        level: world.get::<crate::Unit>(e).map_or(1, |u| u.level),
+        xp: progress.zip(f.specialty).map_or(0, |(p, s)| p.xp[s.index()]),
+        xp_next: progress.zip(f.specialty).and_then(|(p, s)| crate::content::progression::to_next(p.level(s))).unwrap_or(0),
+        unassigned_xp: progress.map_or(0, |p| p.unassigned),
     })
 }
 

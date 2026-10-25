@@ -185,6 +185,11 @@ pub fn apply_commands(world: &mut World) {
             }
             Command::SwapWeapons => abilities::swap(world, e),
             Command::Revive { target } => life::start_revive(world, e, target),
+            Command::AssignXp { specialty, amount } => {
+                if let Some(s) = crate::Specialty::from_key(&specialty) {
+                    crate::progress::assign(world, e, s, amount);
+                }
+            }
         }
     }
 }

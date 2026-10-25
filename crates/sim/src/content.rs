@@ -3,6 +3,8 @@
 
 pub use content::combat::*;
 
+pub mod progression;
+
 /// The skills a downed player can use: fight on, push enemies away, bandage up.
 pub fn downed_skills() -> [&'static str; 3] {
     DOWNED

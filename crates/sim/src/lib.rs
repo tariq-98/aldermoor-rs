@@ -14,6 +14,7 @@ pub mod combat;
 mod components;
 pub mod content;
 mod movement;
+mod progress;
 mod rng;
 mod spatial;
 pub mod stats;
@@ -27,6 +28,7 @@ use std::sync::{Arc, OnceLock};
 
 pub use components::*;
 pub use content::Specialty;
+pub use progress::{Credit, Progress};
 pub use rng::Rng;
 pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
 
@@ -253,6 +255,7 @@ impl Sim {
                 PlayerControl,
                 Home { pos, yaw },
                 Appearance(components::player_look()),
+                Progress::new(specialty, level),
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
@@ -266,6 +269,41 @@ impl Sim {
         });
         combat::abilities::equip(&mut self.world, e);
         id
+    }
+
+    /// Changes a player's specialty, out of combat: its resource, weapons, skills and the level
+    /// it has reached. Returns false in combat, while down or defeated, or if already equipped.
+    pub fn switch_specialty(&mut self, id: UnitId, specialty: Specialty) -> bool {
+        let Some(e) = self.entity(id) else { return false };
+        let time = self.time();
+        let busy = self.world.get::<Vitals>(e).is_none_or(|v| v.dead || v.downed || time - v.last_combat < COMBAT_TIMEOUT);
+        let Some(f) = self.world.get::<Fighter>(e) else { return false };
+        if busy || f.cast.is_some() || f.specialty == Some(specialty) {
+            return false;
+        }
+        let Some(level) = self.world.get::<Progress>(e).map(|p| p.level(specialty)) else { return false };
+        let cat = content::catalog();
+        let def = cat.specialty(specialty);
+        let first = |list: &[&str], n: usize| list.get(n).and_then(|k| cat.ability_id(k));
+        if let Some(mut f) = self.world.get_mut::<Fighter>(e) {
+            f.specialty = Some(specialty);
+            f.resource_kind = def.resource;
+            f.max_resource = def.max_resource;
+            f.resource = def.start;
+            f.sets = def.sets.iter().map(|(m, o)| (m.map(String::from), o.map(String::from))).collect();
+            f.active_set = 0;
+            f.kit = [first(&def.heals, 0), first(&def.utilities, 0), first(&def.utilities, 1), first(&def.utilities, 2), first(&def.elites, 0)];
+        }
+        progress::set_level(&mut self.world, e, specialty, level);
+        combat::abilities::equip(&mut self.world, e);
+        true
+    }
+
+    /// Adds quest XP to a player's pool, for them to give to a specialty.
+    pub fn grant_quest_xp(&mut self, id: UnitId, amount: u32) {
+        if let Some(mut p) = self.get_mut::<Progress>(id) {
+            p.unassigned += amount;
+        }
     }
 
     /// Puts a specialty skill in slot 6–0 (`slot` 5–9): the heal, a utility or the elite.
@@ -430,6 +468,7 @@ pub(crate) fn spawn_mob(world: &mut World, key: &str, at: Vec2, level: Option<u8
         Brain::new(def.key, at, def.aggro, def.wander),
         Home { pos, yaw },
         Appearance(def.look.clone()),
+        Credit::default(),
     ));
     let id = world.resource_mut::<Units>().issue(e);
     // Spread monsters' decisions across the quarter-second so they don't all think at once.
