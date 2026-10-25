@@ -1,0 +1,19 @@
+name: Pull LFS files
+description: >
+  Fetch the Git LFS art the asset tests read, from the Actions cache when nothing changed. The
+  full set is a few hundred MB, so downloading it on every run would burn the LFS bandwidth quota.
+runs:
+  using: composite
+  steps:
+    - name: List LFS objects
+      shell: bash
+      run: git lfs ls-files --long | cut -d ' ' -f 1 | sort > .lfs-ids
+    - uses: actions/cache@v4
+      with:
+        path: .git/lfs
+        key: lfs-${{ hashFiles('.lfs-ids') }}
+        restore-keys: lfs-
+        enableCrossOsArchive: true
+    - name: Pull
+      shell: bash
+      run: git lfs pull

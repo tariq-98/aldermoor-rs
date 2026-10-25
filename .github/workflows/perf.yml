@@ -1,0 +1,69 @@
+# Performance numbers for every PR and push to main. Never blocks a merge: shared runners are noisy,
+# so over-budget results show as warnings and in the job summary, not as a failed check.
+#
+# The sim gates planned in #31 (iai-callgrind instruction counts against base, protocol wire
+# size) go here as further steps when they land.
+name: Perf
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  sim:
+    name: Sim step budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build -p sim --release --locked --example bench --tests
+
+      # 300 monsters and 12 heroes fighting, asserting under 2 ms a step (milestone 1 budget).
+      - name: Crowd fight budget test
+        id: budget
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test -p sim --release --locked --test combat a_crowd_fighting_fits_the_step_budget \
+            -- --exact --nocapture 2>&1 | tee budget.log
+
+      # 2,000 units wandering the valley.
+      - name: Bench, 2,000 units
+        run: cargo run -p sim --release --locked --example bench 2000 2>&1 | tee bench.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Sim step"
+            echo "Budget: 2 ms a step for 2,000 units. Shared runner, so expect noise."
+            echo
+            echo "### Crowd fight (300 monsters, 12 heroes)"
+            echo '```'
+            grep -E "ms a step|test result|panicked" budget.log || echo "no output"
+            echo '```'
+            echo "### bench 2000"
+            echo '```'
+            grep "units:" bench.log || echo "no output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.budget.outcome }}" = failure ]; then
+            echo "::warning title=Sim step budget::The crowd fight test went over 2 ms a step on this runner. See the job summary."
+          fi

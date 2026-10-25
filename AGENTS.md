@@ -31,6 +31,9 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
   Never commit issue work straight to `main`.
 - Push work in progress to the branch at least at the end of each session.
 - If you are blocked, add `status:blocked` and comment why.
+- CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux for the portable crates and
+  on macOS for `render` and `client`. Keep it green; run the same commands locally before pushing.
+  `perf.yml` reports sim step times and never blocks a merge.
 - Issues labelled `perf` need before and after numbers against the budgets in
   [docs/RENDERER.md](docs/RENDERER.md) (12 ms GPU on the M1 Air, 2 ms sim step).
 - Issues labelled `needs-mac` must be checked on the Mac. A cloud agent can do the code but must
@@ -69,3 +72,9 @@ Edit that file, not the GitHub UI, and the Tracking workflow applies it on merge
 Claude Code sessions have skills for each step in [.claude/skills](.claude/skills):
 `claim-issue`, `file-issue` and `finish-issue`. Other agents can read those files as
 instructions; they cover both the `gh` CLI and the GitHub MCP tools.
+
+## Wiki
+
+The GitHub wiki is published from [wiki/](wiki/) on every merge to `main`. Edit pages there, not
+on the wiki. When Chippy answers a `status:needs-decision` issue, add a row to
+[wiki/Decisions-log.md](wiki/Decisions-log.md) in the same PR that acts on it.

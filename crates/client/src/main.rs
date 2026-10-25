@@ -214,9 +214,7 @@ struct Game {
     terrain: Arc<Model>,
     scenery: Option<render::scenery::Scenery>,
     review: Vec<UnitState>,
-    yaw: f32,
-    pitch: f32,
-    distance: f32,
+    orbit: controls::Orbit,
     keys: HashSet<KeyCode>,
     mouse_look: bool,
     last_move: Option<Command>,
@@ -261,9 +259,7 @@ impl Game {
             terrain: render::terrain::valley(),
             scenery: None,
             review: Vec::new(),
-            yaw: std::f32::consts::PI,
-            pitch: 0.23,
-            distance: 7.,
+            orbit: controls::Orbit::default(),
             keys: HashSet::new(),
             mouse_look: false,
             last_move: None,
@@ -338,22 +334,22 @@ impl Game {
         g.last = g.start;
         Ok(g)
     }
+    fn held(&self) -> controls::Held {
+        let down = |k| self.keys.contains(&k);
+        controls::Held {
+            forward: down(KeyCode::KeyW),
+            back: down(KeyCode::KeyS),
+            left: down(KeyCode::KeyA),
+            right: down(KeyCode::KeyD),
+            walk: down(KeyCode::ShiftLeft) || down(KeyCode::ShiftRight),
+            mouse_look: self.mouse_look,
+        }
+    }
     fn direction(&self) -> Vec2 {
-        let axis = |positive, negative| {
-            (self.keys.contains(&positive) as i32 - self.keys.contains(&negative) as i32) as f32
-        };
-        let forward = Vec2::new(self.yaw.sin(), self.yaw.cos());
-        let right = Vec2::new(-self.yaw.cos(), self.yaw.sin());
-        (forward * axis(KeyCode::KeyW, KeyCode::KeyS) + right * axis(KeyCode::KeyD, KeyCode::KeyA))
-            .normalize_or_zero()
+        self.held().direction(self.orbit.yaw)
     }
     fn controls(&mut self) {
-        let c = Command::Move {
-            direction: self.direction(),
-            walk: self.keys.contains(&KeyCode::ShiftLeft)
-                || self.keys.contains(&KeyCode::ShiftRight),
-            face_yaw: self.mouse_look.then_some(self.yaw),
-        };
+        let c = self.held().movement(self.orbit.yaw);
         if self.last_move.as_ref() != Some(&c) {
             self.host.send(c.clone());
             self.last_move = Some(c);
@@ -377,30 +373,15 @@ impl Game {
                 fov: 45f32.to_radians(),
             };
         }
-        let target = p + Vec3::Y * 1.25;
-        let offset = Vec3::new(
-            -self.yaw.sin() * self.pitch.cos(),
-            self.pitch.sin(),
-            -self.yaw.cos() * self.pitch.cos(),
-        ) * self.distance;
-        let desired = target + offset;
-        let mut eye = desired;
-        for i in 1..=40 {
-            let t = i as f32 / 40.;
-            let at = target + offset * t;
-            if at.y < world::height(at.x, at.z) + 0.35 {
-                eye = target + offset * ((i - 1) as f32 / 40.);
-                break;
-            }
-        }
-        if let Some(scenery) = &self.scenery {
-            eye = scenery.camera_eye(target, eye, 0.25);
-        }
-        eye.y = eye.y.max(world::height(eye.x, eye.z) + 0.35);
+        let target = controls::Orbit::target(p);
+        let eye = self.orbit.eye(target, |target, eye| match &self.scenery {
+            Some(scenery) => scenery.camera_eye(target, eye, 0.25),
+            None => eye,
+        });
         Camera {
             eye,
             target,
-            fov: 52f32.to_radians(),
+            fov: controls::camera::FOV_DEGREES.to_radians(),
         }
     }
     fn target(&self, cycle: bool) -> Option<u32> {
@@ -1125,7 +1106,7 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 25.,
                 };
-                self.game.distance = (self.game.distance - y * 0.6).clamp(2., 24.);
+                self.game.orbit.zoom(y);
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Right {
@@ -1224,8 +1205,7 @@ impl ApplicationHandler for App {
         if self.game.mouse_look
             && let DeviceEvent::MouseMotion { delta } = event
         {
-            self.game.yaw -= delta.0 as f32 * 0.004;
-            self.game.pitch = (self.game.pitch + delta.1 as f32 * 0.003).clamp(-0.1, 1.1);
+            self.game.orbit.look(delta.0, delta.1);
         }
     }
     fn about_to_wait(&mut self, e: &ActiveEventLoop) {
