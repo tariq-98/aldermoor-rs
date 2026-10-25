@@ -159,7 +159,8 @@ fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer
     // Longitude is periodic: a quad crossing atan2's wrap spans a small arc, not a full map.
     // Keep latitude's derivative unchanged and clamp its pole samples instead of wrapping.
     float2 gx=dfdx(uv),gy=dfdy(uv);
-    gx.x-=round(gx.x);gy.x-=round(gy.x);
+    gx.x-=round(gx.x);
+    gy.x-=round(gy.x);
     float4 previous=f.previous_vp*float4(ray,0);
     float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;
     return {float4(sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*surfaces.sky.y,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};
