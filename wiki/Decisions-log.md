@@ -6,6 +6,7 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Housing: personal instanced homes (crafted furniture, boss trophies, workshops with small crafting bonuses), plus guild halls | No land shortage in an MMO, cheap to host, gives crafting and bosses more purpose | #91 |
 | 2026-10-25 | Travel: discovered waystones (coin fee), enchanter-made teleport scrolls, no teleporting out of the deeper wilderness; ground mounts from a quest late in the first area, dismount on hit, not in towns or dungeons; flying mounts considered for later | Keeps the world big, regional prices meaningful and the wilderness tense | #90 |
 | 2026-10-25 | Team modes (dungeons, capture the flag, more) with no death stakes; respawn at team spawn points | Competitive and co-op play without risk | #77 |
 | 2026-10-25 | A level-banded wilderness with PvP and PvE: players above a band's ceiling are scaled down to it; deeper bands have better loot; dying there drops everything, equipped gear included | Real stakes, while low levels who stay in their band only meet their own strength | #76 |
