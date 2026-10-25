@@ -158,6 +158,12 @@ Health, power and armour are multipliers on the level's base numbers (below).
   of the healing done on whoever they're fighting.
 - They change targets only when someone pulls 10% ahead (in melee) or 30% ahead (at range).
 - **Taunts** put the taunter on top for 3 s.
+- **Noticing:** a monster starts a fight with a player who comes within its notice radius
+  (`aggro` in mobs.ron, 10 to 16 m) and is in sight. The radius is 1 m shorter for each level
+  the player is above the monster and 1 m longer for each level below, from 4 m to twice its
+  own (`sim::notice_radius`). A monster 10 or more levels below a player never starts a fight
+  with them, but fights back when attacked. Once the Wilderness scales levels to its bands
+  (#76), this uses the scaled level (#199).
 - **Packs:** wolves and goblins call the members of their pack close by.
 - **Leashing:** a monster gives up past 45 m from home, or after 12 s with nobody fighting it,
   and walks home untouchable, healing.
