@@ -13,6 +13,7 @@ mod brain;
 pub mod combat;
 mod components;
 pub mod content;
+mod crafting;
 mod loot;
 mod movement;
 mod progress;
@@ -29,6 +30,7 @@ use std::sync::{Arc, OnceLock};
 
 pub use components::*;
 pub use content::Specialty;
+pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, PILE_PRIVATE, SLOTS};
 pub use progress::{Credit, Progress};
 pub use rng::Rng;
@@ -134,9 +136,11 @@ impl Sim {
     pub fn on(land: Arc<world::Valley>, seed: u64) -> Sim {
         let mut world = World::new();
         world.insert_resource(Clock::default());
-        world.insert_resource(Land(land));
         world.insert_resource(Rng::new(seed));
         world.insert_resource(loot::Loot::new(seed));
+        world.insert_resource(crafting::Nodes::new(seed, &land));
+        world.insert_resource(crafting::Workers::default());
+        world.insert_resource(Land(land));
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());
@@ -162,6 +166,7 @@ impl Sim {
                 combat::auras::update,
                 vitals::update,
                 loot::expire,
+                crafting::update,
                 spatial::rebuild,
                 movement::update_poses,
             )
@@ -263,7 +268,7 @@ impl Sim {
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
-        self.world.entity_mut(e).insert(Inventory::default());
+        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default()));
         self.world.entity_mut(e).insert(Unit {
             id,
             kind: UnitKind::Player,

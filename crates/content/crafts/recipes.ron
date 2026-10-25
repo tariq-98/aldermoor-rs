@@ -1,0 +1,46 @@
+// Crafting (docs/CRAFTING.md): the stations in Brambleford, and what each craft makes there.
+// A recipe takes its inputs from the pack, `seconds` for each one made, and pays `xp`. Stations
+// are placeholders by the shops and houses until their art exists (#145).
+(
+    stations: [
+        (key: "brambleford_forge", name: "Forge", kind: "forge", at: (-9.0, -6.0)),
+        (key: "brambleford_anvil", name: "Anvil", kind: "anvil", at: (-14.5, -5.5)),
+        (key: "brambleford_loom", name: "Loom", kind: "loom", at: (-10.0, -31.0)),
+        (key: "brambleford_tannery", name: "Tanning Rack", kind: "tanning_rack", at: (-29.0, -18.0)),
+        (key: "brambleford_altar", name: "Enchanting Altar", kind: "altar", at: (-18.0, -41.0)),
+        (key: "brambleford_fire", name: "Cooking Fire", kind: "fire", at: (2.0, -28.0)),
+        (key: "brambleford_alchemy", name: "Alchemy Table", kind: "alchemy_table", at: (20.0, -16.0)),
+    ],
+    recipes: [
+        // Smithing: smelt at the forge, then work the metal at the anvil (wood for the handles).
+        (key: "copper_ingot", skill: Smithing, station: "forge", inputs: [("copper_ore", 2)], output: ("copper_ingot", 1), seconds: 3.0, xp: 20),
+        (key: "iron_ingot", skill: Smithing, level: 10, station: "forge", inputs: [("iron_ore", 2)], output: ("iron_ingot", 1), seconds: 3.5, xp: 40),
+        (key: "dagger.hunting", skill: Smithing, station: "anvil", inputs: [("copper_ingot", 2), ("oak_log", 1)], output: ("dagger.hunting", 1), seconds: 4.0, xp: 35),
+        (key: "knife.skinning", skill: Smithing, station: "anvil", inputs: [("copper_ingot", 1), ("leather", 1)], output: ("knife.skinning", 1), seconds: 3.0, xp: 25),
+        (key: "pickaxe.copper", skill: Smithing, station: "anvil", inputs: [("copper_ingot", 3), ("oak_log", 1)], output: ("pickaxe.copper", 1), seconds: 4.0, xp: 40),
+        (key: "hatchet.copper", skill: Smithing, station: "anvil", inputs: [("copper_ingot", 3), ("oak_log", 1)], output: ("hatchet.copper", 1), seconds: 4.0, xp: 40),
+        (key: "sickle.copper", skill: Smithing, station: "anvil", inputs: [("copper_ingot", 2), ("oak_log", 1)], output: ("sickle.copper", 1), seconds: 3.5, xp: 30),
+        (key: "sword.arming", skill: Smithing, level: 5, station: "anvil", inputs: [("copper_ingot", 4), ("oak_log", 1)], output: ("sword.arming", 1), seconds: 5.0, xp: 60),
+        (key: "pickaxe.iron", skill: Smithing, level: 10, station: "anvil", inputs: [("iron_ingot", 3), ("oak_log", 1)], output: ("pickaxe.iron", 1), seconds: 5.0, xp: 80),
+        (key: "hatchet.iron", skill: Smithing, level: 10, station: "anvil", inputs: [("iron_ingot", 3), ("oak_log", 1)], output: ("hatchet.iron", 1), seconds: 5.0, xp: 80),
+        (key: "mace.flanged", skill: Smithing, level: 12, station: "anvil", inputs: [("iron_ingot", 4), ("oak_log", 1)], output: ("mace.flanged", 1), seconds: 6.0, xp: 100),
+
+        // Leatherworking: tan the pelts, then cut and stitch.
+        (key: "leather", skill: Leatherworking, station: "tanning_rack", inputs: [("wolf_pelt", 2)], output: ("leather", 1), seconds: 3.0, xp: 20),
+        (key: "bow.hunting", skill: Leatherworking, level: 3, station: "tanning_rack", inputs: [("oak_log", 2), ("leather", 1)], output: ("bow.hunting", 1), seconds: 4.5, xp: 45),
+        (key: "leather_jerkin", skill: Leatherworking, level: 5, station: "tanning_rack", inputs: [("leather", 5)], output: ("leather_jerkin", 1), seconds: 6.0, xp: 70),
+
+        // Tailoring.
+        (key: "linen", skill: Tailoring, station: "loom", inputs: [("flax", 3)], output: ("linen", 1), seconds: 3.0, xp: 18),
+        (key: "padded_coat", skill: Tailoring, level: 5, station: "loom", inputs: [("linen", 5)], output: ("padded_coat", 1), seconds: 6.0, xp: 60),
+
+        // Enchanting: wood and reagents bound into focuses.
+        (key: "staff.oak", skill: Enchanting, station: "altar", inputs: [("oak_log", 3), ("bone_dust", 2)], output: ("staff.oak", 1), seconds: 5.0, xp: 50),
+        (key: "orb.focus", skill: Enchanting, level: 5, station: "altar", inputs: [("rough_garnet", 1), ("copper_ingot", 1)], output: ("orb.focus", 1), seconds: 5.0, xp: 60),
+        (key: "wand.yew", skill: Enchanting, level: 10, station: "altar", inputs: [("yew_log", 2), ("silverleaf", 2)], output: ("wand.yew", 1), seconds: 5.0, xp: 90),
+
+        // Cooking and alchemy. What food and potions do when used comes with using items (#205).
+        (key: "grilled_trout", skill: Cooking, station: "fire", inputs: [("river_trout", 1)], output: ("grilled_trout", 1), seconds: 2.0, xp: 12),
+        (key: "healing_draught", skill: Alchemy, station: "alchemy_table", inputs: [("marigold", 3)], output: ("healing_draught", 1), seconds: 3.0, xp: 25),
+    ],
+)

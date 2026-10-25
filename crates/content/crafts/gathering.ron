@@ -1,0 +1,56 @@
+// Gathering (docs/CRAFTING.md): nodes and where they stand, which carcasses can be skinned, and
+// the tools. A node gives `gives` of its item each swing, runs out after `uses` swings and grows
+// back `regrow` seconds later. A swing takes `swing` seconds over the tool's `speed`. Striking in
+// its sweet spot (SWEET_SPOT, crates/content/src/crafts.rs) gives one more, and a chance at the
+// `rare` find. Higher-tier nodes stand where it's dangerous: iron and silverleaf by the goblins.
+(
+    nodes: [
+        (key: "copper_vein", name: "Copper Vein", skill: Mining, item: "copper_ore", gives: (1, 2), uses: 4, regrow: 120.0, swing: 2.4, xp: 20, rare: Some(("rough_garnet", 0.05))),
+        (key: "iron_vein", name: "Iron Vein", skill: Mining, level: 10, item: "iron_ore", gives: (1, 2), uses: 4, regrow: 180.0, swing: 3.0, xp: 45, rare: Some(("rough_garnet", 0.08))),
+        (key: "oak_tree", name: "Oak", skill: Woodcutting, item: "oak_log", gives: (1, 2), uses: 5, regrow: 150.0, swing: 2.4, xp: 20),
+        (key: "yew_tree", name: "Yew", skill: Woodcutting, level: 10, item: "yew_log", uses: 4, regrow: 200.0, swing: 3.0, xp: 45),
+        (key: "marigold_patch", name: "Marigold", skill: Herbalism, item: "marigold", gives: (1, 3), uses: 3, regrow: 90.0, swing: 1.6, xp: 15),
+        (key: "flax_patch", name: "Flax", skill: Herbalism, item: "flax", gives: (2, 3), uses: 3, regrow: 90.0, swing: 1.6, xp: 15),
+        (key: "silverleaf_patch", name: "Silverleaf", skill: Herbalism, level: 10, item: "silverleaf", gives: (1, 2), uses: 3, regrow: 150.0, swing: 2.0, xp: 35),
+        // Out in the river: cast from the bank.
+        (key: "trout_spot", name: "Trout Pool", skill: Fishing, item: "river_trout", uses: 6, regrow: 120.0, swing: 4.0, xp: 22, rare: Some(("message_bottle", 0.04)), reach: 9.0),
+        // Carcasses are skinned once, where the beast fell; `regrow` doesn't apply.
+        (key: "wolf_carcass", name: "Wolf Carcass", skill: Skinning, item: "wolf_pelt", gives: (1, 2), uses: 1, regrow: 1.0, swing: 2.0, xp: 20),
+        (key: "dire_wolf_carcass", name: "Dire Wolf Carcass", skill: Skinning, level: 10, item: "dire_pelt", uses: 1, regrow: 1.0, swing: 2.4, xp: 45),
+    ],
+    spawns: [
+        // At the foot of the west ledge.
+        (node: "copper_vein", at: (-34.0, -40.0)),
+        (node: "copper_vein", at: (-35.0, -34.0)),
+        // On the eastern ridge, among the goblins.
+        (node: "iron_vein", at: (55.0, 2.0)),
+        (node: "iron_vein", at: (61.0, 13.0)),
+        // Valley trees (world::Valley's), by the village.
+        (node: "oak_tree", at: (-27.0, -4.0)),
+        (node: "oak_tree", at: (-22.6, -19.6)),
+        (node: "oak_tree", at: (-10.1, -3.2)),
+        (node: "oak_tree", at: (-48.1, -23.4)),
+        (node: "yew_tree", at: (41.2, -11.7)),
+        (node: "yew_tree", at: (55.8, -10.9)),
+        (node: "marigold_patch", at: (8.0, -28.0)),
+        (node: "marigold_patch", at: (-30.0, 36.0)),
+        (node: "flax_patch", at: (-6.0, -26.0)),
+        (node: "flax_patch", at: (-24.0, 28.0)),
+        (node: "silverleaf_patch", at: (48.0, 16.0)),
+        (node: "trout_spot", at: (-20.0, -60.9)),
+        (node: "trout_spot", at: (20.0, -55.1)),
+    ],
+    carcasses: [
+        (mob: "wolf", node: "wolf_carcass"),
+        (mob: "dire_wolf", node: "dire_wolf_carcass"),
+    ],
+    tools: [
+        (item: "pickaxe.copper", skill: Mining, speed: 1.0),
+        (item: "pickaxe.iron", skill: Mining, level: 10, speed: 1.4),
+        (item: "hatchet.copper", skill: Woodcutting, speed: 1.0),
+        (item: "hatchet.iron", skill: Woodcutting, level: 10, speed: 1.4),
+        (item: "knife.skinning", skill: Skinning, speed: 1.0),
+        (item: "sickle.copper", skill: Herbalism, speed: 1.0),
+        (item: "rod.fishing", skill: Fishing, speed: 1.0),
+    ],
+)
