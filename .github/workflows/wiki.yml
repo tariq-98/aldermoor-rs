@@ -1,0 +1,36 @@
+# Publishes wiki/ to the GitHub wiki, so wiki pages are reviewed and versioned like code.
+name: Wiki
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [wiki/**]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push wiki/ to the wiki repo
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki
+          rsync -a --delete --exclude .git wiki/ /tmp/wiki/
+          cd /tmp/wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date"
+          else
+            git commit -m "Publish wiki from ${GITHUB_SHA::7}"
+            git push
+          fi

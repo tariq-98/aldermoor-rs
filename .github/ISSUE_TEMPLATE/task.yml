@@ -1,0 +1,34 @@
+name: Task
+description: A piece of work an agent can claim
+labels: ["status:ready"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What this changes for the player or the project.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files or crates expected to change
+      description: Lets other agents spot overlap before they claim.
+      placeholder: crates/client/src/camera.rs, crates/protocol
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+    validations:
+      required: true
+  - type: textarea
+    id: perf
+    attributes:
+      label: Performance impact
+      description: Expected cost against the 12 ms GPU and 2 ms sim budgets, if any.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes and links
