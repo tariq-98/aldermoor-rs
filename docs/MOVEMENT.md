@@ -27,7 +27,13 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Walls and ruins can be climbed too. A `world::Solid` with a `top` is ground, not an
     obstacle: its sides are faces like any cliff's, so one that tops out within 1.5 m is climbed
     and stood on, and a taller one stops you. Buildings and trees have no top and only block.
-    None stand in the valley yet; they arrive with their art (#153).
+    A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
+    a step at a time.
+  - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
+    top: climb on and walk along them. The ruined hall on the hill south-west of the village
+    (#160) breaks down in steps along its east wall, each a climb from the last, up to a lookout
+    4.2 m up under its gable; the gable, its buttresses and the door's jambs are too tall to climb
+    (`crates/world/src/masonry.rs`).
 - **Swimming:** the river is no longer a wall.
   - Water deeper than 0.5 m is swum (until it's shallower than 0.4 m). Swimmers float with
     their feet 0.5 m under the surface (`world::WATER_LEVEL`), at 0.45× run speed.

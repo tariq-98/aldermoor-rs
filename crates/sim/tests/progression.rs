@@ -77,6 +77,9 @@ fn a_monster_that_gets_away_pays_nothing() {
     let mut events = Vec::new();
     assert!(!fight(&mut sim, hero, w, 1.0, &mut events));
     assert!(!sim.get::<Credit>(w).unwrap().0.is_empty(), "the blows weren't counted");
+    // Break off and run: no more swings, so the result doesn't hang on whether the pack, wandering
+    // round the walls and the ruin, catches up.
+    sim.command(hero, Command::SetAutoAttack(false));
     sim.command(hero, Command::Move { direction: Vec2::new(1.0, 0.0), walk: false, sprint: false, face_yaw: None });
     sim.run_for(15.0);
     assert_eq!(progress(&sim, hero).xp, [0; 6]);

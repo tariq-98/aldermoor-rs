@@ -279,6 +279,180 @@ def needles(size=1024, seed=10):
     return colour, strokes + 0.5 * tufts, 6.0, 0.85 + 0.0 * k
 
 
+def _course_cells(size, seed, row_px, length_px, warp):
+    """Irregular stones laid in courses, wrapping on every side: a periodic Voronoi of seeds laid
+    along rows `row_px` (low, high) tall and spaced `length_px` along them, measured in a frame
+    squashed along x so the cells come out long and low, with outlines bent by up to `warp` pixels.
+
+    Returns, per pixel: the distance in pixels to the nearest joint, which way is away from it
+    (unit x, y; y runs down the image), the stone's index and how many stones there are.
+    """
+    rng = np.random.default_rng(seed)
+    heights = []
+    while sum(heights) < size:
+        heights.append(rng.uniform(*row_px))
+    heights = np.array(heights) * size / sum(heights)
+    tops = np.concatenate([[0.0], np.cumsum(heights)])
+    pts = []
+    for r, h in enumerate(heights):
+        lengths = []
+        while sum(lengths) < size:
+            lengths.append(rng.uniform(*length_px))
+        lengths = np.array(lengths) * size / sum(lengths)
+        x0 = rng.uniform(0, size)
+        for x, l in zip(np.cumsum(lengths) - lengths / 2, lengths):
+            pts.append(((x0 + x) % size, tops[r] + h * (0.5 + rng.uniform(-0.12, 0.12))))
+    stretch = np.mean(length_px) / np.mean(row_px)
+    reach = (int(length_px[1] * 1.6 + warp), int(row_px[1] * 1.6 + warp))
+    # The outlines bend smoothly: every pixel measures from a slightly displaced point.
+    wx = ((noise(size, 7, seed + 101) - 0.5) * 2 * warp + (noise(size, 30, seed + 103) - 0.5) * 0.4 * warp).astype(np.float32)
+    wy = ((noise(size, 7, seed + 102) - 0.5) * 2 * warp + (noise(size, 30, seed + 104) - 0.5) * 0.4 * warp).astype(np.float32)
+    f1 = np.full((size, size), 1e9, np.float32)
+    index = np.zeros((size, size), np.int32)
+    windows = []
+    for k, (cx, cy) in enumerate(pts):
+        xs = np.arange(int(cx) - reach[0], int(cx) + reach[0] + 1)
+        ys = np.arange(int(cy) - reach[1], int(cy) + reach[1] + 1)
+        win = np.ix_(ys % size, xs % size)
+        px, py = xs[None, :] + wx[win], ys[:, None] + wy[win]
+        d = np.sqrt(((px - cx) / stretch) ** 2 + (py - cy) ** 2)
+        closer = d < f1[win]
+        f1[win] = np.where(closer, d, f1[win])
+        index[win] = np.where(closer, k, index[win])
+        windows.append((win, px, py))
+    # The distance to the cell's edge is the nearest of the bisectors with its neighbours, taken
+    # as a smooth minimum so it doesn't crease where the nearest neighbour changes.
+    P = np.array(pts, np.float32)
+    soft = 3.0
+    total = np.zeros((size, size), np.float32)
+    for k, (win, px, py) in enumerate(windows):
+        n = index[win]
+        # The window is laid out round seed k; take the image of each pixel's own seed nearest it.
+        kx, ky = P[k]
+        nx = P[n, 0] + np.round((px - P[n, 0]) / size) * size
+        ny = P[n, 1] + np.round((py - P[n, 1]) / size) * size
+        sx, sy = (kx - nx) / stretch, ky - ny
+        length = np.maximum(np.hypot(sx, sy), 1e-3)
+        ux, uy = sx / length, sy / length
+        mx, my = ((px - nx) / stretch), (py - ny)
+        bis = (mx * ux + my * uy) - length / 2
+        bis_px = -bis / np.hypot(ux / stretch, uy)
+        bis_px = np.where(n == k, 1e4, np.maximum(bis_px, 0.0))
+        total[win] += np.exp(-bis_px / soft)
+    joint = -soft * np.log(np.maximum(total, 1e-30))
+    gy, gx = (np.roll(joint, -1, 0) - np.roll(joint, 1, 0)) / 2, (np.roll(joint, -1, 1) - np.roll(joint, 1, 1)) / 2
+    g = np.maximum(np.hypot(gx, gy), 0.05)
+    return joint, gx / g, gy / g, index, len(pts)
+
+
+def _faces(size, seed, cells, palette, width, falloff, proud):
+    """Shared stone faces for `drystone` and `rubble`: (face mask, height, colour, below). Each
+    stone gets its own colour from `palette`, tone and set, is pillowed toward its middle, worn
+    lighter along its top edge and shadowed along its bottom one, weathered in blotches, pitted and
+    chipped, and carries lichen. `below` is 1 in a joint under a stone, where it's darkest."""
+    joint, ax, ay, index, count = cells
+    rng = np.random.default_rng(seed)
+    # Joints wander in width, opening into voids here and there.
+    w = width * (0.55 + 0.9 * noise(size, 12, seed + 1) ** 2 + 1.6 * np.clip((noise(size, 25, seed + 2) - 0.72) / 0.1, 0, 1))
+    d = joint - w
+    face = np.clip(d / 1.5, 0, 1)
+    inside = np.clip(d, 0, None)
+    # Near a joint only: deep inside a stone the second-nearest cell can switch, which would crease
+    # anything measured from the joint's direction.
+    edge = np.exp(-inside / 4.0) * (inside < 12.0)
+    pillow = 1 - np.exp(-inside / falloff)
+    grain = noise(size, 100, seed + 3, power=1.0)
+    strata = stretched(size, 7.0, 1.0, seed + 4, power=1.5)
+    blotch = noise(size, 9, seed + 5, power=1.6)
+    pits = np.clip((noise(size, 240, seed + 6, power=0.6) - 0.74) / 0.05, 0, 1)
+    chips = np.clip((noise(size, 34, seed + 7) - 0.66) / 0.08, 0, 1) * edge
+    lumps = noise(size, 14, seed + 12, power=1.8)
+    height = face * (0.85 * pillow + rng.uniform(-proud, proud, count)[index]
+                     + 0.35 * lumps + 0.08 * grain + 0.1 * strata - 0.25 * pits - 0.6 * chips)
+    stone = np.asarray(palette)[rng.integers(0, len(palette), count)[index]]
+    stone = stone * rng.uniform(0.8, 1.1, count)[index][..., None]
+    top = np.clip(ay, 0, 1) * edge  # The top edge, where the joint is above.
+    bottom = np.clip(-ay, 0, 1) * edge
+    k = (0.8 + 0.34 * blotch + 0.06 * (grain - 0.5) + 0.1 * (strata - 0.5) - 0.3 * pits - 0.3 * chips
+         + 0.2 * top - 0.3 * bottom + 0.12 * (lumps - 0.5))
+    stone = stone * (k * (0.58 + 0.42 * np.clip(inside / 8.0, 0, 1) ** 0.6))[..., None]
+    # Crustose lichen in soft-edged patches: pale grey-green, and now and then orange.
+    blot = noise(size, 22, seed + 8, power=1.4) + 0.4 * noise(size, 80, seed + 9, power=1.0)
+    pale = np.clip((blot - 1.0) / 0.07, 0, 1) * face
+    blot = noise(size, 28, seed + 10, power=1.4) + 0.4 * noise(size, 100, seed + 11, power=1.0)
+    orange = np.clip((blot - 1.1) / 0.05, 0, 1) * face
+    blot = noise(size, 40, seed + 14, power=1.3) + 0.4 * noise(size, 140, seed + 15, power=1.0)
+    dark = np.clip((blot - 1.06) / 0.05, 0, 1) * face
+    stone = stone * (1 - 0.6 * dark[..., None]) + np.array([0.07, 0.07, 0.065]) * 0.6 * dark[..., None]
+    stone = stone * (1 - 0.8 * pale[..., None]) + np.array([0.55, 0.57, 0.47]) * 0.8 * pale[..., None]
+    stone = stone * (1 - 0.7 * orange[..., None]) + np.array([0.5, 0.33, 0.09]) * 0.7 * orange[..., None]
+    below = np.clip(ay, 0, 1) * (1 - face)
+    return face, height, stone, below
+
+
+def drystone(size=1024, seed=21):
+    """Dry-stone walling: flat limestone laid in rough courses without mortar, so every joint is a
+    dark shadowed gap, opening here and there round a pinning stone. Pale and buff stones with
+    their bedding showing, lichen on the faces, a little moss deep in the joints."""
+    cells = _course_cells(size, seed, (34, 112), (75, 340), 8.0)
+    palette = [(0.53, 0.47, 0.37), (0.48, 0.45, 0.39), (0.5, 0.43, 0.34), (0.41, 0.36, 0.29), (0.55, 0.5, 0.42)]
+    face, height, stone, below = _faces(size, seed, cells, palette, 4.6, 13.0, 0.45)
+    void = 1 - face
+    # Pinning stones wedged in the wider gaps, catching a little light.
+    pins = np.clip((noise(size, 70, seed + 12) - 0.55) / 0.1, 0, 1)
+    moss = np.clip((noise(size, 10, seed + 13) - 0.68) / 0.08, 0, 1)
+    gap = np.array([0.03, 0.029, 0.026]) * (1 + 2.4 * pins - 0.4 * below)[..., None]
+    gap = gap * (1 - 0.8 * moss[..., None]) + np.array([0.045, 0.06, 0.022]) * 0.8 * moss[..., None]
+    colour = stone * face[..., None] + gap * void[..., None]
+    height = height + void * (-1.6 + 0.6 * pins)
+    return colour, height, 7.0, 0.85 + 0.12 * void
+
+
+def rubble(size=1024, seed=23):
+    """Coursed rubble: roughly squared limestone bedded in lime mortar that has weathered back from
+    the stones, darkened, and in places washed out, with rain streaks and lichen. The ruins' walls."""
+    cells = _course_cells(size, seed, (48, 130), (80, 260), 6.0)
+    palette = [(0.42, 0.4, 0.36), (0.39, 0.38, 0.35), (0.44, 0.4, 0.33), (0.34, 0.32, 0.28), (0.46, 0.44, 0.39)]
+    face, height, stone, below = _faces(size, seed, cells, palette, 6.0, 8.0, 0.3)
+    mortar = 1 - face
+    washed = np.clip((noise(size, 9, seed + 12) - 0.6) / 0.08, 0, 1)
+    grit = noise(size, 150, seed + 13, power=0.8)
+    lime = np.array([0.27, 0.26, 0.23]) * (0.75 + 0.4 * grit + 0.2 * noise(size, 6, seed + 14) - 0.35 * below)[..., None]
+    gap = lime * (1 - washed[..., None]) + np.array([0.03, 0.03, 0.026]) * washed[..., None]
+    colour = stone * face[..., None] + gap * mortar[..., None]
+    height = height + mortar * (-0.8 - 0.9 * washed + 0.15 * grit)
+    # Rain runs down the wall in faint streaks.
+    streaks = stretched(size, 1.0, 14.0, seed + 15, power=1.3)
+    colour = colour * (0.86 + 0.22 * streaks)[..., None]
+    return colour, height, 7.5, 0.84 + 0.1 * mortar
+
+
+def dressed(size=1024, seed=25):
+    """Dressed limestone worn smooth by weather and feet: copings, quoins, arches and steps. Soft
+    weathering stains, fine pits, hairline cracks, the odd fossil, crusts of pale and dark lichen,
+    and no joints: each stone is modelled."""
+    broad = noise(size, 2, seed)
+    mid = noise(size, 6, seed + 1)
+    fine = noise(size, 120, seed + 2, power=0.9)
+    stain = np.clip((noise(size, 5, seed + 8, power=1.6) - 0.45) / 0.3, 0, 1)
+    pits = np.clip((noise(size, 260, seed + 3, power=0.6) - 0.74) / 0.04, 0, 1)
+    f1, edge, _, _ = voronoi(size, 60, seed + 4, jitter=1.0)
+    fossils = np.exp(-((f1 - 5.0) / 1.3) ** 2) * (noise(size, 5, seed + 5) > 0.7)
+    _, crack_edge, _, _ = voronoi(size, 9, seed + 9, warp=50)
+    cracks = np.exp(-(crack_edge / 1.3) ** 2) * (noise(size, 3, seed + 10) > 0.6)
+    k = 0.84 + 0.22 * broad + 0.1 * mid + 0.07 * fine - 0.16 * stain - 0.25 * pits - 0.06 * fossils - 0.35 * cracks
+    colour = _tint((0.42, 0.39, 0.33), k)
+    colour = colour * (1 + 0.1 * (noise(size, 3, seed + 6)[..., None] - 0.5) * np.array([1.0, 0.5, -0.6])[None, None, :])
+    blot = noise(size, 26, seed + 7, power=1.4) + 0.4 * noise(size, 90, seed + 11, power=1.0)
+    pale = np.clip((blot - 1.0) / 0.07, 0, 1)
+    blot = noise(size, 36, seed + 12, power=1.4) + 0.4 * noise(size, 120, seed + 13, power=1.0)
+    dark = np.clip((blot - 1.06) / 0.05, 0, 1)
+    colour = colour * (1 - 0.6 * dark[..., None]) + np.array([0.08, 0.08, 0.07]) * 0.6 * dark[..., None]
+    colour = colour * (1 - 0.75 * pale[..., None]) + np.array([0.55, 0.56, 0.48]) * 0.75 * pale[..., None]
+    height = 0.6 * broad + 0.3 * mid + 0.25 * fine - 0.8 * pits - 0.3 * fossils - 0.9 * cracks + 0.15 * pale
+    return colour, height, 3.5, 0.8 + 0.06 * fine
+
+
 SURFACES = {
     "plaster": (plaster, 2.0),
     "stone": (stone_wall, 2.0),
@@ -291,4 +465,7 @@ SURFACES = {
     "rock": (rock, 2.5),
     "foliage": (foliage, 1.5),
     "needles": (needles, 1.2),
+    "drystone": (drystone, 1.6),
+    "rubble": (rubble, 2.0),
+    "dressed": (dressed, 1.2),
 }
