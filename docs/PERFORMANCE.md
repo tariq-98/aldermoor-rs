@@ -35,6 +35,25 @@ this table, or the table changes in the same PR with the reason written down. Is
 The GPU split is a starting point. When per-pass timers land (#26), replace it with measured
 numbers and move the spare to wherever it is needed.
 
+## MMO scale
+
+Aldermoor is an MMORPG (decided 25 October 2026), so the server and the network get budgets of
+their own. Working sizes, until Chippy picks: **2,000 players in a world, 200 in one busy area**
+(a town, a Wilderness fight). Team modes (dungeons, capture the flag) run as separate small
+instances and fit inside these numbers.
+
+| Area | Budget | Last measured |
+| --- | --- | --- |
+| Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.41 ms step plus 161 ms of snapshots (#73) |
+| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | about 0.8 ms, a full snapshot every tick (#34) |
+| Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | about 3 MB/s at 300 units in view (#34) |
+| Server out, one region | 4 MB/s at 200 players | 2.8 GB/s at 200 players (#73) |
+| Client: crowd of 200 characters | 4 ms GPU and 3 ms CPU together, inside the frame budgets above | not built (#75) |
+
+The view cost is the hard one: it has to drop about 40 times. That takes an interest grid,
+appearance sent once, deltas against what the client already has, quantised fields and a
+20–30 Hz send rate (#34, #73). A bot load test (#74) checks the whole region tick.
+
 ## How each is measured
 
 - **GPU and frame:** `scripts/benchmark_renderer.py` on the reference machine, offscreen for
@@ -56,6 +75,9 @@ numbers and move the spare to wherever it is needed.
   60 Hz tick (#31, #34).
 - **Memory:** `footprint -p <pid>` on the running client, peak and steady.
 - **Launch:** wall clock from starting the release binary to its first presented frame.
+- **MMO server and network:** the zone server spike (#73) and bot load test (#74) report the
+  region tick, per-view time and bytes per player once they exist. Until then, the cloud
+  numbers above come from a scratch bench that adds players to the sim bench.
 
 ## Changing a budget
 
