@@ -46,13 +46,16 @@ pub struct Character {
     pub names: HashMap<String, usize>,
     pub look: Look,
     pub clips: Arc<Model>,
+    /// `clips` bound to this character's bones.
+    clip_set: Arc<ClipSet>,
+    /// The model whose skeleton this character was built on, which clip sets bind to.
+    skeleton: Arc<Model>,
     pub clip_meta: HashMap<String, assets::Clip>,
     pub rig_height: f32,
     pelvis_ratio: f32,
     reference_pelvis: Vec3,
     humanoid: bool,
     beast_speeds: [f32; 2],
-    upper: Vec<bool>,
     role_clips: HashMap<String, String>,
     main: Option<assets::Item>,
     off_hand: Option<assets::Item>,
@@ -66,11 +69,17 @@ pub struct Character {
     attack: usize,
     transition: Option<(String, f32)>,
     last_drawn: bool,
-    blend_from: Vec<Transform>,
-    blend_time: f32,
+    /// Settles each switch of the clip stack into the next (#210, docs/ANIMATION.md).
+    pub blender: anim::Blender,
     last_clip: String,
     /// The legs' locomotion clip under an action on the move.
     last_legs: Option<&'static str>,
+    /// Whether last frame's base clip was an action or another one-shot.
+    last_busy: bool,
+    /// Last frame's upper-body layer over the base clip: ready, stow, guard or a drawn idle.
+    last_upper: Option<String>,
+    /// A switch the clips' names won't show: an action starting over, or a LOD swap.
+    forced_switch: Option<anim::Switch>,
     /// Where the walk, jog or sprint cycle is, from 0 to 1.
     stride: f32,
     drawn_now: bool,
@@ -79,8 +88,12 @@ pub struct Character {
     bow_morph: [f32; 2],
     springs: Vec<crate::springs::SpringBones>,
     children: Vec<Vec<usize>>,
-    lod_parts: HashMap<usize, (Vec<Part>, Arc<Model>)>,
+    /// Every node after its parent, to rebuild world matrices in one pass.
+    order: Vec<usize>,
+    lod_parts: HashMap<usize, Stashed>,
 }
+/// What `set_lod` keeps of a LOD it swapped out: its parts, its clips and their binding.
+type Stashed = (Vec<Part>, Arc<Model>, Arc<ClipSet>);
 
 /// Which bones a clip drives. The upper body is `spine_01` and everything under it.
 #[derive(Clone, Copy, PartialEq)]
@@ -108,6 +121,39 @@ fn heading(rotation: Quat, rest: Quat) -> f32 {
 }
 fn wrap(angle: f32) -> f32 {
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+/// Node indices with every parent before its children.
+fn parent_first(nodes: &[Node]) -> Vec<usize> {
+    fn place(i: usize, nodes: &[Node], placed: &mut [bool], order: &mut Vec<usize>) {
+        if placed[i] {
+            return;
+        }
+        if let Some(p) = nodes[i].parent {
+            place(p, nodes, placed, order);
+        }
+        placed[i] = true;
+        order.push(i);
+    }
+    let mut order = Vec::with_capacity(nodes.len());
+    let mut placed = vec![false; nodes.len()];
+    for i in 0..nodes.len() {
+        place(i, nodes, &mut placed, &mut order);
+    }
+    order
+}
+/// The kind of switch from pose `from` to `to`, for how fast it settles. `busy` says an action or
+/// another one-shot (an attack, cast, roll, hit, death) drives the base clip.
+fn switch_kind(from: Pose, from_busy: bool, to: Pose, to_busy: bool) -> anim::Switch {
+    let airborne = |pose| matches!(pose, Pose::Jump | Pose::Fall);
+    if airborne(from) && !airborne(to) {
+        anim::Switch::Land
+    } else if to_busy || to == Pose::Jump {
+        anim::Switch::Action
+    } else if from_busy {
+        anim::Switch::Recover
+    } else {
+        anim::Switch::Locomotion
+    }
 }
 
 pub fn region_mask(names: &[String], regions: &[String]) -> u32 {
@@ -169,6 +215,7 @@ impl Character {
             .map(|(i, n)| (n.name.clone(), i))
             .collect();
         let local = nodes.iter().map(|n| n.rest).collect::<Vec<_>>();
+        let order = parent_first(&nodes);
         let clips = if body.is_some() {
             cache.get(&catalog.path(&h.animations.file))?
         } else {
@@ -179,6 +226,7 @@ impl Character {
             .iter()
             .find(|n| n.name == "pelvis")
             .map_or(Vec3::ZERO, |n| n.rest.translation);
+        let clip_set = cache.clip_set(&model, &clips, body.is_some());
         let mut c = Self {
             lod,
             partial_updates: true,
@@ -186,9 +234,11 @@ impl Character {
             world: world_matrices(&nodes, &local),
             nodes,
             names,
-            local: local.clone(),
+            local,
             look: look.clone(),
             clips,
+            clip_set,
+            skeleton: model.clone(),
             clip_meta: h
                 .animations
                 .clips
@@ -200,7 +250,6 @@ impl Character {
             reference_pelvis,
             humanoid: body.is_some(),
             beast_speeds: [1.; 2],
-            upper: Vec::new(),
             role_clips: beast
                 .map(|b| b.clips.clone().into_iter().collect())
                 .unwrap_or_default(),
@@ -221,10 +270,12 @@ impl Character {
             attack: 0,
             transition: None,
             last_drawn: look.drawn,
-            blend_from: local,
-            blend_time: 1.,
+            blender: anim::Blender::default(),
             last_clip: String::new(),
             last_legs: None,
+            last_busy: false,
+            last_upper: None,
+            forced_switch: None,
             stride: 0.,
             drawn_now: look.drawn,
             main_offset: 0.,
@@ -232,6 +283,7 @@ impl Character {
             bow_morph: [0.; 2],
             springs: Vec::new(),
             children: Vec::new(),
+            order,
             lod_parts: HashMap::new(),
         };
         if beast.is_some() {
@@ -261,7 +313,6 @@ impl Character {
             );
             c.apply_clip(&idle, 0., true, Bones::All);
             c.world = world_matrices(&c.nodes, &c.local);
-            c.blend_from = c.local.clone();
             c.last_clip = idle;
             return Ok(c);
         }
@@ -454,21 +505,6 @@ impl Character {
                 c.set_appearance(catalog, cache, look, &i.id, &j)?;
             }
         }
-        c.upper = (0..c.nodes.len())
-            .map(|mut i| {
-                loop {
-                    if c.nodes[i].name == "spine_01" {
-                        return true;
-                    }
-                    if let Some(p) = c.nodes[i].parent {
-                        i = p
-                    } else {
-                        return false;
-                    }
-                }
-            })
-            .collect();
-        c.blend_from = c.local.clone();
         c.world = world_matrices(&c.nodes, &c.local);
         for (_, id) in &look.gear {
             if let Some(item) = catalog
@@ -537,6 +573,10 @@ impl Character {
                 remap[i] = bind(i, &model, self);
             }
         }
+        if self.order.len() != self.nodes.len() {
+            // A piece brought bones of its own (a cape's): the world matrices cover them too.
+            self.order = parent_first(&self.nodes);
+        }
         self.parts.push(Part {
             appearance: Default::default(),
             model,
@@ -559,7 +599,7 @@ impl Character {
         if lod == self.lod {
             return Ok(());
         }
-        let (parts, clips) = if let Some(parts) = self.lod_parts.remove(&lod) {
+        let (parts, clips, clip_set) = if let Some(parts) = self.lod_parts.remove(&lod) {
             parts
         } else {
             let mut next = Self::load_lod(catalog, cache, &self.look, lod)?;
@@ -573,21 +613,35 @@ impl Character {
                     }
                 }
             }
-            (next.parts, next.clips)
+            // A beast's clips come with each LOD's model; they still drive this skeleton.
+            let clip_set = cache.clip_set(&self.skeleton, &next.clips, self.humanoid);
+            (next.parts, next.clips, clip_set)
         };
         self.lod_parts.insert(
             self.lod,
             (
                 std::mem::replace(&mut self.parts, parts),
                 std::mem::replace(&mut self.clips, clips),
+                std::mem::replace(&mut self.clip_set, clip_set),
             ),
         );
         self.lod = lod;
+        self.forced_switch = Some(anim::Switch::Detail);
         Ok(())
+    }
+    /// Rebuilds every world matrix from the local pose.
+    fn pose_world(&mut self) {
+        for &i in &self.order {
+            let local = self.local[i].matrix();
+            self.world[i] = match self.nodes[i].parent {
+                Some(p) => self.world[p] * local,
+                None => local,
+            };
+        }
     }
     pub(crate) fn update_chain(&mut self, root: usize) {
         if !self.partial_updates {
-            self.world = world_matrices(&self.nodes, &self.local);
+            self.pose_world();
             return;
         }
         if self.children.len() != self.nodes.len() {
@@ -873,41 +927,33 @@ impl Character {
         rotation
     }
     fn apply_clip(&mut self, name: &str, t: f32, looping: bool, bones: Bones) {
-        let Some(clip) = self.clips.clips.get(name) else {
+        let Some(bound) = self.clip_set.clips.get(name) else {
             return;
         };
+        let clip = &bound.clip;
         let t = if looping {
             t.rem_euclid(clip.duration.max(0.001))
         } else {
             t.clamp(0., clip.duration)
         };
-        for track in &clip.tracks {
-            let Some(&i) = self.names.get(&track.node) else {
-                continue;
-            };
-            if bones != Bones::All
-                && self.upper.get(i).copied().unwrap_or(false) != (bones == Bones::Upper)
-            {
-                continue;
-            }
-            let v = track.sample(t);
-            match track.property {
-                Property::Rotation => {
+        let tracks = match bones {
+            Bones::All => &bound.tracks[..],
+            Bones::Upper => &bound.tracks[..bound.upper],
+            Bones::Lower => &bound.tracks[bound.upper..],
+        };
+        for b in tracks {
+            let v = clip.tracks[b.track as usize].sample(t);
+            let i = b.bone as usize;
+            match b.apply {
+                Apply::Rotation => {
                     self.local[i].rotation = Quat::from_array(v.to_array()).normalize()
                 }
-                Property::Translation => {
-                    if !self.humanoid {
-                        self.local[i].translation = v.truncate()
-                    } else if track.node == "pelvis" {
-                        self.local[i].translation = self.nodes[i].rest.translation
-                            + (v.truncate() - self.reference_pelvis) * self.pelvis_ratio
-                    }
+                Apply::Translation => self.local[i].translation = v.truncate(),
+                Apply::Pelvis => {
+                    self.local[i].translation = self.nodes[i].rest.translation
+                        + (v.truncate() - self.reference_pelvis) * self.pelvis_ratio
                 }
-                Property::Scale => {
-                    if !self.humanoid {
-                        self.local[i].scale = v.truncate()
-                    }
-                }
+                Apply::Scale => self.local[i].scale = v.truncate(),
             }
         }
     }
@@ -922,6 +968,8 @@ impl Character {
                 .is_none_or(|old| old.action != c.action || c.action_time < old.action_time);
             if new_action {
                 self.windup = None;
+                // The same clip may start over: still a switch.
+                self.forced_switch = Some(anim::Switch::Action);
             }
             if u.pose == Pose::Attack
                 && let Some(cast) = &c.cast
@@ -978,19 +1026,25 @@ impl Character {
         let speed = u.velocity.xz().length();
         let moving = self.moving_legs(u);
         let legs = moving.map(|pose| locomotion_clip(pose, speed));
-        if name != self.last_clip || legs != self.last_legs {
-            self.blend_from = self.local.clone();
-            self.blend_time = 0.;
+        let acting = self.action_clip(u).is_some();
+        let busy = acting
+            || matches!(
+                u.pose,
+                Pose::Attack | Pose::Cast | Pose::Dodge | Pose::Hit | Pose::Dead
+            );
+        // Any change in what plays is a switch for the blender, even one that looks continuous.
+        let mut switch = self.forced_switch.take();
+        if name != self.last_clip || legs != self.last_legs || u.pose != self.last_pose {
+            switch = Some(switch_kind(self.last_pose, self.last_busy, u.pose, busy));
             self.last_clip = name.clone();
             self.last_legs = legs;
         }
         self.last_pose = u.pose;
-        self.blend_time = (self.blend_time + dt).min(0.16);
+        self.last_busy = busy;
         for (n, l) in self.nodes.iter().zip(&mut self.local) {
             *l = n.rest;
         }
         let locomotion = matches!(u.pose, Pose::Walk | Pose::Run);
-        let acting = self.action_clip(u).is_some();
         let walking = locomotion && !acting;
         let looping = matches!(u.pose, Pose::Idle | Pose::Walk | Pose::Run | Pose::Fall)
             || self.combat.as_ref().is_some_and(|c| {
@@ -1054,6 +1108,7 @@ impl Character {
         if let Some(legs) = legs {
             self.walk_under(legs);
         }
+        let mut upper = None;
         if locomotion
             && u.look.drawn
             && self.humanoid
@@ -1065,6 +1120,7 @@ impl Character {
                 .map(str::to_owned)
         {
             self.apply_clip(&idle, u.pose_time, true, Bones::Upper);
+            upper = Some(idle);
         }
         if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
             let c = self.combat.as_ref().unwrap();
@@ -1081,17 +1137,19 @@ impl Character {
             };
             let looping = !parrying && self.clip_meta.get(&guard).is_some_and(|m| m.looping);
             self.apply_clip(&guard, time, looping, Bones::Upper);
+            upper = Some(guard);
             self.transition = None;
         }
         let transition = self.transition.clone();
         if let Some((n, t)) = &transition {
             self.apply_clip(n, *t, false, Bones::Upper);
+            upper = Some(n.clone());
         }
-        let blend = self.blend_time / 0.16;
-        for (i, p) in self.local.iter_mut().enumerate() {
-            *p = self.blend_from[i].blend(*p, blend);
+        if upper != self.last_upper {
+            switch = switch.or(Some(anim::Switch::Layer));
+            self.last_upper = upper;
         }
-        self.world = world_matrices(&self.nodes, &self.local);
+        self.pose_world();
         self.drawn_now = u.look.drawn;
         self.main_offset = 0.;
         let (active, t) = transition
@@ -1099,6 +1157,11 @@ impl Character {
             .map(|(n, t)| (n.as_str(), *t))
             .unwrap_or((&name, clip_time));
         self.perform(active, t);
+        // Last, so a switch also smooths the hand reaching and gripping that `perform` adds.
+        self.blender.update(&mut self.local, switch, dt);
+        if self.blender.blending() {
+            self.pose_world();
+        }
         let root = Mat4::from_rotation_translation(Quat::from_rotation_y(u.yaw), u.position);
         let mut springs = std::mem::take(&mut self.springs);
         for s in &mut springs {
@@ -1384,6 +1447,8 @@ mod combat_tests {
             ..Default::default()
         };
         let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+        // These check the clip stack itself, so every switch cuts.
+        c.blender.set_method(anim::Method::Off);
         let mut u = UnitState {
             id: 1,
             kind: protocol::UnitKind::Player,
@@ -1400,7 +1465,7 @@ mod combat_tests {
             max_health: 100.,
             hostile: false,
             target: None,
-            look,
+            look: look.into(),
         };
         assert_eq!(
             c.clip_for(&u),
@@ -1498,6 +1563,7 @@ mod combat_tests {
             ..Default::default()
         };
         let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+        c.blender.set_method(anim::Method::Off);
         let u = UnitState {
             id: 1,
             kind: protocol::UnitKind::Player,
@@ -1514,7 +1580,7 @@ mod combat_tests {
             max_health: 100.,
             hostile: false,
             target: None,
-            look,
+            look: look.into(),
         };
         let mut fight = UnitCombat {
             id: 1,
@@ -1551,6 +1617,7 @@ mod combat_tests {
         );
     }
     /// A swordsman with a shield, `speed` m/s forward, and a combat view with no action yet.
+    /// Switches cut, to check the clip stack on its own.
     fn fighter(speed: f32) -> (Character, UnitState, UnitCombat) {
         let cat = assets::Catalog::load(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
@@ -1565,7 +1632,8 @@ mod combat_tests {
             ],
             ..Default::default()
         };
-        let c = Character::load(&cat, &mut ModelCache::default(), &look).unwrap();
+        let mut c = Character::load(&cat, &mut ModelCache::default(), &look).unwrap();
+        c.blender.set_method(anim::Method::Off);
         let u = UnitState {
             id: 1,
             kind: protocol::UnitKind::Player,
@@ -1582,7 +1650,7 @@ mod combat_tests {
             max_health: 100.,
             hostile: false,
             target: None,
-            look,
+            look: look.into(),
         };
         let fight = UnitCombat {
             id: 1,
@@ -1673,6 +1741,73 @@ mod combat_tests {
         );
     }
     #[test]
+    fn switches_carry_the_motion_on_instead_of_popping() {
+        // Jog, swing on the move, jog, raise and drop the guard, stop, roll and run off. Every 20
+        // frames something switches.
+        let play = |method: anim::Method| {
+            let (mut c, mut u, mut fight) = fighter(4.5);
+            c.blender.set_method(method);
+            let mut shown = Vec::new();
+            for frame in 0..160 {
+                let (pose, speed, action) = match frame / 20 {
+                    1 => (Pose::Attack, 4.5, Action::Slash),
+                    3 => (Pose::Run, 4.5, Action::Block),
+                    5 => (Pose::Idle, 0., Action::None),
+                    6 => (Pose::Dodge, 6., Action::None),
+                    _ => (Pose::Run, 4.5, Action::None),
+                };
+                if pose != u.pose {
+                    u.pose_time = 0.;
+                }
+                if action != fight.action {
+                    fight.action_time = 0.;
+                }
+                (u.pose, u.velocity.z, fight.action) = (pose, speed, action);
+                fight.guarding = action == Action::Block;
+                c.update_combat(&u, Some(&fight), 1. / 60.);
+                u.pose_time += 1. / 60.;
+                fight.action_time += 1. / 60.;
+                shown.push(c.local.iter().map(|l| l.rotation).collect::<Vec<_>>());
+            }
+            shown
+        };
+        // How much more or less each bone turned on a switch frame than on the frame before, at
+        // worst.
+        let jolt = |shown: &[Vec<Quat>], at: usize| {
+            let turn = |a: &Quat, b: &Quat| {
+                let d = *b * a.inverse();
+                2. * d.xyz().length().atan2(d.w.abs())
+            };
+            (0..shown[at].len())
+                .map(|b| {
+                    (turn(&shown[at - 1][b], &shown[at][b])
+                        - turn(&shown[at - 2][b], &shown[at - 1][b]))
+                    .abs()
+                })
+                .fold(0., f32::max)
+        };
+        let [cut, smooth, dead] = [
+            anim::Method::Off,
+            anim::Method::Inertialize,
+            anim::Method::DeadBlend,
+        ]
+        .map(play);
+        for at in [20, 40, 60, 80, 100, 120, 140] {
+            assert!(jolt(&cut, at) > 0.5, "cut, frame {at} pops");
+            assert!(
+                jolt(&smooth, at) < 1e-5,
+                "frame {at} jolts {}",
+                jolt(&smooth, at)
+            );
+            // Dead blending lets bones the switch barely moved take the new clip's speed at once.
+            assert!(
+                jolt(&dead, at) < 0.01,
+                "dead blending, frame {at}: {}",
+                jolt(&dead, at)
+            );
+        }
+    }
+    #[test]
     fn moving_swings_face_where_the_clip_does_within_reach_of_the_hips() {
         // How far round the chest and hips of each character face, against their rest pose.
         let facing = |c: &Character| {
@@ -1694,9 +1829,6 @@ mod combat_tests {
                 fight.action_time = frame as f32 / 60.;
                 moving.update_combat(&u, Some(&fight), 1. / 60.);
                 still.update_combat(&s, Some(&fight), 1. / 60.);
-                if frame < 10 {
-                    continue; // still blending in
-                }
                 assert_eq!(moving.last_clip, clip);
                 let [hips, chest] = facing(&moving);
                 let [clip_hips, clip_chest] = facing(&still);
@@ -1718,6 +1850,114 @@ mod combat_tests {
                 clip == "Sword_Regular_A",
                 "{clip}: only the pivot is capped"
             );
+        }
+    }
+    /// How clips were applied before #204, looking each track's bone up by name.
+    fn apply_by_name(c: &mut Character, name: &str, t: f32, looping: bool, bones: Bones) {
+        let clip = c.clips.clips[name].clone();
+        let t = if looping {
+            t.rem_euclid(clip.duration.max(0.001))
+        } else {
+            t.clamp(0., clip.duration)
+        };
+        let upper: Vec<bool> = (0..c.nodes.len())
+            .map(|mut i| {
+                loop {
+                    if c.nodes[i].name == "spine_01" {
+                        return c.humanoid;
+                    }
+                    match c.nodes[i].parent {
+                        Some(p) => i = p,
+                        None => return false,
+                    }
+                }
+            })
+            .collect();
+        for track in &clip.tracks {
+            let Some(&i) = c.names.get(&track.node) else {
+                continue;
+            };
+            if bones != Bones::All && upper[i] != (bones == Bones::Upper) {
+                continue;
+            }
+            let v = track.sample(t);
+            match track.property {
+                Property::Rotation => {
+                    c.local[i].rotation = Quat::from_array(v.to_array()).normalize()
+                }
+                Property::Translation if !c.humanoid => c.local[i].translation = v.truncate(),
+                Property::Translation if track.node == "pelvis" => {
+                    c.local[i].translation = c.nodes[i].rest.translation
+                        + (v.truncate() - c.reference_pelvis) * c.pelvis_ratio
+                }
+                Property::Scale if !c.humanoid => c.local[i].scale = v.truncate(),
+                _ => {}
+            }
+        }
+    }
+    #[test]
+    fn bound_clips_pose_exactly_as_looking_bones_up_by_name() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let knight = Look {
+            art: "male".into(),
+            drawn: true,
+            gear: vec![
+                ("main_hand".into(), "sword.arming".into()),
+                ("off_hand".into(), "shield.round".into()),
+            ],
+            ..Default::default()
+        };
+        let wolf = Look {
+            art: "wolf.grey".into(),
+            ..Default::default()
+        };
+        for look in [knight, wolf] {
+            let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+            // LOD 2 swaps in a beast's own LOD clips, bound to the skeleton it was built on.
+            for lod in [0, 2] {
+                c.set_lod(&cat, &mut cache, lod).unwrap();
+                // Off the rest pose, so a bone that one way sets and the other doesn't shows.
+                let start: Vec<Transform> = c
+                    .local
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| Transform {
+                        translation: l.translation + Vec3::splat(0.01 * i as f32),
+                        rotation: (Quat::from_rotation_x(0.1 * i as f32) * l.rotation).normalize(),
+                        scale: Vec3::splat(1.5),
+                    })
+                    .collect();
+                let mut names: Vec<String> = c.clips.clips.keys().cloned().collect();
+                names.sort();
+                for name in &names {
+                    let duration = c.clips.clips[name].duration;
+                    for bones in [Bones::All, Bones::Upper, Bones::Lower] {
+                        for (at, looping) in [(0., false), (0.37, true), (1.6, true), (1.6, false)]
+                        {
+                            let t = at * duration;
+                            c.local.clone_from(&start);
+                            c.apply_clip(name, t, looping, bones);
+                            let bound = c.local.clone();
+                            c.local.clone_from(&start);
+                            apply_by_name(&mut c, name, t, looping, bones);
+                            for (i, (a, b)) in bound.iter().zip(&c.local).enumerate() {
+                                assert!(
+                                    a.rotation == b.rotation
+                                        && a.translation == b.translation
+                                        && a.scale == b.scale,
+                                    "{} lod {lod} {name} at {t}: bone {} differs",
+                                    look.art,
+                                    c.nodes[i].name
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -383,14 +383,34 @@ def weights(fields, places, sun, seed=61):
         litter = np.maximum(litter, 1.0 - _smooth(0.8 * scale, 2.0 * scale, d + 0.5 * (grain - 0.5)))
         canopy = np.maximum(canopy, 1.0 - _smooth(2.0 * scale, 4.0 * scale, d))
     bare = _smooth(0.8, 0.88, spots) * 0.55
-    dirt = np.maximum.reduce([road, bank * 0.9, yard * 0.75, litter * 0.55, bare]) * (1.0 - rock)
+    # Masonry (crates/world/src/masonry.rs): rough grass along the foot of the field walls, where
+    # nothing mows or grazes, and the ruin's floor and foot trodden to earth and strewn with stone.
+    margin = np.zeros_like(h)
+    trodden = np.zeros_like(h)
+    strewn = np.zeros_like(h)
+    for m in places.get("masonry", []):
+        ox, _, oz = m["origin"]
+        s, c = np.sin(m["yaw"]), np.cos(m["yaw"])
+        ruin = not m["line"]
+        for b in m["blocks"]:
+            bx, bz = b["center"]
+            d = _box_distance(X, Z, (ox + c * bx + s * bz, oz - s * bx + c * bz), b["half"], m["yaw"] + b["yaw"])
+            if ruin:
+                strewn = np.maximum(strewn, (1.0 - _smooth(0.1, 1.6, d + 0.8 * (grain - 0.5))) * _smooth(0.45, 0.7, mid))
+            else:
+                margin = np.maximum(margin, 1.0 - _smooth(0.25, 1.3, d + 0.5 * (fine - 0.5)))
+        if ruin:
+            d = _box_distance(X, Z, (ox, oz), (3.6, 5.7), m["yaw"])
+            trodden = np.maximum(trodden, (1.0 - _smooth(0.0, 3.0, d + 1.2 * (grain - 0.5))) * (0.55 + 0.45 * _smooth(0.3, 0.7, fine)))
+    rock = np.clip(rock + strewn * 0.45, 0, 1)
+    dirt = np.maximum.reduce([road, bank * 0.9, yard * 0.75, litter * 0.55, bare, trodden * 0.7]) * (1.0 - rock)
 
     # Meadow or lush grass: drier on high ground and slopes facing the sun, lusher by the river,
     # trodden along the roads and shaded under the trees.
     facing = np.clip((nx * sun[0] + nz * sun[2]) / max(np.hypot(sun[0], sun[2]), 1e-6) * 3.0, -1, 1)
     dry = 0.62 * macro + 0.38 * mid + 0.2 * _smooth(8.0, 30.0, h) + 0.08 * facing - 0.3 * (1.0 - _smooth(8.0, 22.0, np.abs(river))) * flowing
     patches = _smooth(0.6, 0.76, noise(size, 25, seed + 6)) * 0.75
-    meadow_share = np.maximum.reduce([_smooth(0.52, 0.74, dry), patches, verge * 0.85, canopy * 0.6])
+    meadow_share = np.maximum.reduce([_smooth(0.52, 0.74, dry), patches, verge * 0.85, canopy * 0.6, margin * 0.9])
     rest = np.clip(1.0 - rock - dirt, 0, 1)
     out = np.stack([rest * (1.0 - meadow_share), rest * meadow_share, dirt, rock], -1)
     out /= np.maximum(out.sum(-1, keepdims=True), 1e-6)

@@ -7,6 +7,7 @@
 
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Bumped whenever these types change shape.
 pub const VERSION: u32 = 7;
@@ -242,8 +243,9 @@ pub struct UnitState {
     pub max_health: f32,
     pub hostile: bool,
     pub target: Option<UnitId>,
-    /// What to draw: body, colours, clothing, armour and gear.
-    pub look: Look,
+    /// What to draw: body, colours, clothing, armour and gear. Shared, not copied, by every
+    /// snapshot that shows the unit (#189); on the wire it's the look itself.
+    pub look: Arc<Look>,
 }
 
 /// The local player's own numbers (only sent to them).
@@ -529,7 +531,8 @@ mod tests {
                     drawn: true,
                     dyes: vec![("peasant.top".into(), Some("woad".into()), None)],
                     ..Default::default()
-                },
+                }
+                .into(),
             }],
             player: Some(PlayerState {
                 unit: 1,

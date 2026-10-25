@@ -100,7 +100,7 @@ mod tests {
                 max_health: 100.,
                 hostile: false,
                 target: None,
-                look: Look::default(),
+                look: Default::default(),
             }],
             player: None,
             events: Vec::new(),

@@ -268,6 +268,18 @@ fn use_skills(world: &mut World, e: Entity, mob: &MobDef, te: Entity) -> bool {
     false
 }
 
+/// How near a monster of `monster`'s level notices a foe of level `foe`: its own radius, 1 m less
+/// for each level the foe is above it and 1 m more for each below, from 4 m to twice its own.
+/// `None` when the foe is 10 or more levels above: it isn't worth starting a fight with
+/// (docs/COMBAT.md, "Noticing").
+pub fn notice_radius(base: f32, monster: u8, foe: u8) -> Option<f32> {
+    let above = foe as f32 - monster as f32;
+    (above < NOTICE_IGNORE).then(|| (base - above).clamp(4.0, (base * 2.0).max(4.0)))
+}
+
+/// Monsters this many levels below a player leave it alone unless it starts the fight.
+pub const NOTICE_IGNORE: f32 = 10.0;
+
 fn idle(world: &mut World, e: Entity, deciding: bool) {
     let t = now(world);
     let b = *world.get::<Brain>(e).unwrap();
@@ -282,15 +294,25 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
                 return;
             }
         }
-        // Notice the nearest enemy inside the aggro circle, if it's in sight.
-        let side = world.get::<crate::Unit>(e).map_or(crate::Faction::Hostile, |u| u.faction);
-        let near = world.resource::<Spatial>().near_foes(pos, b.aggro_radius, side);
+        // Notice the nearest enemy inside the aggro circle, if it's in sight. A monster's circle
+        // shrinks for players above its level and grows for those below (#199).
+        let (side, level) = world.get::<crate::Unit>(e).map_or((crate::Faction::Hostile, 1), |u| (u.faction, u.level));
+        let hostile = side == crate::Faction::Hostile;
+        let reach = if hostile { b.aggro_radius * 2.0 } else { b.aggro_radius };
+        let near = world.resource::<Spatial>().near_foes(pos, reach, side);
         let eyes = chest(world, e);
         let seen = near
             .into_iter()
             .filter_map(|(id, p)| {
                 let te = entity(world, id)?;
-                (can_attack(world, e, te) && line_of_sight(world, eyes, chest(world, te))).then_some((id, (p - pos).length_squared()))
+                let d2 = (p - pos).length_squared();
+                if hostile {
+                    let r = notice_radius(b.aggro_radius, level, world.get::<crate::Unit>(te).map_or(level, |u| u.level))?;
+                    if d2 > r * r {
+                        return None;
+                    }
+                }
+                (can_attack(world, e, te) && line_of_sight(world, eyes, chest(world, te))).then_some((id, d2))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
         if let Some((id, _)) = seen {

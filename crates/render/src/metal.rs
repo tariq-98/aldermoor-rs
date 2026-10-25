@@ -20,6 +20,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+mod fx_pass;
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {}
 type Obj<T> = Retained<ProtocolObject<T>>;
@@ -324,6 +325,9 @@ pub struct Renderer {
     previous_camera: Option<Camera>,
     previous_time: f32,
     history_valid: bool,
+    fx_pass: fx_pass::FxPass,
+    /// This frame's combat effects (crate::fx); taken by `draw`.
+    pub effects: Option<crate::fx::Frame>,
 }
 const INITIAL_RING_BYTES: usize = 64 * 1024;
 const SHADOW_SIZE: usize = 1024;
@@ -684,6 +688,7 @@ impl Renderer {
             if temporal { "TAA" } else { "no temporal AA" }
         );
         let gui = crate::gui::Gui::new(&device, &library)?;
+        let fx_pass = fx_pass::FxPass::new(&device, samples)?;
         let surface_maps = [
             texture_array(&device, &queue, &[fallback[0].clone()])?,
             texture_array(&device, &queue, &[fallback[1].clone()])?,
@@ -747,6 +752,8 @@ impl Renderer {
             previous_camera: None,
             previous_time: 0.,
             history_valid: false,
+            fx_pass,
+            effects: None,
         })
     }
     pub fn load_surface_assets(&mut self, path: &Path, root: &Path) -> Result<()> {
@@ -1228,6 +1235,10 @@ impl Renderer {
             viewport: [width, height, 1. / width, 1. / height],
             splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
         };
+        let effects = self.effects.take();
+        let fx = self
+            .fx_pass
+            .prepare(&self.device, slot, effects.as_ref(), camera.eye)?;
         // Size before writing, after this slot's fence. Buffers only grow and remain alive
         // until their submitted command buffer completes. Count each shared skin once.
         let mut unique = std::collections::HashSet::new();
@@ -1530,6 +1541,10 @@ impl Renderer {
                     },
                 )?;
             }
+            // Ground marks go last in the scene, over whatever they lie on.
+            if !split_scene || scene_part == 2 {
+                calls += self.fx_pass.decals(&enc, &fx, &f);
+            }
             enc.endEncoding();
         }
         let history_index = self.frame % 2;
@@ -1608,8 +1623,17 @@ impl Renderer {
             );
             enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
         }
-        enc.endEncoding();
         calls += 1;
+        calls += self.fx_pass.overlay(
+            &enc,
+            &fx,
+            &f,
+            &self.depth,
+            (self.width, self.height),
+            camera.eye,
+            camera.target,
+        );
+        enc.endEncoding();
         if let Some(hud) = &hud {
             let hud_calls = self.gui.paint(&cb, &target, hud, self.frame, counters)?;
             calls += hud_calls;

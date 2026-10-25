@@ -107,7 +107,8 @@ fn monsters_turn_back_at_their_border() {
             west_of_border += 1;
         }
     }
-    assert!(west_of_border < 60, "the wolf spent {west_of_border} steps past its border");
+    // A pounce can land it nearly 4 m over; walking back from a standstill takes about a second.
+    assert!(west_of_border < 70, "the wolf spent {west_of_border} steps past its border");
     assert_eq!(realm.region_of(hero), 0);
 }
 

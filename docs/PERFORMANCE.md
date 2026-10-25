@@ -44,7 +44,7 @@ instances and fit inside these numbers.
 
 | Area | Budget | Last measured |
 | --- | --- | --- |
-| Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.14 ms step (#33) plus 161 ms of snapshots (#73) |
+| Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.14 ms step (#33) plus 92 ms building views at 200 bots (#189, load test) |
 | Server, each player's view | 0.02 ms at a 20–30 Hz send rate | about 0.8 ms, a full snapshot every tick (#34); finding its neighbours from a grid is 0.005 ms (#73) |
 | Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | about 3 MB/s at 300 units in view (#34) |
 | Server out, one region | 4 MB/s at 200 players | 2.8 GB/s at 200 players (#73) |

@@ -9,6 +9,13 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 - **Sprint** (Shift) at 1.5× the run speed. It works out of combat only (6 s after the last
   blow given or taken), on land, and not while guarding, casting, downed or feared. It costs
   nothing.
+- **Getting going** takes a moment, so bodies have some weight without losing the quick starts
+  and stops dodging needs (WoW and Guild Wars 2 are near instant; action games take 50 to
+  150 ms). On foot, standing to a run takes 0.08 s (`START_UP`), a run to a stop 0.06 s
+  (`STOP_TIME`), and a run into a sprint 0.3 s (`SPRINT_UP`). Turning round drops the backward
+  part of your speed at once, so reversing is as quick as starting, and turning keeps your speed.
+  Monsters ramp the same way. Rolls, leaps and climbs, swimming and the air are unchanged, and a
+  root or stun still stops you dead.
 - **Jumps** forgive a little: a jump pressed up to 0.15 s before landing goes off as you land,
   and one pressed up to 0.1 s after running off an edge still jumps (coyote time). The windows are
   `JUMP_BUFFER` and `COYOTE_TIME`; rolls have their own (`DODGE_BUFFER`, in COMBAT.md).
@@ -27,7 +34,13 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Walls and ruins can be climbed too. A `world::Solid` with a `top` is ground, not an
     obstacle: its sides are faces like any cliff's, so one that tops out within 1.5 m is climbed
     and stood on, and a taller one stops you. Buildings and trees have no top and only block.
-    None stand in the valley yet; they arrive with their art (#153).
+    A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
+    a step at a time.
+  - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
+    top: climb on and walk along them. The ruined hall on the hill south-west of the village
+    (#160) breaks down in steps along its east wall, each a climb from the last, up to a lookout
+    4.2 m up under its gable; the gable, its buttresses and the door's jambs are too tall to climb
+    (`crates/world/src/masonry.rs`).
 - **Swimming:** the river is no longer a wall.
   - Water deeper than 0.5 m is swum (until it's shallower than 0.4 m). Swimmers float with
     their feet 0.5 m under the surface (`world::WATER_LEVEL`), at 0.45× run speed.
@@ -49,6 +62,10 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   a pack spreads round a player instead of shoving them about. Nobody is
   pushed up a wall or off a cliff. Rolls, leaps, lunges and climbs pass through bodies, and
   whoever they land on is eased apart afterwards.
+- **Friendly players pass through each other.** Two players who can't harm each other overlap
+  freely, so nobody can block a doorway, a bridge or a vendor (as in WoW and Guild Wars 2).
+  Players on opposing sides still collide, and so do players and monsters, so body-blocking stays
+  part of a fight.
 - **Packs surround their prey.** Once a melee monster is close to its target, it makes for its own
   place on a ring just inside its reach. It starts from the side it came in on and moves round
   until it has its share of the circle: evenly split between everyone fighting that target, or

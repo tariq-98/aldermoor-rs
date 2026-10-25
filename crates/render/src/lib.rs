@@ -1,6 +1,7 @@
 //! Native Metal rendering of the catalogue and simulation snapshot contracts.
 pub mod appearance;
 pub mod character;
+pub mod fx;
 #[cfg(target_os = "macos")]
 pub mod gui;
 pub mod ktx;

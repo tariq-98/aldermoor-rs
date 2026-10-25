@@ -3,7 +3,7 @@
 use content::items::{economy, SELL_SHARE};
 use glam::{Vec2, Vec3};
 use protocol::Command;
-use sim::{roll, Brain, Inventory, Loot, Rng, Sim, Transform, Unit, Vitals, PILE_LASTS, PILE_PRIVATE, SLOTS};
+use sim::{roll, Brain, Credit, Inventory, Loot, Rng, Sim, Specialty, Transform, Unit, Vitals, PILE_LASTS, SLOTS};
 
 fn wolf(sim: &Sim) -> u32 {
     let mut q = sim.world.try_query::<(&Unit, &Brain)>().unwrap();
@@ -80,13 +80,14 @@ fn a_kill_leaves_a_pile_for_whoever_earned_it() {
     sim.run_for(1.0);
     let w = kill_a_wolf(&mut sim, hero);
     let at = sim.get::<Transform>(w).unwrap().pos;
-    let pile = sim.world.resource::<Loot>().piles.iter().find(|p| (p.at - at).length() < 0.1).cloned();
-    let pile = pile.expect("this wolf leaves something");
-    assert_eq!(pile.owner, Some(hero));
+    let pile = sim.world.resource::<Loot>().piles.iter().find(|p| (p.at - at).length() < 0.1 && p.owner == Some(hero)).cloned();
+    let pile = pile.expect("this wolf leaves the hero something");
     let me = sim.snapshot(Some(hero)).player.unwrap();
     assert!(me.loot.iter().any(|l| l.id == pile.id));
-    // Someone else can't take it yet, even standing on it.
+    // Someone else can't see it or take it, even standing on it.
     sim.get_mut::<Transform>(other).unwrap().pos = at;
+    sim.step();
+    assert!(sim.snapshot(Some(other)).player.unwrap().loot.iter().all(|l| l.id != pile.id));
     sim.command(other, Command::Loot { pile: pile.id });
     sim.step();
     assert_eq!(inv(&sim, other), Inventory::default());
@@ -103,7 +104,7 @@ fn a_kill_leaves_a_pile_for_whoever_earned_it() {
 }
 
 #[test]
-fn an_unclaimed_pile_opens_to_anyone_then_rots() {
+fn a_pile_stays_its_owners_alone_then_rots() {
     let mut sim = Sim::brambleford(3);
     let hero = sim.spawn_player("Hero", Vec2::new(-38.0, 21.0), 0.0);
     let other = sim.spawn_player("Other", Vec2::new(30.0, 40.0), 0.0);
@@ -113,17 +114,35 @@ fn an_unclaimed_pile_opens_to_anyone_then_rots() {
     let mut pile = roll(&mut rng, golem, at, Some(hero), sim.time());
     pile.id = 99;
     sim.world.resource_mut::<Loot>().piles.push(pile.clone());
-    sim.run_for(PILE_PRIVATE as f32 + 1.0);
+    sim.run_for(90.0);
     sim.get_mut::<Transform>(other).unwrap().pos = at;
     sim.command(other, Command::Loot { pile: 99 });
     sim.step();
-    assert_eq!(inv(&sim, other).count("golem_core"), 1);
+    assert_eq!(inv(&sim, other).count("golem_core"), 0, "someone else took a personal pile");
     // A pile nobody takes is gone in the end.
-    let mut late = roll(&mut rng, golem, at, None, sim.time());
-    late.id = 100;
-    sim.world.resource_mut::<Loot>().piles.push(late);
-    sim.run_for(PILE_LASTS as f32 + 1.0);
-    assert!(sim.world.resource::<Loot>().piles.iter().all(|p| p.id != 100));
+    sim.run_for((PILE_LASTS - 90.0) as f32 + 1.0);
+    assert!(sim.world.resource::<Loot>().piles.iter().all(|p| p.id != 99));
+}
+
+#[test]
+fn everyone_with_a_fair_share_gets_their_own_roll_and_a_tap_gets_nothing() {
+    let mut sim = Sim::brambleford(3);
+    let a = sim.spawn_player("A", Vec2::new(-38.0, 21.0), 0.0);
+    let b = sim.spawn_player("B", Vec2::new(-37.0, 21.0), 0.0);
+    let tap = sim.spawn_player("Tap", Vec2::new(-36.0, 21.0), 0.0);
+    let w = wolf(&sim);
+    let wolf_at = sim.get::<Transform>(w).unwrap().pos;
+    {
+        let mut c = sim.get_mut::<Credit>(w).unwrap();
+        c.0.push((a, Specialty::Warrior, 60.0));
+        c.0.push((b, Specialty::Warrior, 35.0));
+        c.0.push((tap, Specialty::Warrior, 5.0));
+    }
+    let e = sim.entity(w).unwrap();
+    sim::combat::life::die(&mut sim.world, e, None);
+    let piles = sim.world.resource::<Loot>().piles.clone();
+    let mine = |id| piles.iter().filter(|p| p.owner == Some(id) && (p.at - wolf_at).length() < 0.1).count();
+    assert_eq!((mine(a), mine(b), mine(tap)), (1, 1, 0));
 }
 
 #[test]
