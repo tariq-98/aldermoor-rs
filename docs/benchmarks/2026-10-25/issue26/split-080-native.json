@@ -13,24 +13,24 @@
   "reset_on_look": false,
   "frame_measure": "completed-work",
   "shared_constants": false,
-  "gpu_median_ms": 15.836624999792548,
-  "gpu_p95_ms": 16.330124999967666,
-  "frame_median_ms": 21.011,
-  "frame_p95_ms": 21.808,
+  "gpu_median_ms": 15.942291666760866,
+  "gpu_p95_ms": 16.65291666677149,
+  "frame_median_ms": 20.677,
+  "frame_p95_ms": 21.561,
   "samples": 359,
   "warmup": 120,
   "performance": {
     "allocated_gpu_bytes": {
-      "median": 1230127104.0,
-      "p95": 1230127104.0,
+      "median": 1230389248.0,
+      "p95": 1230389248.0,
       "samples": 360
     },
     "counter_comparison": {
       "method": "Balanced ABBA/BAAB when --counter-overhead is set; on minus off block means; buffers preallocated in both groups",
       "off_gpu_ms": null,
       "on_gpu_ms": {
-        "median": 15.836624999792548,
-        "p95": 16.330124999967666,
+        "median": 15.942291666760866,
+        "p95": 16.65291666677149,
         "samples": 360
       },
       "paired_block_deltas_ms": []
@@ -46,16 +46,16 @@
     "gpu_by_minute": [
       {
         "gpu_ms": {
-          "median": 15.836624999792548,
-          "p95": 16.330124999967666,
+          "median": 15.942291666760866,
+          "p95": 16.65291666677149,
           "samples": 360
         },
         "minute": 0
       }
     ],
     "gpu_ms": {
-      "median": 15.836624999792548,
-      "p95": 16.330124999967666,
+      "median": 15.942291666760866,
+      "p95": 16.65291666677149,
       "samples": 360
     },
     "last_frame": 479,
@@ -66,55 +66,55 @@
     "passes": {
       "composite": {
         "elapsed_ms": {
-          "median": 11.204749999999999,
-          "p95": 11.506124999999999,
+          "median": 11.267584,
+          "p95": 11.633583,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.355209,
-          "p95": 0.396208,
+          "median": 0.361417,
+          "p95": 0.4185,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.014917,
-          "p95": 0.017457999999999998,
+          "median": 0.016375,
+          "p95": 0.018791,
           "samples": 360
         }
       },
       "hud": {
         "elapsed_ms": {
-          "median": 11.209875,
-          "p95": 11.514125,
+          "median": 11.272667,
+          "p95": 11.641499999999999,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.022708,
-          "p95": 0.025124999999999998,
+          "median": 0.0225,
+          "p95": 0.024291999999999998,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.009583,
-          "p95": 0.013541,
+          "median": 0.009791,
+          "p95": 0.012166999999999999,
           "samples": 360
         }
       },
       "opaque": {
         "elapsed_ms": {
-          "median": 8.929458,
-          "p95": 9.174624999999999,
+          "median": 8.988875,
+          "p95": 9.353042,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 7.076791,
-          "p95": 7.2361249999999995,
+          "median": 7.100916,
+          "p95": 7.33,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 1.821667,
-          "p95": 1.944958,
+          "median": 1.826959,
+          "p95": 1.98925,
           "samples": 360
         }
       },
@@ -126,114 +126,114 @@
       },
       "shadow_0": {
         "elapsed_ms": {
-          "median": 0.721792,
-          "p95": 0.777125,
+          "median": 0.725541,
+          "p95": 0.8035,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.20033399999999998,
-          "p95": 0.227292,
+          "median": 0.203125,
+          "p95": 0.23879199999999998,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.482417,
-          "p95": 0.527042,
+          "median": 0.486375,
+          "p95": 0.537083,
           "samples": 360
         }
       },
       "shadow_1": {
         "elapsed_ms": {
-          "median": 1.4765,
-          "p95": 2.333916,
+          "median": 1.5002499999999999,
+          "p95": 2.310208,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.616084,
-          "p95": 0.656625,
+          "median": 0.62625,
+          "p95": 0.6962499999999999,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.807666,
-          "p95": 0.873,
+          "median": 0.8206249999999999,
+          "p95": 0.91075,
           "samples": 360
         }
       },
       "shadow_2": {
         "elapsed_ms": {
-          "median": 1.9894589999999999,
-          "p95": 2.708583,
+          "median": 2.016958,
+          "p95": 2.8372919999999997,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.556917,
-          "p95": 0.735792,
+          "median": 0.578458,
+          "p95": 0.791833,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 1.3395409999999999,
-          "p95": 1.508417,
+          "median": 1.345,
+          "p95": 1.510333,
           "samples": 360
         }
       },
       "sky": {
         "elapsed_ms": {
-          "median": 1.152333,
-          "p95": 1.227625,
+          "median": 1.157708,
+          "p95": 1.262209,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.626459,
-          "p95": 0.9382499999999999,
+          "median": 0.630417,
+          "p95": 0.926709,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.011583999999999999,
-          "p95": 0.013958,
+          "median": 0.010917,
+          "p95": 0.012624999999999999,
           "samples": 360
         }
       },
       "taa": {
         "elapsed_ms": {
-          "median": 10.865124999999999,
-          "p95": 11.120584,
+          "median": 10.921667,
+          "p95": 11.246915999999999,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 3.750333,
-          "p95": 3.8602079999999996,
+          "median": 3.7719579999999997,
+          "p95": 3.891333,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.014790999999999999,
-          "p95": 0.019375,
+          "median": 0.015958,
+          "p95": 0.020541999999999998,
           "samples": 360
         }
       },
       "water_transparent": {
         "elapsed_ms": {
-          "median": 7.160457999999999,
-          "p95": 7.320708,
+          "median": 7.1825,
+          "p95": 7.411625,
           "samples": 360
         },
         "fragment_ms": {
-          "median": 0.037042,
-          "p95": 0.041582999999999995,
+          "median": 0.03675,
+          "p95": 0.046667,
           "samples": 360
         },
         "missing_samples": 0,
         "vertex_ms": {
-          "median": 0.012666,
-          "p95": 0.015375,
+          "median": 0.012166,
+          "p95": 0.013333,
           "samples": 360
         }
       }
     },
-    "peak_allocated_gpu_bytes": 1230127104,
+    "peak_allocated_gpu_bytes": 1230389248,
     "samples": 360,
     "scene_measure": "combined by default; --gpu-profile-scene splits sky/opaque/water-transparent encoders and changes tile load/store costs",
     "visible_triangles": {
@@ -243,10 +243,10 @@
     }
   },
   "gpu_samples": 360,
-  "binary": "/Users/tariqal-radhi/code/aldermoor-rs/target/release/client",
-  "binary_sha256": "90c63be833dc5b6639680658f5110bb1b07fd1dc6bdca3afc500bb23a8a881d2",
+  "binary": "/private/tmp/aldermoor-26-final-080-client",
+  "binary_sha256": "523e72563d61f51bbae23ba36caabb3dd153ad9f8fd795149f8ecb3770413463",
   "command": [
-    "/Users/tariqal-radhi/code/aldermoor-rs/target/release/client",
+    "/private/tmp/aldermoor-26-final-080-client",
     "--showcase",
     "--benchmark",
     "--fps",
@@ -263,10 +263,12 @@
     "2560x1600",
     "--scale",
     "1.0",
+    "--assets",
+    "/Users/tariqal-radhi/code/aldermoor-rs/assets",
     "--gpu-profile-scene",
     "--offscreen"
   ],
-  "started_at": "2026-10-25T01:38:46.425624+00:00",
+  "started_at": "2026-10-25T01:54:34.563420+00:00",
   "frames": 480,
   "counter_overhead": false,
   "split_scene": true,
@@ -274,8 +276,8 @@
   "look_settings": "/Users/tariqal-radhi/code/aldermoor-rs/assets/catalog/look.json",
   "surface_assets": "/Users/tariqal-radhi/code/aldermoor-rs/assets/catalog/surfaces.json",
   "history_resets": 1,
-  "mean_fps": 47.348,
-  "interval_p95_ms": 21.848,
+  "mean_fps": 48.159,
+  "interval_p95_ms": 21.597,
   "internal": "2560x1600",
   "work_budget_pass": false,
   "presentation_pass": null,
