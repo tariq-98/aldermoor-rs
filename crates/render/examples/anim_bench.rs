@@ -6,7 +6,8 @@
 //! The cases are listed in `main`; without one, it runs them all. The tiers (#215) are `full`
 //! (every LOD), `half` and `quarter` (LOD 0); without one, it runs them all. The characters go
 //! over the valley's ground with their feet on it (#214); `off` for the feet leaves them as the
-//! clips have them, to compare.
+//! clips have them, to compare. Each looks at a point sweeping round and up and down in front of
+//! it (#212), as if following someone about.
 use anim::Tier;
 use glam::Vec3;
 use protocol::{Action, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
@@ -213,6 +214,16 @@ fn main() -> anyhow::Result<()> {
                     let f = fight(u.id, if action == Action::None { t } else { cycle });
                     u.position += u.velocity / 60.;
                     u.position.y = valley.ground(u.position.x, u.position.z);
+                    let phase = t + u.id as f32;
+                    let round = u.yaw + 1.2 * (0.7 * phase).sin();
+                    c.look_at(Some(
+                        u.position
+                            + Vec3::new(
+                                6. * round.sin(),
+                                1.6 + 1.5 * (0.5 * phase).sin(),
+                                6. * round.cos(),
+                            ),
+                    ));
                     rebuilds += c.animate(u, Some(&f), 1. / 60., frame as u64) as usize;
                 }
                 let posed = Instant::now();
