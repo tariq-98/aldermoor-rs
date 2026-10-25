@@ -3,6 +3,7 @@
 import argparse, hashlib, json, pathlib, re, subprocess, sys
 from datetime import datetime, timezone
 p = argparse.ArgumentParser()
+p.add_argument('--assets', type=pathlib.Path, help='Existing asset catalogue root, shared with a baseline checkout')
 p.add_argument('--binary', type=pathlib.Path, help='Client executable (allows matched pre-change comparisons)')
 p.add_argument('--size', default='5120x1440')
 p.add_argument('--scale', type=float, default=0.8)
@@ -41,7 +42,9 @@ if a.frames < a.warmup + 30: p.error('Need at least 30 measured frames after war
 root = pathlib.Path(__file__).resolve().parents[1]
 binary = (a.binary or root/'target/release/client').resolve()
 started_at = datetime.now(timezone.utc).isoformat()
+binary_digest = hashlib.sha256(binary.read_bytes()).hexdigest()
 cmd = [str(binary), '--showcase', '--benchmark', '--fps', str(a.fps), '--in-flight', str(a.in_flight), '--aa', a.aa, '--frames', str(a.frames), '--warmup', str(a.warmup), '--size', a.size, '--scale', str(a.scale)]
+if a.assets: cmd += ['--assets', str(a.assets.resolve())]
 if a.capture: cmd += ['--capture', a.capture]
 if a.no_gpu_counters: cmd.append('--no-gpu-counters')
 if a.gpu_profile_scene: cmd.append('--gpu-profile-scene')
@@ -93,7 +96,7 @@ if perf:
                 sys.exit(f'Missing timestamp samples for {name}; refusing incomplete pass timings')
 if not perf and (a.counter_overhead or a.gpu_profile_scene or a.perf_overlay or a.no_gpu_counters):
     sys.exit('Missing PERF report for requested diagnostics')
-report.update(binary=str(binary), binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), command=cmd, started_at=started_at, frames=a.frames, counter_overhead=a.counter_overhead, split_scene=a.gpu_profile_scene, overlay_visible=a.perf_overlay)
+report.update(binary=str(binary), binary_sha256=binary_digest, command=cmd, started_at=started_at, frames=a.frames, counter_overhead=a.counter_overhead, split_scene=a.gpu_profile_scene, overlay_visible=a.perf_overlay)
 for field, marker in [('look_settings', 'LOOK'), ('surface_assets', 'SURFACES')]:
     resolved = re.search(r'^' + marker + r' (.+)$', r.stdout, re.MULTILINE)
     report[field] = str(pathlib.Path(resolved[1]).resolve()) if resolved else None

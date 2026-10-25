@@ -1,0 +1,14 @@
+Metal: Apple M1 | 2880x1800 -> 2880x1800 | 1x samples | TAA | cascades=3x1024
+LOOK /Users/tariqal-radhi/code/aldermoor-rs/crates/client/../../assets/catalog/look.json
+SURFACES /Users/tariqal-radhi/code/aldermoor-rs/crates/client/../../assets/catalog/surfaces.json
+frame=120 gpu=37.12ms draws=766 triangles=364103 sim=0.143ms units=6
+frame=240 gpu=32.75ms draws=766 triangles=364103 sim=0.107ms units=6
+frame=360 gpu=32.90ms draws=766 triangles=364103 sim=0.086ms units=6
+frame=480 gpu=33.06ms draws=766 triangles=364103 sim=0.099ms units=6
+frame=600 gpu=54.76ms draws=766 triangles=364103 sim=0.103ms units=6
+frame=720 gpu=45.25ms draws=766 triangles=364103 sim=0.086ms units=6
+HISTORY resets=36
+INTERVAL mean_fps=45.612 p95=30.410ms
+FRAME median=18.758ms p95=27.049ms samples=599 mode=windowed
+GPU median=34.725ms p95=49.696ms samples=599
+Window size differs from requested benchmark dimensions

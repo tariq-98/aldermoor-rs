@@ -484,3 +484,6 @@ it excludes one-time buffer allocation. Do not infer a sub-0.1 ms overhead pass 
 a negative median difference in a noisy run. Separate before/after binaries can be selected
 with `--binary PATH`. API validation must be disabled for cost runs and enabled separately
 for correctness checks.
+
+The #26 measurements, raw reports, counter-overhead calculation and outstanding display
+checks are recorded in [the issue26 report](benchmarks/2026-10-25/issue26/README.md).
