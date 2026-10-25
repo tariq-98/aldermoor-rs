@@ -6,6 +6,7 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Aldermoor is an MMORPG; build solo against a local server first, online after Brambleford, then the Wilderness and team modes (8 phases) | Every system is server-side from day one, so nothing is rewritten for online; PvP modes need other players | [Roadmap](Roadmap) |
 | 2026-10-25 | The budget is measured at 75% render scale (1920×1200 internal, about 2.3 MP) on the Air's 2560×1600 panel; every budget lives in docs/PERFORMANCE.md | Native at 100% is 4.1 MP, more work than the ultrawide at 65%; 75% with TAA still looks sharp on the Retina panel | #36, #30 |
 | 2026-10-25 | Agents merge their own PRs once tested and working, without asking | Chippy doesn't want to be the bottleneck; AGENTS.md lists what "tested and working" means | |
 | 2026-10-25 | Codex never creates or edits assets or works in Blender | Assets and look come from Claude; Codex sticks to renderer code. Enforced by the Codex guard check on `codex/` branches | |

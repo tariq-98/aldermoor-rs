@@ -37,7 +37,7 @@ Claude Code and Codex share step-by-step skills in
 
 - `status:*` is where an issue is. `status:needs-decision` waits on Chippy.
 - `area:*` matches the crates. `area:render` belongs to Codex by default.
-- `phase:1` to `phase:6` files the issue under the matching milestone automatically.
+- `phase:1` to `phase:8` files the issue under the matching milestone automatically.
 - `perf` means before and after numbers are required. `needs-mac` means a cloud agent can't verify it.
 
 Labels and milestones are defined in
