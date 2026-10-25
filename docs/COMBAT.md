@@ -152,6 +152,25 @@ Health, power and armour are multipliers on the level's base numbers (below).
   goes off as it ends (earlier presses are dropped, so mashing doesn't roll twice). A roll can
   break off a heavy blow's wind-up before it lands; the blow's cast bar then ends early.
 
+## Weight on screen: hits and hitstop
+
+Every blow that reaches its victim, landed, blocked or parried, sends a `Hit` event: who struck
+whom, which way it travelled on the ground and how hard it was. The client uses it to freeze
+both bodies' poses for a moment (hitstop), kick the camera (#196) and play a directional flinch.
+The sim itself never pauses, as in Monster Hunter's online play.
+
+| Weight | When | Hitstop |
+| --- | --- | ---: |
+| Light | quick blows and basic attacks | 40 ms |
+| Heavy | blows that wind up first | 80 ms |
+| Critical | a crit (unless the blow is a monster's big one) | 110 ms |
+| Blocked | stopped by a guard | 60 ms |
+| Parried | stopped by a guard raised just in time | 110 ms |
+| Big | a monster's warned-of slam | 120 ms |
+
+Missiles get half, everything is capped at 120 ms, and conditions ticking (bleeding, burning)
+and a field's pulses send no `Hit` at all. The numbers live in `content::combat::HITSTOP`.
+
 ## Threat
 
 - Monsters fight whoever they hate most: damage done to them (times stances' threat), and half
@@ -213,7 +232,8 @@ table again after tuning.
   roll clears it, a climb holds it), interrupts, melee sweeps (who's in them, aim pull, locked
   targets, reach and width, wind-ups missing), diminishing returns, defiance, warned blows,
   blocks, parries, guard breaks, blows from behind, backstabs, missiles (blocked, reflected,
-  aimed, led, homing), downed and rallying, bleeding out, respawning, reviving, summons, combos,
+  aimed, led, homing), hit events (direction, weight and hitstop for blows, arrows, blocks and
+  parries), downed and rallying, bleeding out, respawning, reviving, summons, combos,
   the combat view, determinism, every skill on every bar, and the step budget (in release).
 - `crates/sim/tests/duels.rs`: the balance targets above.
 - The Swift game's combat checks are covered by these.

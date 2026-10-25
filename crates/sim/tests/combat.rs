@@ -5,7 +5,7 @@
 use std::f32::consts::PI;
 
 use glam::{Vec2, Vec3};
-use protocol::{Avoid, Command, Event, ResourceKind, Shape};
+use protocol::{Avoid, Command, Event, HitWeight, ResourceKind, Shape};
 use sim::combat::{abilities, auras, life, source};
 use sim::content::catalog;
 use sim::{Auras, Brain, Faction, Fighter, Motion, Outbox, Sim, Specialty, Stats, Transform, Unit, Vitals};
@@ -120,6 +120,17 @@ impl Fight {
                 _ => 0.0,
             })
             .sum()
+    }
+
+    /// Every `Hit` that reached `id`: attacker, direction, weight and hitstop.
+    fn hits_on(&self, id: u32) -> Vec<(u32, u8, HitWeight, u8)> {
+        self.log
+            .iter()
+            .filter_map(|e| match e {
+                Event::Hit { attacker, victim, dir, weight, hitstop_ms } if *victim == id => Some((*attacker, *dir, *weight, *hitstop_ms)),
+                _ => None,
+            })
+            .collect()
     }
 
     fn avoided(&self, id: u32, how: Avoid) -> usize {
@@ -1111,4 +1122,94 @@ fn a_crowd_fighting_fits_the_step_budget() {
     println!("{per:.3} ms a step, {blows} blows in ten seconds");
     assert!(blows > 200, "the crowd hardly fought: {blows} blows");
     assert!(per < 2.0, "{per:.3} ms a step");
+}
+
+// Hit events: which way a blow travelled and how hard, for the client's hitstop and flinches.
+
+#[test]
+fn a_wound_up_blow_tells_the_client_it_landed_heavy_and_which_way() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    // The foe stands to the hero's south (+z) and swings toward -z: half a turn.
+    let foe = f.foe(Specialty::Warrior, 1, ROAD + Vec2::new(0.0, 2.0), PI);
+    f.target(foe, hero);
+    f.once(foe, 1); // Rending Blade winds up: a heavy blow.
+    f.run(0.45);
+    assert_eq!(f.blows_on(hero).len(), 1);
+    assert_eq!(f.hits_on(hero), vec![(foe, 128, HitWeight::Heavy, 80)]);
+}
+
+#[test]
+fn a_crit_hits_hardest_and_basic_blows_lightly() {
+    for (crit, weight, ms) in [(0.0, HitWeight::Light, 40), (1.0, HitWeight::Critical, 110)] {
+        let mut f = Fight::new();
+        let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+        // East of the hero: the blow travels west, three quarters of a turn.
+        let foe = f.foe(Specialty::Warrior, 1, ROAD + Vec2::new(2.0, 0.0), -PI / 2.0);
+        f.sim.get_mut::<Stats>(foe).unwrap().crit = crit;
+        f.target(foe, hero);
+        f.cmd(foe, Command::SetAutoAttack(true));
+        assert!(f.until(3.0, |f| !f.hits_on(hero).is_empty()));
+        assert_eq!(f.hits_on(hero)[0], (foe, 192, weight, ms));
+    }
+}
+
+#[test]
+fn an_arrow_hits_with_half_the_hitstop() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    // North of the hero (-z): the arrow flies toward +z, a yaw of 0.
+    let archer = f.dummy("goblin_archer", ROAD + Vec2::new(0.0, -8.0), 0.0);
+    f.sim.get_mut::<Fighter>(archer).unwrap().target = Some(hero);
+    f.sim.get_mut::<Fighter>(archer).unwrap().auto_attack = true;
+    assert!(f.until(3.0, |f| !f.hits_on(hero).is_empty()), "the arrow never landed");
+    let (by, dir, weight, ms) = f.hits_on(hero)[0];
+    assert_eq!((by, weight, ms), (archer, HitWeight::Light, 20));
+    assert!(dir <= 2 || dir >= 254, "dir {dir}");
+}
+
+#[test]
+fn blocks_and_parries_reach_the_client_as_hits() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let foe = f.foe(Specialty::Warrior, 1, ROAD + Vec2::new(0.0, 2.0), PI);
+    f.cmd(hero, Command::Guard(true));
+    f.run(0.5);
+    f.target(foe, hero);
+    f.once(foe, 1);
+    f.run(0.45);
+    assert_eq!(f.avoided(hero, Avoid::Blocked), 1);
+    assert_eq!(f.hits_on(hero), vec![(foe, 128, HitWeight::Blocked, 60)]);
+
+    let mut g = Fight::new();
+    let hero = g.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let foe = g.foe(Specialty::Warrior, 1, ROAD + Vec2::new(0.0, 2.0), PI);
+    g.target(foe, hero);
+    g.once(foe, 1);
+    g.run(0.2);
+    g.cmd(hero, Command::Guard(true));
+    g.run(0.25);
+    assert_eq!(g.avoided(hero, Avoid::Parried), 1);
+    assert_eq!(g.hits_on(hero), vec![(foe, 128, HitWeight::Parried, 110)]);
+}
+
+#[test]
+fn conditions_ticking_send_no_hits() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let foe = f.foe(Specialty::Warrior, 1, ROAD + Vec2::new(0.0, 6.0), PI);
+    assert!(f.apply("bleeding", hero, foe));
+    f.run(3.0);
+    assert!(f.damage_to(hero) > 0.0, "the bleed never ticked");
+    assert!(f.hits_on(hero).is_empty());
+}
+
+#[test]
+fn hit_directions_are_256ths_of_a_turn_from_south() {
+    use sim::combat::effects::quantise_yaw;
+    assert_eq!(quantise_yaw(0.0), 0);
+    assert_eq!(quantise_yaw(PI / 2.0), 64);
+    assert_eq!(quantise_yaw(PI), 128);
+    assert_eq!(quantise_yaw(-PI / 2.0), 192);
+    assert_eq!(quantise_yaw(-0.001), 0);
 }

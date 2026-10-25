@@ -138,6 +138,22 @@ pub enum Avoid {
     Missed,
 }
 
+/// How hard a blow that reached its victim was, for the client's hitstop, camera kick and
+/// flinch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HitWeight {
+    Light,
+    /// A blow that winds up first.
+    Heavy,
+    Critical,
+    /// Stopped by a guard.
+    Blocked,
+    /// Stopped by a guard raised just in time.
+    Parried,
+    /// A monster's big blow, warned of on the ground.
+    Big,
+}
+
 /// The ground an area covers. Cones and lines point along the area's yaw.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Shape {
@@ -473,6 +489,10 @@ pub enum Event {
     /// `periodic` damage comes from a condition (bleeding, burning…), not a blow.
     Damage { target: UnitId, source: UnitId, amount: f32, crit: bool, school: School, periodic: bool },
     Heal { target: UnitId, source: UnitId, amount: f32, crit: bool },
+    /// A blow reached `victim`: it landed, or a guard stopped it. `dir` is the way it travelled
+    /// on the ground, as a yaw in 256ths of a turn (0 is +z, 64 is +x). `hitstop_ms` is how long
+    /// the client may freeze both bodies' poses; the sim itself never pauses.
+    Hit { attacker: UnitId, victim: UnitId, dir: u8, weight: HitWeight, hitstop_ms: u8 },
     /// A blow or effect that did no harm, and why.
     Avoided { target: UnitId, source: UnitId, how: Avoid },
     Died { unit: UnitId, killer: Option<UnitId> },
