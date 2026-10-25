@@ -23,6 +23,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
 use glam::{Vec2, Vec3};
 use protocol::{CombatView, Command, Event, Snapshot, UnitId, UnitKind};
+use std::sync::{Arc, OnceLock};
 
 pub use components::*;
 pub use content::Specialty;
@@ -44,9 +45,16 @@ pub struct Clock {
     pub time: f64,
 }
 
-/// The land everyone walks on.
+/// The land everyone walks on. Shared between every sim on the same map (match instances, region
+/// layers), since building it takes about 12 ms and 0.4 MB.
 #[derive(Resource)]
-pub struct Land(pub world::Valley);
+pub struct Land(pub Arc<world::Valley>);
+
+/// The Brambleford valley, built the first time a sim needs it.
+pub fn brambleford_land() -> Arc<world::Valley> {
+    static LAND: OnceLock<Arc<world::Valley>> = OnceLock::new();
+    LAND.get_or_init(|| Arc::new(world::Valley::new())).clone()
+}
 
 /// Commands waiting for the next step, in arrival order.
 #[derive(Resource, Default)]
@@ -115,9 +123,14 @@ pub struct Sim {
 impl Sim {
     /// A fresh Brambleford valley.
     pub fn new(seed: u64) -> Sim {
+        Sim::on(brambleford_land(), seed)
+    }
+
+    /// A fresh world on `land`, which other sims may share.
+    pub fn on(land: Arc<world::Valley>, seed: u64) -> Sim {
         let mut world = World::new();
         world.insert_resource(Clock::default());
-        world.insert_resource(Land(world::Valley::new()));
+        world.insert_resource(Land(land));
         world.insert_resource(Rng::new(seed));
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
@@ -177,9 +190,10 @@ impl Sim {
         &self.world.resource::<Land>().0
     }
 
-    /// The land, to add to (tests put walls where they need them).
+    /// The land, to add to (tests put walls where they need them). This sim gets its own copy
+    /// first if it was sharing it.
     pub fn land_mut(&mut self) -> &mut world::Valley {
-        &mut self.world.resource_mut::<Land>().into_inner().0
+        Arc::make_mut(&mut self.world.resource_mut::<Land>().into_inner().0)
     }
 
     /// Queues a command from a unit's controller for the next step.

@@ -48,6 +48,7 @@ pub struct Placement {
 }
 
 /// The Brambleford valley: a village in a river valley, about 560 m across.
+#[derive(Clone)]
 pub struct Valley {
     pub solids: Vec<Solid>,
     pub houses: Vec<Placement>,
@@ -286,6 +287,7 @@ pub const TERRAIN_STEP: f32 = 2.0;
 const HEIGHTS_SIDE: usize = (BOUNDS * 2.0 / TERRAIN_STEP) as usize + 1;
 
 /// [`height`] at every terrain vertex, from (-BOUNDS, -BOUNDS) in rows of increasing z.
+#[derive(Clone)]
 struct Heights {
     samples: Vec<f32>,
 }
@@ -320,6 +322,7 @@ impl Heights {
 }
 
 /// Obstacles bucketed into 16 m cells, so a collision check looks at a handful, not all of them.
+#[derive(Clone)]
 struct Grid {
     cells: Vec<Vec<u16>>,
 }
