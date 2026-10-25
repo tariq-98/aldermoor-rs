@@ -2168,14 +2168,14 @@ mod temporal_tests {
         assert_eq!((r.hdr.width(), r.hdr.height()), (35, 35));
         assert_eq!((r.history[0].width(), r.history[1].height()), (35, 35));
         assert_eq!((r.output.width(), r.output.height()), (64, 64));
-        assert!(std::ptr::eq(r.output.as_ref(), output.as_ref()));
+        assert!(std::ptr::eq(&*r.output, &*output));
         assert!(!r.history_valid);
         r.draw(camera, &[], None).unwrap();
         r.wait().unwrap();
         assert!(r.history_valid);
         let history = r.history[0].clone();
         r.set_render_scale(0.55).unwrap();
-        assert!(std::ptr::eq(r.history[0].as_ref(), history.as_ref()));
+        assert!(std::ptr::eq(&*r.history[0], &*history));
         assert!(r.history_valid, "unchanged scale must not discard history");
         assert!(r.set_render_scale(f32::NAN).is_err());
         assert!(r.set_render_scale(0.1).is_err());
