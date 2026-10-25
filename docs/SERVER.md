@@ -17,8 +17,9 @@ Cloud x86 (4 vCPU Xeon at 2.1 GHz, shared), release build, 25 October 2026:
 | Interest: bucket every unit into a 32 m grid | 0.065 ms a step |
 | Interest: every one of the 200 players finds its neighbours within 60 m | 0.91 ms for all, 0.0046 ms each, 229 units each |
 | Lag compensation: record everyone's position and facing | 0.015 ms a step, 2.9 MB for one second |
-| Match instance (10 players, 30 monsters): create | 12.7 ms, of which 11.8 ms builds the land |
-| Match instance: memory | 0.63 MB, of which 0.39 MB is the land |
+| Match instance (10 players, 30 monsters): create | 0.24 ms on the shared land (12.7 ms before #167, which built the land each time) |
+| Match instance: memory | 0.24 MB (0.63 MB before #167) |
+| The shared land, built once per map | about 10–12 ms and 0.39 MB |
 | Match instance: tear down | 0.09 ms |
 | Match instance: step | 0.023 ms (50 of them: 1.14 ms mean, 1.94 ms p99 on one thread) |
 
@@ -29,8 +30,8 @@ What this says:
 - **Finding who a player can see is cheap with a grid**, 0.005 ms a player against the 0.02 ms
   budget. Today's 0.8 ms per view is the full-world scan and building full `UnitState`s every
   tick, which #34 replaces.
-- **Instances are cheap to run but slow to make**, because each builds its own copy of the land.
-  Sharing it (one `Arc`, built once per map) brings creation under a millisecond (#167).
+- **Instances are cheap to make and run** now that every sim on a map shares one copy of its
+  land (`Sim::on`, #167). Before that, each instance spent 12 ms building its own.
 - **History for lag compensation costs almost nothing** in time; its memory is per region, not
   per player.
 
@@ -129,8 +130,8 @@ short-lived sims in the same server process as the world.
 
 - **Made per match, thrown away after.** An instance is a `Sim` on a map (the Barrow, a capture
   the flag map) with a `Mode` resource that holds teams, scores, the timer and respawn points.
-  Measured: under a millisecond to make once maps share their land (#167), 0.1 ms to tear down,
-  about 0.25 MB each without its own copy of the land.
+  Measured: 0.24 ms to make on the map's shared land (`Sim::on`, #167), 0.1 ms to tear down,
+  0.24 MB each.
 - **Teams:** players in a match get a team faction, so `can_harm` lets opposing teams fight with
   no death stakes. Defeat respawns you at your team's spawn point after a few seconds; nothing
   drops and nothing is lost.
@@ -165,7 +166,7 @@ A player sees others where they were about 100 ms ago: the view is interpolated 
 
 ## Follow-up work
 
-- #167: share each map's land between sims, so instances create in under a millisecond.
+- #167 (done): each map's land is shared between sims.
 - #168: the region host, several region sims on threads in one process, with global unit ID
   blocks, ghosts and border handoff.
 - #169: lag compensation, a position history and rewound PvP hit tests.
