@@ -27,8 +27,9 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 
 ## Do the work
 
-- One branch per issue, named `<issue number>-<short-slug>`, for example `12-camera-smoothing`.
-  Never commit issue work straight to `main`.
+- One branch per issue. When you choose the name, use `<issue number>-<short-slug>`, for example
+  `12-camera-smoothing`. Tools that name branches themselves (`codex/...`, `claude/...`) are fine:
+  the link to the issue is `Closes #<n>` in the PR body. Never commit issue work straight to `main`.
 - Push work in progress to the branch at least at the end of each session.
 - If you are blocked, add `status:blocked` and comment why.
 - CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux for the portable crates and
@@ -41,7 +42,9 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 
 ## Finish or hand back
 
-- Open a draft PR whose body contains `Closes #<n>`, and swap the label to `status:in-review`.
+- Open a draft PR whose body contains `Closes #<n>`. The Tracking workflow then sets
+  `status:in-review` on the issue (and sets it back to `status:ready` if the PR closes unmerged), so
+  agents without GitHub access still keep the board right.
 - If you stop before finishing, comment `Released: <what is done, what is left>` and set the
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are
@@ -69,9 +72,35 @@ Edit that file, not the GitHub UI, and the Tracking workflow applies it on merge
 
 ## Step by step
 
-Claude Code sessions have skills for each step in [.claude/skills](.claude/skills):
-`claim-issue`, `file-issue` and `finish-issue`. Other agents can read those files as
-instructions; they cover both the `gh` CLI and the GitHub MCP tools.
+Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue` and
+`finish-issue`. Claude Code loads them from there and Codex from `.agents/skills`, which links to
+the same folder. They cover both the `gh` CLI and the GitHub MCP tools.
+
+## Codex
+
+Codex owns `area:render` issues (see Ownership) and can pick up others when the issue says so.
+
+- **Codex CLI** (on the Mac): needs `gh auth login` once, and network for `gh` (set
+  `network_access = true` under `[sandbox_workspace_write]` in `~/.codex/config.toml`, or approve
+  the command). Then claim, branch and finish exactly as above, signing claims `codex`.
+- **Codex cloud** has no GitHub access while it works. Start the task with the issue number
+  ("Work on #12"), and whoever starts it posts `Claimed by codex (cloud)` on the issue. Codex
+  writes `Closes #12` in the PR description; the Tracking workflow moves the labels from there. Mac-only
+  crates (`render`, `client`, `apple`) can't build there, so say what wasn't run.
+
+## Code Review Rules
+
+For Codex reviews and any other reviewer. Formatting and lint are CI's job; flag these:
+
+- **Untracked work.** The PR body must say `Closes #<n>` (or link the issue it is part of), so the
+  tracker stays the source of truth.
+- **Missing performance numbers.** A PR for a `perf` issue, or one that adds GPU passes, draw calls
+  or per-frame allocations, must report before and after timings against the 12 ms GPU and 2 ms
+  sim budgets in docs/RENDERER.md.
+- **Look values in renderer code.** Colours, fog, exposure, material constants and similar belong
+  in look settings or assets authored by Claude, not hard-coded in `crates/render`.
+- **Broken determinism.** `crates/sim` must not read wall-clock time, use unseeded randomness or
+  iterate hash maps in an order that affects results; the sim is a fixed 60 Hz deterministic step.
 
 ## Wiki
 

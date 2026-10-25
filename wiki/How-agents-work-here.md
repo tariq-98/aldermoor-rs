@@ -12,14 +12,22 @@ The short version:
    `Claimed by <agent>`. The earliest unreleased claim wins.
 3. **Check for overlap.** Each issue lists the files it expects to change. Compare with other
    claimed issues and open PRs first.
-4. **One branch per issue**, named `<number>-<slug>`.
-5. **Finish with a draft PR** that says `Closes #<number>`, and set `status:in-review`.
+4. **One branch per issue**, named `<number>-<slug>` when you pick the name.
+5. **Finish with a draft PR** that says `Closes #<number>`. The Tracking workflow moves the issue
+   to `status:in-review`, and back to `status:ready` if the PR closes unmerged.
 6. **Stopping early?** Comment `Released: ...` and set `status:ready` again.
 7. **Stale claims** (3 days with no activity) can be taken over after a comment.
 
-Claude Code sessions have step-by-step skills in
-[`.claude/skills`](https://github.com/tariq-98/aldermoor-rs/tree/main/.claude/skills):
-`claim-issue`, `file-issue` and `finish-issue`.
+Claude Code and Codex share step-by-step skills in
+[`.claude/skills`](https://github.com/tariq-98/aldermoor-rs/tree/main/.claude/skills)
+(Codex reads them through `.agents/skills`): `claim-issue`, `file-issue` and `finish-issue`.
+
+## Codex
+
+- **Codex CLI** on the Mac works like a local Claude session once `gh` is signed in.
+- **Codex cloud** can't reach GitHub while it works: start it with "Work on #n", post
+  `Claimed by codex (cloud)` on the issue, and its PR's `Closes #n` does the rest.
+- **Codex reviews** follow the Code Review Rules in AGENTS.md.
 
 ## Labels at a glance
 
