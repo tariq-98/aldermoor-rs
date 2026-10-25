@@ -17,8 +17,8 @@ this table, or the table changes in the same PR with the reason written down. Is
 | Area | Budget | Last measured |
 | --- | --- | --- |
 | Whole frame on screen | 60 fps mean, 17.2 ms p95 presented | not yet at the reference setting |
-| GPU total | 12 ms p95 | 14.5 ms median at 5120×1440, 65% (#6) |
-| GPU: shadows (3 cascades) | 1.5 ms | needs per-pass timers (#26) |
+| GPU total | 12 ms p95 | 13.0 ms median, 14.8 ms p95 offscreen at the reference setting, settled minute (#36) |
+| GPU: shadows (3 cascades) | 1.5 ms | about 4.5 ms for the three cascades, elapsed median (#36) |
 | GPU: opaque scene, terrain included | 5.5 ms, terrain at most 2 ms | #26 |
 | GPU: sky, water and transparents | 1 ms | #26 |
 | GPU: TAA or upscaler | 1 ms | #26 |
