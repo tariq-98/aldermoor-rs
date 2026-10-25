@@ -23,7 +23,10 @@ power, and player skill decides close fights (DESIGN.md, "Progression and player
 - **Two weapon sets** per character; `SwapWeapons` changes over, then not again for 5 s.
 - **Bare hands:** Punch.
 - **The global cooldown** is 1 s. Basic attacks aren't on it and give way to any other skill.
-  A skill pressed in the last half-second of the global cooldown goes off when it ends.
+- **Presses wait instead of being lost.** A skill pressed in the last half-second before you're
+  free to use it (the end of the global cooldown, a cast or wind-up, or a climb, leap or charge)
+  goes off the moment you are. The newest press takes the place of an older one, and a roll
+  takes the place of any skill waiting to go. Basic attacks don't wait; they repeat anyway.
 
 ## Specialties
 
@@ -145,7 +148,9 @@ Health, power and armour are multipliers on the level's base numbers (below).
   2 s is a riposte (half as hard again). Quick blows give no warning: block them or take them.
 - **Unblockable blows** (the big monster slams) must be rolled through or outrun.
 - **Rolling** costs 50 endurance, carries you 5 m, and nothing lands for 0.4 s. Endurance
-  refills at 8 a second.
+  refills at 8 a second. A roll pressed in the last 0.2 s of another roll, a climb or a leap
+  goes off as it ends (earlier presses are dropped, so mashing doesn't roll twice). A roll can
+  break off a heavy blow's wind-up before it lands; the blow's cast bar then ends early.
 
 ## Threat
 
@@ -198,11 +203,11 @@ table again after tuning.
 
 ## Checks
 
-- `crates/sim/tests/combat.rs`: resources, casts, cooldowns, the queue, interrupts, melee sweeps
-  (who's in them, aim pull, locked targets, reach and width, wind-ups missing),
-  diminishing returns, defiance, warned blows, blocks, parries, guard breaks, blows from behind,
-  backstabs, missiles (blocked, reflected, aimed, led, homing), downed and rallying, bleeding out,
-  respawning, reviving, summons, combos, the combat view, determinism, every skill on every bar,
-  and the step budget (in release).
+- `crates/sim/tests/combat.rs`: resources, casts, cooldowns, the queue (the newest press wins, a
+  roll clears it, a climb holds it), interrupts, melee sweeps (who's in them, aim pull, locked
+  targets, reach and width, wind-ups missing), diminishing returns, defiance, warned blows,
+  blocks, parries, guard breaks, blows from behind, backstabs, missiles (blocked, reflected,
+  aimed, led, homing), downed and rallying, bleeding out, respawning, reviving, summons, combos,
+  the combat view, determinism, every skill on every bar, and the step budget (in release).
 - `crates/sim/tests/duels.rs`: the balance targets above.
 - The Swift game's combat checks are covered by these.

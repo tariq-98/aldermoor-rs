@@ -109,6 +109,82 @@ fn dodging_rolls_five_metres_for_half_your_endurance() {
     assert!((xz(&sim, id) - before_three).length() < 0.1, "rolled without endurance");
 }
 
+/// Rolls north, presses roll again `after` seconds in, and gives both time to finish: how far
+/// they went in all.
+fn roll_twice(after: f32) -> f32 {
+    let (mut sim, id) = on_the_road();
+    let start = xz(&sim, id);
+    sim.command(id, Command::Dodge { direction: Vec2::new(0.0, -1.0) });
+    sim.run_for(after);
+    sim.command(id, Command::Dodge { direction: Vec2::new(0.0, -1.0) });
+    sim.run_for(1.2);
+    (xz(&sim, id) - start).length()
+}
+
+#[test]
+fn a_roll_pressed_as_a_roll_ends_rolls_again_and_one_pressed_early_is_dropped() {
+    // The roll lasts 0.45 s: pressed with 0.15 s to go, the second roll follows the first.
+    let d = roll_twice(0.3);
+    assert!((d - 10.0).abs() < 0.5, "rolled {d} m");
+    // Pressed with 0.35 s to go, it's too early to hold on to.
+    let d = roll_twice(0.1);
+    assert!((d - 5.0).abs() < 0.3, "rolled {d} m");
+}
+
+/// Jumps, presses jump again `after` seconds into the jump, and reports whether it took off a
+/// second time within half a second of landing.
+fn jump_again(after: f32) -> bool {
+    let (mut sim, id) = on_the_road();
+    sim.command(id, Command::Jump);
+    sim.run_for(after);
+    assert!(!sim.get::<Motion>(id).unwrap().grounded, "landed already");
+    sim.command(id, Command::Jump);
+    let mut landed = false;
+    for _ in 0..60 {
+        sim.step();
+        let grounded = sim.get::<Motion>(id).unwrap().grounded;
+        if landed && !grounded {
+            return true;
+        }
+        landed |= grounded;
+    }
+    false
+}
+
+#[test]
+fn a_jump_pressed_just_before_landing_goes_off_as_you_land() {
+    // A jump lands after about 0.66 s.
+    assert!(jump_again(0.55), "the jump pressed 0.1 s early was lost");
+    assert!(!jump_again(0.35), "a jump pressed 0.3 s before landing still went off");
+}
+
+/// Runs east off the west terraces' 16 m face and presses jump `late` seconds after the feet
+/// leave the top: whether it jumped.
+fn jump_off_the_edge(late: f32) -> bool {
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", Vec2::new(-50.0, -30.0), std::f32::consts::FRAC_PI_2);
+    sim.step();
+    go(&mut sim, id, Vec2::X, false);
+    for _ in 0..240 {
+        sim.step();
+        if !sim.get::<Motion>(id).unwrap().grounded {
+            break;
+        }
+    }
+    assert!(!sim.get::<Motion>(id).unwrap().grounded, "never ran off the edge");
+    sim.run_for(late);
+    sim.command(id, Command::Jump);
+    sim.step();
+    sim.get::<Motion>(id).unwrap().vel.y > 0.0
+}
+
+#[test]
+fn a_jump_just_after_running_off_an_edge_still_works() {
+    assert!(jump_off_the_edge(0.0), "no jump as the feet left the edge");
+    assert!(jump_off_the_edge(0.07), "no jump 0.07 s after leaving the edge");
+    assert!(!jump_off_the_edge(0.2), "jumped in mid-air 0.2 s after leaving the edge");
+}
+
 fn go(sim: &mut Sim, id: u32, direction: Vec2, sprint: bool) {
     sim.command(id, Command::Move { direction, walk: false, sprint, face_yaw: None });
 }
