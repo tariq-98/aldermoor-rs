@@ -2135,6 +2135,7 @@ dependencies = [
  "assets",
  "bevy_ecs",
  "glam 0.34.1",
+ "postcard",
  "protocol",
  "world",
 ]
