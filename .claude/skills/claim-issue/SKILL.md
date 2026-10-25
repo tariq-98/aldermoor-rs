@@ -26,7 +26,8 @@ No issue? Use the `file-issue` skill to create one, then come back.
 
 If you were asked to pick the next piece of work, list ready issues and prefer `p0`, then `p1`,
 lowest phase first. Skip `needs-mac` if you are a cloud session, `type:epic` always, and
-`area:render` unless you are Codex or the issue says otherwise.
+`area:render` unless you are Codex or the issue says otherwise. Codex never takes `area:art` or
+`area:assets` issues, or any issue that needs Blender or new or changed asset files.
 
 - MCP: `list_issues` with `labels: ["status:ready"]`, `state: OPEN`
 - gh: `gh issue list --label status:ready`
@@ -69,7 +70,7 @@ claimed first`, leave the label as it is, and pick another issue.
 ## 5. Branch
 
 ```sh
-git checkout -b <n>-<short-slug>     # e.g. 12-camera-smoothing
+git checkout -b <n>-<short-slug>     # e.g. 12-camera-smoothing; Codex: codex/12-camera-smoothing
 ```
 
 In a session that was told to use a specific branch name, use that branch, and put the issue

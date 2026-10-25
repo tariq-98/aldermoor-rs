@@ -15,7 +15,8 @@ Fable or WoW. Whether Looks or Characters goes second is open in #23.
 
 ## Budgets
 
-Every feature is paid for against these, measured on the M1 Air at 5120×1440:
+Every feature is paid for against these, measured on the M1 Air's built-in display at native
+resolution (decided on #36; the 5120×1440 ultrawide is best effort only):
 
 - GPU: 12 ms per frame (60 fps). Over budget as of 2026-10-25, so phase 1 includes getting under it.
 - Sim: 2 ms per step for 2,000 units.
