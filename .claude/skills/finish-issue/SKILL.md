@@ -21,7 +21,19 @@ Never leave a claimed issue silent. Pick the case that fits.
    status:claimed --add-label status:in-review`).
 5. Comment on the issue with the PR link.
 
-Merging the PR closes the issue. Don't merge your own PR unless Chippy asked you to.
+6. **Merge it when it's tested and working.** Chippy doesn't want to be asked. Check every item:
+   - CI is green on the PR's latest commit (wait for it; don't merge while checks run).
+   - The checks you ran for what you changed passed, and the PR says what you ran.
+   - `needs-mac`, renderer or visual changes were actually run on the Mac and looked right. A
+     cloud session that couldn't run them does **not** merge; it says so in the PR and stops.
+   - No unresolved review comments or requested changes, and no open `status:needs-decision`
+     issue that this PR depends on.
+   - No merge conflicts (if there are, merge `main` in, re-test, and start this list again).
+
+   Then mark it ready for review and squash-merge (MCP: `update_pull_request` with `draft: false`,
+   then `merge_pull_request` with `merge_method: squash`; gh: `gh pr ready <pr>` then
+   `gh pr merge <pr> --squash --delete-branch`). Merging closes the issue. If any item fails, leave
+   the PR open and comment exactly what's missing.
 
 ## Stopping before it's done: release
 

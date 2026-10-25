@@ -45,6 +45,12 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 - Open a draft PR whose body contains `Closes #<n>`. The Tracking workflow then sets
   `status:in-review` on the issue (and sets it back to `status:ready` if the PR closes unmerged), so
   agents without GitHub access still keep the board right.
+- **Merge it yourself once it's tested and working** (Chippy's standing rule, 25 October). That
+  means all of: CI green on the latest commit; you ran the checks for what you changed and they
+  passed; anything `needs-mac` or visual was actually run on the Mac and looked right; no open
+  review comments or requested changes; no `status:needs-decision` issue blocking it; and the PR is
+  mergeable without conflicts. Then mark it ready for review and squash-merge. If any of those
+  isn't true, leave the PR open and say in it exactly what's missing.
 - If you stop before finishing, comment `Released: <what is done, what is left>` and set the
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are
