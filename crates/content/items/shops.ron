@@ -12,7 +12,8 @@
             name: "Brambleford General Store",
             town: "brambleford",
             at: (17.0, -18.0),
-            sells: ["bread", "healing_draught", "padded_coat", "leather_jerkin", "dagger.hunting", "bow.hunting", "wand.yew"],
+            sells: ["bread", "healing_draught", "padded_coat", "leather_jerkin", "dagger.hunting", "bow.hunting", "wand.yew",
+                "pickaxe.copper", "hatchet.copper", "knife.skinning", "sickle.copper", "rod.fishing"],
         ),
         (
             key: "brambleford_smith",
