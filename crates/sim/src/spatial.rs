@@ -2,7 +2,8 @@ use bevy_ecs::prelude::*;
 use glam::Vec2;
 use protocol::UnitId;
 
-use crate::{Transform, Unit, Vitals};
+use crate::movement::{self, Crowd};
+use crate::{Body, Clock, Land, Motion, PlayerControl, Transform, Unit, Vitals};
 
 const CELL: f32 = 8.0;
 
@@ -35,15 +36,38 @@ impl Spatial {
     }
 }
 
-pub fn rebuild(mut spatial: ResMut<Spatial>, q: Query<(&Unit, &Transform, &Vitals)>) {
+/// Also keeps bodies apart (`movement::separate`) every other step, gathering them in the same
+/// pass. The grid keeps where units stood before that nudge, a few centimetres at most.
+pub fn rebuild(
+    mut spatial: ResMut<Spatial>,
+    mut crowd: Local<Crowd>,
+    clock: Res<Clock>,
+    land: Res<Land>,
+    mut q: Query<(Entity, &Unit, &mut Transform, &Vitals, Option<&Motion>, Option<&Body>, Has<PlayerControl>)>,
+) {
     for cell in spatial.cells.values_mut() {
         cell.clear();
     }
-    for (u, t, v) in &q {
+    let separating = Crowd::due(clock.tick);
+    if separating {
+        crowd.clear();
+    }
+    for (e, u, t, v, m, body, player) in &q {
+        let p = Vec2::new(t.pos.x, t.pos.z);
+        if separating {
+            crowd.add(e, p, body.map_or(0.4, |b| b.radius), !v.dead && m.is_some_and(|m| m.forced.is_none()), player);
+        }
         if v.dead {
             continue;
         }
-        let p = Vec2::new(t.pos.x, t.pos.z);
         spatial.cells.entry(Spatial::key(p)).or_default().push((u.id, p));
+    }
+    if separating {
+        movement::separate(&mut crowd);
+        for (e, from, r, push) in crowd.pushes() {
+            if let Ok((_, _, mut t, _, Some(m), _, _)) = q.get_mut(e) {
+                movement::shift(&land.0, &mut t, m, from, push, r);
+            }
+        }
     }
 }

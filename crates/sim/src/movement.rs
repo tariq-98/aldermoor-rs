@@ -3,8 +3,7 @@ use glam::{Vec2, Vec3};
 use protocol::{Event, Pose};
 
 use crate::combat::abilities::Arrivals;
-use crate::spatial::Spatial;
-use crate::{Anim, Body, Clock, Control, Fighter, Forced, ForcedKind, Land, Motion, Outbox, PlayerControl, Transform, Unit, Vitals, DT};
+use crate::{Anim, Body, Clock, Control, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
 
 pub const GRAVITY: f32 = 20.0;
 /// About a 1.1 m jump, landing after 0.66 s.
@@ -45,6 +44,8 @@ const SEPARATE: f32 = 0.5;
 /// Players stand their ground this many times more firmly than monsters, so a pack spreads round
 /// them instead of shoving them about.
 const PLAYER_WEIGHT: f32 = 4.0;
+/// The push apart turns this far (radians) to one side, so crowds slide round each other.
+const SIDESTEP: f32 = 0.5;
 
 /// Landings and splashes this step, for [`after_moving`] to deal with.
 #[derive(Resource, Default)]
@@ -309,70 +310,142 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
     }
 }
 
+/// Scratch space for `separate`, kept between steps (by `spatial::rebuild`) so it doesn't
+/// allocate.
+#[derive(Default)]
+pub struct Crowd {
+    /// Every unit: who, where, its radius and weight (0 for one that neither pushes nor is
+    /// pushed), and the push so far.
+    bodies: Vec<(Entity, Vec2, f32, f32, Vec2)>,
+    widest: f32,
+    /// Indices into `bodies` by band (north-south) then west to east, with the band and the
+    /// east-west position. Units barely move between steps, so last step's order is nearly
+    /// sorted and an insertion sort puts it right cheaply.
+    order: Vec<(i32, f32, u32)>,
+}
+
+impl Crowd {
+    /// Separation runs every other step, which is plenty to keep a crowd apart.
+    pub fn due(tick: u64) -> bool {
+        tick % 2 == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.bodies.clear();
+        self.widest = 0.0;
+    }
+
+    /// Adds a unit as `spatial::rebuild` passes it (one pass over the units does both).
+    pub fn add(&mut self, e: Entity, at: Vec2, radius: f32, free: bool, player: bool) {
+        let weight = if !free { 0.0 } else if player { radius * radius * PLAYER_WEIGHT } else { radius * radius };
+        self.widest = self.widest.max(radius);
+        self.bodies.push((e, at, radius, weight, Vec2::ZERO));
+    }
+
+    /// The bodies `separate` pushed: who, from where, their radius, and the push.
+    pub fn pushes(&self) -> impl Iterator<Item = (Entity, Vec2, f32, Vec2)> + '_ {
+        self.bodies.iter().filter(|b| b.4 != Vec2::ZERO).map(|&(e, from, r, _, push)| (e, from, r, push))
+    }
+}
+
 /// Keeps bodies from overlapping: each pair that does is eased apart, the lighter body moving
-/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). Bodies in forced
-/// motion (rolls, leaps, charges, climbs) neither push nor are pushed, and nobody is pushed into
-/// a wall.
-pub fn separate(world: &mut World) {
-    let units = crate::take_units(world);
-    let mut moves: Vec<(Entity, Vec2)> = Vec::new();
-    let body = |world: &World, e: Entity| -> Option<(protocol::UnitId, Vec2, f32, f32)> {
-        let (u, t, v, m) = (world.get::<Unit>(e)?, world.get::<Transform>(e)?, world.get::<Vitals>(e)?, world.get::<Motion>(e)?);
-        if v.dead || m.forced.is_some() {
-            return None;
+/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). The push turns a
+/// little to one side, so a body caught behind another slides round it rather than queueing.
+/// Bodies in forced motion (rolls, leaps, charges, climbs) neither push nor are pushed. Works out
+/// the pushes for the bodies `spatial::rebuild` gathered, every other step; `shift` applies them.
+pub fn separate(crowd: &mut Crowd) {
+    let Crowd { bodies, order, widest } = crowd;
+    let widest = *widest;
+    // Bodies sorted into east-west bands as tall as the widest pair, west to east within each:
+    // a body only overlaps bodies in its own band or the next, within that width east or west.
+    let span = 2.0 * widest;
+    if order.len() != bodies.len() {
+        order.clear();
+        order.extend((0..bodies.len() as u32).map(|i| (0, 0.0, i)));
+    }
+    for o in order.iter_mut() {
+        let p = bodies[o.2 as usize].1;
+        *o = ((p.y / span).floor() as i32, p.x, o.2);
+    }
+    let before = |a: &(i32, f32, u32), b: &(i32, f32, u32)| a.0 < b.0 || (a.0 == b.0 && a.1 < b.1);
+    for k in 1..order.len() {
+        let mut j = k;
+        while j > 0 && before(&order[j], &order[j - 1]) {
+            order.swap(j - 1, j);
+            j -= 1;
         }
-        let r = world.get::<Body>(e).map_or(0.4, |b| b.radius);
-        let weight = r * r * if world.get::<PlayerControl>(e).is_some() { PLAYER_WEIGHT } else { 1.0 };
-        Some((u.id, t.xz(), r, weight))
+    }
+    let (turn_cos, turn_sin) = (SIDESTEP.cos(), SIDESTEP.sin());
+    let shove = |bodies: &mut [(Entity, Vec2, f32, f32, Vec2)], i: usize, j: usize| {
+        let (_, pa, ra, wa, _) = bodies[i];
+        let (_, pb, rb, wb, _) = bodies[j];
+        if wb == 0.0 {
+            return;
+        }
+        let d = pa - pb;
+        let reach = ra + rb;
+        let dist2 = d.length_squared();
+        if dist2 >= reach * reach {
+            return;
+        }
+        let dist = dist2.sqrt();
+        // Stacked exactly: part along a direction fixed by their order.
+        let away = if dist > 1e-4 { d / dist } else { Vec2::new((i as f32).sin(), (i as f32).cos()) };
+        let away = Vec2::new(away.x * turn_cos - away.y * turn_sin, away.x * turn_sin + away.y * turn_cos);
+        let push = away * (reach - dist) * SEPARATE / (wa + wb);
+        bodies[i].4 += push * wb;
+        bodies[j].4 -= push * wa;
     };
-    for &a in &units {
-        let Some((ia, pa, ra, wa)) = body(world, a) else { continue };
-        let mut push = Vec2::ZERO;
-        for (ib, _) in world.resource::<Spatial>().near(pa, ra + 2.0) {
-            if ib == ia {
+    let mut k = 0;
+    // Where the next band starts in `order`, and how far its scan has got.
+    let (mut next, mut cursor) = (0, 0);
+    while k < order.len() {
+        let band = order[k].0;
+        let end = order[k..].iter().position(|o| o.0 != band).map_or(order.len(), |n| k + n);
+        let next_end = if end < order.len() && order[end].0 == band + 1 { order[end..].iter().position(|o| o.0 != band + 1).map_or(order.len(), |n| end + n) } else { end };
+        if next != end {
+            next = end;
+            cursor = end;
+        }
+        for a in k..end {
+            let (_, x, i) = order[a];
+            if bodies[i as usize].3 == 0.0 {
                 continue;
             }
-            let Some(b) = crate::combat::entity(world, ib) else { continue };
-            let Some((_, pb, rb, wb)) = body(world, b) else { continue };
-            let d = pa - pb;
-            let dist = d.length();
-            let overlap = ra + rb - dist;
-            if overlap <= 0.0 {
-                continue;
+            for &(_, xb, j) in &order[a + 1..end] {
+                if xb - x >= span {
+                    break;
+                }
+                shove(bodies, i as usize, j as usize);
             }
-            // Stacked exactly: part along a direction both sides agree on.
-            let away = if dist > 1e-4 {
-                d / dist
-            } else {
-                let lo = ia.min(ib) as f32;
-                Vec2::new(lo.sin(), lo.cos()) * if ia < ib { 1.0 } else { -1.0 }
-            };
-            push += away * overlap * SEPARATE * wb / (wa + wb);
+            while cursor < next_end && order[cursor].1 <= x - span {
+                cursor += 1;
+            }
+            for &(_, xb, j) in &order[cursor..next_end] {
+                if xb - x >= span {
+                    break;
+                }
+                shove(bodies, i as usize, j as usize);
+            }
         }
-        if push != Vec2::ZERO {
-            moves.push((a, push));
-        }
+        k = end;
     }
-    crate::return_units(world, units);
-    let land = &world.resource::<Land>().0;
-    let mut placed: Vec<(Entity, Vec3)> = Vec::with_capacity(moves.len());
-    for (e, push) in moves {
-        let (Some(r), Some(m), Some(t)) = (world.get::<Body>(e).map(|b| b.radius), world.get::<Motion>(e), world.get::<Transform>(e)) else { continue };
-        let grounded = m.grounded && !m.swimming;
-        let from = t.xz();
-        let to = land.slide(from, push, r);
-        // Never shoved up a wall or off a cliff.
-        let drop = t.pos.y - land.ground(to.x, to.y);
-        if steep(land, from, t.pos.y, to) || (grounded && drop > MAX_SLOPE * (to - from).length() + 0.01) {
-            continue;
-        }
-        let y = if grounded { land.ground(to.x, to.y) } else { t.pos.y };
-        placed.push((e, Vec3::new(to.x, y, to.y)));
+
+}
+
+/// Moves a body by the push `separate` gave it, along any wall in the way, unless that would
+/// carry it up a wall or off a cliff.
+pub fn shift(land: &world::Valley, t: &mut Transform, m: &Motion, from: Vec2, push: Vec2, radius: f32) {
+    let grounded = m.grounded && !m.swimming;
+    let to = land.slide(from, push, radius);
+    let drop = t.pos.y - land.ground(to.x, to.y);
+    if steep(land, from, t.pos.y, to) || (grounded && drop > MAX_SLOPE * (to - from).length() + 0.01) {
+        return;
     }
-    for (e, p) in placed {
-        if let Some(mut t) = world.get_mut::<Transform>(e) {
-            t.pos = p;
-        }
+    t.pos.x = to.x;
+    t.pos.z = to.y;
+    if grounded {
+        t.pos.y = land.ground(to.x, to.y);
     }
 }
 

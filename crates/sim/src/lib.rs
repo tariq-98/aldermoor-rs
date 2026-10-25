@@ -137,7 +137,6 @@ impl Sim {
                 combat::auras::refresh_control,
                 movement::move_units,
                 movement::after_moving,
-                movement::separate,
                 combat::abilities::land_charges,
                 combat::abilities::update,
                 combat::missiles::update,
