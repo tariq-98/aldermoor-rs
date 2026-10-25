@@ -170,6 +170,9 @@ The final release smoke run completed 780 frames: 49.41 m of authoritative movem
 dodge and damage events, and a wolf kill. Local captures are
 `target/render-review/catalogue-instanced.png` and `target/render-review/combat-current.png`.
 
+Budgets and the reference setting (the Air's own panel at 75% render scale) are in
+[PERFORMANCE.md](PERFORMANCE.md); the measurements below predate that choice and use the ultrawide.
+
 Benchmark method:
 
 ```sh

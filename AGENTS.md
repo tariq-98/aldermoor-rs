@@ -36,7 +36,8 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
   on macOS for `render` and `client`. Keep it green; run the same commands locally before pushing.
   `perf.yml` reports sim step times and never blocks a merge.
 - Issues labelled `perf` need before and after numbers against the budgets in
-  [docs/RENDERER.md](docs/RENDERER.md) (12 ms GPU on the M1 Air, 2 ms sim step).
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md) (12 ms GPU on the M1 Air's own screen at 75% render
+  scale, 2 ms sim step).
 - Issues labelled `needs-mac` must be checked on the Mac. A cloud agent can do the code but must
   say in the PR that it was not run.
 
@@ -109,8 +110,8 @@ For Codex reviews and any other reviewer. Formatting and lint are CI's job; flag
 - **Untracked work.** The PR body must say `Closes #<n>` (or link the issue it is part of), so the
   tracker stays the source of truth.
 - **Missing performance numbers.** A PR for a `perf` issue, or one that adds GPU passes, draw calls
-  or per-frame allocations, must report before and after timings against the 12 ms GPU and 2 ms
-  sim budgets in docs/RENDERER.md.
+  or per-frame allocations, must report before and after timings against the budgets in
+  docs/PERFORMANCE.md (12 ms GPU, 2 ms sim step).
 - **Codex touching assets.** A PR from Codex that changes `art/`, `assets/`, `crates/assets/`,
   `tools/`, or any `.blend`, `.glb`, `.gltf`, `.ktx2` or image file is out of bounds, whatever the
   change. Assets come from Claude.
