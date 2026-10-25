@@ -6,6 +6,7 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | The renderer stays on Metal for now; the move to wgpu (#96) is parked and the Windows and Linux renderer is chosen again when that work starts in phase 3 (#98). Phase 2 render passes (#29, #13, #14, #75) are written on Metal | The wgpu spike drew the valley in 14.9 ms GPU against 9.7 ms on Metal on the M1 Air, failing #93's within-5% gate, and the valley is already over 12 ms on Metal | #95, #93 |
 | 2026-10-25 | Kill credit is shared: everyone with at least a tenth of the fight (damage dealt without overkill, damage taken, healing the fighters) gets the full XP and their own loot roll, seen only by them. The Wilderness keeps drop-everything on death | Grouping up never costs XP or loot, a tap earns nothing, and nobody races for drops; tanks and healers earn as much as damage dealers | #201 |
 | 2026-10-25 | Walking, jogging and turning start from free motion capture: 100STYLE (CC BY 4.0, credited) and CMU, retargeted onto the shared rig. Weapon moves stay keyed by script | The fastest way to fill the action controls' biggest animation gap, with natural movement; weapon grips and strikes need exact hand positions | #163, #105 |
 | 2026-10-25 | Art threads build in cloud sessions, several at once, with headless Blender; the Mac keeps the in-game checks, captures and GPU numbers | Blender already runs headless in the cloud (the gear rebuilt in 91 s, matching main), so art no longer queues for the Mac | #162 |
