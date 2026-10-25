@@ -746,6 +746,7 @@ impl Game {
                 },
                 time: scene_time,
                 aim: staged.as_ref().map_or(aim.zip(radius), |f| Some(f.aim)),
+                eye: camera.eye,
             }));
         }
         let projection = combat::Projection {

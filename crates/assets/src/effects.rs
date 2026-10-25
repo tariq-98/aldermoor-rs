@@ -1,8 +1,9 @@
 //! How combat looks (`assets/catalog/effects.json`): glows for each school and field, the
 //! missiles in flight, the glow in a caster's hands, auras on units and marks on the ground.
 //!
-//! Effects are drawn from simple shapes (spheres, streaks, discs and rings) lit by their own
-//! glow, so every look value lives here and the client only supplies the geometry.
+//! Effects are drawn from simple shapes (soft glows facing the camera, streaks, and ground
+//! marks with glowing edges) lit by their own glow, so every look value lives here and the
+//! client only supplies the geometry.
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -29,7 +30,8 @@ pub struct EffectCatalog {
 pub struct Glow {
     /// Linear RGB.
     pub colour: [f32; 3],
-    /// Emission is `colour × strength`; 0 for things that don't glow (an arrow's shaft).
+    /// Emission is `colour × strength`. At 0 the glow is a solid thing that gives no light
+    /// (an arrow's shaft, an axe's head), drawn opaque and lit like any other mesh.
     pub strength: f32,
     /// The surface's own colour is `colour × albedo`, lit by the sun like anything else.
     #[serde(default = "dim")]
@@ -103,21 +105,29 @@ pub struct AuraLook {
 /// Opacity, sizes and timings shared by every effect.
 #[derive(Debug, Clone, Deserialize)]
 pub struct EffectStyle {
+    /// Opacity at the heart of a hot core: a bolt's or a cast's, a flash, a mote.
     pub core_alpha: f32,
+    /// How far a hot core runs from its glow's colour towards white (0…1), and how many times
+    /// brighter than the glow it burns.
+    pub core_white: f32,
+    pub core_boost: f32,
+    /// Opacity at the middle of the softer glow round a bolt or a cast, and along a trail.
     pub halo_alpha: f32,
     pub trail_alpha: f32,
+    /// A shell's opacity at its rim; its middle is far fainter, so the body shows through.
     pub shell_alpha: f32,
     pub ring_alpha: f32,
     /// A ring's band, as a share of its radius.
     pub ring_width: f32,
     pub halo_ring_alpha: f32,
-    /// A warning's whole shape, faint, and the part already filled in.
+    /// A warning's whole shape (the peak of its glowing edge; its body is fainter), and the
+    /// part already filled in.
     pub warning_outline_alpha: f32,
     pub warning_fill_alpha: f32,
-    /// A lasting field's fill and its rim.
+    /// A lasting field's pool and its rim.
     pub field_alpha: f32,
     pub field_rim_alpha: f32,
-    /// The rim's width in metres.
+    /// How far in from a mark's edge its glowing band reaches, in metres.
     pub rim_width: f32,
     /// The orb in a caster's hands: radius when a cast begins and when it completes.
     pub cast_orb: [f32; 2],
@@ -202,6 +212,7 @@ impl EffectCatalog {
         let s = &self.style;
         for (what, alpha) in [
             ("core_alpha", s.core_alpha),
+            ("core_white", s.core_white),
             ("halo_alpha", s.halo_alpha),
             ("trail_alpha", s.trail_alpha),
             ("shell_alpha", s.shell_alpha),
@@ -223,6 +234,7 @@ impl EffectCatalog {
             out.push("effects: style ring_width must be below 1".into());
         }
         sizes.extend([
+            ("style core_boost".into(), s.core_boost),
             ("style rim_width".into(), s.rim_width),
             ("style cast_circle".into(), s.cast_circle),
             ("style burst_seconds".into(), s.burst_seconds),
