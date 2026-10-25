@@ -156,7 +156,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nW/S run and backpedal · A/D turn · Q/E strafe · Shift walk · Space jump · V dodge · Tab target\nLeft-drag look around · Right-drag steer · both buttons run · Num Lock or mouse 4 autorun\nClick target · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme action: WASD moves relative to the camera instead\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nW/S run and backpedal · A/D turn · Q/E strafe · Shift walk · Space jump · V dodge · Tab target\nLeft-drag look around · Right-drag steer · both buttons run · T, Num Lock or mouse 4 autorun\nClick target · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme action: WASD moves relative to the camera instead\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -1157,7 +1157,8 @@ impl ApplicationHandler for App {
                                 }
                                 KeyCode::KeyF => Some(Command::Guard(true)),
                                 KeyCode::Backquote => Some(Command::SwapWeapons),
-                                KeyCode::NumLock => {
+                                // T for MacBook keyboards, which have no Num Lock.
+                                KeyCode::KeyT | KeyCode::NumLock => {
                                     self.game.pilot.toggle_autorun();
                                     None
                                 }

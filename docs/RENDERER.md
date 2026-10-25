@@ -16,7 +16,7 @@ scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65
 Controls are WoW-style by default (`controls::Scheme::Classic`): W runs, S backpedals, A/D turn
 the character and camera, Q/E strafe (A/D strafe too while the right button is held). Left-drag
 looks around without turning the character, right-drag steers it, both buttons run forward, and
-Num Lock or mouse button 4 toggles autorun. Drags hide and hold the pointer; a press that moves
+T, Num Lock or mouse button 4 toggles autorun. Drags hide and hold the pointer; a press that moves
 under 4 px is a click. `--scheme action` brings back camera-relative WASD. Shift walks, Space
 jumps, V rolls. Tab cycles enemies; click selects, right-click starts auto-attacks.
 1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
