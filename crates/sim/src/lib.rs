@@ -445,7 +445,6 @@ impl Sim {
         let clock = self.world.resource::<Clock>();
         let (tick, time) = (clock.tick, clock.time);
         let center = viewer.and_then(|v| self.get::<Transform>(v)).map(|t| t.pos);
-        let land = Land(self.world.resource::<Land>().0.clone());
         // A query visits tables in the order bevy's component index hashes them, which shifts
         // whenever a component type is added. Rank the visible units by ID first, so the states are
         // built in order and the sort below has nothing to move.
@@ -484,7 +483,7 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
-                traversal: movement::traversal(m, Some(&land), t.pos),
+                traversal: movement::traversal(m),
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,

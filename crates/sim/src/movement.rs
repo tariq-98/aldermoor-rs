@@ -77,8 +77,8 @@ fn steep(land: &world::Valley, from: Vec2, y: f32, to: Vec2) -> bool {
     run > 1e-5 && land.ground(to.x, to.y) - y > MAX_SLOPE * run + 0.01
 }
 
-/// How `m` is getting about, for the snapshot. Without the `land`, wading reads as on foot.
-pub fn traversal(m: &Motion, land: Option<&Land>, pos: Vec3) -> protocol::Traversal {
+/// How `m` is getting about, for the snapshot.
+pub fn traversal(m: &Motion) -> protocol::Traversal {
     use protocol::{ForcedMove, Traversal};
     if let Some(f) = m.forced {
         let kind = match f.kind {
@@ -92,7 +92,7 @@ pub fn traversal(m: &Motion, land: Option<&Land>, pos: Vec3) -> protocol::Traver
     }
     if m.swimming {
         Traversal::Swimming
-    } else if m.grounded && land.is_some_and(|l| l.0.water_depth(pos.x, pos.z) > WADE_DEPTH) {
+    } else if m.wading {
         Traversal::Wading
     } else {
         Traversal::Ground
@@ -166,6 +166,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.dodge_queued = None;
             m.forced = None;
             m.swimming = false;
+            m.wading = false;
             m.sprinting = false;
             continue;
         }
@@ -187,6 +188,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 m.forced = None;
                 m.grounded = true;
                 m.swimming = false;
+                m.wading = land.water_depth(t.pos.x, t.pos.z) > WADE_DEPTH;
                 m.vel = Vec3::ZERO;
                 if let ForcedKind::Charge { target, ability } = f.kind {
                     arrivals.0.push((e, target, ability));
@@ -358,6 +360,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         if m.grounded {
             m.fall_from = t.pos.y;
         }
+        m.wading = m.grounded && !m.swimming && depth > WADE_DEPTH;
         m.observed = (t.pos - start) / DT;
     }
 }

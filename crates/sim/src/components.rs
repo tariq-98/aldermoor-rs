@@ -108,6 +108,9 @@ pub struct Motion {
     pub forced: Option<Forced>,
     /// In deep water: floating at the surface, slow, and unable to fight.
     pub swimming: bool,
+    /// On its feet in water deeper than `movement::WADE_DEPTH` after the last step, for the
+    /// snapshot (found once a step, not once for each viewer).
+    pub wading: bool,
     /// Sprinting this step (asked to, and allowed).
     pub sprinting: bool,
     /// The highest the feet have been since they last touched the ground or the water, for fall
@@ -128,6 +131,7 @@ impl Motion {
             dodge_queued: None,
             forced: None,
             swimming: false,
+            wading: false,
             sprinting: false,
             fall_from: f32::NEG_INFINITY,
         }

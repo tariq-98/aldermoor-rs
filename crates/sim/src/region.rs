@@ -222,7 +222,7 @@ impl UnitRecord {
             vitals,
             anim: self.anim.unwrap_or_default(),
             velocity: self.motion.map_or(Vec3::ZERO, |m| m.observed),
-            traversal: self.motion.map_or_else(Default::default, |m| crate::movement::traversal(&m, None, transform.pos)),
+            traversal: self.motion.map_or_else(Default::default, |m| crate::movement::traversal(&m)),
             target,
             drawn: target.is_some() || guarding || now - vitals.last_combat < crate::COMBAT_TIMEOUT,
             first: Some(Box::new(GhostFirst {
@@ -304,7 +304,6 @@ impl Sim {
         let t = self.time();
         crate::queries::with(&mut self.world, |q| &mut q.publish, |world, q| {
             let world: &World = world;
-            let land = world.resource::<crate::Land>();
             world
                 .resource::<Units>()
                 .all()
@@ -324,7 +323,7 @@ impl Sim {
                         vitals,
                         anim: anim.copied().unwrap_or_default(),
                         velocity: motion.map_or(Vec3::ZERO, |m| m.observed),
-                        traversal: motion.map_or_else(Default::default, |m| crate::movement::traversal(m, Some(land), transform.pos)),
+                        traversal: motion.map_or_else(Default::default, crate::movement::traversal),
                         target,
                         drawn: target.is_some() || guarding || t - vitals.last_combat < crate::COMBAT_TIMEOUT,
                         first,
