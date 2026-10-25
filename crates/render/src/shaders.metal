@@ -42,6 +42,9 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
     float2 uv[3]={float2(position.z,-position.y),position.xz,float2(position.x,-position.y)};
     float2 gx[3]={float2(dx.z,-dx.y),dx.xz,float2(dx.x,-dx.y)},gy[3]={float2(dy.z,-dy.y),dy.xz,float2(dy.x,-dy.y)};
     TerrainSample result={float3(0),float3(0)};
+    // The projection count is fixed. Unroll so coordinates, gradients and normal
+    // orientation are constants for each axis instead of dynamically indexed arrays.
+    #pragma clang loop unroll(full)
     for(uint axis=0;axis<3;axis++) {
         if(weights[axis]<0.001)continue;
         gradient2d grad(gx[axis]*exp2(mip_bias),gy[axis]*exp2(mip_bias));
