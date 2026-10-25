@@ -121,7 +121,7 @@ struct Full{float4 position [[position]];float2 uv;};
 vertex Full fullscreen(uint id [[vertex_id]]){float2 uv=float2((id<<1)&2,id&2);return {float4(uv*float2(2,-2)+float2(-1,1),0,1),uv};}
 float3 to_ycocg(float3 c){return float3(dot(c,float3(0.25,0.5,0.25)),dot(c,float3(0.5,0.,-0.5)),dot(c,float3(-0.25,0.5,-0.25)));}
 float3 from_ycocg(float3 c){return float3(c.x+c.y-c.z,c.x+c.z,c.x-c.y-c.z);}
-// Separable Catmull-Rom reconstruction. Depth is deliberately sampled separately.
+// Five-tap Catmull-Rom reconstruction. Depth is deliberately sampled separately.
 float4 catmull_weights(float t){return float4(-0.5*t+t*t-0.5*t*t*t,1.-2.5*t*t+1.5*t*t*t,0.5*t+2.*t*t-1.5*t*t*t,-0.5*t*t+0.5*t*t*t);}
 float3 history_catmull(texture2d<float> tex,float2 uv){
     constexpr sampler linear(coord::normalized,address::clamp_to_edge,filter::linear);
@@ -130,19 +130,62 @@ float3 history_catmull(texture2d<float> tex,float2 uv){
     float3 x=float3(base.x-1.,base.x+wx.z/(wx.y+wx.z),base.x+2.);
     float3 y=float3(base.y-1.,base.y+wy.z/(wy.y+wy.z),base.y+2.);
     float3 weights_x=float3(wx.x,wx.y+wx.z,wx.w),weights_y=float3(wy.x,wy.y+wy.z,wy.w),c=0.;
-    // Combine the two positive centre lobes with hardware bilinear filtering: exact 9-tap bicubic.
-    for(int j=0;j<3;j++)for(int k=0;k<3;k++)c+=tex.sample(linear,(float2(x[k],y[j])+0.5)/size).rgb*weights_x[k]*weights_y[j];
+    // Combine the positive centre lobes with bilinear filtering. Omit the four small
+    // negative-lobe corner products, then renormalise so a constant colour stays constant.
+    c =tex.sample(linear,(float2(x.y,y.x)+0.5)/size).rgb*weights_x.y*weights_y.x;
+    c+=tex.sample(linear,(float2(x.x,y.y)+0.5)/size).rgb*weights_x.x*weights_y.y;
+    c+=tex.sample(linear,(float2(x.y,y.y)+0.5)/size).rgb*weights_x.y*weights_y.y;
+    c+=tex.sample(linear,(float2(x.z,y.y)+0.5)/size).rgb*weights_x.z*weights_y.y;
+    c+=tex.sample(linear,(float2(x.y,y.z)+0.5)/size).rgb*weights_x.y*weights_y.z;
+    float total=weights_x.y*(weights_y.x+weights_y.y+weights_y.z)
+               +weights_y.y*(weights_x.x+weights_x.z);
+    c/=total;
     return max(c,0.);
 }
 fragment float4 temporal_resolve(Full i [[stage_in]],constant Frame& f [[buffer(1)]],texture2d<float> colour [[texture(0)]],texture2d<float> motion [[texture(1)]],depth2d<float> depth [[texture(2)]],texture2d<float> history [[texture(3)]]){
-    constexpr sampler linear(coord::normalized,address::clamp_to_edge,filter::linear);uint2 size=uint2(colour.get_width(),colour.get_height());int2 p=clamp(int2((i.uv+f.jitter.zw)*float2(size)),int2(0),int2(size)-1);float3 now=colour.sample(linear,i.uv+f.jitter.zw).rgb;
-    float nearest=1.;int2 closest=p;float3 lo=float3(INFINITY),hi=-lo,mean=0.,square=0.;
-    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){int2 q=clamp(p+int2(x,y),int2(0),int2(size)-1);float3 c=to_ycocg(colour.read(uint2(q)).rgb);lo=min(lo,c);hi=max(hi,c);mean+=c;square+=c*c;float z=depth.read(uint2(q));if(z<nearest){nearest=z;closest=q;}}
-    float z=depth.read(uint2(p));float linear_z=motion.read(uint2(p)).w;linear_z=linear_z>0.?linear_z:(0.1*800.)/(800.-z*(800.-0.1));float4 mv=motion.read(uint2(closest));float2 uv=i.uv-mv.xy;
-    if(f.clock.w<0.5||any(uv<=0.)||any(uv>=1.)||z>=1.)return float4(now,linear_z);
-    float4 old=float4(history_catmull(history,uv),history.sample(linear,uv).a);if(abs(old.a-mv.z)>max(0.03,mv.z*0.02))return float4(now,linear_z);
-    mean/=9.;float3 sigma=sqrt(max(square/9.-mean*mean,0.));float3 old_y=to_ycocg(old.rgb);old_y=clamp(old_y,max(lo,mean-1.25*sigma),min(hi,mean+1.25*sigma));
-    float weight=mix(0.08,0.25,saturate(length(mv.xy*float2(size))/20.));return float4(mix(from_ycocg(old_y),now,weight),linear_z);
+    constexpr sampler linear(coord::normalized,address::clamp_to_edge,filter::linear);
+    uint2 size=uint2(colour.get_width(),colour.get_height());
+    int2 p=clamp(int2((i.uv+f.jitter.zw)*float2(size)),int2(0),int2(size)-1);
+    float3 now=colour.sample(linear,i.uv+f.jitter.zw).rgb;
+    float z=depth.read(uint2(p));
+    float4 centre_motion=motion.read(uint2(p));
+    float linear_z=centre_motion.w>0.?centre_motion.w:(0.1*800.)/(800.-z*(800.-0.1));
+    // These pixels already returned the current sample. Reject before the neighbourhood work.
+    if(f.clock.w<0.5||z>=1.)return float4(now,linear_z);
+
+    float nearest=1.;int2 closest=p;
+    // Preserve the original scan order and strict comparison, including depth ties at edges.
+    #pragma unroll
+    for(int y=-1;y<=1;y++){
+        #pragma unroll
+        for(int x=-1;x<=1;x++){
+            int2 q=clamp(p+int2(x,y),int2(0),int2(size)-1);
+            float d=(x==0&&y==0)?z:depth.read(uint2(q));
+            if(d<nearest){nearest=d;closest=q;}
+        }
+    }
+    float4 mv=all(closest==p)?centre_motion:motion.read(uint2(closest));
+    float2 uv=i.uv-mv.xy;
+    if(any(uv<=0.)||any(uv>=1.))return float4(now,linear_z);
+    // Depth rejection needs only bilinear alpha, not the expensive bicubic colour reconstruction.
+    float old_depth=history.sample(linear,uv).a;
+    if(abs(old_depth-mv.z)>max(0.03,mv.z*0.02))return float4(now,linear_z);
+
+    float3 lo=float3(INFINITY),hi=-lo,mean=0.,square=0.;
+    #pragma unroll
+    for(int y=-1;y<=1;y++){
+        #pragma unroll
+        for(int x=-1;x<=1;x++){
+            int2 q=clamp(p+int2(x,y),int2(0),int2(size)-1);
+            float3 c=to_ycocg(colour.read(uint2(q)).rgb);
+            lo=min(lo,c);hi=max(hi,c);mean+=c;square+=c*c;
+        }
+    }
+    mean/=9.;float3 sigma=sqrt(max(square/9.-mean*mean,0.));
+    float3 old_y=to_ycocg(history_catmull(history,uv));
+    old_y=clamp(old_y,max(lo,mean-1.25*sigma),min(hi,mean+1.25*sigma));
+    float weight=mix(0.08,0.25,saturate(length(mv.xy*float2(size))/20.));
+    return float4(mix(from_ycocg(old_y),now,weight),linear_z);
 }
 float3 aces(float3 x){return saturate((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14));}
 fragment float4 composite(Full i [[stage_in]],constant Frame& f [[buffer(1)]],texture2d<float> source [[texture(0)]]){constexpr sampler s(filter::linear,coord::normalized,address::clamp_to_edge);float3 c=source.sample(s,i.uv).rgb*f.params.x;c=float3(dot(f.grade[0].xyz,c),dot(f.grade[1].xyz,c),dot(f.grade[2].xyz,c));if(f.params.y>0.5)c=aces(c);return float4(c,1);}
