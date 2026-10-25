@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -123,6 +123,34 @@ pub enum Avoid {
     Reflected,
     /// An aimed shot that flew past.
     Missed,
+}
+
+/// How hard a blow landed (or was stopped), for the client's hit feel: hitstop, camera kick and
+/// flinches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Weight {
+    /// A quick blow or a shot.
+    Light,
+    /// A wound-up blow, or a monster's warned-of slam.
+    Heavy,
+    /// A critical hit.
+    Critical,
+    /// Stopped by a raised guard.
+    Blocked,
+    /// Parried: the attacker staggers.
+    Parried,
+}
+
+/// A heading on the ground (0 faces +z, as `yaw`) in a byte: 256 steps of about 1.4°.
+pub fn direction_to_byte(yaw: f32) -> u8 {
+    let turns = (yaw / std::f32::consts::TAU).rem_euclid(1.0);
+    ((turns * 256.0).round() as u32 % 256) as u8
+}
+
+/// The heading a [`direction_to_byte`] byte stands for, in -π..π.
+pub fn direction_from_byte(b: u8) -> f32 {
+    let yaw = b as f32 / 256.0 * std::f32::consts::TAU;
+    if yaw > std::f32::consts::PI { yaw - std::f32::consts::TAU } else { yaw }
 }
 
 /// The ground an area covers. Cones and lines point along the area's yaw.
@@ -419,6 +447,10 @@ pub enum Event {
     /// A finisher went through a combo field.
     Combo { unit: UnitId, name: String, at: Vec3 },
     WeaponsSwapped { unit: UnitId },
+    /// A blow reached `victim`: it landed, or a guard stopped it. `direction` is the way the blow
+    /// travelled, from attacker (or missile) to victim ([`direction_from_byte`]). `hitstop_ms` is
+    /// how long both bodies freeze on screen; the sim never pauses.
+    Hit { attacker: UnitId, victim: UnitId, direction: u8, weight: Weight, hitstop_ms: u8 },
 }
 
 /// Everything a client needs for one tick.
@@ -459,6 +491,16 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directions_fit_in_a_byte_to_within_a_degree() {
+        for i in -40..=40 {
+            let yaw = i as f32 * 0.08;
+            let back = direction_from_byte(direction_to_byte(yaw));
+            let d = (back - yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            assert!(d.abs() < 0.013, "{yaw} came back as {back}");
+        }
+    }
 
     #[test]
     fn commands_and_snapshots_round_trip() {

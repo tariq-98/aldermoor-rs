@@ -37,6 +37,12 @@ pub const UNARMED_SWING: f32 = 1.4;
 /// away from, short enough to feel quick. The tables write it as `cast: 0.4`.
 pub const WINDUP: f64 = 0.4;
 
+/// How long (ms) a landed blow freezes attacker and victim on screen (hitstop), by weight: light,
+/// heavy, critical, blocked, parried. Missiles freeze half as long, and nothing is longer than
+/// [`HITSTOP_CAP`]. The sim never pauses for it.
+pub const HITSTOP: [u8; 5] = [40, 80, 110, 50, 110];
+pub const HITSTOP_CAP: u8 = 120;
+
 /// Who or where an ability is aimed. Shapes in front of the user take the ability's range as
 /// their length.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

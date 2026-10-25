@@ -152,6 +152,16 @@ Health, power and armour are multipliers on the level's base numbers (below).
   goes off as it ends (earlier presses are dropped, so mashing doesn't roll twice). A roll can
   break off a heavy blow's wind-up before it lands; the blow's cast bar then ends early.
 
+## Hit feel
+
+Every blow that reaches a unit sends a `Hit` event (CONTRACT.md) with the way it travelled, how
+hard it was (light, heavy for wind-ups and monsters' warned slams, critical, blocked, parried) and
+a hitstop time: 40 ms light, 80 heavy, 110 critical or parried, 50 blocked, half for missiles,
+never more than 120 (`content::HITSTOP`). Clients freeze both bodies' poses that long, kick the
+camera on their own player's blows (#196) and play a flinch from the direction. As in Monster
+Hunter's online play, the freeze is only on screen: the sim never pauses, so nobody else's fight
+waits for it.
+
 ## Threat
 
 - Monsters fight whoever they hate most: damage done to them (times stances' threat), and half

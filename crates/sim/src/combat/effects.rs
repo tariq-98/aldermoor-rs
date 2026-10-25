@@ -3,10 +3,10 @@
 
 use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
-use protocol::{Avoid, Event, Pose, School, Shape};
+use protocol::{Avoid, Event, Pose, School, Shape, Weight};
 
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
-use crate::content::{catalog, AbilityDef, Effect, Field, Finisher};
+use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, HITSTOP, HITSTOP_CAP};
 use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
 use crate::region::Landing;
 use crate::spatial::Spatial;
@@ -322,6 +322,30 @@ pub fn shape_of(def: &AbilityDef) -> Option<Shape> {
     }
 }
 
+/// Tells clients a blow reached `te` (landed, or stopped by a guard), which way it travelled
+/// and how long to hold both bodies still on screen. Fields' pulses aren't blows.
+fn hit(world: &mut World, src: &HitSource, te: Entity, delivery: Delivery, weight: Weight) {
+    if delivery == Delivery::Pulse {
+        return;
+    }
+    let Some(victim) = unit_id(world, te) else { return };
+    let Some(t) = world.get::<Transform>(te).copied() else { return };
+    let along = t.xz() - Vec2::new(src.from.x, src.from.z);
+    let yaw = if along.length_squared() > 1e-6 { heading(along) } else { heading(-t.forward()) };
+    let index = match weight {
+        Weight::Light => 0,
+        Weight::Heavy => 1,
+        Weight::Critical => 2,
+        Weight::Blocked => 3,
+        Weight::Parried => 4,
+    };
+    let mut hitstop_ms = HITSTOP[index].min(HITSTOP_CAP);
+    if delivery == Delivery::Missile {
+        hitstop_ms /= 2;
+    }
+    emit(world, Event::Hit { attacker: src.unit, victim, direction: protocol::direction_to_byte(yaw), weight, hitstop_ms });
+}
+
 /// Runs an ability's effects: the user's own once, the rest on each target (unless it
 /// dodges, blocks, parries or is immune).
 pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def: Option<&AbilityDef>, targets: &[Entity], center: Vec3, delivery: Delivery) {
@@ -401,6 +425,11 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
     if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
         let target = unit_id(world, t).unwrap_or(0);
         emit(world, Event::Avoided { target, source: src.unit, how });
+        match how {
+            Avoid::Blocked => hit(world, src, t, delivery, Weight::Blocked),
+            Avoid::Parried => hit(world, src, t, delivery, Weight::Parried),
+            _ => {}
+        }
         return;
     }
     if hostile && def.is_some() && let Some(u) = user {
@@ -418,6 +447,17 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
     }
     if hurt && let Some(u) = user {
         auras::remove_key(world, u, "riposte");
+    }
+    if hurt && hostile {
+        let heavy = def.is_some_and(|d| d.telegraph || d.is_swing());
+        let weight = if crit {
+            Weight::Critical
+        } else if heavy {
+            Weight::Heavy
+        } else {
+            Weight::Light
+        };
+        hit(world, src, t, delivery, weight);
     }
 }
 

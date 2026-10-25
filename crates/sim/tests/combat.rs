@@ -571,6 +571,67 @@ fn a_guard_raised_too_early_only_blocks() {
     assert_eq!(f.avoided(hero, Avoid::Blocked), 1);
 }
 
+/// The `Hit` events that reached `victim`: who from, which way (radians), how hard, and the
+/// hitstop.
+fn hits_on(f: &Fight, victim: u32) -> Vec<(u32, f32, protocol::Weight, u8)> {
+    f.log
+        .iter()
+        .filter_map(|e| match e {
+            Event::Hit { attacker, victim: v, direction, weight, hitstop_ms } if *v == victim => {
+                Some((*attacker, protocol::direction_from_byte(*direction), *weight, *hitstop_ms))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn blows_tell_the_client_which_way_they_came_and_how_hard() {
+    use protocol::Weight;
+    // A heavy blow from the north lands travelling south (-z, a heading of π).
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let foe = f.foe(Specialty::Warrior, 1, ROAD + Vec2::new(0.0, 2.0), PI);
+    f.target(foe, hero);
+    f.once(foe, 1); // Rending Blade: winds up, then lands.
+    f.run(0.45);
+    let hits = hits_on(&f, hero);
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let (by, yaw, weight, ms) = hits[0];
+    assert_eq!((by, weight, ms), (foe, Weight::Heavy, 80));
+    assert!((yaw.abs() - PI).abs() < 0.03, "came from {yaw}");
+
+    // Blocked, then parried.
+    for (early, weight, ms) in [(true, Weight::Blocked, 50), (false, Weight::Parried, 110)] {
+        let mut f = Fight::new();
+        let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+        let foe = f.foe(Specialty::Warrior, 1, ROAD + Vec2::new(0.0, 2.0), PI);
+        if early {
+            f.cmd(hero, Command::Guard(true));
+        }
+        f.target(foe, hero);
+        f.once(foe, 1);
+        f.run(0.2);
+        f.cmd(hero, Command::Guard(true));
+        f.run(0.25);
+        let hits = hits_on(&f, hero);
+        assert_eq!(hits.iter().map(|h| (h.2, h.3)).collect::<Vec<_>>(), vec![(weight, ms)], "{hits:?}");
+    }
+
+    // An arrow is a light blow, and missiles hold half as long.
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let archer = f.dummy("goblin_archer", ROAD + Vec2::new(0.0, 8.0), PI);
+    f.sim.get_mut::<Fighter>(archer).unwrap().target = Some(hero);
+    f.sim.get_mut::<Fighter>(archer).unwrap().auto_attack = true;
+    f.run(0.6);
+    let hits = hits_on(&f, hero);
+    assert!(!hits.is_empty(), "the arrow never landed");
+    let (by, yaw, weight, ms) = hits[0];
+    assert_eq!((by, weight, ms), (archer, Weight::Light, 20));
+    assert!((yaw.abs() - PI).abs() < 0.3, "the arrow came from {yaw}");
+}
+
 #[test]
 fn a_guard_with_no_endurance_left_breaks() {
     let mut f = Fight::new();

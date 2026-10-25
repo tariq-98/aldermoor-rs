@@ -38,7 +38,7 @@ let fight: Arc<CombatView> = host.combat().unwrap(); // combat detail from the s
 let events = host.take_events(); // everything since you last asked
 ```
 
-Each `Snapshot` (protocol version 6) has:
+Each `Snapshot` (protocol version 8) has:
 
 - `units`: everyone within 160 m. For each one:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
@@ -64,6 +64,12 @@ Each `Snapshot` (protocol version 6) has:
   - `AbilityUsed`, `CastStarted`, `CastInterrupted`, `AuraApplied`, `AuraRemoved`;
   - `ProjectileLaunched` and `ProjectileEnded` (where it stopped, and on whom), `AreaImpact`
     (a warned blow landing: a burst of dust, frost or fire), `Combo`;
+  - `Hit`, for hit feel: every blow that reached a unit (landed, or stopped by a guard), with
+    `attacker`, `victim`, `direction` (the way the blow travelled, a heading in a byte:
+    `protocol::direction_from_byte`), `weight` (light, heavy, critical, blocked, parried) and
+    `hitstop_ms`, how long to freeze both bodies' poses on screen (40 light, 80 heavy, 110
+    critical or parried, 50 blocked, half for missiles; `content::HITSTOP`). The sim never
+    pauses; fields' pulses and conditions ticking send none;
   - `Staggered` (thrown off balance by a parry), `Downed`, `Rallied`, `Revived`,
     `DefianceBroken`, `WeaponsSwapped`;
   - deaths, respawns, jumps, rolls and messages.
