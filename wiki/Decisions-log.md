@@ -6,6 +6,7 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Gathering skills: mining, woodcutting, skinning, herbalism and fishing; crafts gain cooking and alchemy alongside smithing, tailoring, leatherworking and enchanting. Each levels through use to 50 | Every craft needs a source of materials; RuneScape-style freedom | #68 |
 | 2026-10-25 | Specialty XP: an enemy's death pays XP split between the specialties whose skills were used on it; quests give XP the player assigns to any specialty | Feels like levelling through use without training-dummy farming | #66 |
 | 2026-10-25 | Specialties cap at level 50, and the equipped specialty's level is the one that counts in combat (no overall character level) | Power compounds 6% a level, so 99 would be ~300x a level-1 fighter; 50 is ~17x | #66 |
 | 2026-10-25 | Action controls are the default: crosshair always on, mouse always steers, shots go to the crosshair, Tab locks a target optionally. Classic (WoW-style) stays as a setting | Chippy wants aiming to matter; Classic already built in PR #52 | #62, #22 |
