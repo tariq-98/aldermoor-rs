@@ -166,9 +166,12 @@ fragment float4 decal_fragment(DecalVary i [[stage_in]],float4 motion [[color(1)
     device const Decal& d=decals[i.instance];
     float3 local=(d.to_decal*float4(world,1)).xyz;
     // Only surfaces facing up the box take the mark: not the legs of whoever stands in it.
-    float3 n=normalize(cross(dfdx(world),dfdy(world)));
+    // Across a silhouette the next pixel is another surface, so its slope can't be trusted.
+    float3 wx=dfdx(world),wy=dfdy(world);
+    float3 n=normalize(cross(wx,wy));
     float3 up=normalize(d.to_world[1].xyz);
-    float lie=smoothstep(0.45,0.7,abs(dot(n,up)))*(1.-smoothstep(0.75,1.,abs(local.y)));
+    float even=1.-smoothstep(0.02,0.05,(length(wx)+length(wy))/max(depth,0.1));
+    float lie=smoothstep(0.45,0.7,abs(dot(n,up)))*(1.-smoothstep(0.75,1.,abs(local.y)))*even;
     float sky=float(depth>0.01&&depth<799.);
     float boxed=float(all(abs(local)<=1.));
     // Metres from the shape's edge (positive inside), and from the fill's leading edge.

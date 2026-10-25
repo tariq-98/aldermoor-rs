@@ -35,8 +35,8 @@ struct Anchor {
     /// A cast's or warning's progress (0…1), or negative for none.
     progress: f32,
     shape: Option<Shape>,
-    /// The ground's lowest and highest points under an area, for its marks.
-    ground: (f32, f32),
+    /// The ground under it, for its marks.
+    ground: Ground,
 }
 
 impl Anchor {
@@ -51,8 +51,54 @@ impl Anchor {
             strength: 1.,
             progress: -1.,
             shape: None,
-            ground: (origin.y, origin.y),
+            ground: Ground::flat(origin.y),
         }
+    }
+}
+
+/// The ground under a mark: the plane that best fits it (its height at the anchor and its rise
+/// a metre along x and z) and how far the real ground strays from that plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Ground {
+    y: f32,
+    slope: Vec2,
+    stray: f32,
+}
+
+impl Ground {
+    fn flat(y: f32) -> Self {
+        Self {
+            y,
+            slope: Vec2::ZERO,
+            stray: 0.,
+        }
+    }
+
+    /// Fits the ground within `reach` of `centre` from a centre sample and two even rings,
+    /// which makes the least-squares plane simple: the mean height, and each slope from its
+    /// own axis alone.
+    fn fit(centre: Vec3, reach: f32, ground: &dyn Fn(f32, f32) -> f32) -> Self {
+        let mut points = vec![(Vec2::ZERO, ground(centre.x, centre.z))];
+        for k in 0..12 {
+            let t = k as f32 / 12. * TAU;
+            for r in [0.5, 1.] {
+                let d = Vec2::new(t.sin(), t.cos()) * reach * r;
+                points.push((d, ground(centre.x + d.x, centre.z + d.y)));
+            }
+        }
+        let n = points.len() as f32;
+        let y = points.iter().map(|p| p.1).sum::<f32>() / n;
+        let along = |axis: fn(Vec2) -> f32| {
+            let num: f32 = points.iter().map(|(d, h)| axis(*d) * (h - y)).sum();
+            let den: f32 = points.iter().map(|(d, _)| axis(*d) * axis(*d)).sum();
+            if den > 1e-6 { num / den } else { 0. }
+        };
+        let slope = Vec2::new(along(|d| d.x), along(|d| d.y));
+        let stray = points
+            .iter()
+            .map(|(d, h)| (h - (y + slope.dot(*d))).abs())
+            .fold(0., f32::max);
+        Self { y, slope, stray }
     }
 }
 
@@ -469,8 +515,7 @@ impl Effects {
             let mut anchor = Anchor::at(at, turn, s.time - born, fseed);
             anchor.velocity = p.velocity;
             // A missile's marks are the light it throws on the ground under it.
-            let under = (s.ground)(at.x, at.z);
-            anchor.ground = (under, under);
+            anchor.ground = Ground::flat((s.ground)(at.x, at.z));
             if let Some(f) = self.look(&look.flight) {
                 for part in f.iter() {
                     emit(part, &anchor, false, &mut out, s);
@@ -567,6 +612,7 @@ impl Effects {
                 u.position.z,
             );
             let turn = Quat::from_rotation_y(u.yaw);
+            let under = Ground::fit(feet, h * 0.6, s.ground);
             if let Some(cast) = &c.cast
                 && let Some(effect) = self.table.casts.get(&cast.ability).cloned()
                 && let Some(look) = self.look(&effect)
@@ -574,6 +620,7 @@ impl Effects {
                 let elapsed = cast.elapsed + s.since;
                 let mut anchor = Anchor::at(feet, turn, elapsed, hash(u.id ^ 0x5eed));
                 anchor.scale = h;
+                anchor.ground = under;
                 anchor.progress = if cast.channel {
                     1.
                 } else {
@@ -600,6 +647,7 @@ impl Effects {
                 let mut anchor =
                     Anchor::at(feet, turn, s.time, hash(u.id.wrapping_mul(31) ^ i as u32));
                 anchor.scale = h;
+                anchor.ground = under;
                 anchor.strength = fade;
                 for part in look.iter() {
                     emit(part, &anchor, false, &mut out, s);
@@ -627,7 +675,7 @@ impl Effects {
 }
 
 /// An area's anchor: on the ground at its centre, facing its way, sized by its reach, with
-/// the ground's span under it for its marks.
+/// the ground under it for its marks.
 fn area_anchor(a: &AreaView, s: &Scene) -> Anchor {
     let reach = match a.shape {
         Shape::Circle { radius } => radius,
@@ -636,17 +684,6 @@ fn area_anchor(a: &AreaView, s: &Scene) -> Anchor {
     };
     let turn = Quat::from_rotation_y(a.yaw);
     let y = (s.ground)(a.center.x, a.center.z).max(a.center.y);
-    let mut low = y;
-    let mut high = y;
-    for k in 0..12 {
-        for r in [0.5, 1.] {
-            let t = k as f32 / 12. * TAU;
-            let p = a.center + turn * Vec3::new(t.sin(), 0., t.cos()) * reach * r;
-            let g = (s.ground)(p.x, p.z);
-            low = low.min(g);
-            high = high.max(g);
-        }
-    }
     let mut anchor = Anchor::at(
         Vec3::new(a.center.x, y, a.center.z),
         turn,
@@ -655,7 +692,7 @@ fn area_anchor(a: &AreaView, s: &Scene) -> Anchor {
     );
     anchor.scale = reach;
     anchor.shape = Some(a.shape);
-    anchor.ground = (low, high);
+    anchor.ground = Ground::fit(a.center, reach, s.ground);
     if a.warning {
         anchor.progress = ((a.elapsed + s.since) / a.duration.max(0.001)).clamp(0., 1.);
     }
@@ -958,16 +995,17 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
     };
     let pulse = 1. + l.pulse[0] * (TAU * l.pulse[1] * a.age).sin();
     // A mark cast from above (a missile's light) weakens the higher its source is.
-    let (low, high) = a.ground;
-    let lift = (a.origin.y - high).max(0.);
+    let g = a.ground;
+    let lift = (a.origin.y - g.y).max(0.);
     let alpha = l.alpha * fade * a.strength * pulse / (1. + 0.5 * lift * lift);
     if alpha <= 0.002 {
         return;
     }
     let spin = Quat::from_rotation_y(l.angle + l.spin[0] * a.age);
-    // The box reaches from just under the lowest ground to just over the highest.
-    let centre_y = (low + high) * 0.5;
-    let half_y = (high - low) * 0.5 + 0.35;
+    // The box lies on the ground's plane, deep enough for the ground straying from it, and
+    // no deeper: anyone standing in the mark is left out of it.
+    let tilt = Quat::from_rotation_arc(Vec3::Y, Vec3::new(-g.slope.x, 1., -g.slope.y).normalize());
+    let half_y = g.stray + 0.35;
     let size = lerp(l.size[0], l.size[1], life.t) * s;
     let (kind, half, centre, cone) = match (l.shape, a.shape) {
         (DecalShape::Area, Some(Shape::Circle { radius })) => (
@@ -1000,12 +1038,13 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
             0.,
         ),
     };
-    let turn = if kind == fx::Decal::TEXTURE {
-        a.turn * spin
-    } else {
-        a.turn
-    };
-    let origin = Vec3::new(a.origin.x, centre_y, a.origin.z) + a.turn * centre;
+    let turn = tilt
+        * if kind == fx::Decal::TEXTURE {
+            a.turn * spin
+        } else {
+            a.turn
+        };
+    let origin = Vec3::new(a.origin.x, g.y, a.origin.z) + tilt * (a.turn * centre);
     let to_world = Mat4::from_scale_rotation_translation(half, turn, origin);
     let tile = [a.age * l.scroll[0], a.age * l.scroll[1], l.repeat, l.repeat];
     let material = part.material(life.t, life.seconds, alpha, tile);
@@ -1272,6 +1311,17 @@ mod tests {
         let fb = frame(&mut b, &fight, &units, 2.5).1;
         assert_eq!(fa.quads, fb.quads);
         assert_eq!(fa.decals, fb.decals);
+    }
+
+    #[test]
+    fn ground_fits_a_slope_and_says_how_far_it_strays() {
+        let slope = |x: f32, z: f32| 2. + 0.5 * x - 0.25 * z;
+        let g = Ground::fit(Vec3::new(3., 0., -1.), 2., &slope);
+        assert!((g.y - slope(3., -1.)).abs() < 1e-4, "{g:?}");
+        assert!((g.slope - Vec2::new(0.5, -0.25)).length() < 1e-4, "{g:?}");
+        assert!(g.stray < 1e-4, "{g:?}");
+        let bumpy = |x: f32, _: f32| if x > 1. { 1. } else { 0. };
+        assert!(Ground::fit(Vec3::ZERO, 2., &bumpy).stray > 0.3);
     }
 
     #[test]
