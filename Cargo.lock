@@ -492,6 +492,11 @@ dependencies = [
 [[package]]
 name = "content"
 version = "0.1.0"
+dependencies = [
+ "protocol",
+ "ron",
+ "serde",
+]
 
 [[package]]
 name = "controls"
@@ -1998,6 +2003,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ron"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81116b9531d61eabc41aeb228e4b6b2435bcca3233b98cf3b3077d4e6e9debb3"
+dependencies = [
+ "bitflags 2.13.2",
+ "once_cell",
+ "serde",
+ "serde_derive",
+ "typeid",
+ "unicode-ident",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2136,6 +2155,7 @@ version = "0.1.0"
 dependencies = [
  "assets",
  "bevy_ecs",
+ "content",
  "glam 0.34.1",
  "postcard",
  "protocol",
