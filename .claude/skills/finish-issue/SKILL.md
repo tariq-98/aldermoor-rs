@@ -15,7 +15,8 @@ Never leave a claimed issue silent. Pick the case that fits.
 3. Push the branch and open a **draft** PR against `main`:
    - Body follows `.github/pull_request_template.md` and starts with `Closes #<n>`.
    - MCP: `create_pull_request` with `draft: true`. gh: `gh pr create --draft --fill`, then edit.
-4. Move the issue to review: swap `status:claimed` for `status:in-review`
+4. The Tracking workflow swaps the issue to `status:in-review` when the PR opens. If it hasn't
+   after a minute (for example the PR body was missing `Closes #<n>` at first), set it yourself
    (`issue_write` update with the full label list / `gh issue edit <n> --remove-label
    status:claimed --add-label status:in-review`).
 5. Comment on the issue with the PR link.
