@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 use protocol::Command;
-use sim::{Motion, Sim, Transform, Vitals};
+use sim::{ForcedKind, Motion, Sim, Transform, Vitals};
 
 fn xz(sim: &Sim, id: u32) -> Vec2 {
     let t = sim.get::<Transform>(id).unwrap();
@@ -353,6 +353,108 @@ fn climbs_onto_a_low_wall_and_down_the_far_side() {
     assert!(t.x > 9.0 && (t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "ended at {t}");
 }
 
+/// A wall `rise` high and `depth` deep across the road 3 m east of a player running (or walking)
+/// at it, with a jump pressed `jump` seconds in if asked. Runs `seconds`; the kinds of forced
+/// move it went through.
+fn at_wall(rise: f32, depth: f32, walk: bool, jump: Option<f32>, seconds: f32) -> (Vec<ForcedKind>, Sim, u32, f32) {
+    let mut sim = Sim::new(7);
+    let at = Vec2::new(5.0, 10.0);
+    let wall = at + Vec2::new(3.0, 0.0);
+    let top = sim.land().ground(wall.x, wall.y) + rise;
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(depth / 2.0, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+    let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
+    sim.step();
+    sim.command(id, Command::Move { direction: Vec2::X, walk, sprint: false, face_yaw: None });
+    let mut kinds = Vec::new();
+    for i in 0..(seconds * 60.0) as u32 {
+        if jump.is_some_and(|j| i == (j * 60.0) as u32) {
+            sim.command(id, Command::Jump);
+        }
+        sim.step();
+        if let Some(f) = sim.get::<Motion>(id).unwrap().forced
+            && kinds.last() != Some(&f.kind)
+        {
+            kinds.push(f.kind);
+        }
+    }
+    (kinds, sim, id, top)
+}
+
+fn ground_speed(sim: &Sim, id: u32) -> f32 {
+    let o = sim.get::<Motion>(id).unwrap().observed;
+    Vec2::new(o.x, o.z).length()
+}
+
+#[test]
+fn running_at_a_low_thin_wall_vaults_it_in_stride() {
+    // Stop just as the hop lands (the road has a field wall of its own a little further on).
+    let (kinds, mut sim, id, _) = at_wall(1.0, 0.4, false, None, 0.5);
+    assert!(matches!(kinds[..], [ForcedKind::Vault { .. }]), "went through {kinds:?}");
+    let mut steps = 0;
+    while sim.get::<Motion>(id).unwrap().forced.is_some() && steps < 60 {
+        sim.step();
+        steps += 1;
+    }
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    assert!(t.x > 8.5, "only got to x = {}", t.x);
+    assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "not on the road beyond: {t}");
+    let run = sim.get::<Motion>(id).unwrap().run_speed;
+    sim.step();
+    assert!(ground_speed(&sim, id) > run * 0.95, "landed at {} m/s", ground_speed(&sim, id));
+}
+
+#[test]
+fn walking_at_a_low_wall_or_running_at_a_deep_or_tall_one_doesnt_vault() {
+    let (kinds, ..) = at_wall(1.0, 0.4, true, None, 2.0);
+    assert!(!kinds.iter().any(|k| matches!(k, ForcedKind::Vault { .. })), "walking went through {kinds:?}");
+    let (kinds, ..) = at_wall(1.0, 1.0, false, None, 1.5);
+    assert_eq!(kinds.first(), Some(&ForcedKind::Climb), "a deep wall went through {kinds:?}");
+    // Too tall to hop: it blocks, as a thin wall did before vaulting.
+    let (kinds, ..) = at_wall(1.4, 0.4, false, None, 1.5);
+    assert!(!kinds.iter().any(|k| matches!(k, ForcedKind::Vault { .. })), "a 1.4 m wall went through {kinds:?}");
+}
+
+#[test]
+fn no_vault_onto_ground_that_isnt_clear() {
+    let mut sim = Sim::new(7);
+    // A shed right behind the wall.
+    sim.land_mut().add_solid(world::Solid { center: Vec2::new(9.6, 10.0), half: Vec2::new(0.5, 2.0), yaw: 0.0, top: None, rise: 0.0 });
+    let (kinds, ..) = {
+        let wall = Vec2::new(8.0, 10.0);
+        let top = sim.land().ground(wall.x, wall.y) + 1.0;
+        sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.2, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+        let id = sim.spawn_player("Hero", Vec2::new(5.0, 10.0), std::f32::consts::FRAC_PI_2);
+        sim.step();
+        go(&mut sim, id, Vec2::X, false);
+        let mut kinds = Vec::new();
+        for _ in 0..60 {
+            sim.step();
+            if let Some(f) = sim.get::<Motion>(id).unwrap().forced
+                && kinds.last() != Some(&f.kind)
+            {
+                kinds.push(f.kind);
+            }
+        }
+        (kinds, sim, id)
+    };
+    assert!(!kinds.iter().any(|k| matches!(k, ForcedKind::Vault { .. })), "vaulted into a shed: {kinds:?}");
+}
+
+#[test]
+fn a_jump_at_a_ledge_out_of_reach_catches_it() {
+    // 2 m: too tall to climb from the ground.
+    let (kinds, ..) = at_wall(2.0, 1.2, false, None, 2.0);
+    assert!(kinds.is_empty(), "got up a 2 m wall without jumping: {kinds:?}");
+    let (kinds, sim, id, top) = at_wall(2.0, 1.2, false, Some(0.3), 2.0);
+    assert_eq!(kinds.first(), Some(&ForcedKind::Mantle), "went through {kinds:?}");
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    assert!(t.x > 7.4, "fell back to x = {}", t.x);
+    assert!((t.y - top).abs() < 0.05 || t.x > 8.6, "not on top or past it: {t}");
+    // Too high to catch even at the top of a jump.
+    let (kinds, ..) = at_wall(3.6, 1.2, false, Some(0.3), 2.0);
+    assert!(kinds.is_empty(), "caught a 3.6 m ledge: {kinds:?}");
+}
+
 #[test]
 fn a_wall_taller_than_chest_height_stops_you() {
     let (mut sim, id, _) = at_a_wall(2.2);
@@ -599,3 +701,5 @@ fn players_on_the_same_side_pass_through_each_other() {
     assert!(moved.y.abs() < 0.01 && (moved.x - 3.0).abs() < 0.2, "walked {moved}");
     assert!((xz(&sim, a) - road).length() < 0.01, "the one standing still was shoved");
 }
+
+

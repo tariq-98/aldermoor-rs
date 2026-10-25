@@ -74,6 +74,11 @@ pub enum ForcedKind {
     Charge { target: UnitId, ability: AbilityId },
     /// Pulling up over a ledge: up first, then over the edge.
     Climb,
+    /// Pulling up onto a ledge caught in a jump: as a climb, from higher up the face.
+    Mantle,
+    /// Hopping a low wall in stride, at the speed it was run at (`speed`, m/s), which it keeps
+    /// on landing. `Forced::arc` is how high above the start the hop clears.
+    Vault { speed: f32 },
 }
 
 /// A move the body is carried through (a roll, a leap, being thrown), ignoring the controls.
