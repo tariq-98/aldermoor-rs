@@ -19,11 +19,11 @@ use std::{
 };
 use winit::{
     application::ApplicationHandler,
-    dpi::PhysicalSize,
+    dpi::{PhysicalPosition, PhysicalSize},
     event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{Fullscreen, Window, WindowId},
+    window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
 struct Options {
@@ -52,6 +52,7 @@ struct Options {
     legacy_cpu: bool,
     look_churn: bool,
     reset_on_look: bool,
+    scheme: controls::Scheme,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -81,6 +82,7 @@ impl Options {
             legacy_cpu: false,
             look_churn: false,
             reset_on_look: false,
+            scheme: controls::Scheme::default(),
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -141,13 +143,20 @@ impl Options {
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
+                "--scheme" => {
+                    o.scheme = match args.next().as_deref() {
+                        Some("classic") => controls::Scheme::Classic,
+                        Some("action") => controls::Scheme::Action,
+                        _ => anyhow::bail!("--scheme expects classic or action"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nW/S run and backpedal · A/D turn · Q/E strafe · Shift walk · Space jump · V dodge · Tab target\nLeft-drag look around · Right-drag steer · both buttons run · Num Lock or mouse 4 autorun\nClick target · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme action: WASD moves relative to the camera instead\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -193,8 +202,10 @@ struct Game {
     scenery: Option<render::scenery::Scenery>,
     review: Vec<UnitState>,
     orbit: controls::Orbit,
+    pilot: controls::Pilot,
     keys: HashSet<KeyCode>,
     mouse_look: bool,
+    orbiting: bool,
     last_move: Option<Command>,
     last: Instant,
     start: Instant,
@@ -221,6 +232,8 @@ impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
         let host = server::Host::start(0xa1de, "Traveller");
+        let orbit = controls::Orbit::default();
+        let pilot = controls::Pilot::new(options.scheme, orbit.yaw);
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
@@ -233,9 +246,11 @@ impl Game {
             terrain: render::terrain::valley(),
             scenery: None,
             review: Vec::new(),
-            orbit: controls::Orbit::default(),
+            orbit,
+            pilot,
             keys: HashSet::new(),
             mouse_look: false,
+            orbiting: false,
             last_move: None,
             last: Instant::now(),
             start: Instant::now(),
@@ -310,15 +325,19 @@ impl Game {
             back: down(KeyCode::KeyS),
             left: down(KeyCode::KeyA),
             right: down(KeyCode::KeyD),
+            strafe_left: down(KeyCode::KeyQ),
+            strafe_right: down(KeyCode::KeyE),
             walk: down(KeyCode::ShiftLeft) || down(KeyCode::ShiftRight),
             mouse_look: self.mouse_look,
+            orbiting: self.orbiting,
         }
     }
     fn direction(&self) -> Vec2 {
-        self.held().direction(self.orbit.yaw)
+        self.pilot.direction(&self.held(), self.orbit.yaw)
     }
-    fn controls(&mut self) {
-        let c = self.held().movement(self.orbit.yaw);
+    fn controls(&mut self, dt: f32) {
+        let held = self.held();
+        let c = self.pilot.steer(&held, &mut self.orbit, dt);
         if self.last_move.as_ref() != Some(&c) {
             self.host.send(c.clone());
             self.last_move = Some(c);
@@ -506,7 +525,7 @@ impl Game {
         if self.options.smoke {
             self.smoke()
         } else {
-            self.controls()
+            self.controls(dt)
         }
         let unit_index: HashMap<_, _> =
             self.snaps.current.units.iter().map(|u| (u.id, u)).collect();
@@ -913,14 +932,78 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     units.push(base);
     units
 }
+/// Mouse travel, in pixels, that turns a click into a drag.
+const DRAG_THRESHOLD: f64 = 4.;
+/// A press of the left or right button, until both are up again.
+struct Drag {
+    from: (f64, f64),
+    travelled: f64,
+    hidden: bool,
+}
 struct App {
     game: Game,
     renderer: Option<Renderer>,
     window: Option<Window>,
     cursor: (f64, f64),
+    drag: Option<Drag>,
     error: Option<anyhow::Error>,
     next_redraw: Instant,
     egui_state: Option<egui_winit::State>,
+}
+impl App {
+    /// Left drags the camera, right steers; a press that barely moves is a click instead,
+    /// which targets (and with the right button, attacks) the unit under the cursor.
+    fn button(&mut self, button: MouseButton, pressed: bool) {
+        match button {
+            MouseButton::Left => self.game.orbiting = pressed,
+            MouseButton::Right => self.game.mouse_look = pressed,
+            MouseButton::Back if pressed => self.game.pilot.toggle_autorun(),
+            MouseButton::Forward => self.game.host.send(Command::Guard(pressed)),
+            _ => return,
+        }
+        if !matches!(button, MouseButton::Left | MouseButton::Right) {
+            return;
+        }
+        if pressed {
+            self.drag.get_or_insert(Drag {
+                from: self.cursor,
+                travelled: 0.,
+                hidden: false,
+            });
+            return;
+        }
+        if self
+            .drag
+            .as_ref()
+            .is_some_and(|d| d.travelled < DRAG_THRESHOLD)
+            && let Some(w) = &self.window
+        {
+            let s = w.inner_size();
+            if let Some(id) = self
+                .game
+                .pick(self.cursor.0, self.cursor.1, s.width, s.height)
+            {
+                self.game.host.send(Command::SetTarget(Some(id)));
+                if button == MouseButton::Right {
+                    self.game.host.send(Command::SetAutoAttack(true));
+                }
+            }
+        }
+        if !self.game.orbiting && !self.game.mouse_look {
+            self.end_drag();
+        }
+    }
+    /// Gives the pointer back where the drag began.
+    fn end_drag(&mut self) {
+        if let Some(d) = self.drag.take()
+            && d.hidden
+            && let Some(w) = &self.window
+        {
+            let _ = w.set_cursor_grab(CursorGrabMode::None);
+            w.set_cursor_visible(true);
+            let _ = w.set_cursor_position(PhysicalPosition::new(d.from.0, d.from.1));
+        }
+    }
 }
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -1006,9 +1089,18 @@ impl ApplicationHandler for App {
                     && let PhysicalKey::Code(key) = event.physical_key
                 {
                     self.game.keys.remove(&key);
-                    if key == KeyCode::KeyQ {
+                    if key == KeyCode::KeyF {
                         self.game.host.send(Command::Guard(false));
                     }
+                }
+                // A drag that ends over the HUD must still let go.
+                if let WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button,
+                    ..
+                } = event
+                {
+                    self.button(button, false);
                 }
                 return;
             }
@@ -1027,7 +1119,9 @@ impl ApplicationHandler for App {
                 self.game.keys.clear();
                 self.game.host.send(Command::Guard(false));
                 self.game.mouse_look = false;
-                self.game.controls();
+                self.game.orbiting = false;
+                self.end_drag();
+                self.game.controls(0.);
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
@@ -1041,24 +1135,7 @@ impl ApplicationHandler for App {
                 self.game.orbit.zoom(y);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Right {
-                    self.game.mouse_look = state == ElementState::Pressed;
-                }
-                if state == ElementState::Pressed
-                    && (button == MouseButton::Left || button == MouseButton::Right)
-                    && let Some(w) = &self.window
-                {
-                    let s = w.inner_size();
-                    if let Some(id) =
-                        self.game
-                            .pick(self.cursor.0, self.cursor.1, s.width, s.height)
-                    {
-                        self.game.host.send(Command::SetTarget(Some(id)));
-                        if button == MouseButton::Right {
-                            self.game.host.send(Command::SetAutoAttack(true));
-                        }
-                    }
-                }
+                self.button(button, state == ElementState::Pressed)
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
@@ -1078,9 +1155,13 @@ impl ApplicationHandler for App {
                                 key if slot_key(key).is_some() => {
                                     Some(self.game.use_slot(slot_key(key).unwrap()))
                                 }
-                                KeyCode::KeyQ => Some(Command::Guard(true)),
+                                KeyCode::KeyF => Some(Command::Guard(true)),
                                 KeyCode::Backquote => Some(Command::SwapWeapons),
-                                KeyCode::KeyE => self
+                                KeyCode::NumLock => {
+                                    self.game.pilot.toggle_autorun();
+                                    None
+                                }
+                                KeyCode::KeyG => self
                                     .game
                                     .revive_target()
                                     .map(|target| Command::Revive { target }),
@@ -1093,7 +1174,7 @@ impl ApplicationHandler for App {
                         }
                     } else {
                         self.game.keys.remove(&key);
-                        if key == KeyCode::KeyQ {
+                        if key == KeyCode::KeyF {
                             self.game.host.send(Command::Guard(false));
                         }
                     }
@@ -1126,7 +1207,7 @@ impl ApplicationHandler for App {
                             self.game.snaps.current.unit(self.game.host.player),
                         )
                     {
-                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · WASD · Space jump · V roll · Tab target · 1/2 attack",p.health,p.max_health,r.stats.gpu_ms));
+                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · WASD · Space jump · V roll · Tab target · 1–9 skills",p.health,p.max_health,r.stats.gpu_ms));
                     }
                 }
             }
@@ -1134,10 +1215,24 @@ impl ApplicationHandler for App {
         }
     }
     fn device_event(&mut self, _: &ActiveEventLoop, _: winit::event::DeviceId, event: DeviceEvent) {
-        if self.game.mouse_look
+        if (self.game.mouse_look || self.game.orbiting)
             && let DeviceEvent::MouseMotion { delta } = event
         {
             self.game.orbit.look(delta.0, delta.1);
+            if let Some(d) = &mut self.drag {
+                d.travelled += delta.0.hypot(delta.1);
+                if !d.hidden
+                    && d.travelled >= DRAG_THRESHOLD
+                    && let Some(w) = &self.window
+                {
+                    // Hold the pointer still while dragging, so it can't run off the window.
+                    let _ = w
+                        .set_cursor_grab(CursorGrabMode::Locked)
+                        .or_else(|_| w.set_cursor_grab(CursorGrabMode::Confined));
+                    w.set_cursor_visible(false);
+                    d.hidden = true;
+                }
+            }
         }
     }
     fn about_to_wait(&mut self, e: &ActiveEventLoop) {
@@ -1202,6 +1297,7 @@ fn main() -> Result<()> {
             renderer: None,
             window: None,
             cursor: (0., 0.),
+            drag: None,
             error: None,
             next_redraw: Instant::now(),
             egui_state: None,
