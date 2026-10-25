@@ -74,7 +74,7 @@ fn unit(id: u32, look: Look, pose: Pose, speed: f32) -> UnitState {
         max_health: 100.,
         hostile: false,
         target: None,
-        look,
+        look: look.into(),
     }
 }
 

@@ -25,7 +25,7 @@ fn unit(look: Look) -> UnitState {
         max_health: 100.,
         hostile: false,
         target: None,
-        look,
+        look: look.into(),
     }
 }
 #[test]
@@ -156,7 +156,7 @@ fn draw_and_sheathe_switch_sockets_at_clip_events() {
     let mut c = Character::load(&cat, &mut cache, &look).unwrap();
     let mut u = unit(look);
     c.update(&u, 0.2);
-    u.look.drawn = true;
+    std::sync::Arc::make_mut(&mut u.look).drawn = true;
     c.update(&u, 0.01);
     let at_hip = c
         .draws(Vec3::ZERO, 0.)

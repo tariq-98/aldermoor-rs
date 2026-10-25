@@ -33,11 +33,11 @@ fn every_look_names_real_art() {
     let mut sim = Sim::new(1);
     for s in sim::Specialty::ALL {
         let id = sim.spawn_hero("Hero", s, 1, Vec2::new(5.0, 10.0), 0.0);
-        looks.push(sim.get::<sim::Appearance>(id).unwrap().0.clone());
+        looks.push(sim.get::<sim::Appearance>(id).unwrap().look().clone());
         sim.get_mut::<sim::Fighter>(id).unwrap().swap_ready_at = 0.0;
         sim.command(id, protocol::Command::SwapWeapons);
         sim.step();
-        looks.push(sim.get::<sim::Appearance>(id).unwrap().0.clone());
+        looks.push(sim.get::<sim::Appearance>(id).unwrap().look().clone());
     }
     for look in looks {
         let body = cat.humanoid.body_types.get(&look.art);
