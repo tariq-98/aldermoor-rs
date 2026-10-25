@@ -7,6 +7,7 @@
 
 pub mod bots;
 pub mod net;
+pub mod regions;
 
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TrySendError};
 use protocol::{CombatView, Command, Snapshot, UnitId};

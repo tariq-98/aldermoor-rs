@@ -122,7 +122,8 @@ fn chase(world: &mut World, e: Entity, mob: &MobDef, deciding: bool) {
         world.get::<Threat>(e).and_then(|th| th.pick(current, t, valid, melee))
     };
     let bored = !summoned && t - last_combat.max(b.engaged_at) > BORED;
-    let strayed = (pos - b.home).length() > leash;
+    // Monsters don't follow anyone off their region's ground.
+    let strayed = (pos - b.home).length() > leash || crate::region::beyond(world, pos);
     let Some(target) = pick.filter(|_| !bored && !strayed) else {
         if summoned {
             stand_down(world, e);
