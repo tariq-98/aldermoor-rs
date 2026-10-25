@@ -31,3 +31,8 @@ debug = "line-tables-only"
 
 [dev-dependencies]
 naga = { version = "30.0.1", features = ["wgsl-in"] }
+
+# Terrain topology calls world::height repeatedly, even in a tiny software-renderer check.
+# Keep that existing CPU code optimised without paying for an optimised wgpu debug build.
+[profile.dev.package.world]
+opt-level = 2
