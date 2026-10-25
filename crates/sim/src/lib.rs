@@ -13,6 +13,7 @@ mod brain;
 pub mod combat;
 mod components;
 pub mod content;
+mod loot;
 mod movement;
 mod progress;
 mod rng;
@@ -28,6 +29,7 @@ use std::sync::{Arc, OnceLock};
 
 pub use components::*;
 pub use content::Specialty;
+pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, PILE_PRIVATE, SLOTS};
 pub use progress::{Credit, Progress};
 pub use rng::Rng;
 pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
@@ -134,6 +136,7 @@ impl Sim {
         world.insert_resource(Clock::default());
         world.insert_resource(Land(land));
         world.insert_resource(Rng::new(seed));
+        world.insert_resource(loot::Loot::new(seed));
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());
@@ -158,6 +161,7 @@ impl Sim {
                 combat::missiles::update_areas,
                 combat::auras::update,
                 vitals::update,
+                loot::expire,
                 spatial::rebuild,
                 movement::update_poses,
             )
@@ -259,6 +263,7 @@ impl Sim {
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
+        self.world.entity_mut(e).insert(Inventory::default());
         self.world.entity_mut(e).insert(Unit {
             id,
             kind: UnitKind::Player,
