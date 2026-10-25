@@ -31,6 +31,11 @@ debug = "line-tables-only"
 # Keep debug builds quick but not painfully slow at runtime.
 [profile.dev]
 opt-level = 1
+# Line tables keep backtraces and debugger line steps for our crates at a fraction of full
+# debuginfo, which grew agents' target folders by about 20 GB an hour on the Mac (#230). Release and
+# the perf gate already use line tables. Set CARGO_PROFILE_DEV_DEBUG=full for a debugger session.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
