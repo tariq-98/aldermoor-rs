@@ -91,6 +91,22 @@ impl Units {
     }
 }
 
+/// A reused buffer for the systems that visit every unit, so a step doesn't allocate one per system.
+#[derive(Resource, Default)]
+struct UnitList(Vec<Entity>);
+
+/// Every unit, in ID order, in the shared buffer. Hand it back with [`return_units`].
+pub(crate) fn take_units(world: &mut World) -> Vec<Entity> {
+    let mut list = std::mem::take(&mut world.resource_mut::<UnitList>().0);
+    list.clear();
+    list.extend(world.resource::<Units>().all());
+    list
+}
+
+pub(crate) fn return_units(world: &mut World, list: Vec<Entity>) {
+    world.resource_mut::<UnitList>().0 = list;
+}
+
 pub struct Sim {
     pub world: World,
     schedule: Schedule,
@@ -106,6 +122,7 @@ impl Sim {
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());
+        world.insert_resource(UnitList::default());
         world.insert_resource(spatial::Spatial::default());
         world.insert_resource(combat::missiles::Missiles::default());
         world.insert_resource(combat::missiles::Areas::default());
