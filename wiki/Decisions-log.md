@@ -6,6 +6,7 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Loot has fixed stats (better tiers, named rares, crafting upgrades) with a small chance of a "fine" version; NPC shops with set, region-dependent prices; player trading waits for co-op; coins go on training, perks, recipes, appearance and housing | Fits fixed item identities and keeps crafted gear competitive | #71 |
 | 2026-10-25 | Quests: a handful of big handmade story quests per area plus small jobs from notice boards and townsfolk; quests are linear with no branching world outcomes | Big quests carry the story and best rewards; no branches keeps content cost down | #70 |
 | 2026-10-25 | Gathering: nodes deplete and regrow in minutes, better ones in dangerous places; tools required; each swing has an optional timing sweet spot for bonus or rare yield, no penalty for missing | Works both actively and passively | #68 |
 | 2026-10-25 | Gathering skills: mining, woodcutting, skinning, herbalism and fishing; crafts gain cooking and alchemy alongside smithing, tailoring, leatherworking and enchanting. Each levels through use to 50 | Every craft needs a source of materials; RuneScape-style freedom | #68 |
