@@ -40,6 +40,12 @@ pub enum Command {
     Revive { target: UnitId },
     /// Give `amount` of your quest XP to a specialty ("warrior", "mage", …).
     AssignXp { specialty: String, amount: u32 },
+    /// Pick up what fits from a loot pile within reach.
+    Loot { pile: u32 },
+    /// Buy `count` of an item from the shop you stand at.
+    Buy { shop: String, item: String, count: u16 },
+    /// Sell `count` from an inventory slot to the shop you stand at.
+    Sell { shop: String, slot: u8, count: u16 },
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -237,6 +243,44 @@ pub struct PlayerState {
     pub xp: u32,
     pub xp_next: u32,
     pub unassigned_xp: u32,
+    pub coins: u32,
+    /// Every inventory slot in order; an empty one has an empty `item`. Each `price` is what
+    /// the shop you stand at pays for it (0 if none, or it doesn't buy that).
+    pub inventory: Vec<ItemView>,
+    /// Loot piles nearby that you may take.
+    pub loot: Vec<LootView>,
+    /// The shop whose counter you stand at.
+    pub shop: Option<ShopView>,
+}
+
+/// Some of one item: in a slot, a pile or a shop.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ItemView {
+    /// The item's key in the content tables (its icon name too).
+    pub item: String,
+    pub name: String,
+    pub count: u16,
+    /// The rare version with a small fixed bonus.
+    pub fine: bool,
+    /// Coins, each: what a shop sells it for, or pays for it.
+    pub price: u32,
+}
+
+/// What a dead monster left on the ground.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LootView {
+    pub id: u32,
+    pub position: Vec3,
+    pub coins: u32,
+    pub items: Vec<ItemView>,
+}
+
+/// A shop's wares, with their prices.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShopView {
+    pub shop: String,
+    pub name: String,
+    pub sells: Vec<ItemView>,
 }
 
 /// One skill on the bar.

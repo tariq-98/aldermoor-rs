@@ -54,6 +54,7 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
     let v = world.get::<Vitals>(e)?;
     let f = world.get::<Fighter>(e)?;
     let progress = world.get::<crate::Progress>(e);
+    let (coins, inventory, loot, shop) = crate::loot::player_view(world, e);
     let t = now(world);
     let cat = catalog();
     let bar_ids = current_bar(world, e);
@@ -106,6 +107,10 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         xp: progress.zip(f.specialty).map_or(0, |(p, s)| p.xp[s.index()]),
         xp_next: progress.zip(f.specialty).and_then(|(p, s)| crate::content::progression::to_next(p.level(s))).unwrap_or(0),
         unassigned_xp: progress.map_or(0, |p| p.unassigned),
+        coins,
+        inventory,
+        loot,
+        shop,
     })
 }
 

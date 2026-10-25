@@ -1,0 +1,47 @@
+// Every item, with its fixed stats and its price (what a shop sells it for; shops pay
+// SELL_SHARE of it, more where the town wants it). Gear is one to a slot; materials stack.
+// Fine versions add FINE_BONUS to the stats and sell for FINE_VALUE times as much
+// (crates/content/src/items.rs). Weapon keys are the gear catalogue's and the combat tables'.
+(
+    items: [
+        // Weapons, tier 1. Stats are what wielding one adds (gear isn't applied to fights yet, #17).
+        (key: "sword.arming", name: "Arming Sword", kind: Weapon, value: 40, stats: (power: 4.0), tags: ["weapon", "metal"]),
+        (key: "sword.great", name: "Greatsword", kind: Weapon, value: 70, stats: (power: 7.0), tags: ["weapon", "metal"]),
+        (key: "axe.bearded", name: "Bearded Axe", kind: Weapon, value: 45, stats: (power: 4.5), tags: ["weapon", "metal"]),
+        (key: "mace.flanged", name: "Flanged Mace", kind: Weapon, value: 45, stats: (power: 4.5), tags: ["weapon", "metal"]),
+        (key: "dagger.hunting", name: "Hunting Dagger", kind: Weapon, value: 25, stats: (power: 2.5), tags: ["weapon", "metal"]),
+        (key: "spear.ash", name: "Ash Spear", kind: Weapon, value: 50, stats: (power: 6.0), tags: ["weapon", "wood"]),
+        (key: "bow.hunting", name: "Hunting Bow", kind: Weapon, value: 45, stats: (power: 5.0), tags: ["weapon", "wood"]),
+        (key: "bow.long", name: "Longbow", kind: Weapon, value: 75, stats: (power: 7.0), tags: ["weapon", "wood"]),
+        (key: "staff.oak", name: "Oak Staff", kind: Weapon, value: 60, stats: (power: 6.5), tags: ["weapon", "wood"]),
+        (key: "staff.healer", name: "Healer's Staff", kind: Weapon, value: 60, stats: (power: 6.5), tags: ["weapon", "wood"]),
+        (key: "staff.necro", name: "Bone Staff", kind: Weapon, value: 60, stats: (power: 6.5), tags: ["weapon", "wood"]),
+        (key: "wand.yew", name: "Yew Wand", kind: Weapon, value: 35, stats: (power: 3.5), tags: ["weapon", "wood"]),
+        (key: "orb.focus", name: "Focus Orb", kind: Weapon, value: 35, stats: (power: 2.0, health: 10.0), tags: ["weapon"]),
+        (key: "book.spells", name: "Spellbook", kind: Weapon, value: 35, stats: (power: 2.0, health: 10.0), tags: ["weapon"]),
+        (key: "shield.round", name: "Round Shield", kind: Weapon, value: 35, stats: (armor: 20.0), tags: ["weapon", "wood"]),
+        (key: "shield.kite", name: "Kite Shield", kind: Weapon, value: 55, stats: (armor: 30.0), tags: ["weapon", "metal"]),
+
+        // Armour, tier 1.
+        (key: "padded_coat", name: "Padded Coat", kind: Armour, value: 30, stats: (armor: 15.0, health: 10.0), tags: ["armour", "cloth"]),
+        (key: "leather_jerkin", name: "Leather Jerkin", kind: Armour, value: 45, stats: (armor: 25.0), tags: ["armour", "hide"]),
+        (key: "goblin_cap", name: "Goblin Cap", kind: Armour, value: 20, stats: (armor: 8.0), tags: ["armour", "hide"]),
+        (key: "barrow_crown", name: "Crown of the Barrow King", kind: Armour, tier: 2, value: 600, stats: (armor: 40.0, power: 4.0, health: 40.0), tags: ["armour", "metal"]),
+
+        // Materials.
+        (key: "copper_ore", name: "Copper Ore", kind: Material, value: 8, stack: 100, tags: ["ore", "metal"]),
+        (key: "iron_ore", name: "Iron Ore", kind: Material, tier: 2, value: 16, stack: 100, tags: ["ore", "metal"]),
+        (key: "wolf_pelt", name: "Wolf Pelt", kind: Material, value: 12, stack: 50, tags: ["hide"]),
+        (key: "dire_pelt", name: "Dire Wolf Pelt", kind: Material, tier: 2, value: 30, stack: 50, tags: ["hide"]),
+        (key: "bone_dust", name: "Bone Dust", kind: Material, value: 6, stack: 100, tags: ["reagent"]),
+        (key: "golem_core", name: "Golem Core", kind: Material, tier: 2, value: 120, stack: 10, tags: ["reagent"]),
+        (key: "marigold", name: "Marigold", kind: Material, value: 4, stack: 100, tags: ["herb"]),
+
+        // Food and drink.
+        (key: "bread", name: "Bread", kind: Consumable, value: 3, stack: 20, tags: ["food"]),
+        (key: "healing_draught", name: "Healing Draught", kind: Consumable, value: 25, stack: 10, tags: ["potion"]),
+
+        // Junk.
+        (key: "goblin_trinket", name: "Goblin Trinket", kind: Junk, value: 10, stack: 20, tags: ["junk"]),
+    ],
+)
