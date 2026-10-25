@@ -3,6 +3,7 @@ mod combat;
 mod hud;
 mod interpolate;
 mod menu;
+mod perf_overlay;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
 use protocol::{Command, Look, Pose, UnitState};
@@ -28,6 +29,7 @@ use winit::{
 };
 
 struct Options {
+    perf: perf_overlay::Options,
     assets: PathBuf,
     width: u32,
     height: u32,
@@ -60,6 +62,7 @@ struct Options {
 impl Options {
     fn read() -> Result<Self> {
         let mut o = Self {
+            perf: perf_overlay::Options::default(),
             assets: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
             width: 1600,
             height: 1000,
@@ -130,6 +133,10 @@ impl Options {
                 "--reset-on-look" => o.reset_on_look = true,
                 "--output-blit" => o.direct_drawable = false,
                 "--benchmark" => o.benchmark = true,
+                "--no-gpu-counters" => o.perf.disabled = true,
+                "--gpu-profile-scene" => o.perf.split_scene = true,
+                "--counter-overhead" => o.perf.overhead_check = true,
+                "--perf-overlay" => o.perf.visible = true,
                 "--shared-constants" => o.inline_constants = false,
                 "--fullscreen" => o.fullscreen = true,
                 "--look-settings" => {
@@ -163,7 +170,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -187,6 +194,7 @@ impl Options {
                 .is_none_or(|fps| fps.is_finite() && (1.0..=240.).contains(&fps)),
             "--fps must be 1..240"
         );
+        o.perf.validate(o.samples)?;
         o.look_settings = catalog_file(&o.assets, "look.json", o.look_settings);
         o.surface_assets = catalog_file(&o.assets, "surfaces.json", o.surface_assets);
         Ok(o)
@@ -240,6 +248,7 @@ struct Game {
     events: usize,
     smoke_start: Vec3,
     smoke_checks: [bool; 4],
+    perf: perf_overlay::Overlay,
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
     platform_output: Option<egui::PlatformOutput>,
@@ -269,6 +278,7 @@ impl Game {
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
+            perf: perf_overlay::Overlay::new(&options.perf),
             options,
             host,
             snaps: interpolate::Snapshots::new(first),
@@ -749,6 +759,7 @@ impl Game {
         }
     }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
+        perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -995,6 +1006,8 @@ impl Game {
             if crosshair {
                 paint_crosshair(ctx);
             }
+            self.perf
+                .draw(ctx, self.host.stats().step_ms, r.gpu_counters_enabled());
             if let Some(m) = &self.menu {
                 changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
             }
@@ -1027,6 +1040,12 @@ impl Game {
             stats = r.stats;
         }
         let finished = Instant::now();
+        self.perf.collect(
+            r,
+            (finished - now).as_secs_f64() * 1000.,
+            self.options.warmup,
+            self.options.benchmark,
+        );
         if self.frame > self.options.warmup && !done {
             self.gpu.push(stats.gpu_ms);
             self.intervals
@@ -1051,6 +1070,15 @@ impl Game {
         }
         if done {
             r.wait()?;
+            self.perf.collect(
+                r,
+                (finished - now).as_secs_f64() * 1000.,
+                self.options.warmup,
+                self.options.benchmark,
+            );
+            if self.options.benchmark {
+                self.perf.report(r.gpu_counters_enabled());
+            }
             eprintln!("HISTORY resets={}", r.stats.history_resets);
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
@@ -1432,6 +1460,7 @@ impl ApplicationHandler for App {
                 anyhow::bail!("Aldermoor requires macOS")
             };
             r.set_frames_in_flight(self.game.options.in_flight)?;
+            perf_overlay::Overlay::configure(&mut r, &self.game.options.perf);
             r.enable_metalfx(self.game.options.metalfx)?;
             if let Some(path) = &self.game.options.look_settings {
                 r.look = render::settings::LookSettings::load(path)?;
@@ -1487,6 +1516,9 @@ impl ApplicationHandler for App {
                 self.game.bind_captured(input);
                 return;
             }
+        }
+        if self.game.perf.event(&event) {
+            return;
         }
         if let (Some(state), Some(window)) = (&mut self.egui_state, &self.window) {
             let response = state.on_window_event(window, &event);
@@ -1651,6 +1683,7 @@ fn main() -> Result<()> {
             game.options.samples,
         )?;
         renderer.set_frames_in_flight(game.options.in_flight)?;
+        perf_overlay::Overlay::configure(&mut renderer, &game.options.perf);
         renderer.enable_metalfx(game.options.metalfx)?;
         if let Some(path) = &game.options.look_settings {
             renderer.look = render::settings::LookSettings::load(path)?;

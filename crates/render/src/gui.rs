@@ -134,12 +134,13 @@ impl Gui {
         }
         Ok(())
     }
-    pub fn paint(
+    pub(crate) fn paint(
         &mut self,
         cb: &ProtocolObject<dyn MTLCommandBuffer>,
         output: &ProtocolObject<dyn MTLTexture>,
         frame: &HudFrame,
         number: usize,
+        counters: Option<&crate::metal::PassCounters>,
     ) -> Result<usize> {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
@@ -204,6 +205,9 @@ impl Gui {
             );
         }
         let pass = MTLRenderPassDescriptor::new();
+        if let Some(counters) = counters {
+            counters.attach(&pass, 6);
+        }
         let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
         c.setTexture(Some(output));
         c.setLoadAction(MTLLoadAction::Load);

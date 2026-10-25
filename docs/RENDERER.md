@@ -415,3 +415,75 @@ not generate substitute scenery, textures, scatter, effects, icons or visual pre
   parameters keyed by `ProjectileView.visual` and area school/field. The protocol now drives
   functional projected diagnostics; replace those with supplied depth-aware world effects.
 - **Shout:** a dedicated roar/shout clip, as already listed in CONTRACT.md.
+
+## Per-pass counters and F3 diagnostics (#26)
+
+The acceptance target is **60 fps, GPU p95 at most 12 ms, on the M1 Air's built-in
+2560×1600 display**, per [#36](https://github.com/tariq-98/aldermoor-rs/issues/36).
+The older ultrawide results above are historical measurements, not acceptance gates.
+Always record internal scale as well as output dimensions; the #26 comparison uses 100%.
+macOS's scaled desktop can give a fullscreen window a 2880×1800 backing buffer on this
+2560×1600 panel. The benchmark rejects that mismatch. Offscreen native-size runs measure
+GPU work only; a locked desktop cannot establish presentation or physical F3 behaviour.
+
+F3 toggles a stock-widget performance window, separate from the gameplay HUD. It reports
+GPU time, CPU encoding plus frame-slot wait, the host's rolling mean simulation step time,
+draw calls, visible scene triangles, Metal allocation bytes, and pass vertex/fragment/elapsed
+times. `--perf-overlay` starts it visible. Counters are enabled by default in the client;
+`--no-gpu-counters` disables them. Unsupported devices continue rendering with an explicit
+unavailable message, and the benchmark requires an explicit opt-out rather than silently
+reporting missing data as zero.
+
+Each in-flight slot owns a shared `MTLCounterSampleBuffer`. The renderer attaches samples
+to the existing render-pass stage boundaries and resolves them only after the existing slot
+fence completes. Completion records carry submission IDs, so warmup filtering and final draining
+include each measured frame exactly once, even with multiple buffers in flight. Unencoded,
+failed, zero, and reversed timestamps remain unavailable. CPU/GPU clock pairs calibrate GPU
+ticks against CPU **nanoseconds**, following [Apple's conversion method](https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time).
+
+The normal path measures three shadow cascades, the combined scene (sky, opaque, water and
+transparency), custom TAA, composite, and HUD. MetalFX owns its internal encoders, so its
+separate timing is explicitly unavailable; whole-command-buffer GPU time still includes it.
+`--gpu-profile-scene` is a diagnostic mode that separates sky, opaque and water/transparency
+into three encoders. It preserves the supplied-surface test pixels, but changes tile load/store
+costs and scheduling. Do not treat its costs as the normal renderer's unperturbed pass costs.
+It requires single-sample rendering and is excluded from the counter-overhead comparison.
+
+Apple GPUs overlap stages and may delay a pass's fragment stage behind earlier work.
+`elapsed_ms` spans vertex start to fragment end and includes that delay. `vertex_ms` and
+`fragment_ms` are the respective stage intervals. **Do not sum pass elapsed times or call
+an elapsed HUD interval its shader cost.** `allocated_gpu_bytes` is
+`MTLDevice.currentAllocatedSize`, not a claim of physical GPU residency on unified memory.
+The scene triangle count excludes shadow duplicates and fullscreen/HUD triangles; draw calls
+include all explicit renderer and HUD draws (not MetalFX's private internals).
+
+The benchmark's `performance` JSON includes median/p95/sample counts per pass and stage,
+draw calls, triangles, allocation bytes, and GPU summaries per elapsed minute after warmup.
+It checks completed-frame and counter coverage and records the executable hash and command.
+The new completed-frame GPU summary supersedes the older delayed `GPU` log aggregate;
+`FRAME` retains its existing CPU/work interpretation.
+
+```sh
+# Native output and internal size. Use an unlocked, native-mode built-in display for presentation.
+python3 scripts/benchmark_renderer.py --windowed --fullscreen --size 2560x1600 \
+  --scale 1 --frames 3720 --warmup 120 --output target/issue26/native.json
+
+# Diagnostic per-category scene timings (extra encoder boundaries).
+python3 scripts/benchmark_renderer.py --size 2560x1600 --scale 1 \
+  --gpu-profile-scene --frames 480 --output target/issue26/split.json
+
+# Interleaved counter-only cost, overlay off, one command buffer at a time.
+python3 scripts/benchmark_renderer.py --size 2560x1600 --scale 1 --in-flight 1 \
+  --counter-overhead --frames 3720 --output target/issue26/overhead.json
+```
+
+`--counter-overhead` uses balanced OFF/ON/ON/OFF and ON/OFF/OFF/ON blocks across jitter phases with preallocated buffers and no
+extra queue drains. The JSON retains paired four-frame block differences (on minus off),
+as well as on/off GPU distributions. It measures runtime sampling/calibration/resolution;
+it excludes one-time buffer allocation. Do not infer a sub-0.1 ms overhead pass merely from
+a negative median difference in a noisy run. Separate before/after binaries can be selected
+with `--binary PATH`. API validation must be disabled for cost runs and enabled separately
+for correctness checks.
+
+The #26 measurements, raw reports, counter-overhead calculation and outstanding display
+checks are recorded in [the issue26 report](benchmarks/2026-10-25/issue26/README.md).
