@@ -51,7 +51,8 @@ pub fn lethal(world: &mut World, e: Entity, killer: Option<UnitId>) {
     }
     effects::act(world, e, Action::Downed);
     if let Some(mut m) = world.get_mut::<Motion>(e) {
-        m.jump_queued = false;
+        m.jump_until = f64::NEG_INFINITY;
+        m.dodge_queued = None;
     }
     let unit = unit_id(world, e).unwrap_or(0);
     emit(world, Event::Downed { unit });

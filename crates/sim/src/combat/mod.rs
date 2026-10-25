@@ -121,8 +121,10 @@ pub fn source(world: &World, e: Entity, ability: Option<&AbilityDef>) -> Option<
     })
 }
 
-/// Applies queued commands in the order they arrived.
-pub fn apply_commands(world: &mut World) {
+/// Applies queued commands in the order they arrived, then lets go any roll that was waiting for
+/// a forced move to end. `waiting` lists the units with a roll held (in the order they pressed),
+/// so the step doesn't look at every unit for them.
+pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
     let commands = std::mem::take(&mut world.resource_mut::<Inbox>().0);
     let now = now(world);
     for (id, c) in commands {
@@ -138,27 +140,23 @@ pub fn apply_commands(world: &mut World) {
                 let ctl = control(world, e);
                 let downed = world.get::<Vitals>(e).is_some_and(|v| v.downed);
                 if let Some(mut m) = world.get_mut::<Motion>(e) && ctl.can_move() && !downed {
-                    m.jump_queued = true;
+                    m.jump_until = now + movement::JUMP_BUFFER;
                 }
             }
             Command::Dodge { direction } => {
-                let ctl = control(world, e);
-                let swimming = world.get::<Motion>(e).is_some_and(|m| m.swimming);
-                if ctl.stunned || ctl.fleeing.is_some() || swimming || world.get::<Vitals>(e).is_some_and(|v| v.downed) {
-                    continue;
-                }
-                let rolled = world.resource_scope(|world, land: Mut<Land>| {
-                    let mut q = world.query::<(&mut Transform, &mut Motion, &mut Vitals, &Body)>();
-                    match q.get_mut(world, e) {
-                        Ok((mut t, mut m, mut v, b)) => movement::start_dodge(&land.0, now, &mut t, &mut m, &mut v, b, direction),
-                        Err(_) => false,
+                // Pressed near the end of another roll, a climb or a leap: wait for it to end.
+                let end = world.get::<Motion>(e).and_then(|m| m.forced).map(|f| f.start + f.duration);
+                match end {
+                    Some(end) if end - now <= movement::DODGE_BUFFER => {
+                        if let Some(mut m) = world.get_mut::<Motion>(e) {
+                            m.dodge_queued = Some((direction, end + 0.1));
+                        }
+                        if !waiting.contains(&e) {
+                            waiting.push(e);
+                        }
                     }
-                });
-                if rolled {
-                    // Rolling drops the guard and breaks off a cast (not a channel you can move in).
-                    guard::lower(world, e);
-                    abilities::cancel_standing_cast(world, e);
-                    emit(world, Event::Dodged { unit: id });
+                    Some(_) => {}
+                    None => roll(world, e, id, direction, now),
                 }
             }
             Command::SetTarget(t) => {
@@ -194,5 +192,51 @@ pub fn apply_commands(world: &mut World) {
                 }
             }
         }
+    }
+    waiting.retain(|&e| {
+        let Some(m) = world.get::<Motion>(e).copied() else { return false };
+        let Some((direction, until)) = m.dodge_queued else { return false };
+        if now > until {
+            if let Some(mut m) = world.get_mut::<Motion>(e) {
+                m.dodge_queued = None;
+            }
+            return false;
+        }
+        if m.forced.is_some() {
+            return true;
+        }
+        if let Some(id) = unit_id(world, e) {
+            roll(world, e, id, direction, now);
+        }
+        false
+    });
+}
+
+/// Rolls `e` along `direction` if it can roll right now.
+fn roll(world: &mut World, e: Entity, id: UnitId, direction: Vec2, now: f64) {
+    if let Some(mut m) = world.get_mut::<Motion>(e) {
+        m.dodge_queued = None;
+    }
+    let ctl = control(world, e);
+    let swimming = world.get::<Motion>(e).is_some_and(|m| m.swimming);
+    if ctl.stunned || ctl.fleeing.is_some() || swimming || world.get::<Vitals>(e).is_none_or(|v| v.downed || v.dead) {
+        return;
+    }
+    let rolled = world.resource_scope(|world, land: Mut<Land>| {
+        let mut q = world.query::<(&mut Transform, &mut Motion, &mut Vitals, &Body)>();
+        match q.get_mut(world, e) {
+            Ok((mut t, mut m, mut v, b)) => movement::start_dodge(&land.0, now, &mut t, &mut m, &mut v, b, direction),
+            Err(_) => false,
+        }
+    });
+    if rolled {
+        // Rolling drops the guard, breaks off a cast (not a channel you can move in), and takes
+        // the place of any skill that was waiting to go.
+        guard::lower(world, e);
+        abilities::cancel_standing_cast(world, e);
+        if let Some(mut f) = world.get_mut::<Fighter>(e) {
+            f.queued = None;
+        }
+        emit(world, Event::Dodged { unit: id });
     }
 }
