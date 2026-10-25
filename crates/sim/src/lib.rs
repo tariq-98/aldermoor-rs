@@ -444,15 +444,33 @@ impl Sim {
         let clock = self.world.resource::<Clock>();
         let (tick, time) = (clock.tick, clock.time);
         let center = viewer.and_then(|v| self.get::<Transform>(v)).map(|t| t.pos);
-        let mut units = Vec::new();
+        // A query visits tables in the order bevy's component index hashes them, which shifts
+        // whenever a component type is added. Rank the visible units by ID first, so the states are
+        // built in order and the sort below has nothing to move.
         let mut q = self.world.query::<(&Unit, &Transform, &Motion, &Vitals, &Anim, &Fighter, Option<&Appearance>)>();
-        for (u, t, m, v, a, f, look) in q.iter(&self.world) {
+        let ids = self.world.resource::<Units>();
+        let own = |id: UnitId| id.checked_sub(ids.base).map(|i| i as usize).filter(|&i| i < ids.entities.len());
+        let mut seen = Vec::new();
+        let mut rank = vec![u32::MAX; ids.entities.len()];
+        for row in q.iter(&self.world) {
+            let (u, t, _, v, ..) = row;
             if let Some(c) = center && (t.pos - c).length_squared() > combat::view::VIEW_RANGE * combat::view::VIEW_RANGE {
                 continue;
             }
             if v.dead && time - v.died_at > 8.0 && u.kind != UnitKind::Player {
                 continue;
             }
+            if let Some(i) = own(u.id) {
+                rank[i] = seen.len() as u32;
+            }
+            seen.push(row);
+        }
+        // Units from other regions' blocks go last, and the sort puts them in place.
+        let foreign = (0..seen.len()).filter(|&i| own(seen[i].0.id).is_none());
+        let order: Vec<usize> = rank.iter().filter(|&&r| r != u32::MAX).map(|&r| r as usize).chain(foreign).collect();
+        let mut units = Vec::with_capacity(order.len());
+        for i in order {
+            let (u, t, m, v, a, f, look) = seen[i];
             units.push(protocol::UnitState {
                 id: u.id,
                 kind: u.kind,
