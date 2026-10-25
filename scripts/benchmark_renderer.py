@@ -5,6 +5,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--size', default='5120x1440')
 p.add_argument('--scale', type=float, default=0.8)
 p.add_argument('--live', action='store_true')
+p.add_argument('--effects-review', action='store_true', help='stage a fight with every combat effect in the showcase scene')
 p.add_argument('--legacy-cpu', action='store_true')
 p.add_argument('--look-churn', action='store_true')
 p.add_argument('--reset-on-look', action='store_true')
@@ -33,6 +34,7 @@ root = pathlib.Path(__file__).resolve().parents[1]
 cmd = [str(root/'target/release/client'), '--showcase', '--benchmark', '--fps', str(a.fps), '--in-flight', str(a.in_flight), '--aa', a.aa, '--frames', str(a.frames), '--warmup', str(a.warmup), '--size', a.size, '--scale', str(a.scale)]
 if a.capture: cmd += ['--capture', a.capture]
 if a.live: cmd.remove('--showcase')
+if a.effects_review: cmd.append('--effects-review')
 if not a.windowed: cmd.append('--offscreen')
 if a.shared_constants: cmd.append('--shared-constants')
 if a.output_blit: cmd.append('--output-blit')
@@ -52,7 +54,7 @@ if a.aa == 'metalfx' and 'TEMPORAL MetalFX' not in r.stdout: sys.exit('MetalFX u
 gpu = re.search(r'GPU median=([\d.]+)ms p95=([\d.]+)ms samples=(\d+)', r.stdout)
 frame = re.search(r'FRAME median=([\d.]+)ms p95=([\d.]+)ms samples=(\d+) mode=([\w-]+)', r.stdout)
 if not gpu or not frame: sys.exit('Missing GPU or full frame measurements')
-report = dict(capture=a.capture, output=a.size, scale=a.scale, mode=frame[4], aa=a.aa, in_flight=a.in_flight, paced_fps=a.fps, direct_drawable=not a.output_blit, legacy_cpu=a.legacy_cpu, live=a.live, look_churn=a.look_churn, reset_on_look=a.reset_on_look, frame_measure='completed-work' if a.in_flight==1 else 'cpu-encode-and-slot-wait', shared_constants=a.shared_constants, gpu_median_ms=float(gpu[1]), gpu_p95_ms=float(gpu[2]), frame_median_ms=float(frame[1]), frame_p95_ms=float(frame[2]), samples=int(frame[3]), warmup=a.warmup)
+report = dict(capture=a.capture, output=a.size, scale=a.scale, mode=frame[4], aa=a.aa, in_flight=a.in_flight, paced_fps=a.fps, direct_drawable=not a.output_blit, legacy_cpu=a.legacy_cpu, live=a.live, effects_review=a.effects_review, look_churn=a.look_churn, reset_on_look=a.reset_on_look, frame_measure='completed-work' if a.in_flight==1 else 'cpu-encode-and-slot-wait', shared_constants=a.shared_constants, gpu_median_ms=float(gpu[1]), gpu_p95_ms=float(gpu[2]), frame_median_ms=float(frame[1]), frame_p95_ms=float(frame[2]), samples=int(frame[3]), warmup=a.warmup)
 for field, marker in [('look_settings', 'LOOK'), ('surface_assets', 'SURFACES')]:
     resolved = re.search(r'^' + marker + r' (.+)$', r.stdout, re.MULTILINE)
     report[field] = str(pathlib.Path(resolved[1]).resolve()) if resolved else None

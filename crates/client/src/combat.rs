@@ -230,6 +230,7 @@ fn area(painter: &egui::Painter, projection: &Projection, a: &AreaView, valley: 
         );
     }
 }
+#[allow(clippy::too_many_arguments)]
 pub fn paint(
     ctx: &egui::Context,
     projection: &Projection,

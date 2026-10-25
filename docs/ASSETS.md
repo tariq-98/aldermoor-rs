@@ -379,6 +379,13 @@ Warnings fill from faint to solid as they ripen and fields pulse; both are red w
 the viewer. These are placeholder looks, sized and coloured to read in a fight; authored spell
 meshes and textures are later work.
 
+To review them, `scripts/run_client.sh --effects-review` stages a fight in the showcase scene
+(`crates/client/src/stage.rs`): every missile look crosses in front of the lineup, which wears a
+shell, rings and halos and casts three spells, while warnings of each shape, two fields, the aiming
+circle and flashes lie on the ground. It runs on frame time alone, so `--capture` with a given
+`--frames` always shows the same moment. `--showcase` is the same scene without the effects, so
+`scripts/benchmark_renderer.py --effects-review` against a plain run gives their GPU cost.
+
 ## Materials and file details
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM

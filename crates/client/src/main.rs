@@ -3,6 +3,7 @@ mod combat;
 mod effects;
 mod hud;
 mod interpolate;
+mod stage;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
 use protocol::{Command, Look, Pose, UnitState};
@@ -37,6 +38,7 @@ struct Options {
     offscreen: bool,
     showcase: bool,
     smoke: bool,
+    effects_review: bool,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -67,6 +69,7 @@ impl Options {
             offscreen: false,
             showcase: false,
             smoke: false,
+            effects_review: false,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -156,13 +159,17 @@ impl Options {
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
+                "--effects-review" => {
+                    o.effects_review = true;
+                    o.showcase = true;
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --specialty NAME\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --specialty NAME\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -234,6 +241,8 @@ struct Game {
     aim_slot: Option<u8>,
     valley: world::Valley,
     effects: Option<effects::Effects>,
+    /// The fight staged for `--effects-review`.
+    stage: Option<stage::Stage>,
 }
 impl Game {
     fn new(options: Options) -> Result<Self> {
@@ -279,8 +288,12 @@ impl Game {
             aim_slot: None,
             valley: world::Valley::new(),
             effects,
+            stage: None,
         };
         g.scenery = Some(render::scenery::Scenery::new(&g.catalog, &mut g.cache)?);
+        if g.options.effects_review {
+            g.stage = Some(stage::Stage::default());
+        }
         if g.options.showcase {
             g.review = showcase(g.snaps.current.unit(g.host.player).unwrap().clone());
             if let Some(goblin) = g
@@ -551,7 +564,10 @@ impl Game {
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
-            if let Some(fx) = &mut self.effects {
+            // A staged fight makes its own events.
+            if let Some(fx) = &mut self.effects
+                && self.stage.is_none()
+            {
                 fx.event(&e, event_time);
             }
             if let protocol::Event::Rallied { unit } | protocol::Event::Revived { unit } = &e
@@ -722,18 +738,33 @@ impl Game {
             .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
             .filter(|s| s.ground && s.radius > 0.)
             .map(|s| s.radius);
-        let world_effects = self.effects.is_some() && !self.options.showcase;
+        let world_effects =
+            self.effects.is_some() && (!self.options.showcase || self.stage.is_some());
         if world_effects && let Some(fx) = &mut self.effects {
             let characters = &self.characters;
             let valley = &self.valley;
+            let ground = |x, z| valley.ground(x, z);
+            let staged = self
+                .stage
+                .as_mut()
+                .map(|s| s.frame(scene_time, &units, &ground));
+            if let Some(f) = &staged {
+                for (e, at) in &f.events {
+                    fx.event(e, *at);
+                }
+            }
             draws.extend(fx.draws(&effects::Scene {
-                fight: &self.fight,
+                fight: staged.as_ref().map_or(&*self.fight, |f| &f.fight),
                 units: &units,
                 height: &|id| characters.get(&id).map_or(1.8, |c| c.rig_height),
-                ground: &|x, z| valley.ground(x, z),
-                since: self.snaps.received.elapsed().as_secs_f32(),
+                ground: &ground,
+                since: if staged.is_some() {
+                    0.
+                } else {
+                    self.snaps.received.elapsed().as_secs_f32()
+                },
                 time: scene_time,
-                aim: aim.zip(radius),
+                aim: staged.as_ref().map_or(aim.zip(radius), |f| Some(f.aim)),
             }));
         }
         let projection = combat::Projection {
