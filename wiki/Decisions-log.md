@@ -6,6 +6,8 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Walking, jogging and turning start from free motion capture: 100STYLE (CC BY 4.0, credited) and CMU, retargeted onto the shared rig. Weapon moves stay keyed by script | The fastest way to fill the action controls' biggest animation gap, with natural movement; weapon grips and strikes need exact hand positions | #163, #105 |
+| 2026-10-25 | Art threads build in cloud sessions, several at once, with headless Blender; the Mac keeps the in-game checks, captures and GPU numbers | Blender already runs headless in the cloud (the gear rebuilt in 91 s, matching main), so art no longer queues for the Mac | #162 |
 | 2026-10-25 | The look draws on RuneScape, Guild Wars, Breath of the Wild and League of Legends, plus Hogwarts Legacy's buildings and roads and nothing else from it; the rules, with numbers, are in docs/ART.md | Chippy's references, replacing "Breath of the Wild in spirit"; Hogwarts Legacy narrowed to architecture the same day | #21 |
 | 2026-10-25 | Visuals first: Looks stays phase 2, before Characters and economy | Chippy's call; the order needed no relabelling | #23 |
 | 2026-10-25 | First dungeon is the Barrow: soloable at ~level 15, scales to 2–5 players, ~25 minutes, golem miniboss and a three-phase Barrow King | Uses the existing creature art and teaches the combat skills | #104 |
