@@ -20,6 +20,10 @@ use std::time::{Duration, Instant};
 
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / sim::TICK_RATE as u64);
 
+/// Network players get a view every third step, 20 a second (#34). Each gets its own third, so
+/// the views to build are spread over every step.
+pub const SEND_EVERY: u64 = 3;
+
 /// Where new players appear: the path into Brambleford, facing the village.
 const SPAWN: glam::Vec2 = glam::Vec2::new(6.0, 28.0);
 
@@ -68,7 +72,16 @@ enum Viewer {
     Local(Arc<Latest>),
     /// Encoded `net::ServerMsg::View` frames for a connection's writer. A connection more than
     /// [`net::BACKLOG`] frames behind is dropped.
-    Remote(Sender<Vec<u8>>),
+    Remote(Remote),
+}
+
+struct Remote {
+    frames: Sender<Vec<u8>>,
+    /// One more than the last view the player said it has (0 for none yet), from its connection.
+    acked: Arc<std::sync::atomic::AtomicU64>,
+    encoder: protocol::wire::Encoder,
+    /// Which of each [`SEND_EVERY`] steps it gets its view on.
+    phase: u64,
 }
 
 enum Control {
@@ -205,6 +218,9 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
     let mut names: HashMap<String, UnitId> = HashMap::new();
     let mut next = Instant::now();
     let mut window = (0u32, 0.0f64, 0.0f64);
+    // The last few steps' events, for network players who get a view every few steps.
+    let mut recent: std::collections::VecDeque<Vec<protocol::Event>> = std::collections::VecDeque::new();
+    let mut joined = 0u64;
     while shared.running.load(Ordering::Acquire) {
         let now = Instant::now();
         if now < next {
@@ -216,7 +232,7 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
             shared.stats.lock().unwrap().skipped += ((now - next).as_nanos() / STEP.as_nanos()) as u64;
             next = now;
         }
-        for Control::Join { name, viewer, reply } in control.try_iter() {
+        for Control::Join { name, mut viewer, reply } in control.try_iter() {
             let id = match names.get(&name) {
                 Some(&id) => id,
                 None => {
@@ -226,6 +242,10 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
                     id
                 }
             };
+            if let Viewer::Remote(r) = &mut viewer {
+                r.phase = joined % SEND_EVERY;
+            }
+            joined += 1;
             // A second connection for the same character replaces the first.
             viewers.retain(|(v, _)| *v != id);
             viewers.push((id, viewer));
@@ -238,30 +258,43 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
         world.step();
         let t1 = Instant::now();
         let events = world.take_events();
+        recent.push_back(events.clone());
+        while recent.len() > SEND_EVERY as usize {
+            recent.pop_front();
+        }
+        let tick = world.tick();
         let mut gone = Vec::new();
         let (mut encoding, mut bytes) = (Duration::ZERO, 0);
-        viewers.retain(|(id, viewer)| {
-            let mut snapshot = world.snapshot(Some(*id));
-            snapshot.events = events.clone();
-            let combat = world.combat_view(Some(*id));
+        viewers.retain_mut(|(id, viewer)| {
             let kept = match viewer {
                 Viewer::Local(latest) => {
+                    let mut snapshot = world.snapshot(Some(*id));
+                    snapshot.events = events.clone();
+                    let combat = world.combat_view(Some(*id));
                     latest.events.lock().unwrap().extend(events.iter().cloned());
                     // The combat view first, so whoever sees a snapshot finds its combat detail beside it.
                     *latest.combat.lock().unwrap() = Some(Arc::new(combat));
                     *latest.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
                     true
                 }
-                Viewer::Remote(frames) => {
+                Viewer::Remote(remote) if tick % SEND_EVERY == remote.phase => {
+                    let mut snapshot = world.snapshot(Some(*id));
+                    snapshot.events = recent.iter().flatten().cloned().collect();
+                    let combat = world.combat_view(Some(*id));
                     let t = Instant::now();
-                    let frame = net::encode(&net::ServerMsg::View { snapshot, combat });
+                    let acked = remote.acked.load(Ordering::Acquire);
+                    if acked > 0 {
+                        remote.encoder.ack(acked - 1);
+                    }
+                    let frame = net::encode(&net::ServerMsg::View(remote.encoder.encode(&snapshot, &combat)));
                     encoding += t.elapsed();
                     bytes += frame.len();
-                    match frames.try_send(frame) {
+                    match remote.frames.try_send(frame) {
                         Ok(()) => true,
                         Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
                     }
                 }
+                Viewer::Remote(_) => true,
             };
             if !kept {
                 gone.push(*id);
@@ -351,7 +384,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(2));
         stop.store(true, Ordering::Relaxed);
         let reports: Vec<_> = bots.into_iter().map(|b| b.join().unwrap()).collect();
-        assert!(reports.iter().all(|r| r.views > 60 && r.bytes > 0), "{reports:?}");
+        assert!(reports.iter().all(|r| r.views > 30 && r.bytes > 0), "{reports:?}");
         assert!(reports.iter().any(|r| r.fighting > 0), "nobody found a fight: {reports:?}");
         let times = server.take_tick_times();
         assert!(times.len() > 60 && times.iter().any(|t| t.bytes > 0 && t.encode_ms > 0.0));

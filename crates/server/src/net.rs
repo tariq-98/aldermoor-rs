@@ -3,11 +3,16 @@
 //! keeps the messages.
 //!
 //! A client opens with [`ClientMsg::Hello`]; the server answers [`ServerMsg::Welcome`] (or
-//! `Refused`) and then sends a [`ServerMsg::View`] every step. Each connection has a reader
-//! thread that queues its commands and a writer thread that sends its views.
+//! `Refused`) and then sends a [`ServerMsg::View`] every [`SEND_EVERY`](crate::SEND_EVERY)
+//! steps, each a delta against the last one the client acknowledged with [`ClientMsg::Ack`]
+//! (`protocol::wire`, #34). Each connection has a reader thread that queues its commands and a
+//! writer thread that sends its views.
 
 use crate::{Server, Viewer};
+use protocol::wire::{Decoder, WireView};
 use protocol::{CombatView, Command, Snapshot, UnitId};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -25,6 +30,8 @@ pub enum ClientMsg {
     /// The first message: who's playing, and which `protocol::VERSION` they speak.
     Hello { version: u32, name: String },
     Command(Command),
+    /// The client has decoded view `tick`, so later views may be deltas against it.
+    Ack(u64),
 }
 
 // Views are nearly every message, so boxing them would only add an allocation.
@@ -33,8 +40,8 @@ pub enum ClientMsg {
 pub enum ServerMsg {
     Welcome { version: u32, player: UnitId },
     Refused(String),
-    /// What the player sees this step. The snapshot's events are everything since the last view.
-    View { snapshot: Snapshot, combat: CombatView },
+    /// What the player sees now, with everything that happened since the last view.
+    View(WireView),
 }
 
 /// A message as it goes on the wire: length, then postcard.
@@ -111,13 +118,15 @@ fn serve(stream: TcpStream, control: crossbeam_channel::Sender<crate::Control>, 
             (&stream).write_all(&encode(&ServerMsg::Refused(why.clone())))?;
             return Err(io::Error::other(why));
         }
-        ClientMsg::Command(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "a command before hello")),
+        ClientMsg::Command(_) | ClientMsg::Ack(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "a command before hello")),
     };
     stream.set_read_timeout(None)?;
     let (frames, outbox) = crossbeam_channel::bounded::<Vec<u8>>(BACKLOG);
     let (reply, answer) = crossbeam_channel::bounded(1);
+    let acked = Arc::new(AtomicU64::new(0));
+    let remote = crate::Remote { frames, acked: acked.clone(), encoder: protocol::wire::Encoder::new(), phase: 0 };
     control
-        .send(crate::Control::Join { name: name.clone(), viewer: Viewer::Remote(frames), reply })
+        .send(crate::Control::Join { name: name.clone(), viewer: Viewer::Remote(remote), reply })
         .map_err(|_| io::Error::other("the server has stopped"))?;
     let player = answer.recv().map_err(|_| io::Error::other("the server has stopped"))?;
     eprintln!("{name} joined from {peer} as unit {player}");
@@ -143,6 +152,9 @@ fn serve(stream: TcpStream, control: crossbeam_channel::Sender<crate::Control>, 
                     break Ok(());
                 }
             }
+            Ok(ClientMsg::Ack(tick)) => {
+                acked.fetch_max(tick.wrapping_add(1), Ordering::AcqRel);
+            }
             Ok(ClientMsg::Hello { .. }) => break Err(io::Error::new(io::ErrorKind::InvalidData, "a second hello")),
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break Ok(()),
             Err(e) => break Err(e),
@@ -158,6 +170,7 @@ fn serve(stream: TcpStream, control: crossbeam_channel::Sender<crate::Control>, 
 pub struct Client {
     stream: TcpStream,
     reader: BufReader<TcpStream>,
+    decoder: Decoder,
     last_size: usize,
     pub player: UnitId,
 }
@@ -170,7 +183,7 @@ impl Client {
         (&stream).write_all(&encode(&ClientMsg::Hello { version: protocol::VERSION, name: name.to_string() }))?;
         let mut reader = BufReader::new(stream.try_clone()?);
         match read::<ServerMsg>(&mut reader)? {
-            ServerMsg::Welcome { player, .. } => Ok(Client { stream, reader, last_size: 0, player }),
+            ServerMsg::Welcome { player, .. } => Ok(Client { stream, reader, decoder: Decoder::new(), last_size: 0, player }),
             ServerMsg::Refused(why) => Err(io::Error::new(io::ErrorKind::ConnectionRefused, why)),
             ServerMsg::View { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "a view before welcome")),
         }
@@ -180,13 +193,16 @@ impl Client {
         (&self.stream).write_all(&encode(&ClientMsg::Command(c)))
     }
 
-    /// Waits for the next view.
+    /// Waits for the next view, rebuilds it whole and acknowledges it.
     pub fn next_view(&mut self) -> io::Result<(Snapshot, CombatView)> {
         loop {
             let (msg, size) = read_sized::<ServerMsg>(&mut self.reader)?;
             self.last_size = size;
-            if let ServerMsg::View { snapshot, combat } = msg {
-                return Ok((snapshot, combat));
+            if let ServerMsg::View(view) = msg {
+                let tick = view.tick;
+                let decoded = self.decoder.decode(view).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                (&self.stream).write_all(&encode(&ClientMsg::Ack(tick)))?;
+                return Ok(decoded);
             }
         }
     }
