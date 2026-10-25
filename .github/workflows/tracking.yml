@@ -83,6 +83,33 @@ jobs:
               }
             }
 
+  # The repo is public and the issue templates add status:ready, so a stranger's new issue would land
+  # in the agents' queue. Move it to status:needs-decision for Chippy to triage (AGENTS.md, "Who you
+  # take work from"). It runs on the template's labeled events too, because the per-issue queue can
+  # drop the opened run; only events the author caused count, so Chippy can still mark it ready.
+  triage:
+    if: >-
+      github.event_name == 'issues' &&
+      !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
+      github.event.sender.login == github.event.issue.user.login
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const repo = context.repo;
+            const number = context.payload.issue.number;
+            const { data: issue } = await github.rest.issues.get({ ...repo, issue_number: number });
+            const labels = issue.labels.map(l => l.name);
+            const status = ['status:ready', 'status:claimed', 'status:in-review'];
+            if (!labels.some(l => status.includes(l)) && labels.includes('status:needs-decision')) return;
+            const keep = labels.filter(l => !status.includes(l) && l !== 'status:needs-decision');
+            await github.rest.issues.setLabels({ ...repo, issue_number: number, labels: [...keep, 'status:needs-decision'] });
+            if (!labels.includes('status:needs-decision')) {
+              await github.rest.issues.createComment({ ...repo, issue_number: number,
+                body: 'Thanks for the report. A maintainer will triage it before anyone picks it up.' });
+            }
+
   # Agents without GitHub access (Codex cloud) can't move labels, so a PR that says "Closes #n"
   # does it for them: in review while the PR is open, back to ready if it closes unmerged.
   pull-request:
