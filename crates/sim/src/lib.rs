@@ -30,6 +30,7 @@ use protocol::{CombatView, Command, Event, Snapshot, UnitId, UnitKind};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
+pub use brain::{notice_radius, NOTICE_IGNORE};
 pub use components::*;
 pub use content::Specialty;
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
