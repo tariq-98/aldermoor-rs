@@ -1,0 +1,25 @@
+name: Bug
+description: Something that is broken
+labels: ["type:bug", "status:ready"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commit, command, and steps.
+  - type: textarea
+    id: files
+    attributes:
+      label: Files or crates likely involved
