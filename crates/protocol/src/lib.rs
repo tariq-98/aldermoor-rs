@@ -419,7 +419,7 @@ mod tests {
                 level: 1,
                 position: Vec3::new(6.0, 9.5, 28.0),
                 velocity: Vec3::ZERO,
-                yaw: 3.14,
+                yaw: 3.0,
                 pose: Pose::Idle,
                 pose_time: 0.0,
                 health: 100.0,

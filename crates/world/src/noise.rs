@@ -52,12 +52,12 @@ impl Lcg {
         Lcg(seed)
     }
 
-    pub fn next(&mut self) -> f32 {
+    pub fn next_unit(&mut self) -> f32 {
         self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         ((self.0 >> 32) as u32) as f32 / u32::MAX as f32
     }
 
     pub fn range(&mut self, a: f32, b: f32) -> f32 {
-        mix(a, b, self.next())
+        mix(a, b, self.next_unit())
     }
 }
