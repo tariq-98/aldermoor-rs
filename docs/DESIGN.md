@@ -1,10 +1,12 @@
 # Aldermoor: the agreed game design
 
 Settled with Tariq in the design interview with Codex on 23 October 2026: 54 questions, every
-recommendation accepted, plus the no-spiders rule. The direction is **Breath of the Wild-inspired
-visuals, RuneScape-like freedom and progression, and a modular character system where equipment
-fits and behaves correctly.** Names, numbers, recipes, quests and item counts stay provisional
-until a coherent draft is reviewed.
+recommendation accepted, plus the no-spiders rule. The direction is **RuneScape-like freedom and
+progression, a modular character system where equipment fits and behaves correctly, and a look
+drawn from RuneScape, Guild Wars, Breath of the Wild and League of Legends, with Hogwarts Legacy's
+buildings and roads** (Chippy, 25 October 2026, in place of "Breath of the Wild-inspired visuals";
+the rules are in [ART.md](ART.md)). Names, numbers, recipes, quests and item counts stay
+provisional until a coherent draft is reviewed.
 
 ## Characters
 
@@ -128,8 +130,9 @@ until a coherent draft is reviewed.
 
 ## Scope and presentation
 
-- **The first version** is solo and offline; co-op comes later, with multiplayer in mind
-  throughout.
+- **An MMORPG** (Chippy, 25 October 2026): large worlds shared by many players. The first
+  version is still played solo against the built-in local server, with every system written to
+  be server-authoritative; the game goes online once the first area is fun.
 - **The first complete area:** one settlement, surrounding wilderness, one dungeon and one major
   boss.
 - **Dialogue:** written conversations, expressive poses and short vocal reactions; full voice

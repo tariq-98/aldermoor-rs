@@ -17,10 +17,14 @@ compression is part of the asset build (the `assets` crate).
 
 ## Art direction
 
-- **Breath of the Wild in spirit:** stylised, expressive proportions, strong silhouettes,
-  restrained texture detail and cohesive lighting.
-- **Practical gear:** most equipment looks practical and proportionate. Exceptional pieces get
-  bolder silhouettes and restrained effects.
+[ART.md](ART.md) is the art bible: the agreed look as rules with numbers. In short:
+
+- **The look:** elements of RuneScape, Guild Wars, Breath of the Wild and League of Legends, and
+  Hogwarts Legacy's buildings and roads (Chippy, 25 October 2026): bold silhouettes and colour
+  that read at a distance, worked physically based materials with painted accents and dye
+  channels, painterly skies, haze and warm light.
+- **Practical gear:** most equipment looks practical and proportionate, drawn a little larger than
+  life so it reads at a distance. Exceptional pieces get bolder silhouettes and restrained effects.
 - **Hard exclusion:** no spiders, other arachnids, spider-like creatures or web scenery, anywhere.
 
 ## Foundation

@@ -7,6 +7,7 @@
 
 use bevy_ecs::prelude::*;
 use glam::Vec2;
+use protocol::UnitId;
 
 use crate::combat::{abilities, auras, can_attack, chest, control, effects, entity, gap, line_of_sight, now, source, unit_id};
 use crate::content::{catalog, MobDef, Targeting};
@@ -86,7 +87,7 @@ fn go_home(world: &mut World, e: Entity) {
     if !auras::has(world, e, "evading") && let Some(src) = source(world, e, None) {
         auras::apply_key(world, "evading", e, &src);
     }
-    steer(world, e, MoveIntent { direction: to.normalize(), walk: false, face_yaw: None });
+    steer(world, e, MoveIntent { direction: to.normalize(), walk: false, sprint: false, face_yaw: None });
 }
 
 fn chase(world: &mut World, e: Entity, mob: &MobDef, deciding: bool) {
@@ -127,23 +128,98 @@ fn chase(world: &mut World, e: Entity, mob: &MobDef, deciding: bool) {
     if let Some(c) = world.get::<Fighter>(e).and_then(|f| f.cast) {
         let def = cat.ability(c.ability);
         let face = if def.telegraph || def.targeting.is_area() { c.yaw } else { heading(to) };
-        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, face_yaw: Some(face) });
+        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: Some(face) });
         return;
     }
     if deciding && control(world, e).can_act() && use_skills(world, e, mob, te) {
-        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, face_yaw: None });
+        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: None });
         return;
     }
     // Close in (or keep to its range), then face the target.
     let reach = world.get::<Fighter>(e).and_then(|f| f.auto).map_or(2.0, |a| cat.ability(a).range);
     let want = if mob.range > 0.0 { mob.range.min(reach) } else { reach };
     let in_sight = mob.range <= 0.0 || line_of_sight(world, chest(world, e), chest(world, te));
-    let intent = if gap(world, e, te) > want - 0.3 || !in_sight {
-        MoveIntent { direction: to.normalize_or_zero(), walk: false, face_yaw: None }
+    let g = gap(world, e, te);
+    // Up close, a fighter makes for its own place round the target.
+    if mob.range <= 0.0 && g < want + SPREAD_FROM {
+        let (slot, ring) = match b.slot {
+            Some(s) if !deciding => s,
+            _ => {
+                let s = find_slot(world, e, te, want);
+                world.get_mut::<Brain>(e).unwrap().slot = Some(s);
+                s
+            }
+        };
+        let goal = to + Vec2::from_angle(slot) * ring;
+        let intent = if goal.length() > 0.25 || g > want - 0.3 {
+            MoveIntent { direction: goal.normalize_or_zero(), walk: false, sprint: false, face_yaw: None }
+        } else {
+            MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: (to.length_squared() > 1e-4).then(|| heading(to)) }
+        };
+        steer(world, e, intent);
+        return;
+    }
+    if b.slot.is_some() {
+        world.get_mut::<Brain>(e).unwrap().slot = None;
+    }
+    let intent = if g > want - 0.3 || !in_sight {
+        MoveIntent { direction: to.normalize_or_zero(), walk: false, sprint: false, face_yaw: None }
     } else {
-        MoveIntent { direction: Vec2::ZERO, walk: false, face_yaw: (to.length_squared() > 1e-4).then(|| heading(to)) }
+        MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: (to.length_squared() > 1e-4).then(|| heading(to)) }
     };
     steer(world, e, intent);
+}
+
+/// How far past its reach a melee monster starts making for its own place round the target.
+const SPREAD_FROM: f32 = 2.5;
+
+/// How far from the target's body a melee fighter with this reach stands.
+fn stand(reach: f32) -> f32 {
+    ((reach - 0.3) * 0.5).max(0.1)
+}
+
+/// Where round `te` that `e` should stand, as a bearing and a distance from its centre: where it
+/// is now, nudged away from anyone else already standing round the target, so each keeps at least
+/// a body's width of the circle to itself.
+fn find_slot(world: &World, e: Entity, te: Entity, reach: f32) -> (f32, f32) {
+    let (Some(at), Some(t)) = (world.get::<Transform>(e).map(|t| t.xz()), world.get::<Transform>(te).map(|t| t.xz())) else { return (0.0, 0.0) };
+    let radius = |x| world.get::<Body>(x).map_or(0.4, |b| b.radius);
+    let (rm, rt) = (radius(e), radius(te));
+    let ring = rt + rm + stand(reach);
+    let mine = (at - t).to_angle();
+    let me = unit_id(world, e);
+    let target = unit_id(world, te);
+    let others: Vec<(UnitId, f32, f32, bool)> = world
+        .resource::<Spatial>()
+        .near(t, ring + rm + 1.0)
+        .into_iter()
+        .filter(|&(id, _)| Some(id) != me && Some(id) != target)
+        .filter_map(|(id, p)| {
+            let n = entity(world, id)?;
+            Some((id, (p - t).to_angle(), radius(n), can_attack(world, n, te)))
+        })
+        .collect();
+    // A pack shares the circle out evenly between its fighters, so it surrounds its prey.
+    let share = std::f32::consts::TAU / (1 + others.iter().filter(|o| o.3).count()) as f32 * 0.9;
+    let mut nudge = 0.0;
+    for &(id, theirs, rn, fighting) in &others {
+        // The angle two bodies side by side on the ring take up, with a little room to spare.
+        let body = 2.0 * ((rm + rn + 0.2) / (2.0 * ring)).min(1.0).asin();
+        let need = if fighting { body.max(share) } else { body };
+        let apart = wrap(mine - theirs);
+        if apart.abs() < need {
+            // Dead level: the higher id gives way to the left, the lower to the right.
+            let side = if apart.abs() > 1e-3 { apart.signum() } else if me > Some(id) { 1.0 } else { -1.0 };
+            nudge += side * (need - apart.abs()) * 0.5;
+        }
+    }
+    (mine + nudge.clamp(-0.6, 0.6), ring)
+}
+
+/// An angle brought into -pi..pi.
+fn wrap(a: f32) -> f32 {
+    let tau = std::f32::consts::TAU;
+    (a + std::f32::consts::PI).rem_euclid(tau) - std::f32::consts::PI
 }
 
 /// Tries the monster's skills in order: the first that's ready, suits its health, reaches the
@@ -209,7 +285,7 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
     if summoned.is_some() {
         // Keep up with the owner.
         let to = b.home - pos;
-        let intent = if to.length() > 3.0 { MoveIntent { direction: to.normalize(), walk: false, face_yaw: None } } else { MoveIntent::default() };
+        let intent = if to.length() > 3.0 { MoveIntent { direction: to.normalize(), walk: false, sprint: false, face_yaw: None } } else { MoveIntent::default() };
         steer(world, e, intent);
         return;
     }
@@ -217,7 +293,7 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
     let radius = world.get::<Body>(e).map_or(0.4, |b| b.radius);
     match b.wander_target {
         Some(w) if (w - pos).length() > 0.5 && t < b.next_wander + 12.0 => {
-            steer(world, e, MoveIntent { direction: (w - pos).normalize(), walk: true, face_yaw: None });
+            steer(world, e, MoveIntent { direction: (w - pos).normalize(), walk: true, sprint: false, face_yaw: None });
         }
         Some(_) => {
             let wait = world.resource_mut::<Rng>().range(4.0, 12.0) as f64;
@@ -233,7 +309,9 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
                 (rng.range(0.0, std::f32::consts::TAU), rng.range(1.0, b.wander))
             };
             let w = b.home + Vec2::new(a.sin(), a.cos()) * r;
-            let clear = !world.resource::<Land>().0.blocked(w, radius);
+            let land = &world.resource::<Land>().0;
+            // Monsters wander on dry land.
+            let clear = !land.blocked(w, radius) && land.water_depth(w.x, w.y) == 0.0;
             if let Some(mut b) = world.get_mut::<Brain>(e) {
                 if clear {
                     b.wander_target = Some(w);

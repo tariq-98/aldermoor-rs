@@ -127,6 +127,7 @@ impl Sim {
         world.insert_resource(combat::missiles::Missiles::default());
         world.insert_resource(combat::missiles::Areas::default());
         world.insert_resource(combat::abilities::Arrivals::default());
+        world.insert_resource(movement::Landings::default());
         let mut schedule = Schedule::new(Step);
         schedule.set_executor(SingleThreadedExecutor::new());
         schedule.add_systems(
@@ -135,6 +136,7 @@ impl Sim {
                 brain::think,
                 combat::auras::refresh_control,
                 movement::move_units,
+                movement::after_moving,
                 combat::abilities::land_charges,
                 combat::abilities::update,
                 combat::missiles::update,
@@ -173,6 +175,11 @@ impl Sim {
 
     pub fn land(&self) -> &world::Valley {
         &self.world.resource::<Land>().0
+    }
+
+    /// The land, to add to (tests put walls where they need them).
+    pub fn land_mut(&mut self) -> &mut world::Valley {
+        &mut self.world.resource_mut::<Land>().into_inner().0
     }
 
     /// Queues a command from a unit's controller for the next step.
@@ -302,7 +309,7 @@ impl Sim {
                 (rng.range(-half.x, half.x), rng.range(-half.y, half.y))
             };
             let p = center + Vec2::new(x, z);
-            if self.land().blocked(p, 0.6) {
+            if self.land().blocked(p, 0.6) || self.land().water_depth(p.x, p.y) > 0.0 {
                 continue;
             }
             let kind = if placed % 3 == 0 { MonsterKind::Goblin } else { MonsterKind::Wolf };

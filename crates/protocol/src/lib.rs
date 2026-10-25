@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -18,8 +18,9 @@ pub type UnitId = u32;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     /// Desired movement in world space (length 0…1), and an optional fixed facing for
-    /// strafing (mouse-look). Sent whenever it changes.
-    Move { direction: Vec2, walk: bool, face_yaw: Option<f32> },
+    /// strafing (mouse-look). `sprint` asks to sprint, which only works out of combat. Sent
+    /// whenever it changes.
+    Move { direction: Vec2, walk: bool, sprint: bool, face_yaw: Option<f32> },
     Jump,
     /// A quick roll in a world-space direction (zero rolls backwards).
     Dodge { direction: Vec2 },
@@ -223,6 +224,9 @@ pub struct PlayerState {
     /// 0 or 1: which weapon set is in hand, and seconds until you can swap again.
     pub weapon_set: u8,
     pub swap_ready: f32,
+    /// In deep water: no skills, guard or rolls.
+    pub swimming: bool,
+    pub sprinting: bool,
 }
 
 /// One skill on the bar.
@@ -402,7 +406,7 @@ mod tests {
 
     #[test]
     fn commands_and_snapshots_round_trip() {
-        let c = Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, face_yaw: Some(1.5) };
+        let c = Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, sprint: false, face_yaw: Some(1.5) };
         assert_eq!(Command::from_bytes(&c.to_bytes()).unwrap(), c);
         let s = Snapshot {
             tick: 42,
@@ -415,7 +419,7 @@ mod tests {
                 level: 1,
                 position: Vec3::new(6.0, 9.5, 28.0),
                 velocity: Vec3::ZERO,
-                yaw: 3.14,
+                yaw: 3.0,
                 pose: Pose::Idle,
                 pose_time: 0.0,
                 health: 100.0,

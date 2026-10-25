@@ -33,12 +33,13 @@ rendering technique still decides the frame rate. That's why the engine talks to
    - Specialties (warrior, archer, mage, necromancer, rogue, healer) level through use,
      RuneScape-style, with hybrids and loadouts.
    - Visible, correctly fitted gear with dyes; factions and guilds.
-   - Solo and offline first.
+   - An MMORPG in the end; built and played solo on a local server first (25 October 2026).
 6. **Prove it first.** Milestone 1 is a slice that justifies the switch. It is measured against the
    Swift build.
 7. **Split of work:** one repo.
    - Claude: simulation, gameplay, AI, server, and since 24 October **the art itself**: characters,
-     gear, creatures, animation and the asset pipeline. See [ASSETS.md](ASSETS.md).
+     gear, creatures, animation and the asset pipeline. See [ASSETS.md](ASSETS.md) for the asset
+     contract and [ART.md](ART.md) for the look.
    - Codex: renderer and shaders. It reads the asset contract in ASSETS.md and draws what it
      describes. It doesn't design or create assets (Tariq, 24 October): models, textures,
      materials, animations, effects, terrain, water and sky materials, scenery placement, HUD

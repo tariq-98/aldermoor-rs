@@ -16,6 +16,11 @@ pub struct Solid {
     pub center: Vec2,
     pub half: Vec2,
     pub yaw: f32,
+    /// The height of a flat top you can stand on (a low wall, a ruin's broken masonry). A box
+    /// with a top is part of the ground rather than an obstacle: walkers meet its sides as they
+    /// meet a terrain face, so they climb onto it when it's low enough and stop when it isn't.
+    /// `None` for buildings and trees, which only block.
+    pub top: Option<f32>,
 }
 
 impl Solid {
@@ -48,6 +53,10 @@ pub struct Valley {
     pub houses: Vec<Placement>,
     pub trees: Vec<Placement>,
     grid: Grid,
+    /// The solids with a top, for [`Valley::ground`], and the box round them all (most of the
+    /// valley has none, and `ground` is called a lot).
+    tops: Grid,
+    tops_box: (Vec2, Vec2),
     heights: Heights,
 }
 
@@ -55,6 +64,10 @@ pub struct Valley {
 pub const BOUNDS: f32 = 280.0;
 /// Where the bridge crosses the river.
 pub const BRIDGE_X: f32 = 1.5;
+/// The river's surface, where the renderer draws the water.
+pub const WATER_LEVEL: f32 = -0.78;
+/// Half-width of the river's water, either side of [`river_z`].
+pub const RIVER_HALF_WIDTH: f32 = 6.0;
 
 const HOUSES: [(f32, f32, f32, f32); 7] = [
     (-12.0, -12.0, 0.18, 1.04),
@@ -72,11 +85,11 @@ impl Valley {
         let houses: Vec<Placement> =
             HOUSES.iter().map(|&(x, z, yaw, scale)| Placement { position: Vec2::new(x, z), yaw, scale }).collect();
         for h in &houses {
-            solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw });
+            solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None });
         }
         // The windmill and the shed by the north fence.
-        solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0 });
-        solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0 });
+        solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None });
+        solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None });
 
         // Trees, from the same sequence as the renderer: candidates first, then a size and a turn
         // for each tree that fits.
@@ -103,12 +116,25 @@ impl Valley {
                 continue;
             }
             let scale = r.range(0.85, 1.6);
-            let yaw = r.range(0.0, 6.28);
+            let yaw = r.range(0.0, std::f32::consts::TAU);
             trees.push(Placement { position: p, yaw, scale });
-            solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0 });
+            solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None });
         }
-        let grid = Grid::build(&solids);
-        Valley { solids, houses, trees, grid, heights: Heights::build() }
+        // The bridge's parapets, either side of its deck (after the trees, which are placed
+        // from the solids before them).
+        for side in [-1.0, 1.0] {
+            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0, top: None });
+        }
+        let (grid, tops) = Grid::split(&solids);
+        let tops_box = tops_box(&solids);
+        Valley { solids, houses, trees, grid, tops, tops_box, heights: Heights::build() }
+    }
+
+    /// Adds a solid after the valley is built (for tests, and props placed by later layers).
+    pub fn add_solid(&mut self, s: Solid) {
+        self.solids.push(s);
+        (self.grid, self.tops) = Grid::split(&self.solids);
+        self.tops_box = tops_box(&self.solids);
     }
 
     /// The ground a walker stands on, including the bridge deck: the terrain as it is drawn
@@ -118,7 +144,22 @@ impl Valley {
         if (x - BRIDGE_X).abs() < 2.3 && dz.abs() < 9.1 {
             return 1.4 + 1.6 * (1.0 - (dz / 9.0).powf(2.0));
         }
-        self.surface(x, z)
+        let p = Vec2::new(x, z);
+        let mut ground = self.surface(x, z);
+        let (lo, hi) = self.tops_box;
+        if p.cmplt(lo).any() || p.cmpgt(hi).any() {
+            return ground;
+        }
+        for i in self.tops.near(p, 0.0) {
+            let s = &self.solids[i as usize];
+            if let Some(top) = s.top
+                && top > ground
+                && s.overlaps(p, 0.0)
+            {
+                ground = top;
+            }
+        }
+        ground
     }
 
     /// The terrain mesh's height at (x, z): [`height`] sampled every [`TERRAIN_STEP`] metres and
@@ -128,16 +169,23 @@ impl Valley {
         self.heights.at(x, z)
     }
 
-    /// True when a walker of `radius` can't stand at `p`: deep river (away from the bridge), an
-    /// obstacle, or the edge of the map.
+    /// True when a walker of `radius` can't stand at `p`: an obstacle or the edge of the map.
+    /// The river isn't a wall: walkers swim it (see [`Valley::water_depth`]). Nor are solids with a
+    /// top: they're ground, so their sides are faces (see [`Valley::ground`]).
     pub fn blocked(&self, p: Vec2, radius: f32) -> bool {
         if p.x.abs() > BOUNDS || p.y.abs() > BOUNDS {
             return true;
         }
-        if (p.y - river_z(p.x)).abs() < 6.5 && (p.x - BRIDGE_X).abs() > 2.5 {
-            return true;
-        }
         self.grid.near(p, radius).any(|i| self.solids[i as usize].overlaps(p, radius))
+    }
+
+    /// How deep the river is at (x, z): from its surface down to the ground (or the bridge
+    /// deck, which is above it). 0 away from the river.
+    pub fn water_depth(&self, x: f32, z: f32) -> f32 {
+        if (z - river_z(x)).abs() > RIVER_HALF_WIDTH {
+            return 0.0;
+        }
+        (WATER_LEVEL - self.ground(x, z)).max(0.0)
     }
 
     /// Moves `from` by `delta`, sliding along anything in the way (in short steps so nothing is
@@ -172,11 +220,19 @@ impl Default for Valley {
     }
 }
 
+/// The box round every solid with a top (empty, min above max, when there are none).
+fn tops_box(solids: &[Solid]) -> (Vec2, Vec2) {
+    solids.iter().filter(|s| s.top.is_some()).fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(lo, hi), s| {
+        let r = Vec2::splat(s.reach());
+        (lo.min(s.center - r), hi.max(s.center + r))
+    })
+}
+
 fn blocked_by(solids: &[Solid], p: Vec2, radius: f32) -> bool {
     if (p.y - river_z(p.x)).abs() < 6.5 && (p.x - BRIDGE_X).abs() > 2.5 {
         return true;
     }
-    solids.iter().any(|s| s.overlaps(p, radius))
+    solids.iter().any(|s| s.top.is_none() && s.overlaps(p, radius))
 }
 
 /// The river's centre line: z for a given x.
@@ -272,9 +328,14 @@ const CELL: f32 = 16.0;
 const SIDE: usize = ((BOUNDS * 2.0 / CELL) as usize) + 2;
 
 impl Grid {
-    fn build(solids: &[Solid]) -> Grid {
+    /// One grid of the solids that block, and one of those with a top.
+    fn split(solids: &[Solid]) -> (Grid, Grid) {
+        (Grid::build(solids, false), Grid::build(solids, true))
+    }
+
+    fn build(solids: &[Solid], tops: bool) -> Grid {
         let mut cells = vec![Vec::new(); SIDE * SIDE];
-        for (i, s) in solids.iter().enumerate() {
+        for (i, s) in solids.iter().enumerate().filter(|(_, s)| s.top.is_some() == tops) {
             let r = s.reach() + 1.5;
             let (x0, z0) = Self::cell(s.center - Vec2::splat(r));
             let (x1, z1) = Self::cell(s.center + Vec2::splat(r));
@@ -307,10 +368,11 @@ mod tests {
 
     // Values from the Swift original (aldermoor-wild), computed on 2026-10-23, except where the
     // river now cuts through the west ledge (#41): (-40, -60) sat 0.76 m up on the buried river.
+    // The river no longer blocks (#65: you swim it), so (-40, -60) in it isn't blocked either.
     const SPOTS: [(f32, f32, f32, f32, f32, bool); 9] = [
         (0.0, 0.0, 4.9790773, -58.0, 4.0, false),
         (6.0, 28.0, 9.586473, -57.12033, 2.7604523, false),
-        (-40.0, -60.0, -1.55, -63.2125, 34.453495, true),
+        (-40.0, -60.0, -1.55, -63.2125, 34.453495, false),
         (120.0, -20.0, 9.364937, -53.923687, 115.06778, false),
         (-70.0, -30.0, 23.01629, -64.96447, 69.12138, false),
         (76.0, -85.0, 31.035648, -51.002224, 68.842804, false),
@@ -352,8 +414,9 @@ mod tests {
     fn the_same_trees_grow_in_the_same_places() {
         let v = Valley::new();
         assert_eq!(v.trees.len(), 106);
-        assert_eq!(v.solids.len(), 115);
-        let last = v.solids[v.solids.len() - 1];
+        // 9 buildings, 106 trees, then the bridge's two parapets.
+        assert_eq!(v.solids.len(), 117);
+        let last = v.solids[114];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
     }
@@ -392,9 +455,10 @@ mod tests {
         let start = Vec2::new(-12.0, 0.0);
         let end = v.slide(start, Vec2::new(0.0, -20.0), 0.4);
         assert!(end.y > -9.5 && end.y < -5.0, "stopped at {end}");
-        // The river blocks, except on the bridge.
-        assert!(v.blocked(Vec2::new(20.0, river_z(20.0)), 0.3));
-        assert!(!v.blocked(Vec2::new(BRIDGE_X, river_z(BRIDGE_X)), 0.3));
+        // The river is deep in the middle and dry on the bridge.
+        assert!(v.water_depth(20.0, river_z(20.0)) > 0.7);
+        assert_eq!(v.water_depth(20.0, river_z(20.0) + 8.0), 0.0);
+        assert_eq!(v.water_depth(BRIDGE_X, river_z(BRIDGE_X)), 0.0);
         assert!(v.ground(BRIDGE_X, river_z(BRIDGE_X)) > 2.9);
     }
 }

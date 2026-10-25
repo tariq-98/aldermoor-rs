@@ -57,6 +57,8 @@ pub struct MoveIntent {
     /// World-space direction, length 0…1.
     pub direction: Vec2,
     pub walk: bool,
+    /// Asking to sprint: granted out of combat, on land.
+    pub sprint: bool,
     /// Locked facing while strafing; `None` turns toward travel.
     pub face_yaw: Option<f32>,
 }
@@ -70,6 +72,8 @@ pub enum ForcedKind {
     Leap,
     /// Rushing at a target; the rest of the ability lands on arrival.
     Charge { target: UnitId, ability: AbilityId },
+    /// Pulling up over a ledge: up first, then over the edge.
+    Climb,
 }
 
 /// A move the body is carried through (a roll, a leap, being thrown), ignoring the controls.
@@ -94,6 +98,13 @@ pub struct Motion {
     pub intent: MoveIntent,
     pub jump_queued: bool,
     pub forced: Option<Forced>,
+    /// In deep water: floating at the surface, slow, and unable to fight.
+    pub swimming: bool,
+    /// Sprinting this step (asked to, and allowed).
+    pub sprinting: bool,
+    /// The highest the feet have been since they last touched the ground or the water, for fall
+    /// damage.
+    pub fall_from: f32,
 }
 
 impl Motion {
@@ -106,6 +117,9 @@ impl Motion {
             intent: MoveIntent::default(),
             jump_queued: false,
             forced: None,
+            swimming: false,
+            sprinting: false,
+            fall_from: f32::NEG_INFINITY,
         }
     }
 
@@ -450,6 +464,10 @@ pub struct Brain {
     pub next_wander: f64,
     /// When the current fight began (a monster that's never been hit still keeps chasing).
     pub engaged_at: f64,
+    /// Where round its target a melee monster stands, as a bearing and a distance from the
+    /// target's centre, so a pack spreads round its prey instead of queueing on the side it came
+    /// from.
+    pub slot: Option<(f32, f32)>,
 }
 
 impl Brain {
@@ -464,6 +482,7 @@ impl Brain {
             next_think: 0.0,
             next_wander: 0.0,
             engaged_at: 0.0,
+            slot: None,
         }
     }
 }

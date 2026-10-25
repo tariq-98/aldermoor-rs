@@ -1,13 +1,22 @@
 //! What the player is holding, turned into the `Move` the server wants, plus the orbit camera.
 //! The client maps its window's keys and buttons onto [`Held`]; everything here is plain data.
+pub mod bindings;
 pub mod camera;
-pub use camera::Orbit;
+pub mod settings;
+pub use bindings::{Bindings, Control, Input};
+pub use camera::{Follow, Orbit};
+pub use settings::Settings;
 
 use glam::Vec2;
 use protocol::Command;
 
 /// Keyboard turning speed in radians a second: half a turn a second, as in WoW.
 pub const TURN_RATE: f32 = std::f32::consts::PI;
+/// Classic: seconds of moving without touching the mouse before the camera swings back
+/// behind the character.
+const SWING_DELAY: f32 = 1.;
+/// How quickly it swings back, per second (the gap shrinks by e every 1/rate seconds).
+const SWING_RATE: f32 = 3.;
 
 /// The movement keys and mouse buttons down right now.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -20,11 +29,18 @@ pub struct Held {
     /// Q and E: always strafe.
     pub strafe_left: bool,
     pub strafe_right: bool,
-    pub walk: bool,
+    /// Shift: sprint (the sim only allows it out of combat).
+    pub sprint: bool,
     /// Right mouse button: the character faces where the camera looks.
     pub mouse_look: bool,
     /// Left mouse button: the camera orbits and the character keeps its heading.
     pub orbiting: bool,
+}
+
+/// An angle brought into -π..π.
+fn wrap(angle: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    (angle + PI).rem_euclid(TAU) - PI
 }
 
 fn axis(positive: bool, negative: bool) -> f32 {
@@ -39,7 +55,8 @@ fn basis(yaw: f32) -> (Vec2, Vec2) {
     )
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Scheme {
     /// New World: the mouse always looks and the character always faces the crosshair.
     /// WASD runs and strafes relative to it.
@@ -57,6 +74,12 @@ pub struct Pilot {
     /// Where the character faces, in the same unwrapped angle as [`Orbit::yaw`].
     pub heading: f32,
     pub autorun: bool,
+    /// Walking instead of running, toggled with its key.
+    pub walking: bool,
+    /// Classic: swing the camera back behind the character after a second of moving.
+    pub swing_back: bool,
+    /// Seconds spent moving since the mouse last held the camera.
+    moving_for: f32,
 }
 
 impl Pilot {
@@ -65,11 +88,18 @@ impl Pilot {
             scheme,
             heading,
             autorun: false,
+            walking: false,
+            swing_back: true,
+            moving_for: 0.,
         }
     }
 
     pub fn toggle_autorun(&mut self) {
         self.autorun = !self.autorun;
+    }
+
+    pub fn toggle_walk(&mut self) {
+        self.walking = !self.walking;
     }
 
     /// Action is Classic with the right button always held. Its left button is for clicking,
@@ -100,9 +130,19 @@ impl Pilot {
                 orbit.yaw += turn;
             }
         }
+        let direction = self.direction(&held, orbit.yaw);
+        if self.swing_back && !held.mouse_look && !held.orbiting && direction != Vec2::ZERO {
+            self.moving_for += dt;
+            if self.moving_for > SWING_DELAY {
+                orbit.yaw += wrap(self.heading - orbit.yaw) * (1. - (-SWING_RATE * dt).exp());
+            }
+        } else {
+            self.moving_for = 0.;
+        }
         Command::Move {
-            direction: self.direction(&held, orbit.yaw),
-            walk: held.walk,
+            direction,
+            walk: self.walking,
+            sprint: held.sprint && !self.walking,
             face_yaw: Some(self.heading),
         }
     }
@@ -144,6 +184,7 @@ mod tests {
             direction,
             walk,
             face_yaw,
+            ..
         } = c
         else {
             unreachable!()
@@ -333,5 +374,62 @@ mod tests {
         let (mut p, mut o) = action();
         let (dir, ..) = moving(p.steer(&held(|h| h.orbiting = true), &mut o, 0.016));
         assert_eq!(dir, Vec2::ZERO);
+    }
+
+    #[test]
+    fn classic_camera_swings_back_after_a_second() {
+        let (mut p, mut o) = classic();
+        o.yaw = p.heading + 1.;
+        let run = held(|h| h.forward = true);
+        for _ in 0..50 {
+            p.steer(&run, &mut o, 1. / 60.);
+        }
+        assert_eq!(o.yaw, p.heading + 1.);
+        for _ in 0..180 {
+            p.steer(&run, &mut o, 1. / 60.);
+        }
+        assert!(wrap(o.yaw - p.heading).abs() < 0.01);
+    }
+
+    #[test]
+    fn swing_back_waits_while_orbiting_or_switched_off() {
+        let (mut p, mut o) = classic();
+        o.yaw = p.heading + 1.;
+        let look = held(|h| {
+            h.forward = true;
+            h.orbiting = true
+        });
+        for _ in 0..180 {
+            p.steer(&look, &mut o, 1. / 60.);
+        }
+        assert_eq!(o.yaw, p.heading + 1.);
+        p.swing_back = false;
+        for _ in 0..180 {
+            p.steer(&held(|h| h.forward = true), &mut o, 1. / 60.);
+        }
+        assert_eq!(o.yaw, p.heading + 1.);
+    }
+
+    #[test]
+    fn wrap_takes_the_short_way() {
+        assert!((wrap(std::f32::consts::TAU + 0.5) - 0.5).abs() < 1e-5);
+        assert!((wrap(-std::f32::consts::PI - 0.5) - (std::f32::consts::PI - 0.5)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn shift_sprints_unless_walking() {
+        let (mut p, mut o) = action();
+        let sprinting = |c: Command| matches!(c, Command::Move { sprint: true, .. });
+        let shift = held(|h| {
+            h.forward = true;
+            h.sprint = true
+        });
+        assert!(sprinting(p.steer(&shift, &mut o, 0.016)));
+        p.toggle_walk();
+        let c = p.steer(&shift, &mut o, 0.016);
+        assert!(!sprinting(c.clone()));
+        assert!(moving(c).1);
+        p.toggle_walk();
+        assert!(!moving(p.steer(&shift, &mut o, 0.016)).1);
     }
 }

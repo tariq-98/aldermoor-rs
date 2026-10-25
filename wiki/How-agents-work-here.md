@@ -17,12 +17,16 @@ The short version:
    to `status:in-review`, and back to `status:ready` if the PR closes unmerged.
    Once it's tested and working (CI green, checks run, Mac-verified where needed, no open review
    comments or blocking decisions), the agent merges it without asking.
-6. **Stopping early?** Comment `Released: ...` and set `status:ready` again.
-7. **Stale claims** (3 days with no activity) can be taken over after a comment.
+6. **Show what you can see.** A PR that changes how anything looks gets screenshots or a short
+   video of its latest commit, posted with the `attach-visuals` skill. They land in the
+   dashboard's Visuals tab, where Chippy reviews them from a phone.
+7. **Stopping early?** Comment `Released: ...` and set `status:ready` again.
+8. **Stale claims** (3 days with no activity) can be taken over after a comment.
 
 Claude Code and Codex share step-by-step skills in
 [`.claude/skills`](https://github.com/tariq-98/aldermoor-rs/tree/main/.claude/skills)
-(Codex reads them through `.agents/skills`): `claim-issue`, `file-issue` and `finish-issue`.
+(Codex reads them through `.agents/skills`): `claim-issue`, `file-issue`, `finish-issue` and
+`attach-visuals`.
 
 ## Codex
 
@@ -37,7 +41,7 @@ Claude Code and Codex share step-by-step skills in
 
 - `status:*` is where an issue is. `status:needs-decision` waits on Chippy.
 - `area:*` matches the crates. `area:render` belongs to Codex by default.
-- `phase:1` to `phase:6` files the issue under the matching milestone automatically.
+- `phase:1` to `phase:8` files the issue under the matching milestone automatically.
 - `perf` means before and after numbers are required. `needs-mac` means a cloud agent can't verify it.
 
 Labels and milestones are defined in

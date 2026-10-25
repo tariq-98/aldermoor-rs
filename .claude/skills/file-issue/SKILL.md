@@ -43,7 +43,7 @@ Pick one from each group that applies (the full list with meanings is in `.githu
   `area:server`, `area:ai`, `area:assets`, `area:infra`, `area:docs`.
 - Type: `type:feature`, `type:bug`, `type:chore`, `type:spike`, `type:epic`.
 - Priority: `p0` now, `p1` this phase, `p2` later.
-- Phase: `phase:1` to `phase:6` from the roadmap. A workflow files the issue under the matching
+- Phase: `phase:1` to `phase:8` from the roadmap. A workflow files the issue under the matching
   milestone automatically.
 - `perf` if it can move frame or step time; `needs-mac` if it can only be verified on the Mac.
 
