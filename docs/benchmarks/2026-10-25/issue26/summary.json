@@ -25,9 +25,10 @@
     "observed_gpu_overhead_below_0_1ms": true
   },
   "native_display_acceptance_verified": false,
-  "display_blocker": "macOS session locked; fullscreen backing 2880x1800, windowed request clamped to 2560x1378; dimension guard rejects both. No native presentation samples.",
+  "display_blocker": "Session now unlocked; temporary native-backing display setting awaits user confirmation. Earlier locked-session attempts were rejected at 2880x1800 fullscreen and 2560x1378 windowed; no native presentation samples.",
   "physical_F3_verified": false,
   "full_scene_12ms_budget_pass": false,
   "resident_memory_verified": false,
-  "memory_measure": "MTLDevice.currentAllocatedSize is allocation bytes, not physical residency."
+  "memory_measure": "MTLDevice.currentAllocatedSize is allocation bytes, not physical residency.",
+  "revision_note": "Recorded before subsequent rebase onto d3a1e07. These are measurements of base_revision and implementation_revision, not the latest head."
 }
