@@ -280,7 +280,10 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
         let Some(e) = entity(world, id) else { continue };
         let (Some(u), Some(v), Some(t)) = (world.get::<Unit>(e), world.get::<Vitals>(e), world.get::<Transform>(e)) else { continue };
         let r = world.get::<Body>(e).map_or(0.4, |b| b.radius);
-        if !in_shape(shape, origin, yaw, t.xz(), r) {
+        // Against another player, where the attacker saw them (#169).
+        let at = crate::rewind::seen_at(world, src, e).unwrap_or(t.pos);
+        let xz = Vec2::new(at.x, at.z);
+        if !in_shape(shape, origin, yaw, xz, r) {
             continue;
         }
         if allies {
@@ -290,10 +293,10 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
         } else if !u.faction.is_enemy(src.faction) || v.dead {
             continue;
         }
-        if !line_of_sight(world, origin + Vec3::Y, chest(world, e)) {
+        if !line_of_sight(world, origin + Vec3::Y, chest(world, e) - t.pos + at) {
             continue;
         }
-        found.push(((t.xz() - o2).length_squared(), e));
+        found.push(((xz - o2).length_squared(), e));
     }
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
     found.into_iter().take(max as usize).map(|(_, e)| e).collect()

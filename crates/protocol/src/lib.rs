@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -62,6 +62,10 @@ pub enum Command {
     /// Eat or drink the consumable in an inventory slot: food only out of combat, and potions
     /// only once `PlayerState::potion_ready` is 0.
     UseItem { slot: u8 },
+    /// The snapshot tick the sender's view is showing (interpolation puts it a little behind
+    /// the newest). Send it with each batch of commands: a player's shots and blows at other
+    /// players are tested where the sender saw them, up to 250 ms back.
+    Viewing { tick: u64 },
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.

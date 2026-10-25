@@ -204,6 +204,7 @@ record! {
     skills: crate::crafting::Skills,
     skinned: crate::crafting::Skinned,
     potion_cooldown: crate::consumables::PotionCooldown,
+    trail: crate::rewind::Trail,
 }
 
 impl UnitRecord {
