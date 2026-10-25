@@ -440,6 +440,7 @@ impl Sim {
         let (tick, time) = (clock.tick, clock.time);
         let center = viewer.and_then(|v| self.get::<Transform>(v)).map(|t| t.pos);
         let mut units = Vec::new();
+        let land = Land(self.world.resource::<Land>().0.clone());
         let mut q = self.world.query::<(&Unit, &Transform, &Motion, &Vitals, &Anim, &Fighter, Option<&Appearance>)>();
         for (u, t, m, v, a, f, look) in q.iter(&self.world) {
             if let Some(c) = center && (t.pos - c).length_squared() > combat::view::VIEW_RANGE * combat::view::VIEW_RANGE {
@@ -459,6 +460,7 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
+                traversal: movement::traversal(m, Some(&land), t.pos),
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
@@ -491,6 +493,7 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
+                traversal: g.traversal,
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,

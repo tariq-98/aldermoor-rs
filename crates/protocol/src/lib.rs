@@ -155,6 +155,44 @@ pub enum Pose {
     Dead,
 }
 
+/// How a body is getting about, beyond its pose: what animation needs to show swimmers,
+/// waders and climbers, and to fit clips to a roll or a leap. One byte when on foot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum Traversal {
+    #[default]
+    Ground,
+    /// On its feet in water up to the knees or so: slower, splashing.
+    Wading,
+    /// Floating in deep water.
+    Swimming,
+    /// Carried through a move that ignores the controls.
+    Forced(ForcedMove),
+}
+
+/// A roll, leap, charge, climb or throw: where it began and ends, and when.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ForcedMove {
+    pub kind: ForcedKind,
+    pub from: Vec3,
+    pub to: Vec3,
+    /// Simulation time it began, in seconds (as `Snapshot::time`).
+    pub start: f64,
+    pub duration: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ForcedKind {
+    Roll,
+    /// A lunge, vault or leap from a skill.
+    Leap,
+    /// Rushing at a target.
+    Charge,
+    /// Pulling up over a ledge.
+    Climb,
+    /// Thrown by a blow.
+    Knockback,
+}
+
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
 /// from `assets/catalog/`. Empty or `None` fields mean the body type's defaults.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -199,6 +237,7 @@ pub struct UnitState {
     pub pose: Pose,
     /// Seconds since the pose began, for animation timing.
     pub pose_time: f32,
+    pub traversal: Traversal,
     pub health: f32,
     pub max_health: f32,
     pub hostile: bool,
@@ -478,6 +517,7 @@ mod tests {
                 yaw: 3.0,
                 pose: Pose::Idle,
                 pose_time: 0.0,
+                traversal: Traversal::Ground,
                 health: 100.0,
                 max_health: 100.0,
                 hostile: false,

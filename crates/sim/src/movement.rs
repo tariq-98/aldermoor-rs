@@ -42,6 +42,8 @@ const SWIM_FLOAT: f32 = 0.5;
 /// Swimming speed, and wading through shallower water, as fractions of running.
 pub const SWIM: f32 = 0.45;
 const WADE: f32 = 0.7;
+/// Water deeper than this is waded through.
+pub const WADE_DEPTH: f32 = 0.2;
 /// Falls up to this many metres don't hurt; past it each metre costs a share of max health.
 pub const SAFE_FALL: f32 = 4.0;
 pub const FALL_DAMAGE: f32 = 0.06;
@@ -67,6 +69,28 @@ pub struct Landings {
 fn steep(land: &world::Valley, from: Vec2, y: f32, to: Vec2) -> bool {
     let run = (to - from).length();
     run > 1e-5 && land.ground(to.x, to.y) - y > MAX_SLOPE * run + 0.01
+}
+
+/// How `m` is getting about, for the snapshot. Without the `land`, wading reads as on foot.
+pub fn traversal(m: &Motion, land: Option<&Land>, pos: Vec3) -> protocol::Traversal {
+    use protocol::{ForcedMove, Traversal};
+    if let Some(f) = m.forced {
+        let kind = match f.kind {
+            ForcedKind::Dodge => protocol::ForcedKind::Roll,
+            ForcedKind::Knockback => protocol::ForcedKind::Knockback,
+            ForcedKind::Leap => protocol::ForcedKind::Leap,
+            ForcedKind::Charge { .. } => protocol::ForcedKind::Charge,
+            ForcedKind::Climb => protocol::ForcedKind::Climb,
+        };
+        return Traversal::Forced(ForcedMove { kind, from: f.from, to: f.to, start: f.start, duration: f.duration as f32 });
+    }
+    if m.swimming {
+        Traversal::Swimming
+    } else if m.grounded && land.is_some_and(|l| l.0.water_depth(pos.x, pos.z) > WADE_DEPTH) {
+        Traversal::Wading
+    } else {
+        Traversal::Ground
+    }
 }
 
 /// Where a walker at `from` (feet at `y`) going along `dir` ends up after climbing the face
@@ -213,7 +237,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         let depth = land.water_depth(t.pos.x, t.pos.z);
         if m.swimming {
             speed *= SWIM;
-        } else if m.grounded && depth > 0.2 {
+        } else if m.grounded && depth > WADE_DEPTH {
             speed *= WADE;
         }
         if dir.length_squared() > 0.0025 && face.is_some() && t.forward().dot(dir.normalize()) < -0.35 {
