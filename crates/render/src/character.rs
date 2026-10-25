@@ -69,6 +69,10 @@ pub struct Character {
     blend_from: Vec<Transform>,
     blend_time: f32,
     last_clip: String,
+    /// The legs' locomotion clip under an action on the move.
+    last_legs: Option<&'static str>,
+    /// Where the walk, jog or sprint cycle is, from 0 to 1.
+    stride: f32,
     drawn_now: bool,
     main_offset: f32,
     grab_offset: Option<f32>,
@@ -76,6 +80,34 @@ pub struct Character {
     springs: Vec<crate::springs::SpringBones>,
     children: Vec<Vec<usize>>,
     lod_parts: HashMap<usize, (Vec<Part>, Arc<Model>)>,
+}
+
+/// Which bones a clip drives. The upper body is `spine_01` and everything under it.
+#[derive(Clone, Copy, PartialEq)]
+enum Bones {
+    All,
+    Upper,
+    Lower,
+}
+/// How far round from the hips an action on the move may turn the chest, beyond the clip's own
+/// twist, to face where the clip faced it.
+const MAX_TWIST: f32 = std::f32::consts::FRAC_PI_3;
+/// The humanoid loop for walking or running at `speed`.
+fn locomotion_clip(pose: Pose, speed: f32) -> &'static str {
+    match pose {
+        Pose::Walk => "Walk_Loop",
+        _ if speed > 7. => "Sprint_Loop",
+        _ => "Jog_Fwd_Loop",
+    }
+}
+/// How far round the vertical a bone at model-space `rotation` has turned from its `rest`: the
+/// twist about +Y of the change, which stays steady however far the bone leans.
+fn heading(rotation: Quat, rest: Quat) -> f32 {
+    let change = rotation * rest.inverse();
+    2. * change.y.atan2(change.w)
+}
+fn wrap(angle: f32) -> f32 {
+    (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
 
 pub fn region_mask(names: &[String], regions: &[String]) -> u32 {
@@ -192,6 +224,8 @@ impl Character {
             blend_from: local,
             blend_time: 1.,
             last_clip: String::new(),
+            last_legs: None,
+            stride: 0.,
             drawn_now: look.drawn,
             main_offset: 0.,
             grab_offset: None,
@@ -225,7 +259,7 @@ impl Character {
                 c.clips.clips.contains_key(&idle),
                 "beast idle clip is missing"
             );
-            c.apply_clip(&idle, 0., true, false);
+            c.apply_clip(&idle, 0., true, Bones::All);
             c.world = world_matrices(&c.nodes, &c.local);
             c.blend_from = c.local.clone();
             c.last_clip = idle;
@@ -737,13 +771,7 @@ impl Character {
                 &self.idle
             }
             .into(),
-            Pose::Walk => "Walk_Loop".into(),
-            Pose::Run => if u.velocity.xz().length() > 7. {
-                "Sprint_Loop"
-            } else {
-                "Jog_Fwd_Loop"
-            }
-            .into(),
+            Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()).into(),
             Pose::Jump => "Jump_Start".into(),
             Pose::Fall => "Jump_Loop".into(),
             Pose::Dodge => "Roll".into(),
@@ -764,7 +792,87 @@ impl Character {
             Pose::Dead => "Death01".into(),
         }
     }
-    fn apply_clip(&mut self, name: &str, t: f32, looping: bool, upper_only: bool) {
+    /// The locomotion pose the legs keep while a humanoid attacks or casts on the move, by the
+    /// sim's own speed thresholds (`update_poses`). `None` plays the action on the whole body.
+    fn moving_legs(&self, u: &UnitState) -> Option<Pose> {
+        let kneeling = self
+            .combat
+            .as_ref()
+            .is_some_and(|c| c.downed || c.action == Action::Revive);
+        if !self.humanoid
+            || kneeling
+            || self.rally_time.is_some()
+            || !matches!(u.pose, Pose::Attack | Pose::Cast)
+        {
+            return None;
+        }
+        let speed = u.velocity.xz().length();
+        (speed > 0.3).then_some(if speed > 3.2 { Pose::Run } else { Pose::Walk })
+    }
+    /// How fast the walk or run cycle plays at `speed`.
+    fn stride_rate(&self, pose: Pose, speed: f32) -> f32 {
+        if pose == Pose::Walk {
+            (speed
+                / if self.humanoid {
+                    1.5
+                } else {
+                    self.beast_speeds[0]
+                })
+            .clamp(0.3, 2.)
+        } else {
+            (speed
+                / if self.humanoid {
+                    4.5
+                } else {
+                    self.beast_speeds[1]
+                })
+            .clamp(0.5, 1.6)
+        }
+    }
+    /// Puts walking legs under the action just applied: `legs` drives the hips and legs at the
+    /// stride phase, and the upper body turns about the vertical back toward where the action's
+    /// own hips faced it. The turn stops once the chest is `MAX_TWIST` round from the hips (or the
+    /// clip's own twist, if that is more), so swings that pivot the whole body keep a believable
+    /// spine while side-on stances (a bow, a wand) still aim forward.
+    fn walk_under(&mut self, legs: &str) {
+        let ids = ["pelvis", "spine_01", "spine_03"].map(|n| self.names.get(n).copied());
+        let [Some(pelvis), Some(spine), Some(chest)] = ids else {
+            return;
+        };
+        let rest_hips = self.rotation_to(pelvis, None, true);
+        let rest_chest = self.rotation_to(chest, None, true);
+        let clip_hips = heading(self.rotation_to(pelvis, None, false), rest_hips);
+        let clip_chest = heading(self.rotation_to(chest, None, false), rest_chest);
+        let time = self.stride * self.clips.clips.get(legs).map_or(1., |a| a.duration);
+        self.apply_clip(legs, time, true, Bones::Lower);
+        let hips = self.rotation_to(pelvis, None, false);
+        let hips_heading = heading(hips, rest_hips);
+        let chest_heading = heading(self.rotation_to(chest, None, false), rest_chest);
+        let own = wrap(clip_chest - clip_hips);
+        let twist = wrap(clip_chest - hips_heading).clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
+        // A turn about the vertical, applied above the hips, adds straight onto the chest's heading.
+        let turn = wrap(hips_heading + twist - chest_heading);
+        self.local[spine].rotation =
+            (hips.inverse() * Quat::from_rotation_y(turn) * hips * self.local[spine].rotation)
+                .normalize();
+    }
+    /// The rotation from `top`'s frame (the model's when `None`) down to bone `i`'s, in the live
+    /// pose or the rest pose.
+    fn rotation_to(&self, i: usize, top: Option<usize>, rest: bool) -> Quat {
+        let mut rotation = Quat::IDENTITY;
+        let mut at = Some(i);
+        while let Some(n) = at.filter(|n| Some(*n) != top) {
+            let local = if rest {
+                self.nodes[n].rest.rotation
+            } else {
+                self.local[n].rotation
+            };
+            rotation = local * rotation;
+            at = self.nodes[n].parent;
+        }
+        rotation
+    }
+    fn apply_clip(&mut self, name: &str, t: f32, looping: bool, bones: Bones) {
         let Some(clip) = self.clips.clips.get(name) else {
             return;
         };
@@ -777,7 +885,9 @@ impl Character {
             let Some(&i) = self.names.get(&track.node) else {
                 continue;
             };
-            if upper_only && !self.upper.get(i).copied().unwrap_or(false) {
+            if bones != Bones::All
+                && self.upper.get(i).copied().unwrap_or(false) != (bones == Bones::Upper)
+            {
                 continue;
             }
             let v = track.sample(t);
@@ -865,10 +975,14 @@ impl Character {
             }
         }
         let name = self.clip_for(u);
-        if name != self.last_clip {
+        let speed = u.velocity.xz().length();
+        let moving = self.moving_legs(u);
+        let legs = moving.map(|pose| locomotion_clip(pose, speed));
+        if name != self.last_clip || legs != self.last_legs {
             self.blend_from = self.local.clone();
             self.blend_time = 0.;
             self.last_clip = name.clone();
+            self.last_legs = legs;
         }
         self.last_pose = u.pose;
         self.blend_time = (self.blend_time + dt).min(0.16);
@@ -876,26 +990,15 @@ impl Character {
             *l = n.rest;
         }
         let locomotion = matches!(u.pose, Pose::Walk | Pose::Run);
+        let acting = self.action_clip(u).is_some();
+        let walking = locomotion && !acting;
         let looping = matches!(u.pose, Pose::Idle | Pose::Walk | Pose::Run | Pose::Fall)
             || self.combat.as_ref().is_some_and(|c| {
                 matches!(c.action, Action::Channel | Action::Revive)
                     || c.action == Action::Spin && c.cast.as_ref().is_some_and(|c| c.channel)
             });
         let rate = match u.pose {
-            Pose::Walk => (u.velocity.xz().length()
-                / if self.humanoid {
-                    1.5
-                } else {
-                    self.beast_speeds[0]
-                })
-            .clamp(0.3, 2.),
-            Pose::Run => (u.velocity.xz().length()
-                / if self.humanoid {
-                    4.5
-                } else {
-                    self.beast_speeds[1]
-                })
-            .clamp(0.5, 1.6),
+            Pose::Walk | Pose::Run => self.stride_rate(u.pose, speed),
             Pose::Dodge => self
                 .clips
                 .clips
@@ -904,7 +1007,25 @@ impl Character {
             Pose::Attack => self.clips.clips.get(&name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
         };
-        let mut clip_time = u.pose_time * rate;
+        // One stride phase runs through attacks on the move and through changes between walk,
+        // jog and sprint (all three loops start on the left foot), so the feet never restart.
+        let stride = match moving {
+            Some(pose) => Some((locomotion_clip(pose, speed), self.stride_rate(pose, speed))),
+            None => walking.then_some((name.as_str(), rate)),
+        };
+        if let Some((clip, rate)) = stride {
+            let length = self
+                .clips
+                .clips
+                .get(clip)
+                .map_or(1., |a| a.duration.max(0.001));
+            self.stride = (self.stride + dt * rate / length).fract();
+        }
+        let mut clip_time = if walking {
+            self.stride * self.clips.clips.get(&name).map_or(1., |a| a.duration)
+        } else {
+            u.pose_time * rate
+        };
         if let Some(c) = &self.combat {
             if c.downed {
                 clip_time = self.clips.clips.get(&name).map_or(0., |a| a.duration);
@@ -919,7 +1040,7 @@ impl Character {
                     .and_then(|m| m.event("hit"))
                     .unwrap_or(duration * 0.5);
                 clip_time = swing_time(c.action_time, windup, hit, duration);
-            } else if self.action_clip(u).is_some() {
+            } else if acting {
                 clip_time = if c.action == Action::Parry {
                     c.action_time * 2.
                 } else if u.pose == Pose::Attack {
@@ -929,7 +1050,10 @@ impl Character {
                 };
             }
         }
-        self.apply_clip(&name, clip_time, looping, false);
+        self.apply_clip(&name, clip_time, looping, Bones::All);
+        if let Some(legs) = legs {
+            self.walk_under(legs);
+        }
         if locomotion
             && u.look.drawn
             && self.humanoid
@@ -940,7 +1064,7 @@ impl Character {
                 .and_then(|v| v.as_str())
                 .map(str::to_owned)
         {
-            self.apply_clip(&idle, u.pose_time, true, true);
+            self.apply_clip(&idle, u.pose_time, true, Bones::Upper);
         }
         if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
             let c = self.combat.as_ref().unwrap();
@@ -956,12 +1080,12 @@ impl Character {
                 self.shield_clip("block", "Sword_Block")
             };
             let looping = !parrying && self.clip_meta.get(&guard).is_some_and(|m| m.looping);
-            self.apply_clip(&guard, time, looping, true);
+            self.apply_clip(&guard, time, looping, Bones::Upper);
             self.transition = None;
         }
         let transition = self.transition.clone();
         if let Some((n, t)) = &transition {
-            self.apply_clip(n, *t, false, true);
+            self.apply_clip(n, *t, false, Bones::Upper);
         }
         let blend = self.blend_time / 0.16;
         for (i, p) in self.local.iter_mut().enumerate() {
@@ -1418,10 +1542,179 @@ mod combat_tests {
         let hit = c.clip_meta["Sword_Overhead"].event("hit").unwrap();
         let arm = c.names["upperarm_r"];
         let struck = c.local[arm].rotation;
-        c.apply_clip("Sword_Overhead", hit, false, false);
+        c.apply_clip("Sword_Overhead", hit, false, Bones::All);
         assert!(
             struck.abs_diff_eq(c.local[arm].rotation, 1e-4),
             "the blade must reach its strike as the wind-up ends"
         );
+    }
+    /// A swordsman with a shield, `speed` m/s forward, and a combat view with no action yet.
+    fn fighter(speed: f32) -> (Character, UnitState, UnitCombat) {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let look = Look {
+            art: "male".into(),
+            drawn: true,
+            gear: vec![
+                ("main_hand".into(), "sword.arming".into()),
+                ("off_hand".into(), "shield.round".into()),
+            ],
+            ..Default::default()
+        };
+        let c = Character::load(&cat, &mut ModelCache::default(), &look).unwrap();
+        let u = UnitState {
+            id: 1,
+            kind: protocol::UnitKind::Player,
+            body: "player".into(),
+            name: "test".into(),
+            level: 1,
+            position: Vec3::ZERO,
+            velocity: Vec3::new(0., 0., speed),
+            yaw: 0.,
+            pose: if speed > 3.2 { Pose::Run } else { Pose::Idle },
+            pose_time: 0.,
+            health: 100.,
+            max_health: 100.,
+            hostile: false,
+            target: None,
+            look,
+        };
+        let fight = UnitCombat {
+            id: 1,
+            action: Action::None,
+            action_time: 0.,
+            cast: None,
+            auras: vec![],
+            resource_kind: protocol::ResourceKind::Rage,
+            resource: 0.,
+            max_resource: 100.,
+            guarding: false,
+            downed: false,
+            defiance: None,
+        };
+        (c, u, fight)
+    }
+    fn sampled(c: &Character, clip: &str, bone: &str, t: f32) -> Quat {
+        let track = c.clips.clips[clip]
+            .tracks
+            .iter()
+            .find(|k| k.node == bone && k.property == Property::Rotation)
+            .unwrap();
+        Quat::from_array(track.sample(t).to_array()).normalize()
+    }
+    fn same(a: Quat, b: Quat) -> bool {
+        a.dot(b).abs() > 1. - 1e-6
+    }
+    #[test]
+    fn attacks_on_the_move_keep_the_legs_striding() {
+        let (mut c, mut u, mut fight) = fighter(4.5);
+        for _ in 0..20 {
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        let jog = c.clips.clips["Jog_Fwd_Loop"].duration;
+        let start = c.stride;
+        u.pose = Pose::Attack;
+        fight.action = Action::Slash;
+        for frame in 0..30 {
+            fight.action_time = frame as f32 / 60.;
+            u.pose_time = fight.action_time;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        assert_eq!(c.last_clip, "Sword_Regular_A");
+        assert_eq!(c.last_legs, Some("Jog_Fwd_Loop"));
+        let stride = (start + 30. / 60. / jog).fract();
+        assert!(
+            (c.stride - stride).abs() < 1e-4,
+            "the stride runs on through the swing"
+        );
+        for leg in ["thigh_l", "calf_l", "foot_r"] {
+            let jogging = sampled(&c, "Jog_Fwd_Loop", leg, c.stride * jog);
+            assert!(
+                same(c.local[c.names[leg]].rotation, jogging),
+                "{leg} keeps jogging under the swing"
+            );
+        }
+        let swing = c.clips.clips["Sword_Regular_A"].duration;
+        let arm = sampled(&c, "Sword_Regular_A", "upperarm_r", 29. / 60. * swing / 0.5);
+        assert!(
+            same(c.local[c.names["upperarm_r"]].rotation, arm),
+            "the arm swings"
+        );
+        u.pose = Pose::Run;
+        u.pose_time = 0.;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Jog_Fwd_Loop");
+        assert!(
+            (c.stride - (stride + 1. / 60. / jog).fract()).abs() < 1e-4,
+            "the jog carries on mid-stride after the swing"
+        );
+        let (mut still, mut u, mut fight) = fighter(0.);
+        u.pose = Pose::Attack;
+        fight.action = Action::Slash;
+        for frame in 0..30 {
+            fight.action_time = frame as f32 / 60.;
+            still.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        assert_eq!(still.last_legs, None);
+        let thigh = sampled(
+            &still,
+            "Sword_Regular_A",
+            "thigh_l",
+            29. / 60. * swing / 0.5,
+        );
+        assert!(
+            same(still.local[still.names["thigh_l"]].rotation, thigh),
+            "standing swings keep their footwork"
+        );
+    }
+    #[test]
+    fn moving_swings_face_where_the_clip_does_within_reach_of_the_hips() {
+        // How far round the chest and hips of each character face, against their rest pose.
+        let facing = |c: &Character| {
+            let [hips, chest] = ["pelvis", "spine_03"].map(|n| c.names[n]);
+            [hips, chest]
+                .map(|i| heading(c.rotation_to(i, None, false), c.rotation_to(i, None, true)))
+        };
+        for (action, clip) in [
+            (Action::Bash, "Shield_OneShot"),
+            (Action::Slash, "Sword_Regular_A"),
+        ] {
+            let (mut moving, mut u, mut fight) = fighter(4.5);
+            let (mut still, mut s, _) = fighter(0.);
+            u.pose = Pose::Attack;
+            s.pose = Pose::Attack;
+            fight.action = action;
+            let mut capped = false;
+            for frame in 0..30 {
+                fight.action_time = frame as f32 / 60.;
+                moving.update_combat(&u, Some(&fight), 1. / 60.);
+                still.update_combat(&s, Some(&fight), 1. / 60.);
+                if frame < 10 {
+                    continue; // still blending in
+                }
+                assert_eq!(moving.last_clip, clip);
+                let [hips, chest] = facing(&moving);
+                let [clip_hips, clip_chest] = facing(&still);
+                // The chest faces where the clip's does, unless that twists it further round
+                // from the jogging hips than MAX_TWIST (or the clip's own twist).
+                let own = wrap(clip_chest - clip_hips);
+                let wanted = wrap(clip_chest - hips);
+                let twist = wanted.clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
+                assert!(
+                    wrap(chest - hips - twist).abs() < 1e-3,
+                    "{clip} at frame {frame}: twist {} for {}",
+                    wrap(chest - hips).to_degrees(),
+                    twist.to_degrees()
+                );
+                capped |= twist != wanted;
+            }
+            assert_eq!(
+                capped,
+                clip == "Sword_Regular_A",
+                "{clip}: only the pivot is capped"
+            );
+        }
     }
 }
