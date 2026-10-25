@@ -1,5 +1,15 @@
 //! Stock widgets for authoritative player state; artwork and icons remain supplied assets.
 use protocol::{CombatView, Command, Snapshot};
+/// What the player's keys are, for the labels.
+#[derive(Default)]
+pub struct Keys {
+    pub hint: String,
+    pub slots: [String; 10],
+    pub revive: String,
+    pub target: String,
+    pub swap: String,
+    pub respawn: String,
+}
 pub enum Action {
     Command(Command),
     CycleTarget,
@@ -43,7 +53,7 @@ pub fn draw(
     snapshot: &Snapshot,
     fight: &CombatView,
     ground: Option<glam::Vec3>,
-    hint: &str,
+    keys: &Keys,
 ) -> Vec<Action> {
     let mut actions = Vec::new();
     let Some(player) = snapshot.player.as_ref() else {
@@ -113,7 +123,7 @@ pub fn draw(
                             );
                         }
                         if c.downed {
-                            ui.label("Downed · E to revive");
+                            ui.label(format!("Downed · {} to revive", keys.revive));
                         }
                         if c.guarding {
                             ui.label("Guarding");
@@ -121,7 +131,7 @@ pub fn draw(
                         auras(ui, &c.auras);
                     }
                     if target.health <= 0. && !target.hostile {
-                        ui.label("Defeated · E to revive");
+                        ui.label(format!("Defeated · {} to revive", keys.revive));
                     }
                 });
             });
@@ -133,7 +143,7 @@ pub fn draw(
             egui::ScrollArea::horizontal().max_width((ctx.content_rect().width()-40.).max(200.)).show(ui,|ui| {
                 ui.horizontal(|ui| {for slot in 0..10 {
                     let data=player.bar.get(slot);
-                    let key=(slot+1)%10;
+                    let key=&keys.slots[slot];
                     let label=data.map_or_else(||format!("{key}\n—"),|s|format!("{key} · {}\nCost {:.0}{}",s.name,s.cost,if s.ground {" · ground"} else {""}));
                     let ready=data.is_some_and(|s|!s.ability.is_empty() && s.cooldown<=0. && s.cost<=player.resource) && me.health>0.;
                     // GCD queueing belongs to the sim; don't disable a ready button during GCD.
@@ -154,12 +164,12 @@ pub fn draw(
                 }});
             });
             ui.horizontal(|ui| {
-                if ui.button("Tab · Target").clicked(){actions.push(Action::CycleTarget);}
+                if ui.button(format!("{} · Target",keys.target)).clicked(){actions.push(Action::CycleTarget);}
                 if ui.button(if player.auto_attack {"Stop attacking"} else {"Auto attack"}).clicked(){actions.push(Action::Command(Command::SetAutoAttack(!player.auto_attack)));}
-                if ui.add_enabled(player.swap_ready<=0.,egui::Button::new(format!("` · Set {} · {:.1}s",player.weapon_set+1,player.swap_ready))).clicked(){actions.push(Action::Command(Command::SwapWeapons));}
-                if player.can_respawn && ui.button("R · Respawn").clicked(){actions.push(Action::Command(Command::Respawn));}
+                if ui.add_enabled(player.swap_ready<=0.,egui::Button::new(format!("{} · Set {} · {:.1}s",keys.swap,player.weapon_set+1,player.swap_ready))).clicked(){actions.push(Action::Command(Command::SwapWeapons));}
+                if player.can_respawn && ui.button(format!("{} · Respawn",keys.respawn)).clicked(){actions.push(Action::Command(Command::Respawn));}
             });
-            ui.label(hint);
+            ui.label(&keys.hint);
         });
     });
     ctx.memory_mut(|m| {
@@ -190,7 +200,15 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| actions = draw(ctx, snapshot, &CombatView::default(), ground, ""),
+                |ctx| {
+                    actions = draw(
+                        ctx,
+                        snapshot,
+                        &CombatView::default(),
+                        ground,
+                        &Keys::default(),
+                    )
+                },
             );
             actions
         };

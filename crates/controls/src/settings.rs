@@ -1,6 +1,6 @@
 //! The player's control settings, read from a JSON file. Every field is optional; a missing
 //! file means the defaults.
-use crate::{Orbit, Pilot, Scheme, camera};
+use crate::{Bindings, Orbit, Pilot, Scheme, camera};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -21,6 +21,8 @@ pub struct Settings {
     pub shoulder: Option<f32>,
     /// Classic: the camera swings back behind the character after a second of moving.
     pub swing_back: bool,
+    /// Keys and mouse buttons; controls left out keep their defaults.
+    pub bindings: Bindings,
 }
 
 impl Default for Settings {
@@ -34,6 +36,7 @@ impl Default for Settings {
             max_distance: camera::MAX_DISTANCE,
             shoulder: None,
             swing_back: true,
+            bindings: Bindings::default(),
         }
     }
 }
@@ -49,6 +52,15 @@ impl Settings {
         let s: Self =
             serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(s.clamped())
+    }
+
+    /// Writes the settings to `path`, making its folder if needed.
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))
     }
 
     fn clamped(mut self) -> Self {
@@ -116,6 +128,22 @@ mod tests {
         assert_eq!(s.sensitivity, 5.);
         assert_eq!(s.max_distance, 10.);
         assert_eq!(s.orbit().distance, 10.);
+    }
+
+    #[test]
+    fn saves_and_loads_back() {
+        let dir = std::env::temp_dir().join(format!("aldermoor-settings-{}", std::process::id()));
+        let path = dir.join("nested/controls.json");
+        let mut s = Settings {
+            scheme: Scheme::Classic,
+            invert_y: true,
+            ..Default::default()
+        };
+        s.bindings
+            .bind(crate::Control::Jump, crate::Input::new("KeyE"));
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).unwrap(), s);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
