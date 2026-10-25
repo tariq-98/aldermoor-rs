@@ -1,5 +1,6 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
 mod combat;
+mod effects;
 mod hud;
 mod interpolate;
 use anyhow::{Context, Result, ensure};
@@ -47,6 +48,7 @@ struct Options {
     look_settings: Option<PathBuf>,
     surface_assets: Option<PathBuf>,
     hud_font: Option<PathBuf>,
+    specialty: server::Specialty,
     metalfx: bool,
     direct_drawable: bool,
     legacy_cpu: bool,
@@ -76,6 +78,7 @@ impl Options {
             look_settings: None,
             surface_assets: None,
             hud_font: None,
+            specialty: server::Specialty::Warrior,
             metalfx: false,
             direct_drawable: true,
             legacy_cpu: false,
@@ -137,6 +140,18 @@ impl Options {
                 "--hud-font" => {
                     o.hud_font = Some(args.next().context("--hud-font needs a file")?.into())
                 }
+                "--specialty" => {
+                    let name = args
+                        .next()
+                        .context("--specialty needs a name")?
+                        .to_lowercase();
+                    o.specialty = server::Specialty::ALL
+                        .into_iter()
+                        .find(|s| format!("{s:?}").to_lowercase() == name)
+                        .context(
+                            "--specialty is warrior, archer, mage, necromancer, rogue or healer",
+                        )?;
+                }
                 "--offscreen" => o.offscreen = true,
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
@@ -147,7 +162,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --specialty NAME\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -218,11 +233,13 @@ struct Game {
     viewport: Vec2,
     aim_slot: Option<u8>,
     valley: world::Valley,
+    effects: Option<effects::Effects>,
 }
 impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
-        let host = server::Host::start(0xa1de, "Traveller");
+        let host = server::Host::start_as(0xa1de, "Traveller", options.specialty);
+        let effects = catalog.effects.clone().map(effects::Effects::new);
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
@@ -261,6 +278,7 @@ impl Game {
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
             valley: world::Valley::new(),
+            effects,
         };
         g.scenery = Some(render::scenery::Scenery::new(&g.catalog, &mut g.cache)?);
         if g.options.showcase {
@@ -529,9 +547,13 @@ impl Game {
         }
         let unit_index: HashMap<_, _> =
             self.snaps.current.units.iter().map(|u| (u.id, u)).collect();
+        let event_time = self.snaps.current.time as f32;
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            if let Some(fx) = &mut self.effects {
+                fx.event(&e, event_time);
+            }
             if let protocol::Event::Rallied { unit } | protocol::Event::Revived { unit } = &e
                 && let Some(c) = self.characters.get_mut(unit)
             {
@@ -700,6 +722,20 @@ impl Game {
             .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
             .filter(|s| s.ground && s.radius > 0.)
             .map(|s| s.radius);
+        let world_effects = self.effects.is_some() && !self.options.showcase;
+        if world_effects && let Some(fx) = &mut self.effects {
+            let characters = &self.characters;
+            let valley = &self.valley;
+            draws.extend(fx.draws(&effects::Scene {
+                fight: &self.fight,
+                units: &units,
+                height: &|id| characters.get(&id).map_or(1.8, |c| c.rig_height),
+                ground: &|x, z| valley.ground(x, z),
+                since: self.snaps.received.elapsed().as_secs_f32(),
+                time: scene_time,
+                aim: aim.zip(radius),
+            }));
+        }
         let projection = combat::Projection {
             matrix: camera.matrix(r.width as f32 / r.height as f32),
             size: self.viewport
@@ -719,6 +755,7 @@ impl Game {
                     &self.feedback,
                     aim.zip(radius),
                     &self.valley,
+                    world_effects,
                 );
             }
             actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim);

@@ -176,7 +176,7 @@ pub struct Animation {
     pub tracks: Vec<Track>,
 }
 static NEXT_MODEL: AtomicU64 = AtomicU64::new(1);
-pub(crate) fn next_model_id() -> u64 {
+pub fn next_model_id() -> u64 {
     NEXT_MODEL.fetch_add(1, Ordering::Relaxed)
 }
 pub struct Model {

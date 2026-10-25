@@ -355,6 +355,30 @@ rain streaks run down them). Tangent frames built from screen derivatives, for m
 tangents such as the terrain and the river, have their bitangent along −∂P/∂v, as glTF's normal
 maps expect.
 
+## Combat effects: `catalog/effects.json`
+
+How a fight looks, as data (checked by `Catalog::check`, and against the combat content by
+`crates/sim/tests/looks.rs`). The client draws every effect from a handful of shapes built once
+(spheres, tapering trails, shafts, discs, rings, fans and strips), blended, unshadowed and lit
+mostly by their own glow, so all look values live here:
+
+- `glows`: named colours with an emission `strength` and an `albedo` share. Schools use their
+  lowercase names (`fire`), combo fields `field.<name>`, ground marks `hostile` and `friendly`,
+  plus `combo` (a combo's burst) and `wood` (a thrown axe's haft).
+- `projectiles`, by `ProjectileView.visual`: `kind` (`bolt`, `lance`, `arrow`, `axe`), its glow
+  and trail glow, size, length, halo, trail length and width, spin, and the flash where it stops.
+  Every missile in the content must have one.
+- `casts`: abilities whose cast or channel glows in the hands, and with what. Every spell (a cast
+  or channel outside the physical school) must be listed; heavy blows' wind-ups are not.
+- `auras`, by aura key: `shell` (a bubble: wards, shields), `ring` (at the feet: buffs and
+  conditions) or `halo` (motes circling the head: stuns, fear, sleep), with a glow and size.
+  Unlisted auras show only on the HUD.
+- `style`: opacities, ring and rim widths, the cast orb and circle, burst and aura fade timings.
+
+Warnings fill from faint to solid as they ripen and fields pulse; both are red when they threaten
+the viewer. These are placeholder looks, sized and coloured to read in a fight; authored spell
+meshes and textures are later work.
+
 ## Materials and file details
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM

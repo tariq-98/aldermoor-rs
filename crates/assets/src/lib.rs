@@ -10,10 +10,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+mod effects;
 mod gltf;
 mod surfaces;
 pub use surfaces::image_size;
 
+pub use effects::*;
 pub use gltf::Gltf;
 
 /// The 65 bones every humanoid skeleton has (the Universal Animation Library's rig).
@@ -374,6 +376,7 @@ pub struct Catalog {
     pub gear: Option<GearCatalog>,
     pub creatures: Option<CreatureCatalog>,
     pub environment: Option<EnvironmentCatalog>,
+    pub effects: Option<EffectCatalog>,
 }
 
 /// A skinned piece may cost this many more draws than it has materials. Parts sharing a
@@ -416,7 +419,8 @@ impl Catalog {
         let creatures = if optional("creatures.json").exists() { Some(read_json(&optional("creatures.json"))?) } else { None };
         let environment =
             if optional("environment.json").exists() { Some(read_json(&optional("environment.json"))?) } else { None };
-        Ok(Catalog { root, humanoid, gear, creatures, environment })
+        let effects = if optional("effects.json").exists() { Some(read_json(&optional("effects.json"))?) } else { None };
+        Ok(Catalog { root, humanoid, gear, creatures, environment, effects })
     }
 
     pub fn path(&self, rel: &str) -> PathBuf {
@@ -718,6 +722,13 @@ impl Catalog {
                 if !ids.contains(id.as_str()) {
                     problem(format!("environment placements name {id}, which isn't a prop"));
                 }
+            }
+        }
+
+        // Combat effects: every glow they name exists, and the numbers make sense.
+        if let Some(fx) = &self.effects {
+            for p in fx.problems() {
+                problem(p);
             }
         }
 

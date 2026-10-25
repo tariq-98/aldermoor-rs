@@ -6,6 +6,7 @@
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use protocol::{CombatView, Command, Snapshot, UnitId};
+pub use sim::Specialty;
 use sim::Sim;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,6 +44,11 @@ pub struct Host {
 impl Host {
     /// Starts the Brambleford valley with one player and returns once the first snapshot exists.
     pub fn start(seed: u64, player_name: &str) -> Host {
+        Host::start_as(seed, player_name, Specialty::Warrior)
+    }
+
+    /// As [`Host::start`], with a player of another specialty (and its weapons and skills).
+    pub fn start_as(seed: u64, player_name: &str, specialty: Specialty) -> Host {
         let (tx, rx) = unbounded();
         let shared = Arc::new(Shared {
             snapshot: Mutex::new(None),
@@ -52,7 +58,7 @@ impl Host {
             running: AtomicBool::new(true),
         });
         let mut world = Sim::brambleford(seed);
-        let player = world.spawn_player(player_name, glam::Vec2::new(6.0, 28.0), std::f32::consts::PI);
+        let player = world.spawn_hero(player_name, specialty, 1, glam::Vec2::new(6.0, 28.0), std::f32::consts::PI);
         let s = shared.clone();
         let thread = std::thread::Builder::new()
             .name("Aldermoor simulation".into())
