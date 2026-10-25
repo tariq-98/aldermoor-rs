@@ -26,15 +26,13 @@ def noise(size, scale, seed, power=2.0):
     return n / max(n.max(), 1e-9)
 
 
-def stretched(size, sx, sy, seed, power=2.0, scale=0.0):
-    """Periodic noise stretched: wavelengths `sx` times longer along x than y (grain, straw).
-    As in `noise`, `scale` leaves out features broader than the tile over `scale` / 2."""
+def stretched(size, sx, sy, seed, power=2.0):
+    """Periodic noise stretched: wavelengths `sx` times longer along x than y (grain, straw)."""
     rng = np.random.default_rng(seed)
-    cx = np.fft.fftfreq(size)[None, :] * size
-    cy = np.fft.fftfreq(size)[:, None] * size
-    fx, fy = cx * sx, cy * sy
+    fx = np.fft.fftfreq(size)[None, :] * size * sx
+    fy = np.fft.fftfreq(size)[:, None] * size * sy
     f = np.sqrt(fx * fx + fy * fy)
-    amp = np.where(f > 0, 1.0 / np.maximum(f, 1e-6) ** power, 0.0) * (np.hypot(cx, cy) >= scale * 0.5)
+    amp = np.where(f > 0, 1.0 / np.maximum(f, 1e-6) ** power, 0.0)
     spec = amp * np.exp(2j * np.pi * rng.random((size, size)))
     n = np.real(np.fft.ifft2(spec))
     n -= n.min()

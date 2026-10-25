@@ -55,16 +55,10 @@ jobs:
 
             const existing = await github.paginate(github.rest.issues.listMilestones, { ...repo, state: 'all' });
             const byPhase = {};
-            // Milestones are matched by their "Phase N:" prefix, so renaming a phase in
-            // tracking.json renames its milestone instead of creating a second one.
             for (const m of config.milestones) {
-              let found = existing.find(e => e.title.startsWith(`Phase ${m.phase}:`));
-              if (!single) {
-                if (!found) {
-                  found = (await github.rest.issues.createMilestone({ ...repo, title: m.title, description: m.description })).data;
-                } else if (found.title !== m.title || found.description !== m.description) {
-                  found = (await github.rest.issues.updateMilestone({ ...repo, milestone_number: found.number, title: m.title, description: m.description })).data;
-                }
+              let found = existing.find(e => e.title === m.title);
+              if (!found && !single) {
+                found = (await github.rest.issues.createMilestone({ ...repo, title: m.title, description: m.description })).data;
               }
               if (found) byPhase[m.phase] = found.number;
             }

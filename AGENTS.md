@@ -34,11 +34,9 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 - If you are blocked, add `status:blocked` and comment why.
 - CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux for the portable crates and
   on macOS for `render` and `client`. Keep it green; run the same commands locally before pushing.
-  `perf.yml` reports sim step times and never blocks a merge. `dashboard.yml` checks the dashboard
-  when a PR touches it.
+  `perf.yml` reports sim step times and never blocks a merge.
 - Issues labelled `perf` need before and after numbers against the budgets in
-  [docs/PERFORMANCE.md](docs/PERFORMANCE.md) (12 ms GPU on the M1 Air's own screen at 75% render
-  scale, 2 ms sim step).
+  [docs/RENDERER.md](docs/RENDERER.md) (12 ms GPU on the M1 Air, 2 ms sim step).
 - Issues labelled `needs-mac` must be checked on the Mac. A cloud agent can do the code but must
   say in the PR that it was not run.
 
@@ -47,34 +45,10 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 - Open a draft PR whose body contains `Closes #<n>`. The Tracking workflow then sets
   `status:in-review` on the issue (and sets it back to `status:ready` if the PR closes unmerged), so
   agents without GitHub access still keep the board right.
-- **Merge it yourself once it's tested and working** (Chippy's standing rule, 25 October). That
-  means all of: CI green on the latest commit; you ran the checks for what you changed and they
-  passed; anything `needs-mac` or visual was actually run on the Mac and looked right; no open
-  review comments or requested changes; no `status:needs-decision` issue blocking it; and the PR is
-  mergeable without conflicts. Then mark it ready for review and squash-merge. If any of those
-  isn't true, leave the PR open and say in it exactly what's missing.
 - If you stop before finishing, comment `Released: <what is done, what is left>` and set the
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are
   taking it, then claim it as above.
-
-## Visuals
-
-Chippy reviews most work from a phone, in the dashboard ([dashboard/](dashboard/README.md)). Its
-Visuals tab collects every capture posted in the standard format, so anything you can see needs
-captures there:
-
-- A PR that changes something visible (looks, terrain, materials, effects, HUD, animation, camera)
-  gets screenshots or a short video of its latest commit, posted on the PR with the
-  `attach-visuals` skill. When it changes how something looks, put main and the branch side by
-  side from the same camera. Cloud sessions can't upload files, so they ask for a Mac check
-  through the coordinator instead.
-- Every Mac check posts its captures the same way, with `--verdict pass` or `fail` and `--head`
-  set to the commit it built.
-- After a push that changes how it looks, post again. The dashboard flags captures of an older
-  commit than the PR's latest.
-- Codex doesn't post captures (no image files, see Ownership). It says in the PR what to look at,
-  and the Mac check captures it.
 
 ## Ownership
 
@@ -96,7 +70,7 @@ any `codex/` branch PR that touches those paths.
   `area:content`, `area:server`, `area:ai`, `area:assets`, `area:infra`, `area:docs`.
 - Type: `type:feature`, `type:bug`, `type:chore`, `type:spike`, `type:epic`.
 - Priority: `p0` now, `p1` this phase, `p2` later.
-- Phase: `phase:1` to `phase:8`, the roadmap phases. The Tracking workflow files each issue under
+- Phase: `phase:1` to `phase:6`, the roadmap phases. The Tracking workflow files each issue under
   the matching milestone.
 - `perf`, `needs-mac`.
 
@@ -105,10 +79,9 @@ Edit that file, not the GitHub UI, and the Tracking workflow applies it on merge
 
 ## Step by step
 
-Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue`,
-`finish-issue` and `attach-visuals`. Claude Code loads them from there and Codex from
-`.agents/skills`, which links to the same folder. They cover both the `gh` CLI and the GitHub MCP
-tools.
+Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue` and
+`finish-issue`. Claude Code loads them from there and Codex from `.agents/skills`, which links to
+the same folder. They cover both the `gh` CLI and the GitHub MCP tools.
 
 ## Codex
 
@@ -130,8 +103,8 @@ For Codex reviews and any other reviewer. Formatting and lint are CI's job; flag
 - **Untracked work.** The PR body must say `Closes #<n>` (or link the issue it is part of), so the
   tracker stays the source of truth.
 - **Missing performance numbers.** A PR for a `perf` issue, or one that adds GPU passes, draw calls
-  or per-frame allocations, must report before and after timings against the budgets in
-  docs/PERFORMANCE.md (12 ms GPU, 2 ms sim step).
+  or per-frame allocations, must report before and after timings against the 12 ms GPU and 2 ms
+  sim budgets in docs/RENDERER.md.
 - **Codex touching assets.** A PR from Codex that changes `art/`, `assets/`, `crates/assets/`,
   `tools/`, or any `.blend`, `.glb`, `.gltf`, `.ktx2` or image file is out of bounds, whatever the
   change. Assets come from Claude.
