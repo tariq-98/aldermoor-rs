@@ -19,7 +19,10 @@ unit's combat view and calls `update`, which builds the pose in this order:
    their role clips.
 2. **Sample it** into `local`, starting from the rest pose (`apply_clip` with `Bones::All`). Walk,
    jog and sprint all run on one stride phase (`stride`), so changing between them never restarts
-   the feet.
+   the feet. Each clip's tracks are bound to the skeleton's bones once (`ClipSet`, #204), and every
+   character with the same skeleton and clips shares it through `ModelCache::clip_set`. A clip
+   samples only the tracks the body uses: humanoid clips turn every bone but move only the pelvis,
+   and never scale.
 3. **Legs under actions** (#186): an attack or cast on the move keeps the jog on the legs
    (`walk_under`, `Bones::Lower`) and turns the chest back to where the action faced it, within
    `MAX_TWIST` of the hips.
@@ -96,26 +99,31 @@ switches stack without popping. Three methods, picked with the client's `--blend
 `cargo run --release -p render --example anim_bench -- [characters] [frames] [case]` times
 `update_combat` (the pose) and `draws` (the skinning palettes) for a plate knight with sword,
 shield and cape, a ranger with a bow and an elf mage with a staff, at each LOD. The cases: `idle`
-and `run` hold their pose, `run + slash` starts the slash over every half second, and `start-stop`
-runs and stops every half second, so those two are blending most of the time.
+and `run` hold their pose, `slash` and `run + slash` start the slash over every half second, and
+`start-stop` runs and stops every half second, so those three are blending most of the time.
 
-Instructions per `update_combat`, from callgrind (6 characters, 240 frames, every LOD), main
-against #210:
+Instructions per `update_combat`, from callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Main | #210 |
-| --- | --- | --- |
-| idle | 166,229 | 140,418 (−16%) |
-| run | 210,673 | 184,894 (−12%) |
-| run + slash | 228,680 | 222,892 (−3%) |
-| start-stop | 187,279 | 185,667 (−1%) |
+| Case | Before #210 | After #210 | After #204 |
+| --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 |
+| run | 210,673 | 184,868 | 88,894 |
+| slash | | 162,570 | 106,448 |
+| run + slash | 228,680 | 222,870 | 113,124 |
+| start-stop | 187,279 | 185,645 | 110,360 |
 
-On the cloud's x86 cores that is about 20 to 30 µs a character a frame. Holding a pose, the
-blender only keeps a copy of the last two poses shown, and it took out main's crossfade, which
-slerped every bone every frame even when nothing was blending. While a switch settles it runs the
-spring for each bone that still has an offset and rebuilds the world matrices a second time, which
-the one-pass rebuild (parents first, into the same buffer, where main recursed and allocated) pays
-for. Where the time goes otherwise (callgrind, main): about a quarter in hashing bone names to find
-each clip track (#204), a quarter in cape springs, and the rest in sampling and matrices (#215).
+On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
+a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
+every frame even when nothing was blending. While a switch settles it runs the spring for each
+bone that still has an offset and rebuilds the world matrices a second time, which the one-pass
+rebuild (parents first, into the same buffer) pays for on x86; on the M1, cases that blend all the
+time came out 2% to 4% dearer than before #210. #204 stopped looking up each track's bone by name
+and sampling tracks the body ignores, which was a third to a half of the instructions.
+
+Where the time goes now (callgrind, `run`): half in cape springs, about 15% each in sampling clips
+and in world matrices, and about 15% in cloning per frame (`perform` copies the weapon's item and
+the clip's metadata, and clip names are `String`s). #215 takes on both: springs only at full
+detail, and no allocations per frame.
 
 ## Next
 

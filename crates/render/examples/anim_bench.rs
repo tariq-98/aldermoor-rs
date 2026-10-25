@@ -86,12 +86,13 @@ fn main() -> anyhow::Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     let cat = assets::Catalog::load(&root)?;
     let mut cache = ModelCache::default();
-    // "idle" and "run" hold their pose throughout. "run + slash" starts the slash over every half
-    // second, and "start-stop" runs and stops every half second, so those two are blending clips
-    // most of the time.
+    // "idle" and "run" hold their pose throughout. "slash" and "run + slash" start the slash over
+    // every half second, and "start-stop" runs and stops every half second, so those three are
+    // blending clips most of the time.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
         ("run", Pose::Run, 6., Action::None),
+        ("slash", Pose::Attack, 0., Action::Slash),
         ("run + slash", Pose::Attack, 6., Action::Slash),
         ("start-stop", Pose::Run, 6., Action::None),
     ] {
