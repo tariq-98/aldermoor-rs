@@ -168,6 +168,12 @@ fn key(p: Vec2) -> (i32, i32) {
 
 fn instances() {
     const N: usize = 50;
+    // The land is built once and shared by every sim on the map (#167); time that on its own.
+    let before = LIVE.load(Ordering::Relaxed);
+    let t0 = Instant::now();
+    let land = sim::brambleford_land();
+    let land_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let land_bytes = LIVE.load(Ordering::Relaxed) - before;
     let before = LIVE.load(Ordering::Relaxed);
     let t0 = Instant::now();
     let mut matches: Vec<(Sim, Vec<UnitId>)> = (0..N).map(|i| busy(10, 30, i as u64)).collect();
@@ -187,23 +193,14 @@ fn instances() {
     let (sm, sp) = stats(steps);
     let t0 = Instant::now();
     matches.clear();
-    let drop = t0.elapsed().as_secs_f64() * 1000.0 / N as f64;
-    let valley = {
-        let before = LIVE.load(Ordering::Relaxed);
-        let t0 = Instant::now();
-        let v = world::Valley::new();
-        let ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let bytes = LIVE.load(Ordering::Relaxed) - before;
-        drop_valley(v);
-        (ms, bytes)
-    };
+    let teardown = t0.elapsed().as_secs_f64() * 1000.0 / N as f64;
+    drop(land);
     println!("instances, {N} matches of 10 players + 30 monsters on one thread:");
-    println!("  create            {create:.2} ms each ({:.2} ms of it building the valley), tear down {drop:.3} ms", valley.0);
-    println!("  memory            {:.2} MB each ({:.2} MB of it the valley)", held / 1e6, valley.1 as f64 / 1e6);
+    println!("  shared land       {land_ms:.2} ms and {:.2} MB, once for all of them", land_bytes as f64 / 1e6);
+    println!("  create            {create:.2} ms each, tear down {teardown:.3} ms");
+    println!("  memory            {:.2} MB each", held / 1e6);
     println!("  step, all {N}      mean {sm:.3} ms, p99 {sp:.3} ms ({:.3} ms each)", sm / N as f64);
 }
-
-fn drop_valley(_: world::Valley) {}
 
 fn threads() {
     let alone = run_regions(1);
