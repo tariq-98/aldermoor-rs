@@ -1,7 +1,8 @@
 //! Specialty XP and levels (#66, docs/PROGRESSION.md).
 //!
-//! Each specialty levels on its own. A monster that dies pays XP to every player who used skills
-//! on it, split between the specialties they used in proportion to how often; nothing comes from
+//! Each specialty levels on its own. A monster that dies pays its full XP to every player who did
+//! at least a tenth of the fight (damage to it, healing on those it fought, damage taken from it;
+//! #201), split between the specialties they fought with by how much each did; nothing comes from
 //! monsters that don't die. Quests give a pool the player assigns to any specialty. The equipped
 //! specialty's level is the one that fights.
 
@@ -54,48 +55,81 @@ impl Progress {
     }
 }
 
-/// Who has used skills on a monster, with which specialty, and how often, until it dies.
+/// What each player has done in a fight with a monster, by specialty, until it dies: damage
+/// dealt to it, healing on those it's fighting, and damage taken from it.
 #[derive(Component, Clone, Debug, Default)]
-pub struct Credit(pub Vec<(UnitId, Specialty, u32)>);
+pub struct Credit(pub Vec<(UnitId, Specialty, f32)>);
 
-/// Notes that `user` used a skill on `target`. Summons count for their owner.
-pub(crate) fn note_use(world: &mut World, user: Entity, target: Entity) {
-    let player = match world.get::<Summoned>(user) {
-        Some(s) => world.resource::<Units>().entity(s.owner),
-        None => Some(user),
-    };
-    let Some(p) = player.filter(|&p| world.get::<PlayerControl>(p).is_some()) else { return };
-    let (Some(id), Some(spec)) = (world.get::<Unit>(p).map(|u| u.id), world.get::<Fighter>(p).and_then(|f| f.specialty)) else { return };
-    let Some(mut credit) = world.get_mut::<Credit>(target) else { return };
-    match credit.0.iter_mut().find(|(u, s, _)| *u == id && *s == spec) {
-        Some(c) => c.2 += 1,
-        None => credit.0.push((id, spec, 1)),
+/// The share of a fight a player needs for a kill's XP and their own loot.
+pub const SHARE_FLOOR: f32 = 0.1;
+
+impl Credit {
+    pub fn add(&mut self, id: UnitId, spec: Specialty, amount: f32) {
+        if amount <= 0.0 {
+            return;
+        }
+        match self.0.iter_mut().find(|(u, s, _)| *u == id && *s == spec) {
+            Some(c) => c.2 += amount,
+            None => self.0.push((id, spec, amount)),
+        }
+    }
+
+    /// What one player did, all specialties together.
+    pub fn of(&self, id: UnitId) -> f32 {
+        self.0.iter().filter(|c| c.0 == id).map(|c| c.2).sum()
+    }
+
+    /// The players who did at least [`SHARE_FLOOR`] of the fight, in the order they joined it.
+    pub fn earners(&self) -> Vec<UnitId> {
+        let total: f32 = self.0.iter().map(|c| c.2).sum();
+        let mut out: Vec<UnitId> = Vec::new();
+        for &(id, _, _) in &self.0 {
+            if !out.contains(&id) && total > 0.0 && self.of(id) >= total * SHARE_FLOOR {
+                out.push(id);
+            }
+        }
+        out
     }
 }
 
-/// Pays out a monster that just died: each player who used skills on it gets its XP, split
-/// between their specialties by use. Summoned monsters pay nothing.
+/// The player `e` earns for, and with which specialty: itself, or a summon's owner.
+pub(crate) fn earner(world: &World, e: Entity) -> Option<(UnitId, Specialty)> {
+    let p = match world.get::<Summoned>(e) {
+        Some(s) => world.resource::<Units>().entity(s.owner)?,
+        None => e,
+    };
+    world.get::<PlayerControl>(p)?;
+    Some((world.get::<Unit>(p)?.id, world.get::<Fighter>(p)?.specialty?))
+}
+
+/// Counts `amount` toward `who`'s share of `monster`, if one is a player (or a player's summon)
+/// and the other a monster that pays out.
+pub(crate) fn credit(world: &mut World, who: Entity, monster: Entity, amount: f32) {
+    if amount <= 0.0 || world.get::<Credit>(monster).is_none() {
+        return;
+    }
+    let Some((id, spec)) = earner(world, who) else { return };
+    if let Some(mut c) = world.get_mut::<Credit>(monster) {
+        c.add(id, spec, amount);
+    }
+}
+
+/// Pays out a monster that just died: everyone who did a fair share of the fight gets its full
+/// XP, split between the specialties they fought it with by how much each did. Summoned
+/// monsters pay nothing.
 pub(crate) fn pay_out(world: &mut World, dead: Entity) {
-    let Some(credit) = world.get_mut::<Credit>(dead).map(|mut c| std::mem::take(&mut c.0)) else { return };
-    if credit.is_empty() || world.get::<Summoned>(dead).is_some() {
+    let Some(credit) = world.get_mut::<Credit>(dead).map(|mut c| std::mem::take(&mut *c)) else { return };
+    if credit.0.is_empty() || world.get::<Summoned>(dead).is_some() {
         return;
     }
     let Some(rank) = world.get::<Brain>(dead).and_then(|b| catalog().mob(b.mob)).map(|m| m.rank) else { return };
     let mob_level = world.get::<Unit>(dead).map_or(1, |u| u.level);
-    // In the order players first touched it, so the payout (and its events) is deterministic.
-    let mut players: Vec<UnitId> = Vec::new();
-    for (id, _, _) in &credit {
-        if !players.contains(id) {
-            players.push(*id);
-        }
-    }
-    for id in players {
+    for id in credit.earners() {
         let Some(p) = world.resource::<Units>().entity(id) else { continue };
-        let uses: Vec<(Specialty, u32)> = credit.iter().filter(|c| c.0 == id).map(|c| (c.1, c.2)).collect();
-        let total: u32 = uses.iter().map(|u| u.1).sum();
-        for (spec, n) in uses {
+        let total = credit.of(id);
+        for &(_, spec, n) in credit.0.iter().filter(|c| c.0 == id) {
             let level = world.get::<Progress>(p).map_or(1, |pr| pr.level(spec));
-            let amount = (kill_xp(mob_level, rank, level) as u64 * n as u64 / total as u64) as u32;
+            let amount = (kill_xp(mob_level, rank, level) as f64 * (n / total) as f64).round() as u32;
             give(world, p, spec, amount);
         }
     }
