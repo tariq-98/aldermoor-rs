@@ -2065,6 +2065,37 @@ fn texture_array(
 #[cfg(test)]
 mod temporal_tests {
     use super::*;
+    /// Hosted macOS uses a paravirtual GPU. Verify the real fallback there; never
+    /// swallow allocation/sampling failures on hardware that advertises support.
+    fn counter_device_or_verify_fallback(r: &mut Renderer) -> bool {
+        if r.device
+            .supportsCounterSampling(MTLCounterSamplingPoint::AtStageBoundary)
+        {
+            return true;
+        }
+        assert!(r.set_gpu_counters(true).is_err());
+        assert!(!r.gpu_counters_enabled());
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        let frame = r.take_completed_frames().next().unwrap();
+        assert!(!frame.counters_sampled);
+        assert!(frame.passes.iter().all(Option::is_none));
+        assert!(
+            frame.draw_calls > 0,
+            "rendering must continue without counters"
+        );
+        eprintln!(
+            "Verified unavailable-counter fallback on {}; timestamp and split-pass assertions require a physical counter-capable GPU",
+            r.device.name()
+        );
+        false
+    }
+
     #[test]
     fn timestamp_decode_rejects_errors_and_handles_overlapping_stages() {
         assert!(decode_pass([1, 2, 3, u64::MAX], 1.).is_none());
@@ -2080,6 +2111,9 @@ mod temporal_tests {
     fn gpu_counters_follow_completed_slots_and_never_reuse_missing_passes() {
         let mut r = Renderer::new(64, 64, 1.).unwrap();
         r.set_frames_in_flight(3).unwrap();
+        if !counter_device_or_verify_fallback(&mut r) {
+            return;
+        }
         r.set_gpu_counters(true).unwrap();
         let camera = Camera {
             eye: Vec3::new(0., 20., 20.),
@@ -2184,6 +2218,9 @@ mod temporal_tests {
     #[test]
     fn diagnostic_scene_split_preserves_supplied_surfaces_and_hud_samples_expire() {
         let mut r = Renderer::with_samples(256, 256, 1., 1).unwrap();
+        if !counter_device_or_verify_fallback(&mut r) {
+            return;
+        }
         r.scene_time = Some(0.);
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
         r.look = LookSettings::load(&root.join("catalog/look.json")).unwrap();

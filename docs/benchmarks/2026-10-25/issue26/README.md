@@ -81,5 +81,7 @@ neither is included in the native-size comparisons.
 
 Remaining: unlock the Mac, use a native-mode built-in display so the actual drawable is
 2560×1600, rerun the native on-screen comparison and F3 interaction, and verify the sub-0.1 ms
-counter overhead there. Unsupported-device fallback is implemented but was not exercised on
-a second GPU. This PR remains draft with these limits stated.
+counter overhead there. GitHub's macOS runner exposes an Apple paravirtual GPU without stage-boundary counters.
+The GPU tests verify continued rendering and unavailable data on that device; full timestamp
+and split-pass assertions still require the physical M1 and ran locally. This PR remains
+draft with the native-display limits stated.
