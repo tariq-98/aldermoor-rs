@@ -23,7 +23,7 @@ fn main() {
     let mut snapshots = Vec::with_capacity(1200);
     for step in 0..1260u32 {
         let a = step as f32 / 120.0;
-        sim.command(hero, Command::Move { direction: Vec2::new(a.sin(), a.cos()), walk: false, face_yaw: None });
+        sim.command(hero, Command::Move { direction: Vec2::new(a.sin(), a.cos()), walk: false, sprint: false, face_yaw: None });
         let t0 = Instant::now();
         sim.step();
         let t1 = Instant::now();

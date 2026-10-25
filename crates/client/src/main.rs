@@ -163,7 +163,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -368,7 +368,7 @@ impl Game {
             right: self.down(C::Right),
             strafe_left: self.down(C::StrafeLeft),
             strafe_right: self.down(C::StrafeRight),
-            walk: self.down(C::Walk),
+            sprint: self.down(C::Sprint),
             mouse_look: self.mouse_look,
             orbiting: self.orbiting,
         }
@@ -384,6 +384,10 @@ impl Game {
             C::Guard => Some(Command::Guard(true)),
             C::Autorun => {
                 self.pilot.toggle_autorun();
+                None
+            }
+            C::Walk => {
+                self.pilot.toggle_walk();
                 None
             }
             C::FreePointer => {
@@ -498,12 +502,12 @@ impl Game {
         let l = |c| self.settings.bindings.label(c);
         let hint = match self.pilot.scheme {
             controls::Scheme::Action => format!(
-                "{}{}{}{} · {} walk · {} jump · {} roll · Hold {} guard · {} revive · Hold {} for the pointer · Esc controls",
+                "{}{}{}{} · {} sprint · {} jump · {} roll · Hold {} guard · {} revive · Hold {} for the pointer · Esc controls",
                 l(C::Forward),
                 l(C::Left),
                 l(C::Back),
                 l(C::Right),
-                l(C::Walk),
+                l(C::Sprint),
                 l(C::Jump),
                 l(C::Roll),
                 l(C::Guard),
@@ -704,6 +708,7 @@ impl Game {
                 0 => self.host.send(Command::Move {
                     direction: Vec2::new(-1., 0.),
                     walk: false,
+                    sprint: false,
                     face_yaw: None,
                 }),
                 1 => self.host.send(Command::Jump),
@@ -722,6 +727,7 @@ impl Game {
                 _ => self.host.send(Command::Move {
                     direction: Vec2::ZERO,
                     walk: false,
+                    sprint: false,
                     face_yaw: None,
                 }),
             }

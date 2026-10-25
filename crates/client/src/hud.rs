@@ -98,6 +98,11 @@ pub fn draw(
                 if player.in_combat {
                     ui.label("In combat");
                 }
+                if player.swimming {
+                    ui.label("Swimming · no skills");
+                } else if player.sprinting {
+                    ui.label("Sprinting");
+                }
                 auras(ui, &player.auras);
             });
         });

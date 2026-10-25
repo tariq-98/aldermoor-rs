@@ -86,7 +86,7 @@ fn go_home(world: &mut World, e: Entity) {
     if !auras::has(world, e, "evading") && let Some(src) = source(world, e, None) {
         auras::apply_key(world, "evading", e, &src);
     }
-    steer(world, e, MoveIntent { direction: to.normalize(), walk: false, face_yaw: None });
+    steer(world, e, MoveIntent { direction: to.normalize(), walk: false, sprint: false, face_yaw: None });
 }
 
 fn chase(world: &mut World, e: Entity, mob: &MobDef, deciding: bool) {
@@ -127,11 +127,11 @@ fn chase(world: &mut World, e: Entity, mob: &MobDef, deciding: bool) {
     if let Some(c) = world.get::<Fighter>(e).and_then(|f| f.cast) {
         let def = cat.ability(c.ability);
         let face = if def.telegraph || def.targeting.is_area() { c.yaw } else { heading(to) };
-        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, face_yaw: Some(face) });
+        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: Some(face) });
         return;
     }
     if deciding && control(world, e).can_act() && use_skills(world, e, mob, te) {
-        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, face_yaw: None });
+        steer(world, e, MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: None });
         return;
     }
     // Close in (or keep to its range), then face the target.
@@ -139,9 +139,9 @@ fn chase(world: &mut World, e: Entity, mob: &MobDef, deciding: bool) {
     let want = if mob.range > 0.0 { mob.range.min(reach) } else { reach };
     let in_sight = mob.range <= 0.0 || line_of_sight(world, chest(world, e), chest(world, te));
     let intent = if gap(world, e, te) > want - 0.3 || !in_sight {
-        MoveIntent { direction: to.normalize_or_zero(), walk: false, face_yaw: None }
+        MoveIntent { direction: to.normalize_or_zero(), walk: false, sprint: false, face_yaw: None }
     } else {
-        MoveIntent { direction: Vec2::ZERO, walk: false, face_yaw: (to.length_squared() > 1e-4).then(|| heading(to)) }
+        MoveIntent { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: (to.length_squared() > 1e-4).then(|| heading(to)) }
     };
     steer(world, e, intent);
 }
@@ -209,7 +209,7 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
     if summoned.is_some() {
         // Keep up with the owner.
         let to = b.home - pos;
-        let intent = if to.length() > 3.0 { MoveIntent { direction: to.normalize(), walk: false, face_yaw: None } } else { MoveIntent::default() };
+        let intent = if to.length() > 3.0 { MoveIntent { direction: to.normalize(), walk: false, sprint: false, face_yaw: None } } else { MoveIntent::default() };
         steer(world, e, intent);
         return;
     }
@@ -217,7 +217,7 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
     let radius = world.get::<Body>(e).map_or(0.4, |b| b.radius);
     match b.wander_target {
         Some(w) if (w - pos).length() > 0.5 && t < b.next_wander + 12.0 => {
-            steer(world, e, MoveIntent { direction: (w - pos).normalize(), walk: true, face_yaw: None });
+            steer(world, e, MoveIntent { direction: (w - pos).normalize(), walk: true, sprint: false, face_yaw: None });
         }
         Some(_) => {
             let wait = world.resource_mut::<Rng>().range(4.0, 12.0) as f64;
@@ -233,7 +233,9 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
                 (rng.range(0.0, std::f32::consts::TAU), rng.range(1.0, b.wander))
             };
             let w = b.home + Vec2::new(a.sin(), a.cos()) * r;
-            let clear = !world.resource::<Land>().0.blocked(w, radius);
+            let land = &world.resource::<Land>().0;
+            // Monsters wander on dry land.
+            let clear = !land.blocked(w, radius) && land.water_depth(w.x, w.y) == 0.0;
             if let Some(mut b) = world.get_mut::<Brain>(e) {
                 if clear {
                     b.wander_target = Some(w);

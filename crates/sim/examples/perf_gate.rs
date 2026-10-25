@@ -59,7 +59,7 @@ fn setup(scene: &str) -> (Sim, UnitId, u32) {
 
 fn run_circle(sim: &mut Sim, hero: UnitId, step: u32) {
     let a = step as f32 / 120.0;
-    sim.command(hero, Command::Move { direction: Vec2::new(a.sin(), a.cos()), walk: false, face_yaw: None });
+    sim.command(hero, Command::Move { direction: Vec2::new(a.sin(), a.cos()), walk: false, sprint: false, face_yaw: None });
 }
 
 /// The measured part: `steps` steps, each followed by the viewer's snapshot and combat view, as

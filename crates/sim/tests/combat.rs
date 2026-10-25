@@ -200,7 +200,7 @@ fn every_skill_on_every_bar_goes_off() {
                 f.sim.get_mut::<Fighter>(hero).unwrap().resource = 100.0;
                 f.once(hero, slot);
                 f.run(3.2);
-                f.cmd(hero, Command::Move { direction: Vec2::ZERO, walk: false, face_yaw: Some(0.0) });
+                f.cmd(hero, Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: Some(0.0) });
                 let back = f.sim.get::<Transform>(hero).unwrap().pos;
                 if (Vec2::new(back.x, back.z) - ROAD).length() > 0.5 {
                     // Leaps and blinks: back to the start.
@@ -260,12 +260,12 @@ fn casts_take_time_and_moving_breaks_off_those_that_need_stillness() {
     assert_eq!(f.damage_to(golem), 0.0);
     assert!(f.sim.snapshot(Some(mage)).player.unwrap().cast.is_some(), "the cast bar shows");
 
-    f.cmd(mage, Command::Move { direction: Vec2::X, walk: false, face_yaw: None });
+    f.cmd(mage, Command::Move { direction: Vec2::X, walk: false, sprint: false, face_yaw: None });
     f.step();
     f.step();
     assert!(f.fighter(mage).cast.is_none(), "still casting on the move");
     assert!(f.log.iter().any(|e| matches!(e, Event::Message { text } if text.contains("moved"))));
-    f.cmd(mage, Command::Move { direction: Vec2::ZERO, walk: false, face_yaw: None });
+    f.cmd(mage, Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: None });
     f.run(0.2);
 
     // Standing still, it goes off, flies, and chills.
@@ -676,14 +676,14 @@ fn monsters_lead_their_shots_so_only_a_change_of_direction_dodges() {
         let mut f = Fight::new();
         let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
         let archer = f.dummy("goblin_archer", ROAD + Vec2::new(0.0, 10.0), PI);
-        f.cmd(hero, Command::Move { direction: Vec2::X, walk: false, face_yaw: Some(0.0) });
+        f.cmd(hero, Command::Move { direction: Vec2::X, walk: false, sprint: false, face_yaw: Some(0.0) });
         f.run(0.5);
         f.sim.get_mut::<Fighter>(archer).unwrap().target = Some(hero);
         f.sim.get_mut::<Fighter>(archer).unwrap().auto_attack = true;
         f.until(1.0, |f| f.log.iter().any(|e| matches!(e, Event::ProjectileLaunched { .. })));
         f.sim.get_mut::<Fighter>(archer).unwrap().auto_attack = false;
         if turn {
-            f.cmd(hero, Command::Move { direction: -Vec2::X, walk: false, face_yaw: Some(0.0) });
+            f.cmd(hero, Command::Move { direction: -Vec2::X, walk: false, sprint: false, face_yaw: Some(0.0) });
         }
         f.run(0.6);
         f.damage_to(hero) > 0.0
@@ -724,11 +724,11 @@ fn left_alone_a_downed_player_bleeds_out_and_respawns_at_home() {
     f.sim.get_mut::<Vitals>(hero).unwrap().health = 1.0;
     assert!(f.until(6.0, |f| f.vitals(hero).downed));
     f.kill(wolf);
-    f.cmd(hero, Command::Move { direction: Vec2::X, walk: false, face_yaw: None });
+    f.cmd(hero, Command::Move { direction: Vec2::X, walk: false, sprint: false, face_yaw: None });
     f.run(2.0);
     let crawled = (f.sim.get::<Transform>(hero).unwrap().pos - Vec3::new(ROAD.x, 0.0, ROAD.y)).with_y(0.0).length();
     assert!(crawled > 0.5 && crawled < 3.0, "crawled {crawled} m");
-    f.cmd(hero, Command::Move { direction: Vec2::ZERO, walk: false, face_yaw: None });
+    f.cmd(hero, Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: None });
     assert!(f.until(18.0, |f| f.vitals(hero).dead), "never bled out");
     assert!(f.log.iter().any(|e| matches!(e, Event::Died { unit, .. } if *unit == hero)));
     assert!(f.sim.snapshot(Some(hero)).player.unwrap().can_respawn);
