@@ -45,7 +45,7 @@ instances and fit inside these numbers.
 | Area | Budget | Last measured |
 | --- | --- | --- |
 | Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.41 ms step plus 161 ms of snapshots (#73) |
-| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | about 0.8 ms, a full snapshot every tick (#34) |
+| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | about 0.8 ms, a full snapshot every tick (#34); finding its neighbours from a grid is 0.005 ms (#73) |
 | Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | about 3 MB/s at 300 units in view (#34) |
 | Server out, one region | 4 MB/s at 200 players | 2.8 GB/s at 200 players (#73) |
 | Client: crowd of 200 characters | 4 ms GPU and 3 ms CPU together, inside the frame budgets above | not built (#75) |
@@ -75,9 +75,11 @@ appearance sent once, deltas against what the client already has, quantised fiel
   60 Hz tick (#31, #34).
 - **Memory:** `footprint -p <pid>` on the running client, peak and steady.
 - **Launch:** wall clock from starting the release binary to its first presented frame.
-- **MMO server and network:** the zone server spike (#73) and bot load test (#74) report the
-  region tick, per-view time and bytes per player once they exist. Until then, the cloud
-  numbers above come from a scratch bench that adds players to the sim bench.
+- **MMO server and network:** `cargo run -p sim --release --example regions` times a busy region
+  (200 players, 2,000 monsters), finding each player's neighbours from a grid, lag compensation
+  history, match instances and regions side by side; the design and its numbers are in
+  [SERVER.md](SERVER.md) (#73). The bot load test (#74) reports the whole region tick and bytes
+  per player once it exists.
 
 ## Changing a budget
 
