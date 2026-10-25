@@ -32,6 +32,8 @@ pub struct HitSource {
     pub ability: Option<AbilityId>,
     /// Where the blow comes from (the attacker, or the missile): what a guard must face.
     pub from: Vec3,
+    /// A player or a player's summon: what it does to an enemy player takes PvP numbers.
+    pub player: bool,
 }
 
 pub(crate) fn now(world: &World) -> f64 {
@@ -118,7 +120,24 @@ pub fn source(world: &World, e: Entity, ability: Option<&AbilityDef>) -> Option<
         faction: u.faction,
         ability: ability.and_then(|a| crate::content::catalog().ability_id(a.key)),
         from: world.get::<Transform>(e).map_or(Vec3::ZERO, |t| t.pos),
+        player: player_side(world, e, u),
     })
+}
+
+/// `e` (whose unit is `u`) is a player, or something a player summoned.
+fn player_side(world: &World, e: Entity, u: &Unit) -> bool {
+    use protocol::UnitKind::Player;
+    u.kind == Player || world.get::<crate::Summoned>(e).and_then(|s| entity(world, s.owner)).and_then(|o| world.get::<Unit>(o)).is_some_and(|o| o.kind == Player)
+}
+
+/// Player against player: `src` and `te` are on players' sides and enemies, so PvP numbers apply.
+pub(crate) fn pvp(world: &World, src: &HitSource, te: Entity) -> bool {
+    src.player && world.get::<Unit>(te).is_some_and(|u| u.faction.is_enemy(src.faction) && player_side(world, te, u))
+}
+
+/// `te` is a player who hurt or was hurt by a player a moment ago: heals on it take PvP numbers.
+pub(crate) fn in_pvp(world: &World, te: Entity) -> bool {
+    world.get::<Fighter>(te).is_some_and(|f| now(world) < f.pvp_until)
 }
 
 /// Applies queued commands in the order they arrived, then lets go any roll that was waiting for

@@ -257,6 +257,8 @@ pub struct Fighter {
     pub action_time: f64,
     /// Enemies this unit hurt recently (felling one rallies you if you're downed).
     pub recent_victims: Vec<(UnitId, f64)>,
+    /// Fighting players until then: heals on it take PvP numbers.
+    pub pvp_until: f64,
     /// Helping someone up: who, and since when.
     pub reviving: Option<(UnitId, f64)>,
 }
@@ -285,6 +287,7 @@ impl Fighter {
             action: Action::None,
             action_time: 0.0,
             recent_victims: Vec::new(),
+            pvp_until: -100.0,
             reviving: None,
         }
     }
@@ -319,6 +322,8 @@ pub struct AuraInstance {
     pub stacks: u8,
     pub next_tick: f64,
     pub absorb_left: f32,
+    /// Put on by a player or their summon (see [`crate::combat::HitSource::player`]).
+    pub player: bool,
 }
 
 /// Diminishing returns in one category of crowd control.
