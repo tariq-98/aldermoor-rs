@@ -29,6 +29,9 @@ pub struct WeaponDef {
     /// Shields block wide and cheaply, and stop missiles; other melee weapons parry blows in a
     /// narrower arc and can't stop missiles; ranged and casting weapons can't guard.
     pub guard: Guard,
+    /// How wide (the full angle, in radians) its single-target blows sweep in front, out to
+    /// each blow's range: spears thrust narrow, greatswords swing wide.
+    pub swing: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +40,9 @@ pub enum Guard {
     Weapon,
     Shield,
 }
+
+/// The sweep of a blow with nothing (or no melee weapon) in the main hand.
+pub const UNARMED_SWING: f32 = 1.4;
 
 /// Heavy blows wind up this long before they land: long enough to see coming and parry or roll
 /// away from, short enough to feel quick.
@@ -755,29 +761,30 @@ pub fn weapons(abilities: &mut Vec<AbilityDef>, auras: &mut Vec<AuraDef>) -> Vec
             ..b()
         },
     ]);
-    let w = |item, grip, skills: &[&'static str], off_skills: &[&'static str], guard| WeaponDef {
+    let w = |item, grip, skills: &[&'static str], off_skills: &[&'static str], guard, swing| WeaponDef {
         item,
         grip,
         skills: skills.to_vec(),
         off_skills: off_skills.to_vec(),
         guard,
+        swing,
     };
     vec![
-        w("sword.arming", Grip::Main, &["sword_chain", "sword_rend", "sword_lunge"], &[], Guard::Weapon),
-        w("axe.bearded", Grip::Main, &["axe_chop", "axe_cleave", "axe_throw"], &[], Guard::Weapon),
-        w("mace.flanged", Grip::Main, &["mace_smash", "mace_crush", "mace_tremor"], &[], Guard::Weapon),
-        w("dagger.hunting", Grip::Either, &["dagger_stab", "dagger_backstab", "dagger_shadowstep"], &["dagger_fan", "dagger_sidestep"], Guard::Weapon),
-        w("spear.ash", Grip::Two, &["spear_thrust", "spear_sweep", "spear_impale", "spear_vault", "spear_skewer"], &[], Guard::Weapon),
-        w("sword.great", Grip::Two, &["gs_swing", "gs_whirlwind", "gs_earthsplitter", "gs_rush", "gs_execution"], &[], Guard::Weapon),
-        w("shield.round", Grip::Off, &["shield_bash", "shield_wall"], &[], Guard::Shield),
-        w("shield.kite", Grip::Off, &["shield_bash", "shield_wall"], &[], Guard::Shield),
-        w("bow.hunting", Grip::Two, &["bow_quick", "bow_cripple", "bow_poison", "bow_disengage", "bow_rain"], &[], Guard::None),
-        w("bow.long", Grip::Two, &["longbow_shot", "longbow_pierce", "longbow_barrage", "longbow_pointblank", "longbow_mark"], &[], Guard::None),
-        w("staff.oak", Grip::Two, &["staff_firebolt", "staff_frostlance", "staff_meteor", "staff_nova", "staff_ring"], &[], Guard::None),
-        w("staff.necro", Grip::Two, &["necro_bolt", "necro_drain", "necro_plague", "necro_terror", "necro_raise"], &[], Guard::None),
-        w("staff.healer", Grip::Two, &["holy_bolt", "healing_light", "renew", "sanctuary", "smite"], &[], Guard::None),
-        w("wand.yew", Grip::Main, &["wand_missile", "wand_spark", "wand_hex"], &[], Guard::None),
-        w("book.spells", Grip::Off, &["book_ward", "book_silence"], &[], Guard::None),
-        w("orb.focus", Grip::Off, &["focus_barrier", "focus_pulse"], &[], Guard::None),
+        w("sword.arming", Grip::Main, &["sword_chain", "sword_rend", "sword_lunge"], &[], Guard::Weapon, 1.6),
+        w("axe.bearded", Grip::Main, &["axe_chop", "axe_cleave", "axe_throw"], &[], Guard::Weapon, 1.6),
+        w("mace.flanged", Grip::Main, &["mace_smash", "mace_crush", "mace_tremor"], &[], Guard::Weapon, 1.5),
+        w("dagger.hunting", Grip::Either, &["dagger_stab", "dagger_backstab", "dagger_shadowstep"], &["dagger_fan", "dagger_sidestep"], Guard::Weapon, 1.4),
+        w("spear.ash", Grip::Two, &["spear_thrust", "spear_sweep", "spear_impale", "spear_vault", "spear_skewer"], &[], Guard::Weapon, 0.9),
+        w("sword.great", Grip::Two, &["gs_swing", "gs_whirlwind", "gs_earthsplitter", "gs_rush", "gs_execution"], &[], Guard::Weapon, 1.8),
+        w("shield.round", Grip::Off, &["shield_bash", "shield_wall"], &[], Guard::Shield, 1.6),
+        w("shield.kite", Grip::Off, &["shield_bash", "shield_wall"], &[], Guard::Shield, 1.6),
+        w("bow.hunting", Grip::Two, &["bow_quick", "bow_cripple", "bow_poison", "bow_disengage", "bow_rain"], &[], Guard::None, UNARMED_SWING),
+        w("bow.long", Grip::Two, &["longbow_shot", "longbow_pierce", "longbow_barrage", "longbow_pointblank", "longbow_mark"], &[], Guard::None, UNARMED_SWING),
+        w("staff.oak", Grip::Two, &["staff_firebolt", "staff_frostlance", "staff_meteor", "staff_nova", "staff_ring"], &[], Guard::None, UNARMED_SWING),
+        w("staff.necro", Grip::Two, &["necro_bolt", "necro_drain", "necro_plague", "necro_terror", "necro_raise"], &[], Guard::None, UNARMED_SWING),
+        w("staff.healer", Grip::Two, &["holy_bolt", "healing_light", "renew", "sanctuary", "smite"], &[], Guard::None, UNARMED_SWING),
+        w("wand.yew", Grip::Main, &["wand_missile", "wand_spark", "wand_hex"], &[], Guard::None, UNARMED_SWING),
+        w("book.spells", Grip::Off, &["book_ward", "book_silence"], &[], Guard::None, UNARMED_SWING),
+        w("orb.focus", Grip::Off, &["focus_barrier", "focus_pulse"], &[], Guard::None, UNARMED_SWING),
     ]
 }
