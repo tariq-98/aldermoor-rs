@@ -52,7 +52,9 @@ struct Options {
     legacy_cpu: bool,
     look_churn: bool,
     reset_on_look: bool,
-    scheme: controls::Scheme,
+    /// Overrides the settings file's scheme.
+    scheme: Option<controls::Scheme>,
+    controls: Option<PathBuf>,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -82,7 +84,8 @@ impl Options {
             legacy_cpu: false,
             look_churn: false,
             reset_on_look: false,
-            scheme: controls::Scheme::default(),
+            scheme: None,
+            controls: None,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -144,11 +147,14 @@ impl Options {
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
                 "--scheme" => {
-                    o.scheme = match args.next().as_deref() {
+                    o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
                         Some("action") => controls::Scheme::Action,
                         _ => anyhow::bail!("--scheme expects classic or action"),
-                    }
+                    })
+                }
+                "--controls" => {
+                    o.controls = Some(args.next().context("--controls needs a file")?.into())
                 }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
@@ -156,7 +162,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -201,7 +207,11 @@ struct Game {
     terrain: Arc<Model>,
     scenery: Option<render::scenery::Scenery>,
     review: Vec<UnitState>,
+    settings: controls::Settings,
     orbit: controls::Orbit,
+    /// The eased camera; `view` is where it was last drawn from.
+    follow: controls::Follow,
+    view: Option<controls::camera::View>,
     pilot: controls::Pilot,
     keys: HashSet<KeyCode>,
     mouse_look: bool,
@@ -234,14 +244,15 @@ impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
         let host = server::Host::start(0xa1de, "Traveller");
-        let orbit = controls::Orbit {
-            shoulder: match options.scheme {
-                controls::Scheme::Action => 0.6,
-                controls::Scheme::Classic => 0.,
-            },
-            ..Default::default()
+        let mut settings = match &options.controls {
+            Some(path) => controls::Settings::load(path).map_err(anyhow::Error::msg)?,
+            None => controls::Settings::default(),
         };
-        let pilot = controls::Pilot::new(options.scheme, orbit.yaw);
+        if let Some(scheme) = options.scheme {
+            settings.scheme = scheme;
+        }
+        let orbit = settings.orbit();
+        let pilot = settings.pilot(orbit.yaw);
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
@@ -254,7 +265,10 @@ impl Game {
             terrain: render::terrain::valley(),
             scenery: None,
             review: Vec::new(),
+            settings,
             orbit,
+            follow: controls::Follow::default(),
+            view: None,
             pilot,
             keys: HashSet::new(),
             mouse_look: false,
@@ -370,15 +384,26 @@ impl Game {
                 fov: 45f32.to_radians(),
             };
         }
-        let target = self.orbit.target(p);
-        let eye = self.orbit.eye(target, |target, eye| match &self.scenery {
-            Some(scenery) => scenery.camera_eye(target, eye, 0.25),
-            None => eye,
+        let view = self.view.unwrap_or_else(|| {
+            let target = self.orbit.target(p);
+            controls::camera::View {
+                target,
+                eye: self
+                    .orbit
+                    .eye(target, |target, eye| self.unblocked(target, eye)),
+            }
         });
         Camera {
-            eye,
-            target,
-            fov: controls::camera::FOV_DEGREES.to_radians(),
+            eye: view.eye,
+            target: view.target,
+            fov: self.settings.fov_degrees.to_radians(),
+        }
+    }
+    /// The eye pulled in front of the scenery between it and `target`.
+    fn unblocked(&self, target: Vec3, eye: Vec3) -> Vec3 {
+        match &self.scenery {
+            Some(scenery) => scenery.camera_eye(target, eye, 0.25),
+            None => eye,
         }
     }
     fn target(&self, cycle: bool) -> Option<u32> {
@@ -594,6 +619,14 @@ impl Game {
             .iter()
             .find(|u| u.id == self.host.player)
             .context("no local player")?;
+        let scenery = &self.scenery;
+        self.view = Some(
+            self.follow
+                .update(&self.orbit, me.position, dt, |target, eye| match scenery {
+                    Some(scenery) => scenery.camera_eye(target, eye, 0.25),
+                    None => eye,
+                }),
+        );
         let camera = self.camera(me.position);
         let mut draws = Vec::new();
         for i in 0..self.terrain.primitives.len() {
