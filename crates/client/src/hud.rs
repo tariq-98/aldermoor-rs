@@ -246,9 +246,13 @@ pub fn draw(
                     xp_bar(ui, player);
                 }
                 if player.unassigned_xp > 0 {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(230, 190, 90),
-                        format!("{} quest XP to give · {} Specialties", player.unassigned_xp, keys.specialties),
+                    badge(
+                        ui,
+                        &format!(
+                            "{} quest XP to give · {} Specialties",
+                            player.unassigned_xp, keys.specialties
+                        ),
+                        egui::Color32::from_rgb(140, 100, 30),
                     );
                 }
                 ui.add(
