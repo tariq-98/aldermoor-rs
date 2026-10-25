@@ -48,6 +48,11 @@ pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
 
 /// Reads one message.
 pub fn read<T: for<'de> Deserialize<'de>>(r: &mut impl Read) -> io::Result<T> {
+    read_sized(r).map(|(msg, _)| msg)
+}
+
+/// Reads one message, and how many bytes it took on the wire.
+pub fn read_sized<T: for<'de> Deserialize<'de>>(r: &mut impl Read) -> io::Result<(T, usize)> {
     let mut len = [0; 4];
     r.read_exact(&mut len)?;
     let len = u32::from_le_bytes(len) as usize;
@@ -56,7 +61,8 @@ pub fn read<T: for<'de> Deserialize<'de>>(r: &mut impl Read) -> io::Result<T> {
     }
     let mut buf = vec![0; len];
     r.read_exact(&mut buf)?;
-    postcard::from_bytes(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    let msg = postcard::from_bytes(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok((msg, 4 + len))
 }
 
 /// Accepting connections into a world.
@@ -152,6 +158,7 @@ fn serve(stream: TcpStream, control: crossbeam_channel::Sender<crate::Control>, 
 pub struct Client {
     stream: TcpStream,
     reader: BufReader<TcpStream>,
+    last_size: usize,
     pub player: UnitId,
 }
 
@@ -163,7 +170,7 @@ impl Client {
         (&stream).write_all(&encode(&ClientMsg::Hello { version: protocol::VERSION, name: name.to_string() }))?;
         let mut reader = BufReader::new(stream.try_clone()?);
         match read::<ServerMsg>(&mut reader)? {
-            ServerMsg::Welcome { player, .. } => Ok(Client { stream, reader, player }),
+            ServerMsg::Welcome { player, .. } => Ok(Client { stream, reader, last_size: 0, player }),
             ServerMsg::Refused(why) => Err(io::Error::new(io::ErrorKind::ConnectionRefused, why)),
             ServerMsg::View { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "a view before welcome")),
         }
@@ -176,9 +183,16 @@ impl Client {
     /// Waits for the next view.
     pub fn next_view(&mut self) -> io::Result<(Snapshot, CombatView)> {
         loop {
-            if let ServerMsg::View { snapshot, combat } = read::<ServerMsg>(&mut self.reader)? {
+            let (msg, size) = read_sized::<ServerMsg>(&mut self.reader)?;
+            self.last_size = size;
+            if let ServerMsg::View { snapshot, combat } = msg {
                 return Ok((snapshot, combat));
             }
         }
+    }
+
+    /// The wire size of the last message `next_view` read.
+    pub fn last_size(&self) -> usize {
+        self.last_size
     }
 }

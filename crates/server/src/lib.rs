@@ -5,6 +5,7 @@
 //! client's built-in server for solo play) or over the network ([`net`], what the headless
 //! `server` binary serves). Both see exactly the same views.
 
+pub mod bots;
 pub mod net;
 
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TrySendError};
@@ -33,7 +34,25 @@ pub struct HostStats {
     pub skipped: u64,
     /// Players connected now.
     pub players: usize,
+    /// Bytes of views handed to network connections, since the start.
+    pub bytes_out: u64,
 }
+
+/// Where one tick's time went, for load tests (`Server::take_tick_times`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TickTime {
+    /// Stepping the sim.
+    pub step_ms: f64,
+    /// Building every player's snapshot and combat view.
+    pub build_ms: f64,
+    /// Encoding views for network players.
+    pub encode_ms: f64,
+    /// Bytes of views encoded this tick.
+    pub bytes: usize,
+}
+
+/// Tick times kept for `take_tick_times`: the last minute.
+const KEPT_TICKS: usize = 60 * sim::TICK_RATE as usize;
 
 /// One player's latest view, for an in-process viewer to read whenever it likes.
 #[derive(Default)]
@@ -59,6 +78,7 @@ enum Control {
 
 struct Shared {
     stats: Mutex<HostStats>,
+    times: Mutex<Vec<TickTime>>,
     running: AtomicBool,
 }
 
@@ -75,7 +95,7 @@ impl Server {
     pub fn start(world: Sim) -> Server {
         let (commands, command_rx) = unbounded();
         let (control, control_rx) = unbounded();
-        let shared = Arc::new(Shared { stats: Mutex::new(HostStats::default()), running: AtomicBool::new(true) });
+        let shared = Arc::new(Shared { stats: Mutex::new(HostStats::default()), times: Mutex::new(Vec::new()), running: AtomicBool::new(true) });
         let s = shared.clone();
         let thread = std::thread::Builder::new()
             .name("Aldermoor simulation".into())
@@ -97,6 +117,11 @@ impl Server {
 
     pub fn stats(&self) -> HostStats {
         *self.shared.stats.lock().unwrap()
+    }
+
+    /// Each tick's timings since the last call (at most the last minute's), oldest first.
+    pub fn take_tick_times(&self) -> Vec<TickTime> {
+        std::mem::take(&mut *self.shared.times.lock().unwrap())
     }
 
     pub fn stop(&mut self) {
@@ -213,6 +238,7 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
         let t1 = Instant::now();
         let events = world.take_events();
         let mut gone = Vec::new();
+        let (mut encoding, mut bytes) = (Duration::ZERO, 0);
         viewers.retain(|(id, viewer)| {
             let mut snapshot = world.snapshot(Some(*id));
             snapshot.events = events.clone();
@@ -225,10 +251,16 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
                     *latest.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
                     true
                 }
-                Viewer::Remote(frames) => match frames.try_send(net::encode(&net::ServerMsg::View { snapshot, combat })) {
-                    Ok(()) => true,
-                    Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
-                },
+                Viewer::Remote(frames) => {
+                    let t = Instant::now();
+                    let frame = net::encode(&net::ServerMsg::View { snapshot, combat });
+                    encoding += t.elapsed();
+                    bytes += frame.len();
+                    match frames.try_send(frame) {
+                        Ok(()) => true,
+                        Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
+                    }
+                }
             };
             if !kept {
                 gone.push(*id);
@@ -243,9 +275,18 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
         let (step, view) = ((t1 - t0).as_secs_f64() * 1000.0, t1.elapsed().as_secs_f64() * 1000.0);
         window = (window.0 + 1, window.1 + step, window.2 + view);
         {
+            let encode_ms = encoding.as_secs_f64() * 1000.0;
+            let mut times = shared.times.lock().unwrap();
+            if times.len() >= KEPT_TICKS {
+                times.drain(..KEPT_TICKS / 2);
+            }
+            times.push(TickTime { step_ms: step, build_ms: view - encode_ms, encode_ms, bytes });
+        }
+        {
             let mut stats = shared.stats.lock().unwrap();
             stats.ticks = world.tick();
             stats.players = viewers.len();
+            stats.bytes_out += bytes as u64;
             if window.0 == sim::TICK_RATE {
                 stats.step_ms = window.1 / window.0 as f64;
                 stats.view_ms = window.2 / window.0 as f64;
@@ -291,6 +332,29 @@ mod tests {
         assert!(combat.units.iter().any(|u| u.id == remote.player));
         let local = host.snapshot().unwrap();
         assert!(local.unit(remote.player).is_some_and(|u| u.name == "Remote"));
+    }
+
+    #[test]
+    fn bots_join_and_find_a_fight() {
+        let mut world = Sim::brambleford(4);
+        world.spawn_crowd_in(40, SPAWN, Vec2::splat(15.0));
+        let server = Server::start(world);
+        let listener = net::listen(&server, "127.0.0.1:0").unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let bots: Vec<_> = (0..4)
+            .map(|i| {
+                let (addr, stop) = (listener.addr(), stop.clone());
+                std::thread::spawn(move || bots::run(addr, &format!("Bot {i}"), i, stop).unwrap())
+            })
+            .collect();
+        std::thread::sleep(Duration::from_secs(2));
+        stop.store(true, Ordering::Relaxed);
+        let reports: Vec<_> = bots.into_iter().map(|b| b.join().unwrap()).collect();
+        assert!(reports.iter().all(|r| r.views > 60 && r.bytes > 0), "{reports:?}");
+        assert!(reports.iter().any(|r| r.fighting > 0), "nobody found a fight: {reports:?}");
+        let times = server.take_tick_times();
+        assert!(times.len() > 60 && times.iter().any(|t| t.bytes > 0 && t.encode_ms > 0.0));
+        assert!(server.stats().bytes_out > 0);
     }
 
     #[test]
