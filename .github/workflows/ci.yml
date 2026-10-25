@@ -1,0 +1,85 @@
+# Build, lint and test every PR and every push to main, so agents working in parallel find out
+# quickly when they break each other's work.
+#
+# - linux: the portable crates (everything but render and client): fmt, clippy, test.
+# - macos: render and client, which need Metal: clippy, test.
+# The Swift package in crates/apple is not built here.
+#
+# Timing-sensitive checks (sim step budget, later the iai-callgrind and wire-size gates from #31)
+# live in perf.yml so a noisy shared runner can't block a PR.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a PR replaces its running checks; pushes to main all run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Crates kept in a hand-written style wider than rustfmt's default. They are left out of the
+  # format check until they are reformatted, or for good; that choice is #45.
+  FMT_HAND_FORMATTED: sim world server protocol assets
+
+jobs:
+  linux:
+    name: Linux (portable crates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/lfs-pull
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: |
+          packages=()
+          for manifest in crates/*/Cargo.toml; do
+            name=$(basename "$(dirname "$manifest")")
+            case " $FMT_HAND_FORMATTED " in *" $name "*) continue ;; esac
+            packages+=(-p "$name")
+          done
+          cargo fmt --check "${packages[@]}"
+
+      # approx_constant is allowed only until #37 fixes the 6.28 in world. Warnings don't fail the
+      # job yet; turn on -D warnings once the existing ones are gone.
+      - name: Clippy
+        run: cargo clippy --workspace --exclude render --exclude client --all-targets --locked -- -A clippy::approx_constant
+
+      - name: Test
+        run: cargo test --workspace --exclude render --exclude client --locked
+
+  macos:
+    name: macOS (render and client)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/lfs-pull
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # .cargo/config.toml points SDKROOT at the Command Line Tools SDK on Chippy's Mac, which
+      # isn't on the runner. Use whatever SDK the runner's Xcode ships.
+      - name: Use the runner's SDK
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - name: Clippy
+        run: cargo clippy -p render -p client --all-targets --locked -- -A clippy::approx_constant
+
+      - name: Test
+        run: cargo test -p render -p client --locked
