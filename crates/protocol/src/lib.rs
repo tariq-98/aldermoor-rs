@@ -9,8 +9,10 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub mod wire;
+
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
