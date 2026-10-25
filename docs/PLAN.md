@@ -73,6 +73,7 @@ rendering technique still decides the frame rate. That's why the engine talks to
 | `server` | Runs `sim` at 60 Hz on its own thread; saves; dispatches AI requests | Claude |
 | `ai` | Providers, router, budget and features: talking NPCs, persuasion, moods, companions, events, quest judging | Claude |
 | `render` | Metal renderer: frame graph, lighting, shadows, water, foliage, characters, MetalFX or our own temporal anti-aliasing (TAA) | Codex |
+| `anim` | Character animation that needs no renderer: blending between clips (inertialization) now, warping, IK and procedural layers next; tested on Linux. See [ANIMATION.md](ANIMATION.md) | Claude |
 | `assets` | Build-time tools: glTF to engine format, texture compression, catalogue checks. The Blender pipeline itself is `art/blender/` | Claude |
 | `client` | The app: window, input, camera, interpolation, HUD, audio | Shared |
 | `controls` | Keys and mouse to movement commands, and the orbit camera; no windowing, so its tests run anywhere | Shared |

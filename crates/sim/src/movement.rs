@@ -3,7 +3,7 @@ use glam::{Vec2, Vec3};
 use protocol::{Event, Pose};
 
 use crate::combat::abilities::Arrivals;
-use crate::{Anim, Body, Clock, Control, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
+use crate::{Anim, Body, Clock, Control, Faction, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
 
 pub const GRAVITY: f32 = 20.0;
 /// About a 1.1 m jump, landing after 0.66 s.
@@ -28,6 +28,12 @@ const BACKPEDAL: f32 = 0.6;
 const STEP_DOWN: f32 = 0.6;
 /// Sprinting (out of combat, on land) runs this much faster.
 pub const SPRINT: f32 = 1.5;
+/// On foot, from standing to full speed takes this long (s), and from run to sprint `SPRINT_UP`.
+/// Short enough to keep dodging sharp, long enough that a body has some weight.
+pub const START_UP: f32 = 0.08;
+pub const SPRINT_UP: f32 = 0.3;
+/// Coming to a stop from a run takes this long (s).
+pub const STOP_TIME: f32 = 0.06;
 /// Steeper than this (rise over run, about 63°) the ground is a wall you can't walk up.
 pub const MAX_SLOPE: f32 = 2.0;
 /// Walls up to about chest height are climbed over; taller ones stop you.
@@ -220,9 +226,18 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             speed *= BACKPEDAL;
         }
         let desired = dir * speed;
-        if m.grounded {
+        if m.grounded && !ctl.can_move() {
+            // Rooted or stunned: stopped dead.
+            m.vel.x = 0.0;
+            m.vel.z = 0.0;
+        } else if m.grounded && m.swimming {
             m.vel.x = desired.x;
             m.vel.z = desired.y;
+        } else if m.grounded {
+            let cruise = if m.sprinting { speed / SPRINT } else { speed };
+            let v = ramp(Vec2::new(m.vel.x, m.vel.z), desired, cruise, m.run_speed * ctl.speed / STOP_TIME);
+            m.vel.x = v.x;
+            m.vel.z = v.y;
         } else {
             // Limited air control.
             let k = (DT * 3.0).min(1.0);
@@ -323,13 +338,42 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
     }
 }
 
+/// One step of on-foot speed toward `desired`: the part of the velocity along the wished
+/// direction builds to `cruise` over `START_UP` and on to a sprint over `SPRINT_UP`, while the
+/// part across it (and all of it when stopping) bleeds off at `brake` (m/s²). Turning round
+/// drops the backward part at once, so reversing is as quick as starting.
+fn ramp(vel: Vec2, desired: Vec2, cruise: f32, brake: f32) -> Vec2 {
+    // Standing still or already at speed, the common case.
+    if vel == desired {
+        return desired;
+    }
+    let target = desired.length();
+    let shed = |v: Vec2| v * (1.0 - brake * DT / v.length().max(1e-6)).max(0.0);
+    if target < 1e-4 {
+        return shed(vel);
+    }
+    let wish = desired / target;
+    let mut along = vel.dot(wish).max(0.0);
+    let across = shed(vel - wish * vel.dot(wish));
+    if along < target {
+        let rate = if along < cruise { cruise / START_UP } else { (target - cruise) / SPRINT_UP };
+        along = (along + rate * DT).min(target);
+    } else {
+        along = (along - brake * DT).max(target);
+    }
+    wish * along + across
+}
+
+/// A unit in the crowd: who, where, its radius and weight (0 for one that neither pushes nor is
+/// pushed), the push so far, and a player's side (players on the same side pass through each
+/// other).
+type Member = (Entity, Vec2, f32, f32, Vec2, Option<Faction>);
+
 /// Scratch space for `separate`, kept between steps (by `spatial::rebuild`) so it doesn't
 /// allocate.
 #[derive(Default)]
 pub struct Crowd {
-    /// Every unit: who, where, its radius and weight (0 for one that neither pushes nor is
-    /// pushed), and the push so far.
-    bodies: Vec<(Entity, Vec2, f32, f32, Vec2)>,
+    bodies: Vec<Member>,
     widest: f32,
     /// Indices into `bodies` by band (north-south) then west to east, with the band and the
     /// east-west position. Units barely move between steps, so last step's order is nearly
@@ -349,20 +393,22 @@ impl Crowd {
     }
 
     /// Adds a unit as `spatial::rebuild` passes it (one pass over the units does both).
-    pub fn add(&mut self, e: Entity, at: Vec2, radius: f32, free: bool, player: bool) {
-        let weight = if !free { 0.0 } else if player { radius * radius * PLAYER_WEIGHT } else { radius * radius };
+    pub fn add(&mut self, e: Entity, at: Vec2, radius: f32, free: bool, player: Option<Faction>) {
+        let weight = if !free { 0.0 } else if player.is_some() { radius * radius * PLAYER_WEIGHT } else { radius * radius };
         self.widest = self.widest.max(radius);
-        self.bodies.push((e, at, radius, weight, Vec2::ZERO));
+        self.bodies.push((e, at, radius, weight, Vec2::ZERO, player));
     }
 
     /// The bodies `separate` pushed: who, from where, their radius, and the push.
     pub fn pushes(&self) -> impl Iterator<Item = (Entity, Vec2, f32, Vec2)> + '_ {
-        self.bodies.iter().filter(|b| b.4 != Vec2::ZERO).map(|&(e, from, r, _, push)| (e, from, r, push))
+        self.bodies.iter().filter(|b| b.4 != Vec2::ZERO).map(|&(e, from, r, _, push, _)| (e, from, r, push))
     }
 }
 
 /// Keeps bodies from overlapping: each pair that does is eased apart, the lighter body moving
-/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). The push turns a
+/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). Players who
+/// can't harm each other pass through each other, so nobody can block a doorway or a bridge;
+/// monsters, and players on opposing sides, still collide. The push turns a
 /// little to one side, so a body caught behind another slides round it rather than queueing.
 /// Bodies in forced motion (rolls, leaps, charges, climbs) neither push nor are pushed. Works out
 /// the pushes for the bodies `spatial::rebuild` gathered, every other step; `shift` applies them.
@@ -389,10 +435,13 @@ pub fn separate(crowd: &mut Crowd) {
         }
     }
     let (turn_cos, turn_sin) = (SIDESTEP.cos(), SIDESTEP.sin());
-    let shove = |bodies: &mut [(Entity, Vec2, f32, f32, Vec2)], i: usize, j: usize| {
-        let (_, pa, ra, wa, _) = bodies[i];
-        let (_, pb, rb, wb, _) = bodies[j];
+    let shove = |bodies: &mut [Member], i: usize, j: usize| {
+        let (_, pa, ra, wa, _, sa) = bodies[i];
+        let (_, pb, rb, wb, _, sb) = bodies[j];
         if wb == 0.0 {
+            return;
+        }
+        if let (Some(fa), Some(fb)) = (sa, sb) && !fa.is_enemy(fb) {
             return;
         }
         let d = pa - pb;

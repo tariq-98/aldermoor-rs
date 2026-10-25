@@ -65,13 +65,15 @@ pub fn equip(world: &mut World, e: Entity) {
         f.auto = auto;
     }
     if let Some(mut look) = world.get_mut::<Appearance>(e) {
-        look.0.gear.retain(|(slot, _)| slot != "main_hand" && slot != "off_hand");
-        if let Some(m) = &set.0 {
-            look.0.gear.push(("main_hand".into(), m.clone()));
-        }
-        if let Some(o) = &set.1 {
-            look.0.gear.push(("off_hand".into(), o.clone()));
-        }
+        look.edit(|look| {
+            look.gear.retain(|(slot, _)| slot != "main_hand" && slot != "off_hand");
+            if let Some(m) = &set.0 {
+                look.gear.push(("main_hand".into(), m.clone()));
+            }
+            if let Some(o) = &set.1 {
+                look.gear.push(("off_hand".into(), o.clone()));
+            }
+        });
     }
 }
 

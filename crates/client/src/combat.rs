@@ -230,6 +230,7 @@ fn area(painter: &egui::Painter, projection: &Projection, a: &AreaView, valley: 
         );
     }
 }
+#[allow(clippy::too_many_arguments)]
 pub fn paint(
     ctx: &egui::Context,
     projection: &Projection,
@@ -238,15 +239,18 @@ pub fn paint(
     feedback: &Feedback,
     ground: Option<(Vec3, f32)>,
     valley: &world::Valley,
+    world_effects: bool,
 ) {
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Background,
         egui::Id::new("combat-world"),
     ));
-    for a in &fight.areas {
+    // Areas, the aiming circle and missiles are drawn in the world when the effects table
+    // exists (effects.rs); these flat outlines remain the fallback without it.
+    for a in fight.areas.iter().filter(|_| !world_effects) {
         area(&painter, projection, a, valley);
     }
-    if let Some((center, radius)) = ground {
+    if let Some((center, radius)) = ground.filter(|_| !world_effects) {
         area(
             &painter,
             projection,
@@ -265,7 +269,7 @@ pub fn paint(
             valley,
         );
     }
-    for p in &fight.projectiles {
+    for p in fight.projectiles.iter().filter(|_| !world_effects) {
         if let Some(at) = projection.point(p.position) {
             if let Some(tail) = projection.point(p.position - p.velocity.normalize_or_zero() * 0.5)
             {

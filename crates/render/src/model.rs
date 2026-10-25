@@ -45,12 +45,17 @@ impl Transform {
     pub fn matrix(self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
-    pub fn blend(self, other: Self, t: f32) -> Self {
-        Self {
-            translation: self.translation.lerp(other.translation, t),
-            rotation: self.rotation.slerp(other.rotation, t),
-            scale: self.scale.lerp(other.scale, t),
-        }
+}
+impl anim::Bone for Transform {
+    fn rotation(&self) -> Quat {
+        self.rotation
+    }
+    fn translation(&self) -> Vec3 {
+        self.translation
+    }
+    fn set(&mut self, rotation: Quat, translation: Vec3) {
+        self.rotation = rotation;
+        self.translation = translation;
     }
 }
 #[derive(Clone, Debug)]
@@ -175,8 +180,94 @@ pub struct Animation {
     pub duration: f32,
     pub tracks: Vec<Track>,
 }
+/// What a bound track sets on its bone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Apply {
+    Rotation,
+    Translation,
+    /// A humanoid's pelvis, which clips move in the proportions of the rig they were made on.
+    Pelvis,
+    Scale,
+}
+/// A track of a clip and the bone it drives.
+#[derive(Clone, Copy, Debug)]
+pub struct Bound {
+    pub track: u32,
+    pub bone: u32,
+    pub apply: Apply,
+}
+/// A clip with the tracks a body uses bound to its bones, the upper body's first.
+pub struct BoundClip {
+    pub clip: Arc<Animation>,
+    pub tracks: Box<[Bound]>,
+    /// How many of `tracks` drive the upper body: `spine_01` and everything under it.
+    pub upper: usize,
+}
+/// Every clip of a clip set bound to one skeleton (#204), so playing a clip looks up no bone by
+/// name and samples only the tracks the body uses. Humanoid clips turn every bone but move only
+/// the pelvis, and never scale. Characters share one for each skeleton and clip set through
+/// `ModelCache::clip_set`.
+pub struct ClipSet {
+    pub clips: HashMap<String, BoundClip>,
+}
+impl ClipSet {
+    pub fn bind(skeleton: &[Node], clips: &Model, humanoid: bool) -> Self {
+        let bones: HashMap<&str, usize> = skeleton
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.name.as_str(), i))
+            .collect();
+        let upper: Vec<bool> = (0..skeleton.len())
+            .map(|i| {
+                let mut at = Some(i);
+                while let Some(n) = at {
+                    if skeleton[n].name == "spine_01" {
+                        return humanoid;
+                    }
+                    at = skeleton[n].parent;
+                }
+                false
+            })
+            .collect();
+        let clips = clips
+            .clips
+            .iter()
+            .map(|(name, clip)| {
+                let mut tracks: Vec<Bound> = clip
+                    .tracks
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(track, t)| {
+                        let bone = *bones.get(t.node.as_str())?;
+                        let apply = match t.property {
+                            Property::Rotation => Apply::Rotation,
+                            Property::Translation if !humanoid => Apply::Translation,
+                            Property::Translation if t.node == "pelvis" => Apply::Pelvis,
+                            Property::Scale if !humanoid => Apply::Scale,
+                            _ => return None,
+                        };
+                        Some(Bound {
+                            track: track as u32,
+                            bone: bone as u32,
+                            apply,
+                        })
+                    })
+                    .collect();
+                // Stable, so each half keeps the clip's own order.
+                tracks.sort_by_key(|b| !upper[b.bone as usize]);
+                let bound = BoundClip {
+                    clip: clip.clone(),
+                    upper: tracks.iter().filter(|b| upper[b.bone as usize]).count(),
+                    tracks: tracks.into(),
+                };
+                (name.clone(), bound)
+            })
+            .collect();
+        Self { clips }
+    }
+}
 static NEXT_MODEL: AtomicU64 = AtomicU64::new(1);
-pub(crate) fn next_model_id() -> u64 {
+pub fn next_model_id() -> u64 {
     NEXT_MODEL.fetch_add(1, Ordering::Relaxed)
 }
 pub struct Model {
@@ -186,7 +277,7 @@ pub struct Model {
     pub rest_world: Vec<Mat4>,
     pub skins: Vec<Skin>,
     pub primitives: Vec<Primitive>,
-    pub clips: HashMap<String, Animation>,
+    pub clips: HashMap<String, Arc<Animation>>,
 }
 impl Model {
     pub fn load(path: &Path) -> Result<Self> {
@@ -497,11 +588,11 @@ impl Model {
             let name = a.name().unwrap_or("unnamed").to_owned();
             clips.insert(
                 name.clone(),
-                Animation {
+                Arc::new(Animation {
                     name,
                     duration,
                     tracks,
-                },
+                }),
             );
         }
         let rest_world = world_matrices(&nodes, &nodes.iter().map(|n| n.rest).collect::<Vec<_>>());
@@ -521,8 +612,16 @@ pub struct ModelCache {
     models: HashMap<PathBuf, Arc<Model>>,
     metadata: HashMap<PathBuf, Arc<serde_json::Value>>,
     texture_pool: HashMap<String, Arc<Texture>>,
+    clip_sets: HashMap<(u64, u64, bool), Arc<ClipSet>>,
 }
 impl ModelCache {
+    /// `clips` bound to the bones of `skeleton`, built once for each pair.
+    pub fn clip_set(&mut self, skeleton: &Model, clips: &Model, humanoid: bool) -> Arc<ClipSet> {
+        self.clip_sets
+            .entry((skeleton.id, clips.id, humanoid))
+            .or_insert_with(|| Arc::new(ClipSet::bind(&skeleton.nodes, clips, humanoid)))
+            .clone()
+    }
     /// Catalogue extensions are immutable for the lifetime of an asset cache.
     pub fn metadata(&mut self, path: &Path) -> Result<Arc<serde_json::Value>> {
         if let Some(value) = self.metadata.get(path) {
