@@ -371,8 +371,14 @@ impl Sim {
         }
         units.sort_by_key(|u| u.id);
         let player = viewer.and_then(|id| combat::view::player_state(&self.world, id));
-        let events = std::mem::take(&mut self.world.resource_mut::<Outbox>().0);
+        let events = self.take_events();
         Snapshot { tick, time, units, player, events }
+    }
+
+    /// Events since they were last taken (by this or by `snapshot`), in order. A host with many
+    /// viewers takes them once and gives each viewer a copy.
+    pub fn take_events(&mut self) -> Vec<protocol::Event> {
+        std::mem::take(&mut self.world.resource_mut::<Outbox>().0)
     }
 
     /// Combat detail for everything `viewer` can see (actions, casts, auras, projectiles,
