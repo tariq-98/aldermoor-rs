@@ -19,6 +19,9 @@ pub const SWAP_COOLDOWN: f64 = 5.0;
 /// How far (radians, about 12°) a player's blow turns toward the enemy nearest their aim, so a
 /// near miss still lands.
 pub const AIM_PULL: f32 = 0.21;
+/// A skill pressed this long (or less) before you're free to use it waits and then goes off,
+/// instead of being refused.
+pub const SKILL_QUEUE: f64 = 0.5;
 
 /// The bar for a weapon set: skills 1–5 from the weapons in hand, then the kit (6–0).
 pub fn bar_for(set: &(Option<String>, Option<String>), kit: &[Option<AbilityId>; 5]) -> [Option<AbilityId>; 10] {
@@ -94,6 +97,14 @@ pub fn use_slot(world: &mut World, e: Entity, slot: u8, ground: Option<Vec3>) {
     if def.auto && let Some(mut f) = world.get_mut::<Fighter>(e) {
         f.auto_attack = true;
     }
+    // Pressed just before the global cooldown, a cast or wind-up, or a climb or leap ends: it
+    // goes off the moment that does. The newest press takes the place of an older one.
+    if !def.auto && let Some(free) = free_soon(world, e, id, def) {
+        if let Some(mut f) = world.get_mut::<Fighter>(e) {
+            f.queued = Some(Queued { ability: id, ground, until: free + 0.1 });
+        }
+        return;
+    }
     // Pressing the basic attack turns it on; it says nothing while it's mid-swing.
     if use_ability(world, e, id, None, ground, def.auto) {
         // Attacking a target keeps you swinging at it.
@@ -102,13 +113,32 @@ pub fn use_slot(world: &mut World, e: Entity, slot: u8, ground: Option<Vec3>) {
         if offensive && target.is_some_and(|t| can_attack(world, e, t)) && let Some(mut f) = world.get_mut::<Fighter>(e) {
             f.auto_attack = true;
         }
-    } else if def.gcd {
-        // Pressed just before the global cooldown ends: it goes off the moment it does.
-        let t = now(world);
-        if let Some(mut f) = world.get_mut::<Fighter>(e) && t < f.gcd_until && f.gcd_until - t < 0.5 {
-            f.queued = Some(Queued { ability: id, ground, until: f.gcd_until + 0.1 });
-        }
     }
+}
+
+/// When `e`, busy now, will be free to use `id`, if that is within [`SKILL_QUEUE`]: the end of
+/// the global cooldown (for a skill on it), of a cast or wind-up, and of a forced move other than
+/// a roll. `None` if nothing is in the way, or it won't end soon enough to wait for.
+fn free_soon(world: &World, e: Entity, id: AbilityId, def: &AbilityDef) -> Option<f64> {
+    let t = now(world);
+    let f = world.get::<Fighter>(e)?;
+    let mut free = f64::NEG_INFINITY;
+    if def.gcd {
+        free = free.max(f.gcd_until);
+    }
+    if let Some(c) = f.cast {
+        let current = catalog().ability(c.ability);
+        // A basic attack or a channel gives way at once, and pressing the skill being cast does
+        // nothing.
+        if c.ability == id || current.auto || c.channel {
+            return None;
+        }
+        free = free.max(c.start + c.duration);
+    }
+    if let Some(fm) = world.get::<Motion>(e).and_then(|m| m.forced).filter(|fm| fm.kind != ForcedKind::Dodge) {
+        free = free.max(fm.start + fm.duration);
+    }
+    (free > t && free - t <= SKILL_QUEUE).then_some(free)
 }
 
 /// Checks and starts an ability. Returns false (telling a player why) when it can't be used.
@@ -422,7 +452,7 @@ pub fn update(world: &mut World) {
                 if let Some(mut f) = world.get_mut::<Fighter>(e) {
                     f.queued = None;
                 }
-            } else if t >= gcd_until {
+            } else if t >= gcd_until && !world.get::<Motion>(e).and_then(|m| m.forced).is_some_and(|fm| fm.kind != ForcedKind::Dodge) {
                 if let Some(mut f) = world.get_mut::<Fighter>(e) {
                     f.queued = None;
                 }

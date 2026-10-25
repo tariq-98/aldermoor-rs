@@ -9,6 +9,9 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 - **Sprint** (Shift) at 1.5× the run speed. It works out of combat only (6 s after the last
   blow given or taken), on land, and not while guarding, casting, downed or feared. It costs
   nothing.
+- **Jumps** forgive a little: a jump pressed up to 0.15 s before landing goes off as you land,
+  and one pressed up to 0.1 s after running off an edge still jumps (coyote time). The windows are
+  `JUMP_BUFFER` and `COYOTE_TIME`; rolls have their own (`DODGE_BUFFER`, in COMBAT.md).
 - **Cliffs:** ground steeper than 2:1 (about 63°) is a wall. Walking into one either climbs it
   or slides along it.
   - A face that tops out within **1.5 m** of your feet (chest height) is climbed: a 0.6 s pull-up
