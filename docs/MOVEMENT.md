@@ -21,6 +21,10 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     only stay on the ground going down ground no steeper than 2:1.
   - The bridge has stone parapets along both sides (solids in `world`), so you can't climb onto
     the deck from beside it; get on at either end.
+  - Walls and ruins can be climbed too. A `world::Solid` with a `top` is ground, not an
+    obstacle: its sides are faces like any cliff's, so one that tops out within 1.5 m is climbed
+    and stood on, and a taller one stops you. Buildings and trees have no top and only block.
+    None stand in the valley yet; they arrive with their art (#153).
 - **Swimming:** the river is no longer a wall.
   - Water deeper than 0.5 m is swum (until it's shallower than 0.4 m). Swimmers float with
     their feet 0.5 m under the surface (`world::WATER_LEVEL`), at 0.45× run speed.

@@ -177,6 +177,11 @@ impl Sim {
         &self.world.resource::<Land>().0
     }
 
+    /// The land, to add to (tests put walls where they need them).
+    pub fn land_mut(&mut self) -> &mut world::Valley {
+        &mut self.world.resource_mut::<Land>().into_inner().0
+    }
+
     /// Queues a command from a unit's controller for the next step.
     pub fn command(&mut self, from: UnitId, c: Command) {
         self.world.resource_mut::<Inbox>().0.push((from, c));

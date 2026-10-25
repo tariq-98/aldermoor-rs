@@ -211,6 +211,40 @@ fn cliffs_taller_than_chest_height_stop_you() {
     assert!(t.y < sim.land().ground(-42.0, -10.0) - 2.0, "got up the cliff to {t}");
 }
 
+/// A player on the road with a wall `rise` metres tall across their way 3 m east, walking at it.
+fn at_a_wall(rise: f32) -> (Sim, u32, f32) {
+    let mut sim = Sim::new(7);
+    let at = Vec2::new(5.0, 10.0);
+    let wall = at + Vec2::new(3.0, 0.0);
+    let top = sim.land().ground(wall.x, wall.y) + rise;
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top) });
+    let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
+    sim.step();
+    go(&mut sim, id, Vec2::X, false);
+    (sim, id, top)
+}
+
+#[test]
+fn climbs_onto_a_low_wall_and_down_the_far_side() {
+    let (mut sim, id, top) = at_a_wall(1.1);
+    assert!(climb(&mut sim, id, 90), "never climbed the wall");
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    assert!((t.y - top).abs() < 0.05 && (t.x - 8.0).abs() < 0.45, "stood at {t}, the top is {top}");
+    // Walking on, off the far side and down to the road.
+    sim.run_for(1.0);
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    assert!(t.x > 9.0 && (t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "ended at {t}");
+}
+
+#[test]
+fn a_wall_taller_than_chest_height_stops_you() {
+    let (mut sim, id, _) = at_a_wall(2.2);
+    assert!(!climb(&mut sim, id, 120), "climbed a 2.2 m wall");
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    assert!(t.x < 7.6 && t.x > 6.5, "stopped at x = {}", t.x);
+    assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "left the road for {t}");
+}
+
 #[test]
 fn swims_the_river_slowly_and_cannot_fight_in_it() {
     let r = world::river_z(40.0);
