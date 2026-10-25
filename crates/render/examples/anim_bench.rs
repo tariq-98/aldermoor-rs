@@ -1,7 +1,9 @@
 //! CPU cost of animating characters: `Character::update_combat` (pose) and `Character::draws`
 //! (skinning palettes) per character per frame, for a few typical looks and poses.
 //!
-//!     cargo run --release -p render --example anim_bench -- [characters] [frames] [pose]
+//!     cargo run --release -p render --example anim_bench -- [characters] [frames] [case]
+//!
+//! The cases are listed in `main`; without one, it runs them all.
 use glam::Vec3;
 use protocol::{Action, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
 use render::character::Character;
