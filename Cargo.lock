@@ -446,6 +446,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assets",
+ "controls",
  "egui",
  "egui-winit",
  "glam 0.34.1",
@@ -491,6 +492,15 @@ dependencies = [
 [[package]]
 name = "content"
 version = "0.1.0"
+
+[[package]]
+name = "controls"
+version = "0.1.0"
+dependencies = [
+ "glam 0.34.1",
+ "protocol",
+ "world",
+]
 
 [[package]]
 name = "convert_case"

@@ -74,6 +74,7 @@ rendering technique still decides the frame rate. That's why the engine talks to
 | `render` | Metal renderer: frame graph, lighting, shadows, water, foliage, characters, MetalFX or our own temporal anti-aliasing (TAA) | Codex |
 | `assets` | Build-time tools: glTF to engine format, texture compression, catalogue checks. The Blender pipeline itself is `art/blender/` | Claude |
 | `client` | The app: window, input, camera, interpolation, HUD, audio | Shared |
+| `controls` | Keys and mouse to movement commands, and the orbit camera; no windowing, so its tests run anywhere | Shared |
 | `apple` | Swift add-on built as a static library behind a C interface: on-device model, and later Game Center | Claude |
 
 ## Milestones
