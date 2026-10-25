@@ -1,9 +1,11 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
 mod combat;
+mod effects;
 mod hud;
 mod interpolate;
 mod menu;
 mod perf_overlay;
+mod stage;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
 use protocol::{Command, Look, Pose, UnitState};
@@ -39,6 +41,18 @@ struct Options {
     offscreen: bool,
     showcase: bool,
     smoke: bool,
+    effects_review: bool,
+    /// The effects review as a captioned reel of close shots, one effect at a time, from this
+    /// many seconds in.
+    reel: bool,
+    reel_from: f32,
+    /// The showcase camera: 0 is the whole scene; 1–3 come in close on parts of the staged
+    /// fight (the left of the lineup, its right, the missiles' lanes).
+    view: usize,
+    /// Every frame after the warmup (or every `sequence_step`th) is captured into this folder
+    /// (for review videos and contact sheets).
+    sequence: Option<PathBuf>,
+    sequence_step: u64,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -74,6 +88,12 @@ impl Options {
             offscreen: false,
             showcase: false,
             smoke: false,
+            effects_review: false,
+            reel: false,
+            reel_from: 0.,
+            view: 0,
+            sequence: None,
+            sequence_step: 1,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -110,6 +130,22 @@ impl Options {
                 "--capture" => {
                     o.capture = Some(PathBuf::from(
                         args.next().context("--capture needs a .png path")?,
+                    ))
+                }
+                "--view" => {
+                    o.view = args.next().context("--view needs 0..3")?.parse()?;
+                    ensure!(o.view <= 3, "--view needs 0..3");
+                }
+                "--sequence-step" => {
+                    o.sequence_step = args
+                        .next()
+                        .context("--sequence-step needs a count")?
+                        .parse()?;
+                    ensure!(o.sequence_step > 0, "--sequence-step needs a count above 0");
+                }
+                "--sequence" => {
+                    o.sequence = Some(PathBuf::from(
+                        args.next().context("--sequence needs a folder")?,
                     ))
                 }
                 "--frames" => {
@@ -157,6 +193,18 @@ impl Options {
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
+                "--effects-review" => {
+                    o.effects_review = true;
+                    o.showcase = true;
+                }
+                "--effects-reel" => {
+                    o.effects_review = true;
+                    o.reel = true;
+                    o.showcase = true;
+                }
+                "--reel-from" => {
+                    o.reel_from = args.next().context("--reel-from needs seconds")?.parse()?
+                }
                 "--scheme" => {
                     o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
@@ -181,7 +229,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -271,6 +319,13 @@ struct Game {
     viewport: Vec2,
     aim_slot: Option<u8>,
     valley: world::Valley,
+    effects: Option<effects::Effects>,
+    /// The effects' art, for each renderer to upload.
+    effects_art: Option<render::fx::Library>,
+    /// The fight staged for `--effects-review`.
+    stage: Option<stage::Stage>,
+    /// Seconds into the effects reel (it starts as the warmup ends).
+    reel_time: f32,
 }
 impl Game {
     fn new(options: Options) -> Result<Self> {
@@ -286,6 +341,14 @@ impl Game {
         }
         let orbit = settings.orbit();
         let pilot = settings.pilot(orbit.yaw);
+        let mut cache = ModelCache::default();
+        let (effects, effects_art) = match catalog.effects.clone() {
+            Some(table) => {
+                let (fx, art) = effects::Effects::load(table, &options.assets, &mut cache)?;
+                (Some(fx), Some(art))
+            }
+            None => (None, None),
+        };
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
@@ -294,7 +357,7 @@ impl Game {
             host,
             snaps: interpolate::Snapshots::new(first),
             catalog,
-            cache: ModelCache::default(),
+            cache,
             characters: HashMap::new(),
             terrain: render::terrain::valley(),
             scenery: None,
@@ -334,8 +397,22 @@ impl Game {
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
             valley: world::Valley::new(),
+            effects,
+            effects_art,
+            stage: None,
+            reel_time: 0.,
         };
         g.scenery = Some(render::scenery::Scenery::new(&g.catalog, &mut g.cache)?);
+        if g.options.reel {
+            eprintln!(
+                "effects reel: {:.1} s ({} frames after the warmup)",
+                stage::reel_seconds(),
+                (stage::reel_seconds() * 60.).ceil()
+            );
+            g.stage = Some(stage::Stage::reel());
+        } else if g.options.effects_review {
+            g.stage = Some(stage::Stage::default());
+        }
         if g.options.showcase {
             g.review = showcase(g.snaps.current.unit(g.host.player).unwrap().clone());
             if let Some(goblin) = g
@@ -591,9 +668,20 @@ impl Game {
             };
         }
         if self.options.showcase {
-            let target = Vec3::new(2., world::height(2., 22.) + 1.25, 22.);
+            // Target (x, z, height over the ground), and the eye's offset from it.
+            let (x, z, up, from) = match self.options.view {
+                _ if self.options.reel => {
+                    let (x, z, up, from) = stage::shot(self.reel_time).camera;
+                    (x, z, up, Vec3::from(from))
+                }
+                1 => (-1.5, 24.2, 1.0, Vec3::new(3.2, 1.7, 6.8)),
+                2 => (5.6, 23.6, 1.0, Vec3::new(2.6, 1.8, 6.6)),
+                3 => (0.5, 25., 1.5, Vec3::new(1.6, 0.9, 7.5)),
+                _ => (2., 22., 1.25, Vec3::new(8., 3.5, 14.)),
+            };
+            let target = Vec3::new(x, world::height(x, z) + up, z);
             return Camera {
-                eye: target + Vec3::new(8., 3.5, 14.),
+                eye: target + from,
                 target,
                 fov: 45f32.to_radians(),
             };
@@ -798,9 +886,16 @@ impl Game {
         }
         let unit_index: HashMap<_, _> =
             self.snaps.current.units.iter().map(|u| (u.id, u)).collect();
+        let event_time = self.snaps.current.time as f32;
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            // A staged fight makes its own events.
+            if let Some(fx) = &mut self.effects
+                && self.stage.is_none()
+            {
+                fx.event(&e, event_time);
+            }
             if let protocol::Event::Message { text } = &e {
                 // The same refusal repeated just refreshes its timer.
                 self.messages.retain(|m| m.0 != *text);
@@ -839,6 +934,8 @@ impl Game {
             self.snaps.units(!self.options.legacy_cpu)
         };
         let time = self.frame as f32 / 60.;
+        self.reel_time =
+            self.options.reel_from + (self.frame as f32 - self.options.warmup as f32) / 60.;
         if self.options.showcase {
             for u in &mut units {
                 u.pose_time = time;
@@ -968,10 +1065,19 @@ impl Game {
         // events, so a short --frames or slow frames can't end it early.
         let done = self.options.frames.is_some_and(|n| self.frame >= n)
             && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.);
+        let frame_file = self
+            .options
+            .sequence
+            .as_ref()
+            .filter(|_| {
+                self.frame > self.options.warmup
+                    && (self.frame - self.options.warmup).is_multiple_of(self.options.sequence_step)
+            })
+            .map(|dir| dir.join(format!("{:05}.png", self.frame)));
         let capture = if done {
             self.options.capture.as_deref()
         } else {
-            None
+            frame_file.as_deref()
         };
         let raw = self.hud_input.take().unwrap_or_else(|| egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -989,6 +1095,46 @@ impl Game {
             .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
             .filter(|s| s.ground && s.radius > 0.)
             .map(|s| s.radius);
+        let world_effects =
+            self.effects.is_some() && (!self.options.showcase || self.stage.is_some());
+        if world_effects && let Some(fx) = &mut self.effects {
+            let characters = &self.characters;
+            let valley = &self.valley;
+            let ground = |x, z| valley.ground(x, z);
+            let stage_time = if self.options.reel {
+                self.reel_time
+            } else {
+                scene_time
+            };
+            let staged = self
+                .stage
+                .as_mut()
+                .map(|s| s.frame(stage_time, &units, &ground));
+            if let Some(f) = &staged {
+                // A new shot starts clean: nothing left lying from the last.
+                if f.cut {
+                    fx.clear();
+                }
+                for (e, at) in &f.events {
+                    fx.event(e, *at);
+                }
+            }
+            let (solids, frame) = fx.draws(&effects::Scene {
+                fight: staged.as_ref().map_or(&*self.fight, |f| &f.fight),
+                units: &units,
+                height: &|id| characters.get(&id).map_or(1.8, |c| c.rig_height),
+                ground: &ground,
+                since: if staged.is_some() {
+                    0.
+                } else {
+                    self.snaps.received.elapsed().as_secs_f32()
+                },
+                time: staged.as_ref().map_or(scene_time, |f| f.clock),
+                aim: staged.as_ref().map_or(aim.zip(radius), |f| f.aim),
+            });
+            draws.extend(solids);
+            r.effects = Some(frame);
+        }
         let projection = combat::Projection {
             matrix: camera.matrix(r.width as f32 / r.height as f32),
             size: self.viewport
@@ -1011,10 +1157,15 @@ impl Game {
                     &self.feedback,
                     aim.zip(radius),
                     &self.valley,
+                    world_effects,
                 );
             }
-            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
-            hud::messages(ctx, &self.messages);
+            if self.options.reel {
+                paint_caption(ctx, stage::shot(self.reel_time).caption);
+            } else {
+                actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
+                hud::messages(ctx, &self.messages);
+            }
             if crosshair {
                 paint_crosshair(ctx);
             }
@@ -1277,6 +1428,22 @@ fn paint_crosshair(ctx: &egui::Context) {
         }
     }
 }
+/// The reel's caption, top centre on a dark plate.
+fn paint_caption(ctx: &egui::Context, text: &str) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("caption"),
+    ));
+    let galley = painter.layout_no_wrap(
+        text.into(),
+        egui::FontId::proportional(24.),
+        egui::Color32::from_white_alpha(235),
+    );
+    let top = egui::pos2(ctx.content_rect().center().x - galley.size().x / 2., 22.);
+    let plate = egui::Rect::from_min_size(top, galley.size()).expand2(egui::vec2(16., 8.));
+    painter.rect_filled(plate, 6., egui::Color32::from_black_alpha(150));
+    painter.galley(top, galley, egui::Color32::WHITE);
+}
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
 /// A press of the left or right button, until both are up again.
@@ -1481,6 +1648,9 @@ impl ApplicationHandler for App {
             if let Some(path) = &self.game.options.surface_assets {
                 r.load_surface_assets(path, &self.game.options.assets)?;
                 eprintln!("SURFACES {}", path.display());
+            }
+            if let Some(art) = &self.game.effects_art {
+                r.load_effects(art)?;
             }
             self.egui_state = Some(egui_winit::State::new(
                 self.game.hud_context.clone(),
@@ -1704,6 +1874,9 @@ fn main() -> Result<()> {
         if let Some(path) = &game.options.surface_assets {
             renderer.load_surface_assets(path, &game.options.assets)?;
             eprintln!("SURFACES {}", path.display());
+        }
+        if let Some(art) = &game.effects_art {
+            renderer.load_effects(art)?;
         }
         let mut deadline = Instant::now();
         loop {

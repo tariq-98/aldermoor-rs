@@ -1,0 +1,648 @@
+{
+  "version": 2,
+  "atlas": "effects/atlas.png",
+  "frames": "effects/atlas.json",
+  "tiles": {
+    "energy": "effects/tile.energy.png",
+    "hex": "effects/tile.hex.png",
+    "noise": "effects/tile.noise.png",
+    "trail": "effects/tile.trail.png"
+  },
+  "meshes": {
+    "arrow": "effects/arrow.glb",
+    "axe": "gear/axe.bearded.gltf",
+    "column": "effects/column.glb",
+    "crystal": "effects/crystal.glb",
+    "shell": "effects/shell.glb"
+  },
+  "ramps": {
+    "fire": [[0, 0.04, 0.0, 0.0], [0.25, 0.55, 0.05, 0.01], [0.5, 1.45, 0.3, 0.03], [0.72, 2.3, 0.9, 0.1], [0.88, 3.0, 1.8, 0.45], [1, 4.0, 3.2, 1.6]],
+    "ember": [[0, 0, 0, 0], [0.5, 1.2, 0.25, 0.03], [1, 3.4, 1.9, 0.55]],
+    "blast": [[0, 0.05, 0.0, 0.0], [0.26, 0.55, 0.04, 0.01], [0.3, 1.5, 0.28, 0.03], [0.5, 1.6, 0.32, 0.03], [0.54, 2.6, 1.05, 0.1], [0.72, 2.7, 1.15, 0.12], [0.76, 3.6, 2.7, 0.9], [1, 4.0, 3.4, 1.6]],
+    "char": [[0, 0.0, 0.0, 0.0], [1, 0.07, 0.02, 0.008]],
+    "smoke": [[0, 0.02, 0.018, 0.016], [0.5, 0.07, 0.062, 0.056], [1, 0.19, 0.17, 0.155]],
+    "dust": [[0, 0.06, 0.05, 0.035], [0.5, 0.17, 0.14, 0.1], [1, 0.42, 0.36, 0.27]],
+    "frost": [[0, 0, 0, 0], [0.3, 0.02, 0.12, 0.45], [0.6, 0.2, 0.75, 2.0], [0.85, 0.9, 2.0, 3.0], [1, 2.6, 3.4, 4.0]],
+    "ice": [[0, 0.03, 0.08, 0.2], [0.5, 0.35, 0.85, 1.6], [1, 1.8, 2.6, 3.2]],
+    "mist": [[0, 0.16, 0.21, 0.3], [1, 0.72, 0.84, 1.0]],
+    "deep": [[0, 0.0, 0.0, 0.0], [1, 0.0, 0.03, 0.09]],
+    "arcane": [[0, 0, 0, 0], [0.3, 0.25, 0.03, 0.7], [0.6, 1.05, 0.25, 2.3], [0.85, 1.9, 1.1, 3.2], [1, 3.2, 2.8, 4.2]],
+    "spark_cyan": [[0, 0, 0, 0], [0.5, 0.05, 0.6, 1.2], [1, 1.4, 3.0, 3.6]],
+    "shadow": [[0, 0, 0, 0], [0.3, 0.15, 0.0, 0.4], [0.6, 0.6, 0.08, 1.3], [0.85, 1.2, 0.35, 2.2], [1, 2.2, 1.4, 3.0]],
+    "void": [[0, 0.0, 0.0, 0.0], [0.6, 0.02, 0.0, 0.035], [1, 0.08, 0.01, 0.12]],
+    "holy": [[0, 0, 0, 0], [0.3, 0.6, 0.32, 0.03], [0.6, 1.8, 1.15, 0.25], [0.85, 3.0, 2.4, 0.9], [1, 4.2, 3.8, 2.4]],
+    "gold": [[0, 0, 0, 0], [0.4, 1.0, 0.5, 0.05], [0.8, 2.8, 2.0, 0.5], [1, 4.0, 3.4, 2.0]],
+    "warm": [[0, 0.0, 0.0, 0.0], [1, 0.06, 0.035, 0.0]],
+    "nature": [[0, 0, 0, 0], [0.3, 0.05, 0.3, 0.02], [0.6, 0.3, 1.4, 0.14], [0.85, 1.0, 2.5, 0.55], [1, 2.4, 3.6, 1.6]],
+    "renewal": [[0, 0, 0, 0], [0.35, 0.05, 0.5, 0.12], [0.7, 0.5, 2.3, 0.6], [1, 2.2, 3.8, 2.0]],
+    "poison": [[0, 0, 0, 0], [0.4, 0.15, 0.55, 0.02], [0.75, 0.6, 1.9, 0.14], [1, 1.9, 3.2, 0.7]],
+    "blood": [[0, 0, 0, 0], [0.5, 0.38, 0.0, 0.0], [1, 1.3, 0.08, 0.05]],
+    "lightning": [[0, 0, 0, 0], [0.3, 0.12, 0.28, 1.2], [0.6, 0.7, 1.4, 3.4], [0.85, 2.0, 2.8, 4.4], [1, 4.0, 4.4, 5.0]],
+    "water": [[0, 0, 0, 0], [0.4, 0.02, 0.2, 0.55], [0.8, 0.3, 0.95, 1.8], [1, 1.4, 2.2, 3.0]],
+    "physical": [[0, 0, 0, 0], [0.4, 0.5, 0.35, 0.2], [0.8, 1.8, 1.45, 0.95], [1, 3.4, 3.1, 2.6]],
+    "ward": [[0, 0, 0, 0], [0.3, 0.02, 0.14, 0.55], [0.6, 0.22, 0.8, 2.2], [0.85, 0.9, 1.9, 3.4], [1, 2.6, 3.4, 4.4]],
+    "valour": [[0, 0, 0, 0], [0.35, 0.75, 0.1, 0.0], [0.7, 2.6, 0.8, 0.08], [1, 4.0, 2.9, 1.1]],
+    "swift": [[0, 0, 0, 0], [0.4, 0.05, 0.48, 0.75], [0.8, 0.5, 2.1, 2.6], [1, 2.3, 3.8, 4.2]],
+    "curse": [[0, 0, 0, 0], [0.4, 0.55, 0.02, 0.45], [0.8, 2.1, 0.28, 2.0], [1, 3.6, 2.0, 3.6]],
+    "steel": [[0, 0, 0, 0], [0.5, 0.6, 0.65, 0.75], [1, 3.4, 3.6, 3.9]]
+  },
+  "effects": {
+    "flight.fire_bolt": [
+      {"kind": "sprite", "frame": "glow", "ramp": "char", "blend": 1, "alpha": 0.45, "size": [0.36, 0.36], "towards": -0.12, "soft": 0.1},
+      {"kind": "beam", "tile": "trail", "ramp": "fire", "alpha": 1.0, "length": 1.7, "size": [0.15, 0.03], "repeat": 0.7, "scroll": [5.0, 0]},
+      {"kind": "sprite", "frame": "flame", "ramp": "fire", "count": 5, "life": 0.24, "size": [0.26, 0.19], "stretch": 0.024, "flip": true, "spread": [0.04, 0.04, 0.04], "blend": 0.3, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "fire", "colour": [1.4, 1.4, 1.4], "size": [0.19, 0.19], "stretch": 0.006, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "fire", "colour": [0.8, 0.8, 0.8], "alpha": 0.3, "size": [0.55, 0.55], "soft": 0.2},
+      {"kind": "sprite", "frame": "spark", "ramp": "ember", "count": 4, "life": 0.3, "stretch": 0.03, "speed": [1, 2.5], "gravity": 2, "size": [0.025, 0.01], "fade": [0, 0.5], "world": true},
+      {"kind": "decal", "frame": "glow", "ramp": "fire", "alpha": 0.16, "size": [1.0, 1.0]}
+    ],
+    "trail.fire_bolt": [
+      {"kind": "trail", "frame": "fire", "ramp": "blast", "rate": 4, "life": 0.2, "size": [0.1, 0.03], "vary": 0.3, "spin": [1, 4], "spread": [0.04, 0.04, 0.04], "fade": [0.0, 0.5], "erode": [-0.1, 0.55], "erode_soft": 0.07, "cool": 0.6, "soft": 0.1},
+      {"kind": "trail", "frame": "smoke", "ramp": "smoke", "blend": 0.85, "alpha": 0.18, "rate": 1.5, "life": 0.6, "size": [0.06, 0.24], "vary": 0.4, "velocity": [0, 0.5, 0], "spin": [0.3, 1.0], "spread": [0.06, 0.06, 0.06], "fade": [0.2, 0.6], "erode": [-0.05, 0.8], "erode_soft": 0.1, "soft": 0.3},
+      {"kind": "trail", "frame": "spark", "ramp": "ember", "rate": 3, "life": 0.4, "stretch": 0.04, "speed": [0.5, 1.5], "gravity": 2, "spread": [0.04, 0.04, 0.04], "size": [0.02, 0.008], "fade": [0, 0.5]}
+    ],
+    "hit.fire": [
+      {"kind": "sprite", "frame": "glow", "ramp": "fire", "colour": [1.6, 1.6, 1.6], "life": 0.1, "size": [0.35, 0.8], "ease": 3, "fade": [0, 1]},
+      {"kind": "sprite", "frame": "starburst", "ramp": "fire", "alpha": 0.8, "life": 0.14, "size": [0.3, 0.9], "ease": 3, "fade": [0, 0.8], "spin": [0.5, 1]},
+      {"kind": "sprite", "frame": "flame", "ramp": "fire", "count": 6, "life": 0.42, "ring": true, "spread": [0.1, 0.04, 0.1], "speed": [0.8, 1.6], "drag": 4, "velocity": [0, 0.7, 0], "size": [0.12, 0.24], "ease": 2, "vary": 0.3, "blend": 0.3, "soft": 0.15},
+      {"kind": "sprite", "frame": "burst", "ramp": "blast", "count": 2, "life": 0.36, "size": [0.25, 0.55], "ease": 3, "spread": [0.08, 0.08, 0.08], "spin": [0.5, 1.5], "fade": [0, 0.3], "erode": [-0.1, 0.55], "erode_soft": 0.07, "soft": 0.2},
+      {"kind": "sprite", "frame": "spark", "ramp": "ember", "count": 10, "life": 0.32, "stretch": 0.03, "speed": [3, 6], "drag": 3, "gravity": 4, "size": [0.025, 0.01], "fade": [0, 0.4]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "smoke", "blend": 0.85, "alpha": 0.35, "count": 2, "life": 0.7, "size": [0.25, 0.6], "ease": 2.5, "delay": [0.06, 0.12], "spread": [0.1, 0.1, 0.1], "velocity": [0, 0.5, 0], "spin": [0.2, 0.6], "erode": [-0.1, 0.8], "erode_soft": 0.1, "soft": 0.3},
+      {"kind": "decal", "frame": "scorch", "ramp": "fire", "blend": 0.6, "life": 2.5, "size": [0.55, 0.55], "fade": [0.02, 0.5], "erode": [-0.2, 0.9]}
+    ],
+    "flight.frost_lance": [
+      {"kind": "sprite", "frame": "glow", "ramp": "deep", "blend": 1, "alpha": 0.4, "size": [0.32, 0.32], "towards": -0.12, "soft": 0.1},
+      {"kind": "beam", "tile": "trail", "ramp": "frost", "alpha": 1.0, "length": 1.3, "size": [0.08, 0.016], "repeat": 0.7, "scroll": [5.0, 0]},
+      {"kind": "mesh", "mesh": "crystal", "ramp": "ice", "size": [0.08, 0.08], "length": 10, "offset": [0, 0, -0.42], "rim": [2.5, 1.0], "mask": [0, 0], "twinkle": [0.35, 6], "texture": 0, "colour": [1, 1, 1], "alpha": 0.95, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "frost", "colour": [1.2, 1.2, 1.2], "size": [0.13, 0.13], "stretch": 0.01, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "frost", "alpha": 0.35, "size": [0.45, 0.45], "soft": 0.2},
+      {"kind": "decal", "frame": "glow", "ramp": "frost", "alpha": 0.15, "size": [1.0, 1.0]}
+    ],
+    "trail.frost_lance": [
+      {"kind": "trail", "frame": "flare", "ramp": "frost", "rate": 4, "life": 0.4, "size": [0.06, 0.0], "spread": [0.08, 0.08, 0.08], "spin": [2, 4]},
+      {"kind": "trail", "frame": "smoke", "ramp": "mist", "blend": 0.5, "alpha": 0.15, "rate": 2, "life": 0.5, "size": [0.07, 0.24], "vary": 0.3, "spread": [0.05, 0.05, 0.05], "spin": [0.3, 1.2], "erode": [-0.05, 0.85], "erode_soft": 0.1, "velocity": [0, -0.1, 0], "soft": 0.3},
+      {"kind": "trail", "frame": "snowflake", "ramp": "frost", "rate": 1, "life": 0.6, "size": [0.04, 0.025], "spin": [1, 3], "gravity": 0.5, "spread": [0.1, 0.1, 0.1]}
+    ],
+    "hit.frost": [
+      {"kind": "sprite", "frame": "glow", "ramp": "frost", "colour": [1.4, 1.4, 1.4], "life": 0.1, "size": [0.3, 0.75], "ease": 3, "fade": [0, 1]},
+      {"kind": "sprite", "frame": "starburst", "ramp": "frost", "alpha": 0.7, "life": 0.14, "size": [0.28, 0.8], "ease": 3, "fade": [0, 0.8], "spin": [0.5, 1]},
+      {"kind": "sprite", "frame": "shard", "ramp": "ice", "count": 8, "life": 0.45, "speed": [2.5, 4.5], "gravity": 7, "drag": 0.5, "spin": [4, 10], "size": [0.07, 0.05], "fade": [0, 0.3]},
+      {"kind": "sprite", "frame": "snowflake", "ramp": "frost", "count": 4, "life": 0.6, "speed": [0.8, 1.6], "gravity": 0.6, "drag": 1.0, "spin": [1, 3], "size": [0.06, 0.04]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "mist", "blend": 0.55, "alpha": 0.35, "count": 2, "life": 0.6, "size": [0.2, 0.5], "ease": 2.5, "spread": [0.1, 0.1, 0.1], "erode": [-0.1, 0.8], "erode_soft": 0.1, "soft": 0.3},
+      {"kind": "decal", "frame": "frost", "ramp": "ice", "blend": 0.4, "life": 2.5, "size": [0.6, 0.6], "fade": [0.05, 0.5], "erode": [-0.2, 0.9]}
+    ],
+    "flight.shadow_bolt": [
+      {"kind": "sprite", "frame": "glow", "ramp": "shadow", "alpha": 0.55, "size": [0.42, 0.42], "soft": 0.2},
+      {"kind": "beam", "tile": "trail", "ramp": "shadow", "alpha": 1.0, "length": 1.3, "size": [0.1, 0.020000000000000004], "repeat": 0.7, "scroll": [5.0, 0]},
+      {"kind": "sprite", "frame": "glow", "ramp": "void", "blend": 1, "alpha": 0.9, "size": [0.15, 0.15], "stretch": 0.008, "soft": 0.05},
+      {"kind": "sprite", "frame": "flame", "ramp": "shadow", "count": 3, "life": 0.3, "size": [0.14, 0.09], "stretch": 0.024, "flip": true, "spread": [0.03, 0.03, 0.03], "fade": [0.05, 0.4], "erode": [-0.1, 0.5], "erode_soft": 0.06, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "shadow", "colour": [1.2, 1.2, 1.2], "size": [0.09, 0.09], "soft": 0.05},
+      {"kind": "decal", "frame": "glow", "ramp": "shadow", "alpha": 0.12, "size": [1.0, 1.0]}
+    ],
+    "trail.shadow_bolt": [
+      {"kind": "trail", "frame": "smoke", "ramp": "void", "blend": 1, "alpha": 0.3, "rate": 2, "life": 0.45, "size": [0.1, 0.28], "vary": 0.4, "spin": [0.5, 1.5], "spread": [0.07, 0.07, 0.07], "erode": [-0.05, 0.85], "erode_soft": 0.1, "soft": 0.3},
+      {"kind": "trail", "frame": "spark", "ramp": "shadow", "rate": 2, "life": 0.35, "stretch": 0.04, "speed": [0.5, 1.5], "drag": 2, "size": [0.018, 0.007], "spread": [0.06, 0.06, 0.06], "fade": [0, 0.5]}
+    ],
+    "hit.shadow": [
+      {"kind": "sprite", "frame": "glow", "ramp": "shadow", "colour": [1.5, 1.5, 1.5], "life": 0.1, "size": [0.3, 0.75], "ease": 3, "fade": [0, 1]},
+      {"kind": "sprite", "frame": "burst", "ramp": "void", "blend": 1, "alpha": 0.7, "count": 2, "life": 0.45, "size": [0.25, 0.6], "ease": 3, "spread": [0.08, 0.08, 0.08], "spin": [0.5, 1], "erode": [-0.1, 0.6], "erode_soft": 0.08, "soft": 0.25},
+      {"kind": "sprite", "frame": "starburst", "ramp": "shadow", "alpha": 0.8, "life": 0.14, "size": [0.28, 0.8], "ease": 3, "fade": [0, 0.8], "spin": [0.5, 1]},
+      {"kind": "sprite", "frame": "wisp", "ramp": "shadow", "count": 4, "life": 0.45, "speed": [1.5, 2.5], "drag": 3, "size": [0.16, 0.3], "spin": [2, 5]},
+      {"kind": "sprite", "frame": "spark", "ramp": "shadow", "count": 8, "life": 0.32, "stretch": 0.03, "speed": [2.5, 5], "drag": 3, "size": [0.022, 0.009], "fade": [0, 0.4]}
+    ],
+    "flight.holy_bolt": [
+      {"kind": "sprite", "frame": "glow", "ramp": "warm", "blend": 1, "alpha": 0.35, "size": [0.38, 0.38], "towards": -0.12, "soft": 0.1},
+      {"kind": "beam", "tile": "trail", "ramp": "holy", "alpha": 1.0, "length": 1.4, "size": [0.09, 0.018], "repeat": 0.7, "scroll": [5.0, 0]},
+      {"kind": "sprite", "frame": "glow", "ramp": "holy", "colour": [1.3, 1.3, 1.3], "size": [0.16, 0.16], "stretch": 0.012, "soft": 0.05},
+      {"kind": "sprite", "frame": "flare", "ramp": "holy", "size": [0.32, 0.32], "spin": [1.5, 1.5], "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "holy", "alpha": 0.35, "size": [0.5, 0.5], "soft": 0.2},
+      {"kind": "decal", "frame": "glow", "ramp": "holy", "alpha": 0.16, "size": [1.0, 1.0]}
+    ],
+    "trail.holy_bolt": [
+      {"kind": "trail", "frame": "flare", "ramp": "holy", "rate": 5, "life": 0.4, "size": [0.06, 0.0], "spread": [0.08, 0.08, 0.08], "spin": [1, 3], "velocity": [0, 0.25, 0]},
+      {"kind": "trail", "frame": "spark", "ramp": "holy", "rate": 2, "life": 0.3, "stretch": 0.03, "speed": [0.4, 1.2], "drag": 2, "size": [0.016, 0.006], "spread": [0.05, 0.05, 0.05], "fade": [0, 0.5]}
+    ],
+    "hit.holy": [
+      {"kind": "sprite", "frame": "glow", "ramp": "holy", "colour": [1.5, 1.5, 1.5], "life": 0.12, "size": [0.35, 0.9], "ease": 3, "fade": [0, 1]},
+      {"kind": "sprite", "frame": "starburst", "ramp": "holy", "alpha": 0.9, "life": 0.18, "size": [0.35, 1.1], "ease": 3, "fade": [0, 0.8], "spin": [0.3, 0.6]},
+      {"kind": "sprite", "frame": "flare", "ramp": "holy", "count": 8, "life": 0.6, "speed": [1.2, 2.4], "drag": 3, "size": [0.07, 0.0], "velocity": [0, 0.5, 0], "spin": [1, 3]},
+      {"kind": "sprite", "frame": "shock", "ramp": "holy", "alpha": 0.7, "life": 0.25, "size": [0.15, 0.8], "ease": 3, "fade": [0, 0.7]}
+    ],
+    "flight.arcane_missile": [
+      {"kind": "sprite", "frame": "glow", "ramp": "void", "blend": 1, "alpha": 0.35, "size": [0.32, 0.32], "towards": -0.12, "soft": 0.1},
+      {"kind": "beam", "tile": "trail", "ramp": "arcane", "alpha": 1.0, "length": 1.2, "size": [0.08, 0.016], "repeat": 0.7, "scroll": [5.0, 0]},
+      {"kind": "sprite", "frame": "glow", "ramp": "arcane", "colour": [1.3, 1.3, 1.3], "size": [0.13, 0.13], "stretch": 0.012, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "spark_cyan", "count": 3, "orbit": 12, "spread": [0.13, 0.13, 0.13], "size": [0.045, 0.045], "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "arcane", "alpha": 0.35, "size": [0.42, 0.42], "soft": 0.2},
+      {"kind": "decal", "frame": "glow", "ramp": "arcane", "alpha": 0.14, "size": [1.0, 1.0]}
+    ],
+    "trail.arcane_missile": [
+      {"kind": "trail", "frame": "flare", "ramp": "arcane", "rate": 5, "life": 0.35, "size": [0.055, 0.0], "spread": [0.07, 0.07, 0.07], "spin": [2, 4]},
+      {"kind": "trail", "frame": "flare", "ramp": "spark_cyan", "rate": 2, "life": 0.3, "size": [0.04, 0.0], "spread": [0.09, 0.09, 0.09], "spin": [2, 4]}
+    ],
+    "flight.arcane_spark": [
+      {"kind": "sprite", "frame": "glow", "ramp": "void", "blend": 1, "alpha": 0.3, "size": [0.24, 0.24], "towards": -0.12, "soft": 0.1},
+      {"kind": "beam", "tile": "trail", "ramp": "arcane", "alpha": 1.0, "length": 0.8, "size": [0.05, 0.010000000000000002], "repeat": 0.7, "scroll": [5.0, 0]},
+      {"kind": "sprite", "frame": "glow", "ramp": "arcane", "colour": [1.3, 1.3, 1.3], "size": [0.1, 0.1], "stretch": 0.012, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "arcane", "alpha": 0.35, "size": [0.3, 0.3], "soft": 0.2}
+    ],
+    "trail.arcane_spark": [
+      {"kind": "trail", "frame": "flare", "ramp": "arcane", "rate": 4, "life": 0.3, "size": [0.045, 0.0], "spread": [0.05, 0.05, 0.05], "spin": [2, 4]}
+    ],
+    "hit.arcane": [
+      {"kind": "sprite", "frame": "glow", "ramp": "arcane", "colour": [1.5, 1.5, 1.5], "life": 0.1, "size": [0.28, 0.7], "ease": 3, "fade": [0, 1]},
+      {"kind": "sprite", "frame": "starburst", "ramp": "arcane", "alpha": 0.85, "life": 0.14, "size": [0.26, 0.75], "ease": 3, "fade": [0, 0.8], "spin": [0.5, 1]},
+      {"kind": "sprite", "frame": "flare", "ramp": "spark_cyan", "count": 6, "life": 0.45, "speed": [1.5, 3], "drag": 3, "size": [0.06, 0.0], "spin": [2, 4]},
+      {"kind": "sprite", "frame": "flare", "ramp": "arcane", "count": 6, "life": 0.45, "speed": [1.5, 3], "drag": 3, "size": [0.06, 0.0], "spin": [2, 4]}
+    ],
+    "hit.arcane_spark": {
+      "like": "hit.arcane"
+    },
+    "flight.arrow": [
+      {"kind": "beam", "tile": "trail", "ramp": "steel", "colour": [0.5, 0.5, 0.5], "alpha": 0.25, "length": 0.8, "size": [0.01, 0.003], "offset": [0, 0, -0.7], "repeat": 2, "scroll": [4, 0]}
+    ],
+    "hit.arrow": [
+      {"kind": "sprite", "frame": "smoke", "ramp": "dust", "blend": 0.85, "alpha": 0.4, "count": 2, "life": 0.45, "size": [0.06, 0.2], "ease": 2.5, "speed": [0.3, 0.8], "drag": 2, "erode": [-0.1, 0.8], "soft": 0.2},
+      {"kind": "sprite", "frame": "spark", "ramp": "physical", "count": 4, "life": 0.18, "stretch": 0.03, "speed": [1.5, 3], "size": [0.018, 0.007], "fade": [0, 0.5]}
+    ],
+    "flight.axe": [
+      {"kind": "beam", "tile": "trail", "ramp": "steel", "colour": [0.5, 0.5, 0.5], "alpha": 0.2, "length": 0.8, "size": [0.05, 0.01], "repeat": 2, "scroll": [4, 0]}
+    ],
+    "hit.axe": [
+      {"kind": "sprite", "frame": "smoke", "ramp": "dust", "blend": 0.85, "alpha": 0.5, "count": 3, "life": 0.55, "size": [0.08, 0.3], "ease": 2.5, "speed": [0.4, 1], "drag": 2, "erode": [-0.1, 0.8], "soft": 0.2},
+      {"kind": "sprite", "frame": "spark", "ramp": "physical", "count": 7, "life": 0.24, "stretch": 0.035, "speed": [2, 4], "gravity": 4, "size": [0.022, 0.009], "fade": [0, 0.5]}
+    ],
+    "cast.fire": [
+      {"kind": "sprite", "frame": "glow", "ramp": "fire", "scaled": true, "offset": [0, 0.62, 0.24], "size": [0.05, 0.11], "soft": 0.05},
+      {"kind": "sprite", "frame": "flame", "ramp": "fire", "scaled": true, "upright": true, "count": 3, "life": 0.45, "offset": [0, 0.62, 0.24], "spread": [0.025, 0.015, 0.025], "size": [0.03, 0.055], "blend": 0.3, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "fire", "scaled": true, "alpha": 0.4, "offset": [0, 0.62, 0.24], "size": [0.1, 0.26], "soft": 0.1},
+      {"kind": "sprite", "frame": "spark", "ramp": "ember", "scaled": true, "alpha": 0.7, "count": 6, "life": 0.55, "ring": true, "offset": [0, 0.62, 0.24], "spread": [0.3, 0.1, 0.3], "speed": [-0.6, -0.48], "stretch": 0.06, "size": [0.006, 0.01], "fade": [0.4, 0.15]},
+      {"kind": "decal", "frame": "runes", "ramp": "fire", "scaled": true, "alpha": 0.8, "size": [0.42, 0.5], "spin": [0.5, 0.5], "erode": [1.0, -0.2], "fill": [1, 1, 1, 0.2]}
+    ],
+    "cast.frost": {
+      "like": "cast.fire",
+      "ramps": {
+        "fire": "frost",
+        "ember": "frost"
+      }
+    },
+    "cast.shadow": {
+      "like": "cast.fire",
+      "ramps": {
+        "fire": "shadow",
+        "ember": "shadow"
+      }
+    },
+    "cast.holy": {
+      "like": "cast.fire",
+      "ramps": {
+        "fire": "holy",
+        "ember": "holy"
+      }
+    },
+    "cast.nature": {
+      "like": "cast.fire",
+      "ramps": {
+        "fire": "poison",
+        "ember": "poison"
+      }
+    },
+    "cast.arcane": {
+      "like": "cast.fire",
+      "ramps": {
+        "fire": "arcane",
+        "ember": "arcane"
+      }
+    },
+    "aura.ward": [
+      {"kind": "mesh", "mesh": "shell", "ramp": "ward", "tile": "trail", "scaled": true, "offset": [0, 0.5, 0], "size": [0.56, 0.56], "aspect": 1.08, "rim": [3.0, 0.75], "mask": [0, 0], "twinkle": [0, 1], "texture": 0.18, "repeat": 1.0, "scroll": [0, 0.25], "alpha": 0.4, "soft": 0.25},
+      {"kind": "sprite", "frame": "flare", "ramp": "ward", "scaled": true, "count": 4, "orbit": 0.8, "offset": [0, 0.55, 0], "spread": [0.55, 0.35, 0.55], "size": [0.018, 0.018], "spin": [1, 2]},
+      {"kind": "decal", "frame": "seal", "ramp": "ward", "scaled": true, "size": [0.45, 0.45], "alpha": 0.3, "spin": [0.3, 0.3]}
+    ],
+    "aura.arcane_ward": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "arcane"
+      }
+    },
+    "aura.frost_barrier": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "frost"
+      }
+    },
+    "aura.bone_armor": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "shadow"
+      }
+    },
+    "aura.faith": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "holy"
+      }
+    },
+    "aura.divine": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "gold"
+      }
+    },
+    "aura.unbreakable": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "valour"
+      }
+    },
+    "aura.evasion": {
+      "like": "aura.ward",
+      "ramps": {
+        "ward": "swift"
+      }
+    },
+    "aura.vanished": [
+      {"kind": "sprite", "frame": "smoke", "ramp": "void", "blend": 1, "alpha": 0.5, "scaled": true, "count": 9, "life": 1.4, "offset": [0, 0.45, 0], "spread": [0.2, 0.38, 0.2], "size": [0.14, 0.32], "velocity": [0, 0.12, 0], "erode": [-0.1, 0.8], "soft": 0.3},
+      {"kind": "sprite", "frame": "wisp", "ramp": "shadow", "alpha": 0.85, "scaled": true, "count": 4, "life": 1.0, "offset": [0, 0.5, 0], "spread": [0.22, 0.35, 0.22], "size": [0.1, 0.2], "spin": [1, 3]}
+    ],
+    "aura.dazed": [
+      {"kind": "sprite", "frame": "star", "ramp": "gold", "scaled": true, "count": 3, "orbit": 4.2, "offset": [0, 1.1, 0], "spread": [0.2, 0.02, 0.2], "size": [0.065, 0.065], "spin": [2, 2], "blend": 0.5, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "gold", "scaled": true, "count": 3, "orbit": 4.2, "offset": [0, 1.1, 0], "spread": [0.2, 0.02, 0.2], "size": [0.1, 0.1], "alpha": 0.35, "soft": 0.05}
+    ],
+    "aura.feared": [
+      {"kind": "sprite", "frame": "skull", "ramp": "curse", "pulse": [0.12, 1.5], "scaled": true, "offset": [0, 1.2, 0], "size": [0.1, 0.1], "blend": 0.75, "soft": 0.05},
+      {"kind": "sprite", "frame": "wisp", "ramp": "curse", "scaled": true, "count": 3, "orbit": -3, "offset": [0, 1.0, 0], "spread": [0.18, 0.06, 0.18], "size": [0.07, 0.1], "spin": [2, 3], "soft": 0.05}
+    ],
+    "aura.asleep": [
+      {"kind": "sprite", "frame": "zzz", "ramp": "swift", "scaled": true, "count": 3, "life": 2.1, "offset": [0.08, 1.04, 0], "spread": [0.02, 0.0, 0.02], "velocity": [0.06, 0.14, 0], "size": [0.04, 0.085], "fade": [0.15, 0.4], "blend": 0.75, "soft": 0.05}
+    ],
+    "aura.silenced": [
+      {"kind": "sprite", "frame": "hush", "ramp": "arcane", "pulse": [0.1, 1.2], "scaled": true, "offset": [0, 1.2, 0], "size": [0.1, 0.1], "blend": 0.75, "soft": 0.05},
+      {"kind": "sprite", "frame": "flare", "ramp": "arcane", "scaled": true, "count": 3, "orbit": 3, "offset": [0, 1.04, 0], "spread": [0.16, 0.02, 0.16], "size": [0.03, 0.03], "spin": [2, 2]}
+    ],
+    "aura.burning": [
+      {"kind": "sprite", "frame": "flame", "ramp": "fire", "scaled": true, "upright": true, "count": 18, "life": 0.6, "offset": [0, 0.36, 0], "spread": [0.16, 0.42, 0.16], "velocity": [0, 0.25, 0], "size": [0.06, 0.13], "vary": 0.3, "blend": 0.3, "cool": 0.3, "soft": 0.15},
+      {"kind": "sprite", "frame": "spark", "ramp": "ember", "scaled": true, "count": 4, "life": 0.8, "offset": [0, 0.5, 0], "spread": [0.15, 0.3, 0.15], "velocity": [0, 0.7, 0], "stretch": 0.05, "size": [0.01, 0.004], "fade": [0, 0.5]}
+    ],
+    "aura.bleeding": [
+      {"kind": "sprite", "frame": "drop", "ramp": "blood", "scaled": true, "count": 9, "life": 1.0, "offset": [0, 0.6, 0], "spread": [0.14, 0.25, 0.14], "gravity": 2, "size": [0.04, 0.03], "fade": [0.05, 0.3], "blend": 0.8}
+    ],
+    "aura.poisoned": [
+      {"kind": "sprite", "frame": "bubble", "ramp": "poison", "scaled": true, "count": 8, "life": 1.2, "offset": [0, 0.3, 0], "spread": [0.2, 0.3, 0.2], "velocity": [0, 0.35, 0], "size": [0.025, 0.05], "fade": [0.2, 0.3], "blend": 0.4},
+      {"kind": "sprite", "frame": "smoke", "ramp": "poison", "blend": 0.3, "alpha": 0.3, "scaled": true, "count": 3, "life": 1.6, "offset": [0, 0.25, 0], "spread": [0.2, 0.2, 0.2], "velocity": [0, 0.15, 0], "size": [0.12, 0.25], "erode": [-0.1, 0.8], "soft": 0.3},
+      {"kind": "decal", "frame": "glow", "ramp": "poison", "scaled": true, "size": [0.35, 0.35], "alpha": 0.35}
+    ],
+    "aura.chilled": [
+      {"kind": "decal", "frame": "frost", "ramp": "ice", "blend": 0.4, "scaled": true, "size": [0.45, 0.45], "alpha": 0.85},
+      {"kind": "sprite", "frame": "snowflake", "ramp": "frost", "scaled": true, "count": 5, "life": 1.8, "offset": [0, 0.7, 0], "spread": [0.25, 0.4, 0.25], "gravity": 0.3, "spin": [1, 2], "size": [0.025, 0.018]},
+      {"kind": "sprite", "frame": "chevron", "ramp": "frost", "angle": 3.1416, "scaled": true, "offset": [0, 1.2, 0], "size": [0.1, 0.1], "blend": 0.75, "soft": 0.05}
+    ],
+    "aura.frozen": [
+      {"kind": "mesh", "mesh": "crystal", "ramp": "ice", "upright": true, "scaled": true, "count": 6, "ring": true, "spread": [0.24, 0, 0.24], "offset": [0, 0.08, 0], "size": [0.05, 0.05], "vary": 0.35, "length": 6, "rim": [2.2, 0.9], "mask": [0, 0], "twinkle": [0.3, 1.5], "texture": 0, "alpha": 0.9, "soft": 0.05},
+      {"kind": "decal", "frame": "frost", "ramp": "ice", "blend": 0.4, "scaled": true, "size": [0.5, 0.5], "alpha": 0.85},
+      {"kind": "sprite", "frame": "glow", "ramp": "frost", "scaled": true, "alpha": 0.25, "offset": [0, 0.5, 0], "size": [0.45, 0.45], "soft": 0.3}
+    ],
+    "aura.rooted": [
+      {"kind": "sprite", "frame": "vine", "ramp": "nature", "scaled": true, "upright": true, "count": 6, "ring": true, "spread": [0.15, 0, 0.15], "size": [0.1, 0.12], "vary": 0.2, "blend": 0.75, "soft": 0.05},
+      {"kind": "decal", "frame": "frost", "ramp": "nature", "blend": 0.35, "scaled": true, "size": [0.4, 0.4], "alpha": 0.85, "spin": [0.05, 0.05]}
+    ],
+    "aura.crippled": [
+      {"kind": "decal", "frame": "seal", "ramp": "blood", "scaled": true, "size": [0.32, 0.32], "alpha": 0.85, "spin": [-0.3, -0.3]},
+      {"kind": "sprite", "frame": "chevron", "ramp": "blood", "angle": 3.1416, "scaled": true, "offset": [0, 1.2, 0], "size": [0.1, 0.1], "blend": 0.75, "soft": 0.05}
+    ],
+    "aura.vulnerable": [
+      {"kind": "decal", "frame": "scorch", "ramp": "curse", "blend": 0.3, "scaled": true, "size": [0.34, 0.34], "alpha": 0.7},
+      {"kind": "sprite", "frame": "chevron", "ramp": "curse", "angle": 3.1416, "scaled": true, "offset": [0, 1.2, 0], "size": [0.1, 0.1], "blend": 0.75, "soft": 0.05}
+    ],
+    "aura.weakness": [
+      {"kind": "sprite", "frame": "chevron", "ramp": "fire", "angle": 3.1416, "scaled": true, "offset": [0, 1.2, 0], "size": [0.1, 0.1], "blend": 0.75, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "curse", "scaled": true, "count": 5, "life": 1.4, "ring": true, "offset": [0, 0.9, 0], "spread": [0.25, 0.1, 0.25], "gravity": 0.4, "size": [0.014, 0.005]}
+    ],
+    "aura.taunted": [
+      {"kind": "decal", "frame": "seal", "ramp": "valour", "colour": [1.4, 0.4, 0.3], "scaled": true, "size": [0.32, 0.32], "alpha": 0.75, "pulse": [0.3, 2], "spin": [0.6, 0.6]},
+      {"kind": "sprite", "frame": "mark", "ramp": "blood", "colour": [1.6, 1.6, 1.6], "pulse": [0.15, 2], "scaled": true, "offset": [0, 1.2, 0], "size": [0.13, 0.13], "blend": 0.75, "soft": 0.05}
+    ],
+    "aura.riposte": [
+      {"kind": "sprite", "frame": "flare", "ramp": "steel", "scaled": true, "count": 4, "life": 0.9, "offset": [0, 0.55, 0.12], "spread": [0.2, 0.22, 0.1], "size": [0.1, 0.0], "spin": [2, 4]},
+      {"kind": "decal", "frame": "seal", "ramp": "steel", "scaled": true, "size": [0.32, 0.32], "alpha": 0.8, "spin": [0.8, 0.8]}
+    ],
+    "aura.buff": [
+      {"kind": "decal", "frame": "glow", "ramp": "valour", "scaled": true, "size": [0.34, 0.34], "alpha": 0.35},
+      {"kind": "decal", "frame": "ring", "ramp": "valour", "scaled": true, "size": [0.3, 0.3], "alpha": 0.7, "pulse": [0.15, 1.2]},
+      {"kind": "sprite", "frame": "chevron", "ramp": "valour", "scaled": true, "count": 3, "life": 1.4, "ring": true, "spread": [0.26, 0, 0.26], "offset": [0, 0.25, 0], "velocity": [0, 0.5, 0], "size": [0.045, 0.045], "fade": [0.25, 0.35], "blend": 0.6, "soft": 0.05},
+      {"kind": "sprite", "frame": "glow", "ramp": "valour", "scaled": true, "count": 8, "life": 1.5, "ring": true, "spread": [0.28, 0, 0.28], "velocity": [0, 0.55, 0], "size": [0.016, 0.004], "fade": [0.15, 0.4]},
+      {"kind": "sprite", "frame": "spark", "ramp": "valour", "scaled": true, "alpha": 0.7, "count": 2, "life": 1.0, "ring": true, "spread": [0.24, 0, 0.24], "velocity": [0, 1.0, 0], "stretch": 0.1, "size": [0.008, 0.003], "fade": [0.1, 0.5]}
+    ],
+    "aura.might": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "valour"
+      }
+    },
+    "aura.fury": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "fire"
+      }
+    },
+    "aura.quickness": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "swift"
+      }
+    },
+    "aura.protection": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "ward"
+      }
+    },
+    "aura.regeneration": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "renewal"
+      }
+    },
+    "aura.endure": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "valour"
+      }
+    },
+    "aura.arcane_power": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "arcane"
+      }
+    },
+    "aura.lich_form": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "shadow"
+      }
+    },
+    "aura.guardian": {
+      "like": "aura.buff",
+      "ramps": {
+        "valour": "holy"
+      }
+    },
+    "field.fire": [
+      {"kind": "decal", "frame": "scorch", "ramp": "fire", "blend": 0.6, "scaled": true, "size": [1.05, 1.05], "alpha": 0.95},
+      {"kind": "decal", "frame": "glow", "ramp": "fire", "scaled": true, "size": [0.85, 0.85], "alpha": 0.28, "pulse": [0.12, 1.5]},
+      {"kind": "sprite", "frame": "flame", "ramp": "fire", "scaled": true, "upright": true, "count": 28, "life": 0.9, "spread": [0.74, 0, 0.74], "size": [0.08, 0.17], "vary": 0.4, "velocity": [0, 0.1, 0], "blend": 0.4, "cool": 0.25, "soft": 0.25},
+      {"kind": "sprite", "frame": "spark", "ramp": "ember", "scaled": true, "count": 8, "life": 1.1, "spread": [0.7, 0, 0.7], "velocity": [0, 0.9, 0], "stretch": 0.05, "speed": [0, 0.3], "size": [0.008, 0.003], "fade": [0, 0.5]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "smoke", "blend": 0.85, "alpha": 0.16, "scaled": true, "count": 3, "life": 2.2, "spread": [0.6, 0, 0.6], "offset": [0, 0.5, 0], "velocity": [0, 0.35, 0], "size": [0.18, 0.45], "erode": [-0.1, 0.8], "soft": 0.4}
+    ],
+    "field.ice": [
+      {"kind": "decal", "frame": "frost", "ramp": "ice", "blend": 0.35, "scaled": true, "size": [1.1, 1.1], "alpha": 0.65, "fill": [1, 1, 1, 0.2]},
+      {"kind": "mesh", "mesh": "crystal", "ramp": "ice", "upright": true, "scaled": true, "count": 7, "spread": [0.7, 0, 0.7], "offset": [0, 0.06, 0], "size": [0.045, 0.045], "vary": 0.45, "length": 7, "rim": [2.2, 0.9], "mask": [0, 0], "twinkle": [0.3, 2.5], "texture": 0, "alpha": 0.9, "soft": 0.05},
+      {"kind": "sprite", "frame": "smoke", "ramp": "mist", "blend": 0.5, "alpha": 0.2, "scaled": true, "count": 4, "life": 2.6, "spread": [0.7, 0, 0.7], "offset": [0, 0.12, 0], "velocity": [0, 0.06, 0], "size": [0.22, 0.45], "vary": 0.3, "spin": [0.1, 0.4], "erode": [-0.05, 0.85], "soft": 0.4},
+      {"kind": "sprite", "frame": "flare", "ramp": "frost", "scaled": true, "count": 6, "life": 1.2, "spread": [0.8, 0.05, 0.8], "offset": [0, 0.08, 0], "size": [0.02, 0.0], "spin": [1, 3]}
+    ],
+    "field.light": [
+      {"kind": "decal", "frame": "runes", "ramp": "holy", "scaled": true, "size": [1.0, 1.0], "alpha": 0.55, "spin": [0.25, 0.25], "fill": [1, 1, 1, 0.2]},
+      {"kind": "mesh", "mesh": "column", "ramp": "holy", "scaled": true, "size": [0.85, 0.85], "aspect": 1.3, "rim": [1, 0], "mask": [0, 0.3], "texture": 0, "alpha": 0.15, "soft": 0.3},
+      {"kind": "sprite", "frame": "glow", "ramp": "holy", "scaled": true, "count": 10, "life": 1.6, "spread": [0.8, 0, 0.8], "velocity": [0, 0.75, 0], "size": [0.025, 0.006], "fade": [0.15, 0.4]}
+    ],
+    "field.water": [
+      {"kind": "decal", "frame": "glow", "ramp": "water", "blend": 0.25, "scaled": true, "size": [1.0, 1.0], "alpha": 0.45},
+      {"kind": "decal", "frame": "ring", "ramp": "water", "scaled": true, "count": 3, "life": 1.8, "size": [0.15, 1.0], "ease": 1.6, "fade": [0.05, 0.7], "alpha": 0.8},
+      {"kind": "sprite", "frame": "flare", "ramp": "water", "scaled": true, "count": 6, "life": 1.0, "spread": [0.8, 0, 0.8], "offset": [0, 0.04, 0], "size": [0.025, 0.0], "spin": [1, 2]}
+    ],
+    "field.poison": [
+      {"kind": "decal", "frame": "scorch", "ramp": "poison", "blend": 0.3, "scaled": true, "size": [1.05, 1.05], "alpha": 0.75},
+      {"kind": "sprite", "frame": "bubble", "ramp": "poison", "scaled": true, "count": 8, "life": 1.4, "spread": [0.75, 0, 0.75], "velocity": [0, 0.35, 0], "size": [0.035, 0.06], "fade": [0.2, 0.3]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "poison", "blend": 0.3, "alpha": 0.2, "scaled": true, "count": 3, "life": 2.4, "spread": [0.65, 0, 0.65], "offset": [0, 0.2, 0], "velocity": [0, 0.15, 0], "size": [0.25, 0.5], "erode": [-0.1, 0.8], "soft": 0.4}
+    ],
+    "field.lightning": [
+      {"kind": "decal", "frame": "ring", "ramp": "lightning", "scaled": true, "size": [1.0, 1.0], "alpha": 0.5, "pulse": [0.25, 5]},
+      {"kind": "sprite", "frame": "lightning0", "ramp": "lightning", "scaled": true, "count": 3, "life": 0.18, "spread": [0.6, 0, 0.6], "offset": [0, 0.3, 0], "size": [0.3, 0.3], "aspect": 0.25, "fade": [0, 0.5], "soft": 0.1},
+      {"kind": "sprite", "frame": "spark", "ramp": "lightning", "scaled": true, "count": 6, "life": 0.4, "spread": [0.7, 0, 0.7], "speed": [1, 2.5], "stretch": 0.04, "size": [0.01, 0.004], "fade": [0, 0.5]}
+    ],
+    "field.arcane": [
+      {"kind": "decal", "frame": "sigil", "ramp": "arcane", "scaled": true, "size": [1.0, 1.0], "alpha": 0.5, "spin": [-0.3, -0.3], "fill": [1, 1, 1, 0.15]},
+      {"kind": "sprite", "frame": "flare", "ramp": "arcane", "scaled": true, "count": 8, "life": 1.4, "spread": [0.8, 0, 0.8], "velocity": [0, 0.5, 0], "size": [0.025, 0.0], "spin": [1, 3]}
+    ],
+    "field.shadow": [
+      {"kind": "decal", "frame": "sigil", "ramp": "shadow", "scaled": true, "size": [1.0, 1.0], "alpha": 0.5, "spin": [0.3, 0.3]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "void", "blend": 1, "alpha": 0.3, "scaled": true, "count": 4, "life": 2.0, "spread": [0.65, 0, 0.65], "offset": [0, 0.2, 0], "velocity": [0, 0.2, 0], "size": [0.25, 0.5], "erode": [-0.1, 0.8], "soft": 0.4}
+    ],
+    "field.nature": [
+      {"kind": "decal", "frame": "frost", "ramp": "nature", "blend": 0.3, "scaled": true, "size": [1.0, 1.0], "alpha": 0.65},
+      {"kind": "sprite", "frame": "glow", "ramp": "nature", "scaled": true, "count": 8, "life": 1.6, "spread": [0.8, 0, 0.8], "velocity": [0, 0.4, 0], "size": [0.02, 0.005]}
+    ],
+    "field.physical": [
+      {"kind": "sprite", "frame": "smoke", "ramp": "dust", "blend": 0.85, "alpha": 0.25, "scaled": true, "count": 4, "life": 2.0, "spread": [0.7, 0, 0.7], "offset": [0, 0.15, 0], "size": [0.25, 0.5], "erode": [-0.1, 0.8], "soft": 0.4}
+    ],
+    "warning.hostile": [
+      {"kind": "decal", "shape": "area", "colour": [2.6, 0.32, 0.12], "edge": 0.06, "fill": [0.6, 0.05, 0.02, 0.07], "blend": 0.12}
+    ],
+    "warning.friendly": [
+      {"kind": "decal", "shape": "area", "colour": [0.2, 1.1, 2.4], "edge": 0.06, "fill": [0.03, 0.2, 0.5, 0.06], "blend": 0.08}
+    ],
+    "aim": [
+      {"kind": "decal", "shape": "area", "colour": [0.4, 1.3, 1.9], "edge": 0.05, "fill": [0.04, 0.15, 0.25, 0.05], "blend": 0.06},
+      {"kind": "decal", "frame": "runes", "ramp": "swift", "scaled": true, "size": [0.95, 0.95], "alpha": 0.22, "spin": [0.4, 0.4]}
+    ],
+    "slam.physical": [
+      {"kind": "decal", "frame": "shock", "ramp": "physical", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "physical", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "sprite", "frame": "smoke", "ramp": "dust", "blend": 0.85, "alpha": 0.45, "scaled": true, "count": 6, "life": 0.8, "ring": true, "spread": [0.6, 0, 0.6], "offset": [0, 0.15, 0], "speed": [0.6, 1.2], "drag": 2, "size": [0.15, 0.35], "ease": 2.5, "erode": [-0.1, 0.8], "soft": 0.3},
+      {"kind": "sprite", "frame": "spark", "ramp": "physical", "scaled": true, "count": 8, "life": 0.35, "speed": [1.5, 3], "gravity": 6, "stretch": 0.04, "size": [0.01, 0.004], "fade": [0, 0.5]}
+    ],
+    "slam.fire": [
+      {"kind": "decal", "frame": "shock", "ramp": "fire", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "fire", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "sprite", "frame": "burst", "ramp": "blast", "scaled": true, "count": 3, "life": 0.45, "spread": [0.35, 0.1, 0.35], "offset": [0, 0.25, 0], "size": [0.25, 0.5], "ease": 3, "spin": [0.5, 1.5], "delay": [0, 0.08], "erode": [-0.1, 0.55], "erode_soft": 0.07, "soft": 0.3},
+      {"kind": "sprite", "frame": "spark", "ramp": "ember", "scaled": true, "count": 10, "life": 0.5, "speed": [1.5, 3.5], "gravity": 5, "stretch": 0.05, "size": [0.013, 0.005], "fade": [0, 0.4]},
+      {"kind": "decal", "frame": "scorch", "ramp": "fire", "blend": 0.55, "scaled": true, "life": 3, "size": [0.7, 0.7], "fade": [0.02, 0.5], "erode": [-0.2, 0.9]}
+    ],
+    "slam.frost": [
+      {"kind": "decal", "frame": "shock", "ramp": "frost", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "frost", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "sprite", "frame": "shard", "ramp": "ice", "scaled": true, "count": 10, "life": 0.6, "speed": [1.2, 2.6], "gravity": 6, "spin": [4, 10], "size": [0.045, 0.03], "offset": [0, 0.2, 0]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "mist", "blend": 0.55, "alpha": 0.35, "scaled": true, "count": 5, "life": 1.0, "ring": true, "spread": [0.6, 0, 0.6], "offset": [0, 0.12, 0], "speed": [0.4, 0.9], "drag": 2, "size": [0.18, 0.4], "ease": 2.5, "erode": [-0.1, 0.8], "soft": 0.3},
+      {"kind": "decal", "frame": "frost", "ramp": "ice", "blend": 0.4, "scaled": true, "life": 3, "size": [0.8, 0.8], "fade": [0.02, 0.5], "erode": [-0.2, 0.9]}
+    ],
+    "slam.holy": [
+      {"kind": "decal", "frame": "shock", "ramp": "holy", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "holy", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "decal", "frame": "runes", "ramp": "holy", "scaled": true, "life": 0.7, "size": [0.8, 0.9], "fade": [0, 0.6], "erode": [-0.2, 0.9]},
+      {"kind": "sprite", "frame": "flare", "ramp": "holy", "scaled": true, "count": 10, "life": 0.7, "spread": [0.6, 0, 0.6], "velocity": [0, 1.2, 0], "size": [0.035, 0.0], "spin": [1, 3]}
+    ],
+    "slam.shadow": [
+      {"kind": "decal", "frame": "shock", "ramp": "shadow", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "shadow", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "sprite", "frame": "burst", "ramp": "void", "blend": 1, "alpha": 0.65, "scaled": true, "count": 3, "life": 0.6, "spread": [0.35, 0.1, 0.35], "offset": [0, 0.25, 0], "size": [0.25, 0.5], "ease": 3, "erode": [-0.1, 0.6], "soft": 0.3},
+      {"kind": "sprite", "frame": "wisp", "ramp": "shadow", "scaled": true, "count": 5, "life": 0.55, "speed": [1, 2], "drag": 2, "offset": [0, 0.3, 0], "size": [0.1, 0.22], "spin": [2, 4]}
+    ],
+    "slam.arcane": [
+      {"kind": "decal", "frame": "shock", "ramp": "arcane", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "arcane", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "decal", "frame": "sigil", "ramp": "arcane", "scaled": true, "life": 0.6, "size": [0.8, 0.9], "fade": [0, 0.6], "erode": [-0.2, 0.9]},
+      {"kind": "sprite", "frame": "flare", "ramp": "arcane", "scaled": true, "count": 10, "life": 0.6, "spread": [0.6, 0, 0.6], "velocity": [0, 0.9, 0], "size": [0.035, 0.0], "spin": [1, 3]}
+    ],
+    "slam.nature": [
+      {"kind": "decal", "frame": "shock", "ramp": "poison", "scaled": true, "life": 0.3, "size": [0.25, 1.05], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "glow", "ramp": "poison", "scaled": true, "life": 0.25, "size": [0.5, 0.9], "ease": 3, "fade": [0, 1], "alpha": 0.6},
+      {"kind": "sprite", "frame": "bubble", "ramp": "poison", "scaled": true, "count": 8, "life": 0.8, "spread": [0.6, 0, 0.6], "velocity": [0, 0.8, 0], "size": [0.025, 0.05]},
+      {"kind": "sprite", "frame": "smoke", "ramp": "poison", "blend": 0.3, "alpha": 0.35, "scaled": true, "count": 4, "life": 1.0, "ring": true, "spread": [0.5, 0, 0.5], "offset": [0, 0.15, 0], "speed": [0.4, 0.8], "drag": 2, "size": [0.18, 0.4], "ease": 2.5, "erode": [-0.1, 0.8], "soft": 0.3}
+    ],
+    "combo": [
+      {"kind": "sprite", "frame": "glow", "ramp": "gold", "colour": [1.3, 1.3, 1.3], "life": 0.15, "offset": [0, 0.5, 0], "size": [0.5, 1.4], "ease": 3, "fade": [0, 1]},
+      {"kind": "sprite", "frame": "starburst", "ramp": "gold", "alpha": 0.85, "life": 0.2, "offset": [0, 0.6, 0], "size": [0.5, 1.6], "ease": 3, "fade": [0, 0.8], "spin": [0.3, 0.6]},
+      {"kind": "decal", "frame": "shock", "ramp": "gold", "life": 0.45, "size": [0.6, 2.8], "ease": 3, "fade": [0, 0.6]},
+      {"kind": "decal", "frame": "runes", "ramp": "gold", "life": 0.8, "size": [1.6, 1.9], "fade": [0, 0.6], "erode": [-0.2, 0.9]},
+      {"kind": "sprite", "frame": "burst", "ramp": "blast", "count": 3, "life": 0.5, "spread": [0.6, 0.2, 0.6], "offset": [0, 0.4, 0], "size": [0.35, 0.8], "ease": 3, "vary": 0.3, "spin": [0.5, 1.5], "delay": [0, 0.1], "erode": [-0.1, 0.5], "erode_soft": 0.07, "soft": 0.3},
+      {"kind": "sprite", "frame": "spark", "ramp": "gold", "count": 18, "life": 0.6, "speed": [3, 6], "gravity": 6, "drag": 1.5, "stretch": 0.05, "size": [0.025, 0.01], "fade": [0, 0.4]}
+    ]
+  },
+  "projectiles": {
+    "arrow": {
+      "flight": "flight.arrow",
+      "impact": "hit.arrow",
+      "mesh": "arrow"
+    },
+    "axe": {
+      "flight": "flight.axe",
+      "impact": "hit.axe",
+      "mesh": "axe",
+      "spin": 2.6,
+      "pivot": [0, 0.2, 0.04]
+    },
+    "fire_bolt": {
+      "flight": "flight.fire_bolt",
+      "trail": "trail.fire_bolt",
+      "impact": "hit.fire"
+    },
+    "frost_lance": {
+      "flight": "flight.frost_lance",
+      "trail": "trail.frost_lance",
+      "impact": "hit.frost"
+    },
+    "shadow_bolt": {
+      "flight": "flight.shadow_bolt",
+      "trail": "trail.shadow_bolt",
+      "impact": "hit.shadow"
+    },
+    "holy_bolt": {
+      "flight": "flight.holy_bolt",
+      "trail": "trail.holy_bolt",
+      "impact": "hit.holy"
+    },
+    "arcane_missile": {
+      "flight": "flight.arcane_missile",
+      "trail": "trail.arcane_missile",
+      "impact": "hit.arcane"
+    },
+    "arcane_spark": {
+      "flight": "flight.arcane_spark",
+      "trail": "trail.arcane_spark",
+      "impact": "hit.arcane_spark"
+    }
+  },
+  "casts": {
+    "staff_firebolt": "cast.fire",
+    "staff_frostlance": "cast.frost",
+    "staff_meteor": "cast.fire",
+    "necro_bolt": "cast.shadow",
+    "necro_drain": "cast.shadow",
+    "necro_plague": "cast.nature",
+    "necro_raise": "cast.shadow",
+    "holy_bolt": "cast.holy",
+    "healing_light": "cast.holy",
+    "smite": "cast.holy",
+    "mending_prayer": "cast.holy",
+    "king_frost": "cast.frost",
+    "king_summon": "cast.shadow"
+  },
+  "auras": {
+    "shield_wall": "aura.ward",
+    "arcane_ward": "aura.arcane_ward",
+    "barrier": "aura.arcane_ward",
+    "frost_barrier": "aura.frost_barrier",
+    "bone_armor": "aura.bone_armor",
+    "shield_of_faith": "aura.faith",
+    "divine_shield": "aura.divine",
+    "evasion": "aura.evasion",
+    "evading": "aura.evasion",
+    "vanished": "aura.vanished",
+    "unbreakable": "aura.unbreakable",
+    "stunned": "aura.dazed",
+    "broken": "aura.dazed",
+    "dazed": "aura.dazed",
+    "staggered": "aura.dazed",
+    "knockdown": "aura.dazed",
+    "feared": "aura.feared",
+    "asleep": "aura.asleep",
+    "silenced": "aura.silenced",
+    "burning": "aura.burning",
+    "bleeding": "aura.bleeding",
+    "poisoned": "aura.poisoned",
+    "chilled": "aura.chilled",
+    "frozen": "aura.frozen",
+    "rooted": "aura.rooted",
+    "crippled": "aura.crippled",
+    "taunted": "aura.taunted",
+    "vulnerable": "aura.vulnerable",
+    "exposed": "aura.vulnerable",
+    "weakness": "aura.weakness",
+    "riposte": "aura.riposte",
+    "might": "aura.might",
+    "fury": "aura.fury",
+    "quickness": "aura.quickness",
+    "swiftness": "aura.quickness",
+    "protection": "aura.protection",
+    "regeneration": "aura.regeneration",
+    "second_wind": "aura.regeneration",
+    "endure": "aura.endure",
+    "arcane_power": "aura.arcane_power",
+    "lich_form": "aura.lich_form",
+    "guardian": "aura.guardian"
+  },
+  "fields": {
+    "fire": "field.fire",
+    "ice": "field.ice",
+    "light": "field.light",
+    "water": "field.water",
+    "poison": "field.poison",
+    "lightning": "field.lightning"
+  },
+  "schools": {
+    "physical": {
+      "field": "field.physical",
+      "impact": "slam.physical"
+    },
+    "fire": {
+      "field": "field.fire",
+      "impact": "slam.fire"
+    },
+    "frost": {
+      "field": "field.ice",
+      "impact": "slam.frost"
+    },
+    "arcane": {
+      "field": "field.arcane",
+      "impact": "slam.arcane"
+    },
+    "nature": {
+      "field": "field.nature",
+      "impact": "slam.nature"
+    },
+    "holy": {
+      "field": "field.light",
+      "impact": "slam.holy"
+    },
+    "shadow": {
+      "field": "field.shadow",
+      "impact": "slam.shadow"
+    }
+  },
+  "warnings": {
+    "hostile": "warning.hostile",
+    "friendly": "warning.friendly"
+  },
+  "combo": "combo",
+  "aim": "aim"
+}
