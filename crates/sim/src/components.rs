@@ -464,6 +464,10 @@ pub struct Brain {
     pub next_wander: f64,
     /// When the current fight began (a monster that's never been hit still keeps chasing).
     pub engaged_at: f64,
+    /// Where round its target a melee monster stands, as a bearing and a distance from the
+    /// target's centre, so a pack spreads round its prey instead of queueing on the side it came
+    /// from.
+    pub slot: Option<(f32, f32)>,
 }
 
 impl Brain {
@@ -478,6 +482,7 @@ impl Brain {
             next_think: 0.0,
             next_wander: 0.0,
             engaged_at: 0.0,
+            slot: None,
         }
     }
 }

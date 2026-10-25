@@ -35,5 +35,18 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   costs 36%), which can down or kill you. The fall is measured from the highest point since you
   last stood on ground or water. Landing in deep water breaks the fall.
 
+- **Bodies don't overlap.** Two living bodies that overlap are eased apart, half the overlap
+  every other step (30 times a second, to keep the cost down at crowd sizes). The push leans a
+  little sideways, so bodies slide round each other instead of queueing in a line. The lighter one
+  moves further: bigger bodies outweigh smaller ones, and players count four times their size, so
+  a pack spreads round a player instead of shoving them about. Nobody is
+  pushed up a wall or off a cliff. Rolls, leaps, lunges and climbs pass through bodies, and
+  whoever they land on is eased apart afterwards.
+- **Packs surround their prey.** Once a melee monster is close to its target, it makes for its own
+  place on a ring just inside its reach. It starts from the side it came in on and moves round
+  until it has its share of the circle: evenly split between everyone fighting that target, or
+  at least a body's width once a crowd is too big for that. Three wolves end up about 100°
+  apart. Places are rechecked four times a second.
+
 Not yet: free climbing anywhere, mounts, and climbing or swimming animations (pose `Jump` for
 climbing; walk and idle in water).
