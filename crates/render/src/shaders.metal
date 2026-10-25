@@ -81,7 +81,8 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
             if(weights[layer]==0.)continue;
             TerrainSample sample=terrain_layer(terrain_colour,terrain_normal,
                 i.world*surfaces.scales[layer],world_dx*surfaces.scales[layer],world_dy*surfaces.scales[layer],
-                projections,sign(i.normal.xz),layer,f.params.z);
+                // With v down, +u points right when cross(T_u,T_v) == -normal.
+                projections,float2(-sign(i.normal.x),sign(i.normal.z)),layer,f.params.z);
             albedo.rgb+=sample.colour*weights[layer];
             terrain_perturbation+=sample.perturbation*weights[layer];
             surface_roughness+=surfaces.roughness[layer]*weights[layer];
