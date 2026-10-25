@@ -8,7 +8,7 @@ use protocol::Event;
 use crate::combat::{emit, life, now};
 use crate::content::catalog;
 use crate::stats::DOWNED_TIME;
-use crate::{Anim, Auras, Brain, Control, Fighter, Home, Mode, Motion, Threat, Transform, Unit, Units, Vitals, DT};
+use crate::{Anim, Auras, Brain, Control, Fighter, Home, Mode, Motion, Threat, Transform, Unit, Vitals, DT};
 
 pub const ENDURANCE_MAX: f32 = 100.0;
 pub const ENDURANCE_REGEN: f32 = 8.0;
@@ -17,8 +17,8 @@ pub const COMBAT_TIMEOUT: f64 = 6.0;
 
 pub fn update(world: &mut World) {
     let t = now(world);
-    let entities: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in entities {
+    let entities = crate::take_units(world);
+    for &e in &entities {
         let Some(v) = world.get::<Vitals>(e).copied() else { continue };
         if v.dead {
             if v.respawn_at.is_some_and(|at| t >= at) {
@@ -65,6 +65,7 @@ pub fn update(world: &mut World) {
             }
         }
     }
+    crate::return_units(world, entities);
     life::update_revives(world);
     life::expire_summons(world);
     life::clear_remains(world);

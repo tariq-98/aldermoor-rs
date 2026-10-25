@@ -48,6 +48,7 @@ pub struct Valley {
     pub houses: Vec<Placement>,
     pub trees: Vec<Placement>,
     grid: Grid,
+    heights: Heights,
 }
 
 /// The walkable square around the village, in metres from its centre.
@@ -107,16 +108,24 @@ impl Valley {
             solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0 });
         }
         let grid = Grid::build(&solids);
-        Valley { solids, houses, trees, grid }
+        Valley { solids, houses, trees, grid, heights: Heights::build() }
     }
 
-    /// The ground a walker stands on, including the bridge deck.
+    /// The ground a walker stands on, including the bridge deck: the terrain as it is drawn
+    /// (see [`Valley::surface`]), so feet land on the triangles you see.
     pub fn ground(&self, x: f32, z: f32) -> f32 {
         let dz = z - river_z(BRIDGE_X);
         if (x - BRIDGE_X).abs() < 2.3 && dz.abs() < 9.1 {
             return 1.4 + 1.6 * (1.0 - (dz / 9.0).powf(2.0));
         }
-        height(x, z)
+        self.surface(x, z)
+    }
+
+    /// The terrain mesh's height at (x, z): [`height`] sampled every [`TERRAIN_STEP`] metres and
+    /// joined in the same triangles the renderer draws. Much cheaper than [`height`], which
+    /// evaluates the noise from scratch.
+    pub fn surface(&self, x: f32, z: f32) -> f32 {
+        self.heights.at(x, z)
     }
 
     /// True when a walker of `radius` can't stand at `p`: deep river (away from the bridge), an
@@ -216,6 +225,44 @@ pub fn path_distance(x: f32, z: f32) -> f32 {
     main.min(street).min(square + 2.0)
 }
 
+/// Spacing of the terrain mesh's vertices, in metres. The renderer builds its mesh on this grid.
+pub const TERRAIN_STEP: f32 = 2.0;
+const HEIGHTS_SIDE: usize = (BOUNDS * 2.0 / TERRAIN_STEP) as usize + 1;
+
+/// [`height`] at every terrain vertex, from (-BOUNDS, -BOUNDS) in rows of increasing z.
+struct Heights {
+    samples: Vec<f32>,
+}
+
+impl Heights {
+    fn build() -> Heights {
+        let mut samples = Vec::with_capacity(HEIGHTS_SIDE * HEIGHTS_SIDE);
+        for j in 0..HEIGHTS_SIDE {
+            for i in 0..HEIGHTS_SIDE {
+                samples.push(height(i as f32 * TERRAIN_STEP - BOUNDS, j as f32 * TERRAIN_STEP - BOUNDS));
+            }
+        }
+        Heights { samples }
+    }
+
+    /// Each grid square is split along its (x + 1, z)–(x, z + 1) diagonal, as the mesh's
+    /// triangles are. Outside the grid, the nearest edge.
+    #[inline]
+    fn at(&self, x: f32, z: f32) -> f32 {
+        let last = (HEIGHTS_SIDE - 1) as f32;
+        let gx = ((x + BOUNDS) / TERRAIN_STEP).clamp(0.0, last);
+        let gz = ((z + BOUNDS) / TERRAIN_STEP).clamp(0.0, last);
+        let (i, j) = ((gx as usize).min(HEIGHTS_SIDE - 2), (gz as usize).min(HEIGHTS_SIDE - 2));
+        let (u, v) = (gx - i as f32, gz - j as f32);
+        let h = |di: usize, dj: usize| self.samples[(j + dj) * HEIGHTS_SIDE + i + di];
+        if u + v <= 1.0 {
+            h(0, 0) + (h(1, 0) - h(0, 0)) * u + (h(0, 1) - h(0, 0)) * v
+        } else {
+            h(1, 1) + (h(0, 1) - h(1, 1)) * (1.0 - u) + (h(1, 0) - h(1, 1)) * (1.0 - v)
+        }
+    }
+}
+
 /// Obstacles bucketed into 16 m cells, so a collision check looks at a handful, not all of them.
 struct Grid {
     cells: Vec<Vec<u16>>,
@@ -309,6 +356,33 @@ mod tests {
         let last = v.solids[v.solids.len() - 1];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_ground_is_the_drawn_terrain() {
+        let v = Valley::new();
+        // On a vertex it is the height itself; between vertices it stays on the triangles, so it
+        // never strays far from the true height.
+        for (x, z) in [(0.0, 0.0), (-66.0, -30.0), (76.0, -84.0), (-BOUNDS, -BOUNDS), (BOUNDS, BOUNDS)] {
+            assert!((v.surface(x, z) - height(x, z)).abs() < 1e-4, "vertex ({x}, {z})");
+        }
+        let mut worst: f32 = 0.0;
+        let mut x = -BOUNDS;
+        while x <= BOUNDS {
+            let mut z = -BOUNDS;
+            while z <= BOUNDS {
+                worst = worst.max((v.surface(x, z) - height(x, z)).abs());
+                z += 0.37;
+            }
+            x += 0.37;
+        }
+        assert!(worst < 2.0, "the mesh strays {worst} m from the height field");
+        // Each square splits along the same diagonal as the renderer's triangles: halfway along
+        // it, the surface is the mean of its two ends.
+        let (x0, z0) = (10.0, 20.0);
+        let mid = v.surface(x0 + 1.0, z0 + 1.0);
+        let ends = (height(x0 + 2.0, z0) + height(x0, z0 + 2.0)) / 2.0;
+        assert!((mid - ends).abs() < 1e-4, "{mid} vs {ends}");
     }
 
     #[test]
