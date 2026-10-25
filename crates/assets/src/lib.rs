@@ -316,6 +316,25 @@ pub struct Prop {
     /// Moving parts (the windmill's sails): a file placed at `at`, spinning about `spin.axis`.
     #[serde(default)]
     pub parts: Vec<PropPart>,
+    /// Masonry (`kind` "masonry": the field walls and the ruin) records the boxes it was built to
+    /// fill, in its own frame, as `world::Valley::masonry` gave them. The renderer stands it where
+    /// `world` puts those boxes, so this says whether the art still matches.
+    #[serde(default)]
+    pub blocks: Vec<PropBlock>,
+}
+
+/// One of a masonry prop's boxes: as `world::Block`, `top` measured up from the prop's origin
+/// (`None` for masonry too tall to climb), rising by `rise` per metre along its own x.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PropBlock {
+    pub center: [f32; 2],
+    pub half: [f32; 2],
+    pub yaw: f32,
+    pub top: Option<f32>,
+    #[serde(default)]
+    pub rise: f32,
+    #[serde(default)]
+    pub part: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

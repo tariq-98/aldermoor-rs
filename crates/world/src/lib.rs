@@ -7,7 +7,9 @@
 
 use glam::{Vec2, Vec3};
 
+mod masonry;
 mod noise;
+pub use masonry::{Block, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
 pub use noise::{fbm, hash, mix, noise, smooth, Lcg};
 
 /// Something you can't walk through: a box on the ground, turned by `yaw`.
@@ -16,21 +18,41 @@ pub struct Solid {
     pub center: Vec2,
     pub half: Vec2,
     pub yaw: f32,
-    /// The height of a flat top you can stand on (a low wall, a ruin's broken masonry). A box
-    /// with a top is part of the ground rather than an obstacle: walkers meet its sides as they
-    /// meet a terrain face, so they climb onto it when it's low enough and stop when it isn't.
-    /// `None` for buildings and trees, which only block.
+    /// The height of a top you can stand on (a low wall, a ruin's broken masonry), at the box's
+    /// centre. A box with a top is part of the ground rather than an obstacle: walkers meet its
+    /// sides as they meet a terrain face, so they climb onto it when it's low enough and stop when
+    /// it isn't. `None` for buildings and trees, which only block.
     pub top: Option<f32>,
+    /// How much the top rises per metre along the box's own x: a wall following a slope, which
+    /// you walk up rather than climb a step at a time. 0 for a flat top.
+    pub rise: f32,
 }
 
 impl Solid {
     /// True when a circle of `radius` at `p` overlaps the box.
     #[inline]
     pub fn overlaps(&self, p: Vec2, radius: f32) -> bool {
+        let local = self.local(p);
+        local.x.abs() < self.half.x + radius && local.y.abs() < self.half.y + radius
+    }
+
+    /// The height of the top at `p`, if the box has one and `p` is on it.
+    #[inline]
+    pub fn top_at(&self, p: Vec2) -> Option<f32> {
+        let top = self.top?;
+        if (p - self.center).length_squared() > self.half.length_squared() {
+            return None;
+        }
+        let local = self.local(p);
+        (local.x.abs() < self.half.x && local.y.abs() < self.half.y).then_some(top + self.rise * local.x)
+    }
+
+    /// `p` in the box's own frame.
+    #[inline]
+    fn local(&self, p: Vec2) -> Vec2 {
         let d = p - self.center;
         let (s, c) = self.yaw.sin_cos();
-        let local = Vec2::new(c * d.x - s * d.y, s * d.x + c * d.y);
-        local.x.abs() < self.half.x + radius && local.y.abs() < self.half.y + radius
+        Vec2::new(c * d.x - s * d.y, s * d.x + c * d.y)
     }
 
     /// Half-size of the box's footprint once turned, for broad-phase grids.
@@ -56,6 +78,9 @@ pub struct Valley {
     pub solids: Vec<Solid>,
     pub houses: Vec<Placement>,
     pub trees: Vec<Placement>,
+    /// The field walls and the ruin: what the renderer draws, and the solids at the end of
+    /// `solids` that you climb onto (or that stop you).
+    pub masonry: Vec<Masonry>,
     grid: Grid,
     /// The solids with a top, for [`Valley::ground`], and the box round them all (most of the
     /// valley has none, and `ground` is called a lot).
@@ -89,11 +114,11 @@ impl Valley {
         let houses: Vec<Placement> =
             HOUSES.iter().enumerate().map(|(variant, &(x, z, yaw, scale))| Placement { position: Vec2::new(x, z), yaw, scale, variant }).collect();
         for h in &houses {
-            solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None });
+            solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 });
         }
         // The windmill and the shed by the north fence.
-        solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None });
-        solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None });
+        solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None, rise: 0.0 });
+        solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None, rise: 0.0 });
 
         // Trees, from the same sequence as the renderer: candidates first, then a size and a turn
         // for each tree that fits.
@@ -131,16 +156,21 @@ impl Valley {
                 continue;
             }
             trees.push(Placement { position: p, yaw, scale, variant: art });
-            solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None });
+            solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None, rise: 0.0 });
         }
         // The bridge's parapets, either side of its deck (after the trees, which are placed
         // from the solids before them).
         for side in [-1.0, 1.0] {
-            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0, top: None });
+            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0, top: None, rise: 0.0 });
         }
+        // Then the walls and the ruin, standing on the drawn ground.
+        let heights = Heights::build();
+        let mut masonry = masonry::field_walls(|x, z| heights.at(x, z));
+        masonry.push(masonry::ruin(|x, z| heights.at(x, z)));
+        solids.extend(masonry.iter().flat_map(Masonry::solids));
         let (grid, tops) = Grid::split(&solids);
         let tops_box = tops_box(&solids);
-        Valley { solids, houses, trees, grid, tops, tops_box, heights: Heights::build() }
+        Valley { solids, houses, trees, masonry, grid, tops, tops_box, heights }
     }
 
     /// Adds a solid after the valley is built (for tests, and props placed by later layers).
@@ -164,12 +194,8 @@ impl Valley {
             return ground;
         }
         for i in self.tops.near(p, 0.0) {
-            let s = &self.solids[i as usize];
-            if let Some(top) = s.top
-                && top > ground
-                && s.overlaps(p, 0.0)
-            {
-                ground = top;
+            if let Some(top) = self.solids[i as usize].top_at(p) {
+                ground = ground.max(top);
             }
         }
         ground
@@ -441,8 +467,9 @@ mod tests {
         // 106 from the Swift sequence, less the 19 on cliff faces (#40), which still take their
         // draws so the rest keep their sizes and turns.
         assert_eq!(v.trees.len(), 87);
-        // 9 buildings, 87 trees, then the bridge's two parapets.
-        assert_eq!(v.solids.len(), 98);
+        // 9 buildings, 87 trees, the bridge's two parapets, then the walls and the ruin.
+        let masonry: usize = v.masonry.iter().map(|m| m.blocks.len()).sum();
+        assert_eq!(v.solids.len(), 98 + masonry);
         let last = v.solids[95];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);

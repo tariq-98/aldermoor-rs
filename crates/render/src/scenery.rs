@@ -106,6 +106,10 @@ impl Scenery {
                 p.scale,
             )?;
         }
+        // The walls and the ruin stand exactly where `world` puts the solids they're built on.
+        for m in &v.masonry {
+            place(&m.prop, m.origin, m.yaw, 1.)?;
+        }
         // Load the supplied levels before play; changing LOD does not block a frame on disk I/O.
         for instance in &scene.instances {
             for lod in 0..=2 {
