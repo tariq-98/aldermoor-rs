@@ -24,8 +24,8 @@ findings before there is a PR).
 
 `scripts/attach_visuals.py` does it in one go: it uploads the files and their phone-sized
 thumbnails to the `captures` branch in one commit (through the API, so never as LFS pointers), then
-posts the comment. It needs `gh` signed in; on the Mac and in cloud sessions with a proxied `gh`
-that is already true.
+posts the comment. It needs `gh` signed in with write access, which the Mac has. Cloud sessions
+can't upload: their GitHub proxy refuses file writes (see Without gh).
 
 ```sh
 scripts/attach_visuals.py --pr 54 --title "Mac check: limestone repeat" --verdict pass \
@@ -41,17 +41,20 @@ scripts/attach_visuals.py --pr 54 --title "Mac check: limestone repeat" --verdic
   latest commit. `--base`: what it is compared with, for a before and after.
 - `--by`: who you are, written as in claims (`thread: <title>`, `local: <checkout>`, `codex`).
 - `--item FILE CAPTION`, once per file, in reading order. `--note` or `--note-file` adds markdown
-  (findings, what to look at, what is still wrong) below the captures.
+  (findings, what to look at, what is still wrong) below the captures. `--footer` ends the comment
+  with your attribution line, if you sign GitHub comments.
 - `--dry-run` prints the comment without uploading anything.
 
 To correct a post, post a new one; the dashboard shows every post, newest first.
 
-## Without gh
+## Without gh, or from a cloud session
 
-The GitHub MCP file tools only take text, so they can't upload images. Hand the captures to a
-session that has `gh`, or, for Mac renders, ask for a Mac check through the coordinator. If the
-files are already on `captures`, post the comment yourself with `add_issue_comment`, in the format
-below.
+A cloud session's proxied `gh` can't write files to the repo, and the GitHub MCP file tools only
+take text, so neither can upload images. For game captures, ask for a Mac check through the
+coordinator: the Mac renders, captures and posts with this script. For anything else you captured
+yourself, attach the files to your reply in the project thread and say in the PR where they are.
+If the files are already on `captures`, post the comment yourself with `add_issue_comment`, in the
+format below.
 
 ## The format
 

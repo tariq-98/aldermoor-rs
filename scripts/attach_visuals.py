@@ -3,8 +3,9 @@
 
 Uploads the files to the `captures` branch in one commit (with phone-sized thumbnails), then posts
 a comment that shows them on GitHub and carries a hidden `aldermoor-visuals` manifest for the
-dashboard's Visuals tab. Needs `gh` signed in (or a cloud session's proxied `gh`). Stdlib only, so
-the Mac's system python3 runs it. The format is described in .claude/skills/attach-visuals.
+dashboard's Visuals tab. Needs `gh` signed in with write access, as on the Mac; a Claude cloud
+session's GitHub proxy refuses the upload. Stdlib only, so the Mac's system python3 runs it. The
+format is described in .claude/skills/attach-visuals.
 
     scripts/attach_visuals.py --pr 54 --title "Mac check: limestone repeat" --verdict pass \\
         --head 5f5e4d7 --base 7286aa4 --by "thread: Run Mac tasks from home folder" \\
@@ -92,7 +93,7 @@ def manifest_comment(manifest: dict) -> str:
     return f'<!-- {MARKER} {text} -->'
 
 
-def comment_body(manifest: dict, sizes: dict, note: str) -> str:
+def comment_body(manifest: dict, sizes: dict, note: str, footer: str = '') -> str:
     ref = manifest['ref']
     blob = f'https://github.com/{REPO}/blob/{ref}/'
     head = [f"**Visuals: {md(manifest['title'])}**"]
@@ -118,6 +119,8 @@ def comment_body(manifest: dict, sizes: dict, note: str) -> str:
     if note.strip():
         parts.append(note.strip())
     parts.append('<sub>Posted with `scripts/attach_visuals.py`; the Aldermoor dashboard shows these under Visuals.</sub>')
+    if footer.strip():
+        parts.append(footer.strip())
     return '\n\n'.join(parts) + '\n'
 
 
@@ -170,6 +173,7 @@ def main() -> None:
     p.add_argument('--by', help='who captured them, as in claims: "thread: <title>", "local: <checkout>"')
     p.add_argument('--note', default='', help='markdown to add below the captures')
     p.add_argument('--note-file', type=Path, help='file of markdown to add below the captures')
+    p.add_argument('--footer', default='', help='markdown to end the comment with, such as an attribution line')
     p.add_argument('--branch', default='captures', help='branch that stores captures (default captures)')
     p.add_argument('--dry-run', action='store_true', help='print the comment and upload nothing')
     a = p.parse_args()
@@ -216,11 +220,15 @@ def main() -> None:
     manifest['items'] = items
 
     if a.dry_run:
-        print(comment_body(manifest, sizes, note))
+        print(comment_body(manifest, sizes, note, a.footer))
         print(f'would upload to {a.branch}: ' + ', '.join(files), file=sys.stderr)
         return
-    manifest['ref'] = upload(files, a.branch, f'Captures for {"PR" if a.pr else "issue"} #{number}: {a.title}')
-    posted = gh(f'repos/{REPO}/issues/{number}/comments', {'body': comment_body(manifest, sizes, note)})
+    try:
+        manifest['ref'] = upload(files, a.branch, f'Captures for {"PR" if a.pr else "issue"} #{number}: {a.title}')
+    except RuntimeError as error:
+        fail(f'upload refused: {error}\nThis gh can\'t write to the repo (a cloud session\'s proxy never can). '
+             'Post from the Mac instead; see "Without gh" in .claude/skills/attach-visuals.')
+    posted = gh(f'repos/{REPO}/issues/{number}/comments', {'body': comment_body(manifest, sizes, note, a.footer)})
     print(posted['html_url'])
 
 

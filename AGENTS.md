@@ -67,7 +67,8 @@ captures there:
 - A PR that changes something visible (looks, terrain, materials, effects, HUD, animation, camera)
   gets screenshots or a short video of its latest commit, posted on the PR with the
   `attach-visuals` skill. When it changes how something looks, put main and the branch side by
-  side from the same camera.
+  side from the same camera. Cloud sessions can't upload files, so they ask for a Mac check
+  through the coordinator instead.
 - Every Mac check posts its captures the same way, with `--verdict pass` or `fail` and `--head`
   set to the commit it built.
 - After a push that changes how it looks, post again. The dashboard flags captures of an older
