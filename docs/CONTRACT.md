@@ -190,8 +190,11 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
 
 ## Input the client sends
 
-- **WASD:** a world-space direction from the camera's yaw, sent as `Move` whenever it changes.
-- **Holding the right mouse button:** also sends `face_yaw` (mouse-look strafing).
+- **Movement keys:** a world-space direction, sent as `Move` whenever it changes. In the default
+  Classic scheme the client keeps the character's heading (A/D turn it, the right mouse button
+  sets it to the camera's yaw) and always sends it as `face_yaw`, so S backpedals and Q/E strafe.
+  In the Action scheme WASD points from the camera's yaw, and `face_yaw` goes only while the
+  right mouse button is held (mouse-look strafing).
 - **Space:** `Jump`.
 - **Dodge key:** `Dodge` (a zero direction rolls backwards).
 - **Tab or clicking a unit:** `SetTarget`. Right-clicking an enemy: `SetTarget` plus
@@ -200,7 +203,7 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
   the screen with mouse-look): ground skills land there, and straight-flying shots fly at it, so
   a player can lead a moving target. Show slots with `ground` as a circle of the skill's radius
   following the cursor.
-- **Guard:** hold a key (we suggest `Q`, or a mouse side button): `Guard(true)` on press,
+- **Guard:** hold a key (`F`, or mouse button 5; Q and E strafe): `Guard(true)` on press,
   `Guard(false)` on release.
 - **Swap weapons:** `` ` `` sends `SwapWeapons`.
 - **Interact on a downed or defeated friend:** `Revive { target }`; it takes a few seconds of

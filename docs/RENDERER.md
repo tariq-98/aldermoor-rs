@@ -13,11 +13,15 @@ scripts/run_client.sh
 scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65
 ```
 
-WASD moves relative to the camera; Shift walks, Space jumps, V rolls, right-drag rotates and
-fixes facing for strafing. Tab cycles enemies; click selects, right-click starts auto-attacks.
+Controls are WoW-style by default (`controls::Scheme::Classic`): W runs, S backpedals, A/D turn
+the character and camera, Q/E strafe (A/D strafe too while the right button is held). Left-drag
+looks around without turning the character, right-drag steers it, both buttons run forward, and
+T, Num Lock or mouse button 4 toggles autorun. Drags hide and hold the pointer; a press that moves
+under 4 px is a click. `--scheme action` brings back camera-relative WASD. Shift walks, Space
+jumps, V rolls. Tab cycles enemies; click selects, right-click starts auto-attacks.
 1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
 (screen centre while mouse-looking). Hovering/selecting a ground skill previews its actual radius.
-Hold Q to guard; ` swaps weapon sets; E revives a selected or nearby downed/defeated friend;
+Hold F (or mouse button 5) to guard; ` swaps weapon sets; G revives a selected or nearby downed/defeated friend;
 R respawns; Esc exits. The stock-widget HUD shows all ten named slots, costs, cooldowns and GCD
 sweeps, health/endurance/resource, casts, auras, weapon-set recharge and target cast/defiance bars.
 The HUD is composed after temporal AA at output resolution. Claude will supply its artwork,
