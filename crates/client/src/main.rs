@@ -2,6 +2,7 @@
 mod combat;
 mod hud;
 mod interpolate;
+mod menu;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
 use protocol::{Command, Look, Pose, UnitState};
@@ -162,7 +163,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -208,12 +209,19 @@ struct Game {
     scenery: Option<render::scenery::Scenery>,
     review: Vec<UnitState>,
     settings: controls::Settings,
+    /// Where the settings load from and the controls menu saves to.
+    settings_path: PathBuf,
+    /// The controls menu, while it is open.
+    menu: Option<menu::Menu>,
+    /// Quit was clicked in the menu.
+    quit: bool,
     orbit: controls::Orbit,
     /// The eased camera; `view` is where it was last drawn from.
     follow: controls::Follow,
     view: Option<controls::camera::View>,
     pilot: controls::Pilot,
-    keys: HashSet<KeyCode>,
+    /// Keys and mouse buttons 3-5 down right now.
+    keys: HashSet<controls::Input>,
     mouse_look: bool,
     orbiting: bool,
     /// Ctrl held in the Action scheme: the pointer is out for the HUD and the mouse doesn't look.
@@ -244,10 +252,11 @@ impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
         let host = server::Host::start(0xa1de, "Traveller");
-        let mut settings = match &options.controls {
-            Some(path) => controls::Settings::load(path).map_err(anyhow::Error::msg)?,
-            None => controls::Settings::default(),
-        };
+        let settings_path = options.controls.clone().unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                .join("Library/Application Support/Aldermoor/controls.json")
+        });
+        let mut settings = controls::Settings::load(&settings_path).map_err(anyhow::Error::msg)?;
         if let Some(scheme) = options.scheme {
             settings.scheme = scheme;
         }
@@ -266,6 +275,9 @@ impl Game {
             scenery: None,
             review: Vec::new(),
             settings,
+            settings_path,
+            menu: None,
+            quit: false,
             orbit,
             follow: controls::Follow::default(),
             view: None,
@@ -341,18 +353,189 @@ impl Game {
         g.last = g.start;
         Ok(g)
     }
+    /// Whether any input bound to `control` is down.
+    fn down(&self, control: controls::Control) -> bool {
+        self.settings
+            .bindings
+            .held(control, |i| self.keys.contains(i))
+    }
     fn held(&self) -> controls::Held {
-        let down = |k| self.keys.contains(&k);
+        use controls::Control as C;
         controls::Held {
-            forward: down(KeyCode::KeyW),
-            back: down(KeyCode::KeyS),
-            left: down(KeyCode::KeyA),
-            right: down(KeyCode::KeyD),
-            strafe_left: down(KeyCode::KeyQ),
-            strafe_right: down(KeyCode::KeyE),
-            walk: down(KeyCode::ShiftLeft) || down(KeyCode::ShiftRight),
+            forward: self.down(C::Forward),
+            back: self.down(C::Back),
+            left: self.down(C::Left),
+            right: self.down(C::Right),
+            strafe_left: self.down(C::StrafeLeft),
+            strafe_right: self.down(C::StrafeRight),
+            walk: self.down(C::Walk),
             mouse_look: self.mouse_look,
             orbiting: self.orbiting,
+        }
+    }
+    /// Does what a bound control does when its key goes down.
+    fn press(&mut self, control: controls::Control) {
+        use controls::Control as C;
+        let command = match control {
+            C::Jump => Some(Command::Jump),
+            C::Roll => Some(Command::Dodge {
+                direction: self.direction(),
+            }),
+            C::Guard => Some(Command::Guard(true)),
+            C::Autorun => {
+                self.pilot.toggle_autorun();
+                None
+            }
+            C::FreePointer => {
+                self.pointer_free = true;
+                None
+            }
+            C::Target => Some(Command::SetTarget(self.target(true))),
+            C::SwapWeapons => Some(Command::SwapWeapons),
+            C::Revive => self
+                .revive_target()
+                .map(|target| Command::Revive { target }),
+            C::Respawn => Some(Command::Respawn),
+            c => c.slot().map(|slot| self.use_slot(slot)),
+        };
+        if let Some(c) = command {
+            self.host.send(c);
+        }
+    }
+    /// Lets go of a held control once none of its inputs is down any more.
+    fn release(&mut self, control: controls::Control) {
+        match control {
+            controls::Control::Guard if !self.down(control) => {
+                self.host.send(Command::Guard(false))
+            }
+            controls::Control::FreePointer => self.pointer_free = self.down(control),
+            _ => {}
+        }
+    }
+    /// Lets go of everything, for losing focus or opening the menu.
+    fn release_all(&mut self) {
+        self.keys.clear();
+        self.host.send(Command::Guard(false));
+        self.mouse_look = false;
+        self.orbiting = false;
+        self.pointer_free = false;
+        self.controls(0.);
+    }
+    fn open_menu(&mut self) {
+        self.release_all();
+        self.menu = Some(menu::Menu::default());
+    }
+    fn change(&mut self, change: menu::Change) {
+        let Some(m) = &mut self.menu else {
+            return;
+        };
+        match change {
+            menu::Change::Capture(c) => {
+                m.capture = Some(c);
+                m.notice = Some(format!(
+                    "Press a key or mouse button for {}. Esc cancels.",
+                    c.name()
+                ));
+                return;
+            }
+            menu::Change::Unbind(c, input) => {
+                self.settings.bindings.unbind(c, &input);
+                m.notice = Some(format!("{} no longer does {}.", input.label(), c.name()));
+            }
+            menu::Change::Reset => {
+                self.settings.bindings.reset();
+                m.notice = Some("Keys are back to the defaults.".into());
+            }
+            menu::Change::Scheme(scheme) => {
+                self.settings.scheme = scheme;
+                self.pilot.scheme = scheme;
+                self.orbit.shoulder = self.settings.shoulder();
+                m.notice = None;
+            }
+            menu::Change::Close => {
+                self.menu = None;
+                return;
+            }
+            menu::Change::Quit => {
+                self.quit = true;
+                return;
+            }
+        }
+        self.save_settings();
+    }
+    /// Binds the key or button pressed while the menu was waiting for one.
+    fn bind_captured(&mut self, input: controls::Input) {
+        let Some(m) = &mut self.menu else {
+            return;
+        };
+        let Some(control) = m.capture.take() else {
+            return;
+        };
+        let taken = self.settings.bindings.bind(control, input.clone());
+        m.notice = Some(if taken.is_empty() {
+            format!("{} now does {}.", input.label(), control.name())
+        } else {
+            let names: Vec<_> = taken.iter().map(|c| c.name()).collect();
+            format!(
+                "{} now does {}, and no longer {}.",
+                input.label(),
+                control.name(),
+                names.join(" or ")
+            )
+        });
+        self.save_settings();
+    }
+    fn save_settings(&mut self) {
+        if let Err(e) = self.settings.save(&self.settings_path)
+            && let Some(m) = &mut self.menu
+        {
+            m.notice = Some(format!("Couldn't save: {e}"));
+        }
+    }
+    /// The keys as the HUD shows them.
+    fn key_labels(&self) -> hud::Keys {
+        use controls::Control as C;
+        let l = |c| self.settings.bindings.label(c);
+        let hint = match self.pilot.scheme {
+            controls::Scheme::Action => format!(
+                "{}{}{}{} · {} walk · {} jump · {} roll · Hold {} guard · {} revive · Hold {} for the pointer · Esc controls",
+                l(C::Forward),
+                l(C::Left),
+                l(C::Back),
+                l(C::Right),
+                l(C::Walk),
+                l(C::Jump),
+                l(C::Roll),
+                l(C::Guard),
+                l(C::Revive),
+                l(C::FreePointer),
+            ),
+            controls::Scheme::Classic => format!(
+                "{}/{} · {}/{} turn · {}/{} strafe · {} jump · {} roll · Hold {} guard · {} revive · Left-drag look · Right-drag steer · Esc controls",
+                l(C::Forward),
+                l(C::Back),
+                l(C::Left),
+                l(C::Right),
+                l(C::StrafeLeft),
+                l(C::StrafeRight),
+                l(C::Jump),
+                l(C::Roll),
+                l(C::Guard),
+                l(C::Revive),
+            ),
+        };
+        hud::Keys {
+            hint,
+            slots: std::array::from_fn(|i| {
+                C::ALL
+                    .into_iter()
+                    .find(|c| c.slot() == Some(i as u8))
+                    .map_or_else(String::new, l)
+            }),
+            revive: l(C::Revive),
+            target: l(C::Target),
+            swap: l(C::SwapWeapons),
+            respawn: l(C::Respawn),
         }
     }
     fn direction(&self) -> Vec2 {
@@ -449,7 +632,9 @@ impl Game {
     }
     /// Aiming at the crosshair in the middle of the screen, rather than at the pointer.
     fn aiming(&self) -> bool {
-        self.mouse_look || (self.pilot.scheme == controls::Scheme::Action && !self.pointer_free)
+        self.menu.is_none()
+            && (self.mouse_look
+                || (self.pilot.scheme == controls::Scheme::Action && !self.pointer_free))
     }
     fn aim_point(&self) -> Option<Vec3> {
         let me = self.snaps.current.unit(self.host.player)?;
@@ -756,14 +941,8 @@ impl Game {
                     .unwrap_or(1.),
         };
         let crosshair = self.aiming() && !self.options.showcase;
-        let hint = match self.pilot.scheme {
-            controls::Scheme::Action => {
-                "WASD · Shift walk · Space jump · Alt roll · Hold F guard · G revive · Hold Ctrl for the pointer"
-            }
-            controls::Scheme::Classic => {
-                "W/S · A/D turn · Q/E strafe · Space jump · Alt roll · Hold F guard · G revive · Left-drag look · Right-drag steer"
-            }
-        };
+        let keys = self.key_labels();
+        let mut changes = Vec::new();
         let output = ctx.run(raw, |ctx| {
             if !self.options.showcase {
                 combat::paint(
@@ -776,9 +955,12 @@ impl Game {
                     &self.valley,
                 );
             }
-            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, hint);
+            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
             if crosshair {
                 paint_crosshair(ctx);
+            }
+            if let Some(m) = &self.menu {
+                changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
             }
         });
         for action in actions {
@@ -897,6 +1079,9 @@ impl Game {
                 );
                 eprintln!("SMOKE PASS moved={moved:.2}m events={}", self.events);
             }
+        }
+        for change in changes {
+            self.change(change);
         }
         Ok(done)
     }
@@ -1030,23 +1215,61 @@ struct App {
     error: Option<anyhow::Error>,
     next_redraw: Instant,
     egui_state: Option<egui_winit::State>,
+    focused: bool,
 }
 impl App {
+    /// A key or mouse button 3-5 going down or up: does whatever it is bound to.
+    fn input(&mut self, input: controls::Input, pressed: bool, repeat: bool) {
+        let bound = self.game.settings.bindings.controls(&input);
+        if pressed {
+            if self.game.menu.is_some() {
+                return;
+            }
+            self.game.keys.insert(input);
+            if !repeat {
+                for control in bound {
+                    self.game.press(control);
+                }
+            }
+        } else {
+            self.game.keys.remove(&input);
+            for control in bound {
+                self.game.release(control);
+            }
+        }
+        self.sync_pointer(self.focused);
+    }
+    /// Esc closes the menu (or stops it waiting for a key), and opens it otherwise.
+    fn escape(&mut self) {
+        match &mut self.game.menu {
+            Some(m) if m.capture.is_some() => {
+                m.capture = None;
+                m.notice = None;
+            }
+            Some(_) => self.game.menu = None,
+            None => {
+                self.end_drag();
+                self.game.open_menu();
+            }
+        }
+        self.sync_pointer(self.focused);
+    }
     /// Left drags the camera, right steers; a press that barely moves is a click instead,
     /// which targets (and with the right button, attacks) the unit under the cursor.
+    /// The middle and thumb buttons are bindable inputs like keys.
     fn button(&mut self, button: MouseButton, pressed: bool) {
         match button {
+            MouseButton::Left | MouseButton::Right if pressed && self.game.menu.is_some() => {
+                return;
+            }
             MouseButton::Left => self.game.orbiting = pressed,
             MouseButton::Right => self.game.mouse_look = pressed,
-            // The thumb button rolls, the way the keys point.
-            MouseButton::Back if pressed => self.game.host.send(Command::Dodge {
-                direction: self.game.direction(),
-            }),
-            MouseButton::Forward => self.game.host.send(Command::Guard(pressed)),
-            _ => return,
-        }
-        if !matches!(button, MouseButton::Left | MouseButton::Right) {
-            return;
+            other => {
+                if let Some(input) = mouse_input(other) {
+                    self.input(input, pressed, false);
+                }
+                return;
+            }
         }
         if self.pointer_held {
             // Action: every press is a click on whatever is under the crosshair.
@@ -1097,6 +1320,7 @@ impl App {
         let want = focused
             && self.game.pilot.scheme == controls::Scheme::Action
             && !self.game.pointer_free
+            && self.game.menu.is_none()
             && !self.game.options.showcase;
         if want == self.pointer_held {
             return;
@@ -1196,6 +1420,33 @@ impl ApplicationHandler for App {
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        // The menu waiting for a key takes the next one before egui (or the game) sees it.
+        if self.game.menu.as_ref().is_some_and(|m| m.capture.is_some()) {
+            let captured = match &event {
+                WindowEvent::KeyboardInput { event, .. }
+                    if event.state == ElementState::Pressed && !event.repeat =>
+                {
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::Escape) => {
+                            self.escape();
+                            return;
+                        }
+                        PhysicalKey::Code(key) => Some(key_input(key)),
+                        _ => None,
+                    }
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button,
+                    ..
+                } => mouse_input(*button),
+                _ => None,
+            };
+            if let Some(input) = captured {
+                self.game.bind_captured(input);
+                return;
+            }
+        }
         if let (Some(state), Some(window)) = (&mut self.egui_state, &self.window) {
             let response = state.on_window_event(window, &event);
             if response.consumed
@@ -1210,14 +1461,7 @@ impl ApplicationHandler for App {
                     && event.state == ElementState::Released
                     && let PhysicalKey::Code(key) = event.physical_key
                 {
-                    self.game.keys.remove(&key);
-                    if key == KeyCode::KeyF {
-                        self.game.host.send(Command::Guard(false));
-                    }
-                    if matches!(key, KeyCode::ControlLeft | KeyCode::ControlRight) {
-                        self.game.pointer_free = false;
-                        self.sync_pointer(true);
-                    }
+                    self.input(key_input(key), false, false);
                 }
                 // A drag that ends over the HUD must still let go.
                 if let WindowEvent::MouseInput {
@@ -1242,16 +1486,13 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) => {
-                self.game.keys.clear();
-                self.game.host.send(Command::Guard(false));
-                self.game.mouse_look = false;
-                self.game.orbiting = false;
-                self.game.pointer_free = false;
+                self.focused = false;
+                self.game.release_all();
                 self.end_drag();
                 self.sync_pointer(false);
-                self.game.controls(0.);
             }
             WindowEvent::Focused(true) => {
+                self.focused = true;
                 // Grab again: a grab made before the window had focus may not have held.
                 self.pointer_held = false;
                 self.sync_pointer(true)
@@ -1272,51 +1513,13 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
-                    if matches!(key, KeyCode::ControlLeft | KeyCode::ControlRight) {
-                        self.game.pointer_free = event.state == ElementState::Pressed;
-                        self.sync_pointer(true);
-                    }
-                    if event.state == ElementState::Pressed {
-                        self.game.keys.insert(key);
-                        if !event.repeat {
-                            let command = match key {
-                                KeyCode::Escape => {
-                                    event_loop.exit();
-                                    None
-                                }
-                                KeyCode::Space => Some(Command::Jump),
-                                KeyCode::KeyV | KeyCode::AltLeft | KeyCode::AltRight => {
-                                    Some(Command::Dodge {
-                                        direction: self.game.direction(),
-                                    })
-                                }
-                                KeyCode::Tab => Some(Command::SetTarget(self.game.target(true))),
-                                key if slot_key(key).is_some() => {
-                                    Some(self.game.use_slot(slot_key(key).unwrap()))
-                                }
-                                KeyCode::KeyF => Some(Command::Guard(true)),
-                                KeyCode::Backquote => Some(Command::SwapWeapons),
-                                // T for MacBook keyboards, which have no Num Lock.
-                                KeyCode::KeyT | KeyCode::NumLock => {
-                                    self.game.pilot.toggle_autorun();
-                                    None
-                                }
-                                KeyCode::KeyG => self
-                                    .game
-                                    .revive_target()
-                                    .map(|target| Command::Revive { target }),
-                                KeyCode::KeyR => Some(Command::Respawn),
-                                _ => None,
-                            };
-                            if let Some(c) = command {
-                                self.game.host.send(c);
-                            }
+                    let pressed = event.state == ElementState::Pressed;
+                    if key == KeyCode::Escape {
+                        if pressed && !event.repeat {
+                            self.escape();
                         }
                     } else {
-                        self.game.keys.remove(&key);
-                        if key == KeyCode::KeyF {
-                            self.game.host.send(Command::Guard(false));
-                        }
+                        self.input(key_input(key), pressed, event.repeat);
                     }
                 }
             }
@@ -1333,6 +1536,9 @@ impl ApplicationHandler for App {
                     ) {
                         state.handle_platform_output(window, output);
                     }
+                    if self.game.quit {
+                        event_loop.exit();
+                    }
                     match result {
                         Ok(true) => event_loop.exit(),
                         Ok(false) => {}
@@ -1347,9 +1553,11 @@ impl ApplicationHandler for App {
                             self.game.snaps.current.unit(self.game.host.player),
                         )
                     {
-                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · mouse aims · Ctrl pointer · WASD · Space jump · Alt roll · Tab target · 1–9 skills",p.health,p.max_health,r.stats.gpu_ms));
+                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · mouse aims · Ctrl pointer · WASD · Space jump · Alt roll · Tab target · 1–9 skills · Esc controls",p.health,p.max_health,r.stats.gpu_ms));
                     }
                 }
+                // The menu may have opened, closed or switched scheme.
+                self.sync_pointer(self.focused);
             }
             _ => {}
         }
@@ -1442,6 +1650,7 @@ fn main() -> Result<()> {
             error: None,
             next_redraw: Instant::now(),
             egui_state: None,
+            focused: true,
         };
         event_loop.run_app(&mut app)?;
         if let Some(e) = app.error {
@@ -1451,22 +1660,21 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn slot_key(key: KeyCode) -> Option<u8> {
-    [
-        KeyCode::Digit1,
-        KeyCode::Digit2,
-        KeyCode::Digit3,
-        KeyCode::Digit4,
-        KeyCode::Digit5,
-        KeyCode::Digit6,
-        KeyCode::Digit7,
-        KeyCode::Digit8,
-        KeyCode::Digit9,
-        KeyCode::Digit0,
-    ]
-    .iter()
-    .position(|k| *k == key)
-    .map(|i| i as u8)
+/// A key by its winit name, which is how the bindings name it.
+fn key_input(key: KeyCode) -> controls::Input {
+    controls::Input(format!("{key:?}"))
+}
+
+/// The middle and thumb buttons; the left and right ones aren't bindable.
+fn mouse_input(button: MouseButton) -> Option<controls::Input> {
+    let n = match button {
+        MouseButton::Middle => 3,
+        MouseButton::Back => 4,
+        MouseButton::Forward => 5,
+        MouseButton::Other(n) => n + 1,
+        MouseButton::Left | MouseButton::Right => return None,
+    };
+    Some(controls::Input(format!("Mouse{n}")))
 }
 
 #[cfg(test)]

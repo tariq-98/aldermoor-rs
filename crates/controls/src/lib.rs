@@ -1,7 +1,9 @@
 //! What the player is holding, turned into the `Move` the server wants, plus the orbit camera.
 //! The client maps its window's keys and buttons onto [`Held`]; everything here is plain data.
+pub mod bindings;
 pub mod camera;
 pub mod settings;
+pub use bindings::{Bindings, Control, Input};
 pub use camera::{Follow, Orbit};
 pub use settings::Settings;
 
