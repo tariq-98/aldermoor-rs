@@ -8,7 +8,10 @@ API validation and the F3 overlay are off. Existing supplied assets and look val
 are unchanged. Commands, executable hashes and start times are recorded in each JSON.
 
 The baseline is `feb05ef`; the profiler implementation is `a1352e9` (before this
-report-only commit). Both use the committed catalogue from the isolated validation
+report-only commit). Claude subsequently merged the same main into the PR as `2a98092`;
+its only runtime differences from the measured build are F3 event priority and menu/overlay
+UI draw order. Both are inactive during these overlay-off, non-interactive benchmarks.
+Both use the committed catalogue from the isolated validation
 checkout. A missing terrain texture stopped an earlier attempt in the shared checkout;
 that failed attempt is not a measurement and no missing asset was authored or replaced.
 
@@ -50,8 +53,8 @@ coverage for expected passes, draw calls, visible triangles and allocation bytes
 - Release build, scoped fmt, macOS CI-equivalent clippy and four Python harness tests pass.
 - The prior head `5aaff69` was visually checked on the unlocked Mac at a 1600×1000 window:
   F3 displayed readable live counters and a second F3 hid them. Scene and HUD remained
-  intact. The latest rebase preserves the newer menu/controls and reserves F3 before
-  key-binding capture; its on-screen check has not yet been repeated.
+  intact. The current merge preserves the newer menu/controls and their key-binding capture
+  priority; its on-screen check has not yet been repeated.
 - Hosted macOS CI has a paravirtual GPU without stage counters. Tests explicitly verify
   unavailable timestamps and continued rendering there; physical-M1 tests exercise counters.
 
