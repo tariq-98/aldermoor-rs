@@ -118,6 +118,11 @@ impl Valley {
             }
             let scale = r.range(0.85, 1.6);
             let yaw = r.range(0.0, std::f32::consts::TAU);
+            // Not out of a cliff face. Checked after the draws so the trees that stay keep their
+            // size and turn.
+            if too_steep_for_a_tree(p) {
+                continue;
+            }
             trees.push(Placement { position: p, yaw, scale });
             solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None });
         }
@@ -268,6 +273,16 @@ pub fn height(x: f32, z: f32) -> f32 {
 /// the centre line than this is valley floor, never hilltop.
 const GORGE_FLOOR: f32 = 9.0;
 
+/// Trees don't grow where the ground is steeper than this, anywhere under the tree.
+const TREE_SLOPE_LIMIT_DEGREES: f32 = 40.0;
+
+/// Whether the ground around `p` (out to about a trunk and its roots) is too steep for a tree:
+/// a cliff face, or the lip of one.
+fn too_steep_for_a_tree(p: Vec2) -> bool {
+    let flattest = TREE_SLOPE_LIMIT_DEGREES.to_radians().cos();
+    [(0.0, 0.0), (1.5, 0.0), (-1.5, 0.0), (0.0, 1.5), (0.0, -1.5)].iter().any(|(dx, dz)| normal(p.x + dx, p.y + dz).y < flattest)
+}
+
 /// The terrain's surface normal at (x, z).
 pub fn normal(x: f32, z: f32) -> Vec3 {
     Vec3::new(height(x - 0.5, z) - height(x + 0.5, z), 1.0, height(x, z - 0.5) - height(x, z + 0.5)).normalize()
@@ -416,12 +431,26 @@ mod tests {
     #[test]
     fn the_same_trees_grow_in_the_same_places() {
         let v = Valley::new();
-        assert_eq!(v.trees.len(), 106);
-        // 9 buildings, 106 trees, then the bridge's two parapets.
-        assert_eq!(v.solids.len(), 117);
-        let last = v.solids[114];
+        // 106 from the Swift sequence, less the 19 on cliff faces (#40), which still take their
+        // draws so the rest keep their sizes and turns.
+        assert_eq!(v.trees.len(), 87);
+        // 9 buildings, 87 trees, then the bridge's two parapets.
+        assert_eq!(v.solids.len(), 98);
+        let last = v.solids[95];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
+    }
+
+    #[test]
+    fn no_tree_grows_out_of_a_cliff() {
+        let v = Valley::new();
+        let flattest = TREE_SLOPE_LIMIT_DEGREES.to_radians().cos();
+        for t in &v.trees {
+            let n = normal(t.position.x, t.position.y);
+            assert!(n.y >= flattest, "a tree at {} stands on a {:.0}° slope", t.position, n.y.acos().to_degrees());
+        }
+        // The west ledge's east face, where #40 saw one.
+        assert!(!v.trees.iter().any(|t| t.position.distance(Vec2::new(-39.0, -50.0)) < 1.0));
     }
 
     #[test]
