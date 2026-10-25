@@ -628,7 +628,8 @@ fn others_see_a_swimmer_wade_in_swim_and_wade_out() {
 
 #[test]
 fn others_see_a_climb_from_its_foot_to_its_top() {
-    let at = Vec2::new(-50.0, 26.0);
+    // Where `climbs_a_low_ledge_by_walking_into_it` starts, far enough back to get up to speed.
+    let at = Vec2::new(-51.0, 26.2);
     let dir = Vec2::new(-1.0, -1.0).normalize();
     let mut sim = Sim::new(7);
     let id = sim.spawn_player("Hero", at, dir.x.atan2(dir.y));
