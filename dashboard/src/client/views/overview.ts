@@ -27,7 +27,7 @@ const PAGE = 30;
 // How much of the feed is open; "Show more" adds a page. Kept across redraws.
 let shown = PAGE;
 
-const MAIN_STATE = { success: 'main passing', failure: 'main failing', running: 'main running CI', cancelled: 'main cancelled', none: null };
+const MAIN_STATE = { success: 'main passing', failure: 'main failing', running: "main's CI running", cancelled: "main's CI cancelled", none: null };
 const TOKEN_FROM: Record<string, string> = { cookie: " with this browser's token", env: " with the project's token", dev: ' through the dev proxy' };
 
 export function overviewView(view: ViewContext): HTMLElement {

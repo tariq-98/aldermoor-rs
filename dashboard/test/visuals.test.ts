@@ -84,6 +84,15 @@ test('reads captions from older comments that only link images', () => {
   assert.equal(post.items[5]!.src, '/api/media?ref=captures&path=pr54%2Fhaze-far.png');
 });
 
+test('an older post is titled with its first sentence', () => {
+  const image = `![a](https://github.com/${REPO}/blob/captures/pr84/menu.png?raw=true)`;
+  const title = (first: string) => fromLinks(comment(`${first}\n\n${image}`), onPr(null))?.title;
+  assert.equal(title("**Mac check: PASS (head 7b9c3d9).** I can't send real key input from here, so I drove the menu."),
+    'Mac check: PASS (head 7b9c3d9).');
+  assert.equal(title('Fog, e.g. at the gorge. Still too thick.'), 'Fog, e.g. at the gorge.');
+  assert.equal(title('Mac check: PASS (head 5f5e4d7) on the Apple M1.'), 'Mac check: PASS (head 5f5e4d7) on the Apple M1.');
+});
+
 test('leaves out links whose file name has a space', () => {
   const body = `Captures\n\n![a](https://github.com/${REPO}/blob/captures/pr54/haze%20far.png?raw=true)`;
   assert.equal(fromLinks(comment(body), onPr(null)), null);

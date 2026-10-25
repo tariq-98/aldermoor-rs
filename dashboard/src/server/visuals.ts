@@ -119,6 +119,12 @@ export function plainText(markdown: string): string {
     .trim();
 }
 
+/** A line's first sentence, when it runs on past one: an older post's first line is often a
+ * whole paragraph. */
+function firstSentence(line: string): string {
+  return line.match(/^(.{12,}?[.!?])\s+(?=[A-Z])/)?.[1] ?? line;
+}
+
 function tableCells(line: string): string[] | null {
   const row = line.trim();
   if (!row.startsWith('|')) return null;
@@ -181,7 +187,7 @@ export function fromLinks(comment: RawComment, ctx: Context): VisualPost | null 
     at: comment.created_at,
     number: ctx.number,
     kind: ctx.kind,
-    title: first.slice(0, 140) || 'Captures',
+    title: firstSentence(first).slice(0, 140) || 'Captures',
     verdict,
     head,
     base: null,
