@@ -20,6 +20,19 @@ Agreed with Chippy on 25 October 2026 (#71). The tables are `crates/content/item
   fills empty slots.
 - Coins are carried apart from the slots.
 
+## Food and potions
+
+- `Command::UseItem { slot }` eats or drinks one of the consumable in that slot. Its `effect` in
+  items.ron names an aura in the combat tables (common.ron), which goes on the player. Nothing is
+  used up if the aura doesn't take, and the dead or downed use nothing.
+- Food (tagged `food`) is only eaten out of combat. Its buff lasts into the next fight: Bread
+  gives Fed (a slow heal for 60 s), Grilled Trout gives Well Fed (a slow heal and +5% damage for
+  180 s). Out of combat, health comes back quickly anyway, so food is for before a fight.
+- Potions (tagged `potion`) work in combat and share one cooldown, `POTION_COOLDOWN` (60 s). The
+  Healing Draught heals over 8 s. The player's state shows `potion_ready`, the seconds left.
+- The tables are checked on load: every consumable has an effect that is a real aura and is
+  tagged food or potion, and nothing else has an effect.
+
 ## Loot
 
 - A monster that dies rolls its loot table (`loot.ron`): coins in a range, then each line on its
@@ -56,4 +69,4 @@ yet. Losing some coins in a recoverable pouch on death (DESIGN.md) is its own fo
 
 The player's own state carries `coins`, every `inventory` slot (with what the shop you stand at
 pays for each), the `loot` piles nearby you may take, and the `shop` you stand at with its wares
-and prices. Protocol version 7. The loot window, bags and shop screen are client work (#179).
+and prices. Protocol version 7 (8 with gathering and crafting, CRAFTING.md; 9 with `UseItem` and `potion_ready`). The loot window, bags and shop screen are client work (#179).

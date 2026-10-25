@@ -48,6 +48,6 @@ at level 1 and about 23 at level 49, before quests. How long 50 should take is s
 
 The player's own state in each snapshot carries the equipped `specialty`, its `level`, `xp`
 into the level and `xp_next` (0 at the cap), `unassigned_xp`, and every specialty's level in
-`specialties`. Protocol version 8. The client shows the equipped specialty's XP bar under the
+`specialties`. Protocol version 11. The client shows the equipped specialty's XP bar under the
 player frame, a banner on each level up, and a Specialties screen (K by default) that lists
 every specialty's level and gives quest XP to one.

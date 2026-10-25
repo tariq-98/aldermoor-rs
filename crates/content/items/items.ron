@@ -36,12 +36,35 @@
         (key: "bone_dust", name: "Bone Dust", kind: Material, value: 6, stack: 100, tags: ["reagent"]),
         (key: "golem_core", name: "Golem Core", kind: Material, tier: 2, value: 120, stack: 10, tags: ["reagent"]),
         (key: "marigold", name: "Marigold", kind: Material, value: 4, stack: 100, tags: ["herb"]),
+        (key: "flax", name: "Flax", kind: Material, value: 3, stack: 100, tags: ["herb", "cloth"]),
+        (key: "silverleaf", name: "Silverleaf", kind: Material, tier: 2, value: 10, stack: 100, tags: ["herb"]),
+        (key: "oak_log", name: "Oak Log", kind: Material, value: 5, stack: 50, tags: ["wood"]),
+        (key: "yew_log", name: "Yew Log", kind: Material, tier: 2, value: 12, stack: 50, tags: ["wood"]),
+        (key: "river_trout", name: "River Trout", kind: Material, value: 4, stack: 50, tags: ["fish"]),
+        (key: "rough_garnet", name: "Rough Garnet", kind: Material, value: 40, stack: 20, tags: ["gem"]),
+
+        // Crafted materials (docs/CRAFTING.md).
+        (key: "copper_ingot", name: "Copper Ingot", kind: Material, value: 20, stack: 50, tags: ["metal"]),
+        (key: "iron_ingot", name: "Iron Ingot", kind: Material, tier: 2, value: 40, stack: 50, tags: ["metal"]),
+        (key: "leather", name: "Leather", kind: Material, value: 16, stack: 50, tags: ["hide"]),
+        (key: "linen", name: "Linen", kind: Material, value: 8, stack: 50, tags: ["cloth"]),
+
+        // Tools: in the pack, they gather for their skill; better ones swing faster.
+        (key: "pickaxe.copper", name: "Copper Pickaxe", kind: Tool, value: 30, tags: ["tool", "metal"]),
+        (key: "pickaxe.iron", name: "Iron Pickaxe", kind: Tool, tier: 2, value: 90, tags: ["tool", "metal"]),
+        (key: "hatchet.copper", name: "Copper Hatchet", kind: Tool, value: 30, tags: ["tool", "metal"]),
+        (key: "hatchet.iron", name: "Iron Hatchet", kind: Tool, tier: 2, value: 90, tags: ["tool", "metal"]),
+        (key: "knife.skinning", name: "Skinning Knife", kind: Tool, value: 20, tags: ["tool", "metal"]),
+        (key: "sickle.copper", name: "Copper Sickle", kind: Tool, value: 20, tags: ["tool", "metal"]),
+        (key: "rod.fishing", name: "Fishing Rod", kind: Tool, value: 20, tags: ["tool", "wood"]),
 
         // Food and drink.
-        (key: "bread", name: "Bread", kind: Consumable, value: 3, stack: 20, tags: ["food"]),
-        (key: "healing_draught", name: "Healing Draught", kind: Consumable, value: 25, stack: 10, tags: ["potion"]),
+        (key: "bread", name: "Bread", kind: Consumable, value: 3, stack: 20, tags: ["food"], effect: Some("fed")),
+        (key: "grilled_trout", name: "Grilled Trout", kind: Consumable, value: 10, stack: 20, tags: ["food"], effect: Some("well_fed")),
+        (key: "healing_draught", name: "Healing Draught", kind: Consumable, value: 25, stack: 10, tags: ["potion"], effect: Some("draught_healing")),
 
         // Junk.
         (key: "goblin_trinket", name: "Goblin Trinket", kind: Junk, value: 10, stack: 20, tags: ["junk"]),
+        (key: "message_bottle", name: "Message in a Bottle", kind: Junk, value: 25, stack: 20, tags: ["junk"]),
     ],
 )

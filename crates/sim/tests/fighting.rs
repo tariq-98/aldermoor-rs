@@ -102,3 +102,18 @@ fn the_same_seed_and_commands_give_the_same_world() {
     }
     assert_eq!(run(), run());
 }
+
+#[test]
+fn snapshots_list_units_in_id_order() {
+    // Monsters and players live in different tables, which a query visits in hash order.
+    let mut sim = Sim::brambleford(42);
+    sim.spawn_crowd_in(40, Vec2::new(0.0, -40.0), Vec2::new(30.0, 30.0));
+    let hero = sim.spawn_hero("Hero", sim::Specialty::Warrior, 4, Vec2::new(0.0, -40.0), 0.0);
+    sim.spawn_crowd_in(10, Vec2::new(0.0, -40.0), Vec2::new(30.0, 30.0));
+    sim.step();
+    let ids: Vec<u32> = sim.snapshot(Some(hero)).units.iter().map(|u| u.id).collect();
+    let mut q = sim.world.try_query::<(&sim::Unit, &Transform)>().unwrap();
+    let near = q.iter(&sim.world).filter(|(_, t)| Vec2::new(t.pos.x, t.pos.z).distance(Vec2::new(0.0, -40.0)) < 100.0).count();
+    assert!(ids.contains(&hero) && ids.len() >= near && near > 50, "{near} near: {ids:?}");
+    assert!(ids.is_sorted(), "{ids:?}");
+}

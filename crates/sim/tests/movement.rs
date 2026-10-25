@@ -599,3 +599,73 @@ fn players_on_the_same_side_pass_through_each_other() {
     assert!(moved.y.abs() < 0.01 && (moved.x - 3.0).abs() < 0.2, "walked {moved}");
     assert!((xz(&sim, a) - road).length() < 0.01, "the one standing still was shoved");
 }
+
+// What everyone else sees: swimming, wading, climbing and rolling on every unit.
+
+fn traversal(sim: &mut Sim, viewer: u32, id: u32) -> protocol::Traversal {
+    sim.snapshot(Some(viewer)).unit(id).unwrap().traversal
+}
+
+#[test]
+fn others_see_a_swimmer_wade_in_swim_and_wade_out() {
+    use protocol::Traversal::*;
+    let r = world::river_z(40.0);
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", Vec2::new(40.0, r + 9.0), std::f32::consts::PI);
+    let watcher = sim.spawn_player("Watcher", Vec2::new(36.0, r + 12.0), 0.0);
+    sim.step();
+    go(&mut sim, id, Vec2::new(0.0, -1.0), false);
+    let mut seen = vec![traversal(&mut sim, watcher, id)];
+    for _ in 0..480 {
+        sim.step();
+        let t = traversal(&mut sim, watcher, id);
+        if seen.last() != Some(&t) {
+            seen.push(t);
+        }
+    }
+    assert_eq!(seen, vec![Ground, Wading, Swimming, Wading, Ground]);
+}
+
+#[test]
+fn others_see_a_climb_from_its_foot_to_its_top() {
+    // Where `climbs_a_low_ledge_by_walking_into_it` starts, far enough back to get up to speed.
+    let at = Vec2::new(-51.0, 26.2);
+    let dir = Vec2::new(-1.0, -1.0).normalize();
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", at, dir.x.atan2(dir.y));
+    let watcher = sim.spawn_player("Watcher", at + Vec2::new(4.0, 0.0), 0.0);
+    sim.step();
+    go(&mut sim, id, dir, false);
+    for _ in 0..40 {
+        sim.step();
+        if let Some(f) = sim.get::<Motion>(id).unwrap().forced {
+            let protocol::Traversal::Forced(seen) = traversal(&mut sim, watcher, id) else { panic!("the climb wasn't sent") };
+            assert_eq!(seen.kind, protocol::ForcedKind::Climb);
+            assert_eq!((seen.from, seen.to, seen.start), (f.from, f.to, f.start));
+            assert!((seen.duration - 0.6).abs() < 1e-6);
+            return;
+        }
+    }
+    panic!("never climbed");
+}
+
+#[test]
+fn others_see_a_roll_with_where_it_ends() {
+    let (mut sim, id) = on_the_road();
+    let watcher = sim.spawn_player("Watcher", Vec2::new(8.0, 10.0), 0.0);
+    sim.command(id, Command::Dodge { direction: Vec2::new(0.0, -1.0) });
+    sim.step();
+    let protocol::Traversal::Forced(roll) = traversal(&mut sim, watcher, id) else { panic!("the roll wasn't sent") };
+    assert_eq!(roll.kind, protocol::ForcedKind::Roll);
+    assert!(((roll.to - roll.from).length() - 5.0).abs() < 0.3);
+    sim.run_for(0.6);
+    assert_eq!(traversal(&mut sim, watcher, id), protocol::Traversal::Ground);
+}
+
+#[test]
+fn walking_wading_and_swimming_cost_a_unit_one_byte() {
+    use protocol::Traversal::*;
+    for t in [Ground, Wading, Swimming] {
+        assert_eq!(postcard::to_stdvec(&t).unwrap().len(), 1, "{t:?}");
+    }
+}

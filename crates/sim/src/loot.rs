@@ -70,6 +70,31 @@ impl Inventory {
         self.clone().add(def, count, fine) == 0
     }
 
+    /// Takes `count` of an item out, from the last stacks first. Returns false, taking
+    /// nothing, if there aren't that many.
+    pub fn remove(&mut self, item: &str, count: u16) -> bool {
+        if self.count(item) < count as u32 {
+            return false;
+        }
+        let mut left = count;
+        for slot in self.slots.iter_mut().rev() {
+            if left == 0 {
+                break;
+            }
+            if let Some(s) = slot
+                && s.item == item
+            {
+                let take = s.count.min(left);
+                s.count -= take;
+                left -= take;
+                if s.count == 0 {
+                    *slot = None;
+                }
+            }
+        }
+        true
+    }
+
     /// How many of an item it holds, across slots.
     pub fn count(&self, item: &str) -> u32 {
         self.slots.iter().flatten().filter(|s| s.item == item).map(|s| s.count as u32).sum()

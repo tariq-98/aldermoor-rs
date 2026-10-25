@@ -101,6 +101,11 @@ Health, power and armour are multipliers on the level's base numbers (below).
   moves can make them miss. Players aim instant shots with the point they send; cast bolts fly at
   where the target is when they're loosed. Monsters lead a moving target, so running in a straight
   line won't save you; changing direction will.
+- **Shot magnetism:** an aimed missile that passes within 0.3 m of a monster's body (`MAGNETISM`)
+  strikes it, so a shot that looks like a hit is one. Against players the margin is 0.1 m
+  (`MAGNETISM_PVP`), so PvP stays a matter of aim. The first body along the flight still takes
+  it, and walls still stop it. There's no friction slowing the crosshair: on a mouse it fights
+  muscle memory.
 - **Piercing** missiles strike everything along their flight.
 - **Shield Wall** turns missiles back on whoever loosed them.
 
@@ -152,12 +157,37 @@ Health, power and armour are multipliers on the level's base numbers (below).
   goes off as it ends (earlier presses are dropped, so mashing doesn't roll twice). A roll can
   break off a heavy blow's wind-up before it lands; the blow's cast bar then ends early.
 
+## Weight on screen: hits and hitstop
+
+Every blow that reaches its victim, landed, blocked or parried, sends a `Hit` event: who struck
+whom, which way it travelled on the ground and how hard it was. The client uses it to freeze
+both bodies' poses for a moment (hitstop), kick the camera (#196) and play a directional flinch.
+The sim itself never pauses, as in Monster Hunter's online play.
+
+| Weight | When | Hitstop |
+| --- | --- | ---: |
+| Light | quick blows and basic attacks | 40 ms |
+| Heavy | blows that wind up first | 80 ms |
+| Critical | a crit (unless the blow is a monster's big one) | 110 ms |
+| Blocked | stopped by a guard | 60 ms |
+| Parried | stopped by a guard raised just in time | 110 ms |
+| Big | a monster's warned-of slam | 120 ms |
+
+Missiles get half, everything is capped at 120 ms, and conditions ticking (bleeding, burning)
+and a field's pulses send no `Hit` at all. The numbers live in `content::combat::HITSTOP`.
+
 ## Threat
 
 - Monsters fight whoever they hate most: damage done to them (times stances' threat), and half
   of the healing done on whoever they're fighting.
 - They change targets only when someone pulls 10% ahead (in melee) or 30% ahead (at range).
 - **Taunts** put the taunter on top for 3 s.
+- **Noticing:** a monster starts a fight with a player who comes within its notice radius
+  (`aggro` in mobs.ron, 10 to 16 m) and is in sight. The radius is 1 m shorter for each level
+  the player is above the monster and 1 m longer for each level below, from 4 m to twice its
+  own (`sim::notice_radius`). A monster 10 or more levels below a player never starts a fight
+  with them, but fights back when attacked. Once the Wilderness scales levels to its bands
+  (#76), this uses the scaled level (#199).
 - **Packs:** wolves and goblins call the members of their pack close by.
 - **Leashing:** a monster gives up past 45 m from home, or after 12 s with nobody fighting it,
   and walks home untouchable, healing.
@@ -207,7 +237,8 @@ table again after tuning.
   roll clears it, a climb holds it), interrupts, melee sweeps (who's in them, aim pull, locked
   targets, reach and width, wind-ups missing), diminishing returns, defiance, warned blows,
   blocks, parries, guard breaks, blows from behind, backstabs, missiles (blocked, reflected,
-  aimed, led, homing), downed and rallying, bleeding out, respawning, reviving, summons, combos,
+  aimed, led, homing), hit events (direction, weight and hitstop for blows, arrows, blocks and
+  parries), downed and rallying, bleeding out, respawning, reviving, summons, combos,
   the combat view, determinism, every skill on every bar, and the step budget (in release).
 - `crates/sim/tests/duels.rs`: the balance targets above.
 - The Swift game's combat checks are covered by these.

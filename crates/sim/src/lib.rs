@@ -12,12 +12,15 @@
 mod brain;
 pub mod combat;
 mod components;
+mod consumables;
 pub mod content;
+mod crafting;
 mod loot;
 mod movement;
 mod progress;
 mod queries;
 pub mod region;
+mod rewind;
 mod rng;
 mod spatial;
 pub mod stats;
@@ -30,9 +33,13 @@ use protocol::{CombatView, Command, Event, Snapshot, UnitId, UnitKind};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
+pub use brain::{notice_radius, NOTICE_IGNORE};
 pub use components::*;
+pub use consumables::PotionCooldown;
 pub use content::Specialty;
+pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
+pub use rewind::{Trail, HISTORY, MAX_REWIND};
 pub use progress::{Credit, Progress, SHARE_FLOOR};
 pub use rng::Rng;
 pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
@@ -175,13 +182,15 @@ impl Sim {
     pub fn on(land: Arc<world::Valley>, seed: u64) -> Sim {
         let mut world = World::new();
         world.insert_resource(Clock::default());
-        world.insert_resource(Land(land));
         world.insert_resource(Rng::new(seed));
         world.insert_resource(loot::Loot::new(seed));
         world.insert_resource(queries::Queries::default());
         world.insert_resource(combat::life::Fallen::default());
         world.insert_resource(region::Region::default());
         world.insert_resource(region::Outgoing::default());
+        world.insert_resource(crafting::Nodes::new(seed, &land));
+        world.insert_resource(crafting::Workers::default());
+        world.insert_resource(Land(land));
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());
@@ -200,6 +209,7 @@ impl Sim {
                 combat::auras::refresh_control,
                 movement::move_units,
                 movement::after_moving,
+                rewind::record,
                 combat::abilities::land_charges,
                 combat::abilities::update,
                 combat::missiles::update,
@@ -207,6 +217,7 @@ impl Sim {
                 combat::auras::update,
                 vitals::update,
                 loot::expire,
+                crafting::update,
                 spatial::rebuild,
                 movement::update_poses,
             )
@@ -308,7 +319,7 @@ impl Sim {
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
-        self.world.entity_mut(e).insert(Inventory::default());
+        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default(), rewind::Trail::default()));
         self.world.entity_mut(e).insert(Unit {
             id,
             kind: UnitKind::Player,
@@ -439,15 +450,33 @@ impl Sim {
         let clock = self.world.resource::<Clock>();
         let (tick, time) = (clock.tick, clock.time);
         let center = viewer.and_then(|v| self.get::<Transform>(v)).map(|t| t.pos);
-        let mut units = Vec::new();
+        // A query visits tables in the order bevy's component index hashes them, which shifts
+        // whenever a component type is added. Rank the visible units by ID first, so the states are
+        // built in order and the sort below has nothing to move.
         let mut q = self.world.query::<(&Unit, &Transform, &Motion, &Vitals, &Anim, &Fighter, Option<&Appearance>)>();
-        for (u, t, m, v, a, f, look) in q.iter(&self.world) {
+        let ids = self.world.resource::<Units>();
+        let own = |id: UnitId| id.checked_sub(ids.base).map(|i| i as usize).filter(|&i| i < ids.entities.len());
+        let mut seen = Vec::new();
+        let mut rank = vec![u32::MAX; ids.entities.len()];
+        for row in q.iter(&self.world) {
+            let (u, t, _, v, ..) = row;
             if let Some(c) = center && (t.pos - c).length_squared() > combat::view::VIEW_RANGE * combat::view::VIEW_RANGE {
                 continue;
             }
             if v.dead && time - v.died_at > 8.0 && u.kind != UnitKind::Player {
                 continue;
             }
+            if let Some(i) = own(u.id) {
+                rank[i] = seen.len() as u32;
+            }
+            seen.push(row);
+        }
+        // Units from other regions' blocks go last, and the sort puts them in place.
+        let foreign = (0..seen.len()).filter(|&i| own(seen[i].0.id).is_none());
+        let order: Vec<usize> = rank.iter().filter(|&&r| r != u32::MAX).map(|&r| r as usize).chain(foreign).collect();
+        let mut units = Vec::with_capacity(order.len());
+        for i in order {
+            let (u, t, m, v, a, f, look) = seen[i];
             units.push(protocol::UnitState {
                 id: u.id,
                 kind: u.kind,
@@ -459,6 +488,7 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
+                traversal: movement::traversal(m),
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
@@ -489,6 +519,7 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
+                traversal: g.traversal,
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,

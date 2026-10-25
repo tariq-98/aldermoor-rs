@@ -3,10 +3,10 @@
 
 use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
-use protocol::{Avoid, Event, Pose, School, Shape};
+use protocol::{Avoid, Event, HitWeight, Pose, School, Shape};
 
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
-use crate::content::{catalog, AbilityDef, Effect, Field, Finisher};
+use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, HITSTOP, WINDUP};
 use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
 use crate::region::Landing;
 use crate::spatial::Spatial;
@@ -280,7 +280,10 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
         let Some(e) = entity(world, id) else { continue };
         let (Some(u), Some(v), Some(t)) = (world.get::<Unit>(e), world.get::<Vitals>(e), world.get::<Transform>(e)) else { continue };
         let r = world.get::<Body>(e).map_or(0.4, |b| b.radius);
-        if !in_shape(shape, origin, yaw, t.xz(), r) {
+        // Against another player, where the attacker saw them (#169).
+        let at = crate::rewind::seen_at(world, src, e).unwrap_or(t.pos);
+        let xz = Vec2::new(at.x, at.z);
+        if !in_shape(shape, origin, yaw, xz, r) {
             continue;
         }
         if allies {
@@ -290,10 +293,10 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
         } else if !u.faction.is_enemy(src.faction) || v.dead {
             continue;
         }
-        if !line_of_sight(world, origin + Vec3::Y, chest(world, e)) {
+        if !line_of_sight(world, origin + Vec3::Y, chest(world, e) - t.pos + at) {
             continue;
         }
-        found.push(((t.xz() - o2).length_squared(), e));
+        found.push(((xz - o2).length_squared(), e));
     }
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
     found.into_iter().take(max as usize).map(|(_, e)| e).collect()
@@ -413,6 +416,11 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
     if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
         let target = unit_id(world, t).unwrap_or(0);
         emit(world, Event::Avoided { target, source: src.unit, how });
+        match how {
+            Avoid::Blocked => hit(world, src, t, HitWeight::Blocked, delivery),
+            Avoid::Parried => hit(world, src, t, HitWeight::Parried, delivery),
+            _ => {}
+        }
         return;
     }
     let crit = world.resource_mut::<Rng>().chance(src.crit);
@@ -424,6 +432,15 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
     let mut hurt = false;
     for e in rest {
         hurt |= apply(world, e, t, src, def, crit, center, mult);
+    }
+    if hurt && hostile {
+        let weight = match def {
+            Some(d) if d.telegraph => HitWeight::Big,
+            _ if crit => HitWeight::Critical,
+            Some(d) if d.cast >= WINDUP && !d.is_channel() => HitWeight::Heavy,
+            _ => HitWeight::Light,
+        };
+        hit(world, src, t, weight, delivery);
     }
     if hurt && let Some(u) = user {
         auras::remove_key(world, u, "riposte");
@@ -445,6 +462,25 @@ pub(crate) fn land_request(world: &mut World, te: Entity, landing: Landing) {
         }
     }
     super::life::release_deaths(world);
+}
+
+/// Tells the client a blow reached `te`: which way it travelled and how hard, for hitstop and
+/// flinches. A field's pulses aren't blows, so they say nothing.
+fn hit(world: &mut World, src: &HitSource, te: Entity, weight: HitWeight, delivery: Delivery) {
+    if delivery == Delivery::Pulse {
+        return;
+    }
+    let (Some(victim), Some(at)) = (unit_id(world, te), world.get::<Transform>(te).map(|t| t.xz())) else { return };
+    let d = at - Vec2::new(src.from.x, src.from.z);
+    let d = if d.length_squared() > 1e-6 { d } else { -world.get::<Transform>(te).map_or(Vec2::Y, |t| t.forward()) };
+    let dir = quantise_yaw(d.x.atan2(d.y));
+    let hitstop_ms = HITSTOP.ms(weight, delivery == Delivery::Missile);
+    emit(world, Event::Hit { attacker: src.unit, victim, dir, weight, hitstop_ms });
+}
+
+/// A yaw in 256ths of a turn, 0 facing +z.
+pub fn quantise_yaw(yaw: f32) -> u8 {
+    (yaw / std::f32::consts::TAU * 256.0).round().rem_euclid(256.0) as u8
 }
 
 /// One effect on one target. Returns whether it did damage.

@@ -38,12 +38,23 @@ let fight: Arc<CombatView> = host.combat().unwrap(); // combat detail from the s
 let events = host.take_events(); // everything since you last asked
 ```
 
+Once the client interpolates remote bodies behind the newest snapshot (#87, #198), it sends
+`Command::Viewing { tick }` with each batch of commands: the snapshot tick its view is showing. A
+player's shots and blows at other players are then tested where the client showed them, up to
+250 ms back (docs/SERVER.md, "PvP hit checks and lag compensation"). Without it nothing is
+rewound.
+
 Each `Snapshot` (protocol version 6) has:
 
 - `units`: everyone within 160 m. For each one:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
   - `look`, which says exactly what to draw (see "Art for each unit" below);
   - position, velocity, yaw, `pose` with `pose_time`;
+  - `traversal`, how the body is getting about: `Ground`, `Wading` (feet in water deeper than
+    0.2 m), `Swimming`, or `Forced` for a move that ignores the controls, with its `kind` (roll,
+    leap, charge, climb or knockback), `from` and `to` points, `start` (sim time, as
+    `Snapshot::time`) and `duration`, so a clip can be fitted to it. Every unit has it, so
+    remote swimmers swim and remote climbers climb. One byte when not forced;
   - health, name, level, `hostile` and target.
 - `player`, the viewer's own numbers:
   - endurance (rolls and blocks spend it), the specialty's resource (`resource_kind`: rage,
@@ -61,6 +72,12 @@ Each `Snapshot` (protocol version 6) has:
   - `Damage` (with `school`, and `periodic` for conditions ticking), `Heal`, and `Avoided` with
     why (evaded, blocked, parried, absorbed, immune, reflected, missed): show these as floating
     numbers and words;
+  - `Hit`, for every blow that reached its victim, landed, blocked or parried (not conditions
+    ticking or a field's pulses): `attacker`, `victim`, `dir` (the way the blow travelled on the
+    ground, a yaw in 256ths of a turn, 0 toward +z and 64 toward +x), `weight` (light, heavy,
+    critical, blocked, parried, or big for a monster's warned slam) and `hitstop_ms` (how long to
+    freeze both bodies' poses, at most 120). It goes to everyone, so remote bodies flinch too;
+    the sim never pauses. See COMBAT.md, "Weight on screen";
   - `AbilityUsed`, `CastStarted`, `CastInterrupted`, `AuraApplied`, `AuraRemoved`;
   - `ProjectileLaunched` and `ProjectileEnded` (where it stopped, and on whom), `AreaImpact`
     (a warned blow landing: a burst of dust, frost or fire), `Combo`;
