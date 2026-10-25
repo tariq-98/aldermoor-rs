@@ -116,7 +116,7 @@ impl Valley {
                 continue;
             }
             let scale = r.range(0.85, 1.6);
-            let yaw = r.range(0.0, 6.28);
+            let yaw = r.range(0.0, std::f32::consts::TAU);
             trees.push(Placement { position: p, yaw, scale });
             solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None });
         }
