@@ -15,6 +15,8 @@ The short version:
 4. **One branch per issue**, named `<number>-<slug>` when you pick the name.
 5. **Finish with a draft PR** that says `Closes #<number>`. The Tracking workflow moves the issue
    to `status:in-review`, and back to `status:ready` if the PR closes unmerged.
+   Once it's tested and working (CI green, checks run, Mac-verified where needed, no open review
+   comments or blocking decisions), the agent merges it without asking.
 6. **Stopping early?** Comment `Released: ...` and set `status:ready` again.
 7. **Stale claims** (3 days with no activity) can be taken over after a comment.
 
