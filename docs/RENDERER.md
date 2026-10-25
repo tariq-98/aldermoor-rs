@@ -25,7 +25,22 @@ Alt (Option), V or mouse button 4 rolls the way the keys point. Action looks ove
 1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
 (screen centre while mouse-looking). Hovering/selecting a ground skill previews its actual radius.
 Hold F (or mouse button 5) to guard; ` swaps weapon sets; G revives a selected or nearby downed/defeated friend;
-R respawns; Esc exits. The stock-widget HUD shows all ten named slots, costs, cooldowns and GCD
+R respawns; Esc exits. The camera eases: the wheel zoom glides, the eye snaps in front of walls and slides back out at
+4 m/s, and the pivot follows slopes and jumps smoothly. Pitch goes from just below the horizon
+(looking up from near the ground) to nearly straight down. In Classic the camera swings back
+behind the character after a second of moving without the mouse.
+
+`--controls FILE.json` reads control settings; every field is optional and a missing file means
+the defaults. `--scheme` overrides the file's scheme.
+
+```json
+{ "scheme": "action", "sensitivity": 1.0, "invert_y": false, "fov_degrees": 52,
+  "min_distance": 2, "max_distance": 24, "shoulder": 0.6, "swing_back": true }
+```
+
+Unknown fields are an error so typos show up; values outside sensible ranges are clamped.
+`shoulder` left out means 0.6 m in Action and centred in Classic.
+The stock-widget HUD shows all ten named slots, costs, cooldowns and GCD
 sweeps, health/endurance/resource, casts, auras, weapon-set recharge and target cast/defiance bars.
 The HUD is composed after temporal AA at output resolution. Claude will supply its artwork,
 icons, fonts and style. `--hud-font FILE` can load the supplied font without changing code.
