@@ -455,6 +455,7 @@ dependencies = [
  "protocol",
  "raw-window-handle",
  "render",
+ "serde_json",
  "server",
  "winit",
  "world",
