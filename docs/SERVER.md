@@ -164,6 +164,27 @@ A player sees others where they were about 100 ms ago: the view is interpolated 
 - **Warned blows keep their rules:** telegraphed attacks and dodges resolve on the server's own
   time, as today, so dodging a warned blow is never undone by someone else's lag.
 
+## Running a server today
+
+`cargo run -p server --release -- --bind 0.0.0.0:7878` runs the valley headless on Linux (or a
+Mac): no window, GPU or Metal, stepping at 60 Hz and printing step and view times every ten
+seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks the world.
+
+- **Transport:** plain TCP, each message a 4-byte little-endian length then postcard
+  (`server::net`). A client says `Hello` with its name and `protocol::VERSION`, gets `Welcome`
+  (or `Refused` for another version), sends `Command`s and gets a `View` (snapshot and combat
+  view) every step. QUIC (#86) replaces the transport and keeps the messages.
+- **Players:** joining with a name already in the world takes that character back; a player who
+  leaves stays standing where they were (until accounts, #88). A connection more than two
+  seconds of views behind is dropped.
+- **Solo play** is the same server in-process: the client's `server::Host` joins it as a local
+  player, and others could join it over the network.
+- **Measured** (cloud Linux box, release, 2,000 wandering monsters, 25 October 2026): the step
+  takes 1.1 to 1.4 ms, inside the 2 ms budget. Each player's view costs about 1.1 ms to build
+  and encode and is about 10 MB/s, because every view is a full snapshot of everything in range
+  every step. Views from the interest grid, deltas and a 20 to 30 Hz send rate (#34) are what
+  bring that down before more than a handful of players join.
+
 ## Follow-up work
 
 - #167 (done): each map's land is shared between sims.

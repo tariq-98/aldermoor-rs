@@ -2139,7 +2139,9 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "glam 0.34.1",
+ "postcard",
  "protocol",
+ "serde",
  "sim",
 ]
 

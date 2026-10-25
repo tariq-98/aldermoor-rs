@@ -1,6 +1,6 @@
 [package]
 name = "server"
-description = "Runs the simulation on its own thread at 60 Hz: commands in, snapshots out."
+description = "Runs the simulation on its own thread at 60 Hz for in-process and networked players; the `server` binary runs it headless."
 edition.workspace = true
 version.workspace = true
 publish.workspace = true
@@ -10,3 +10,5 @@ sim.workspace = true
 protocol.workspace = true
 glam.workspace = true
 crossbeam-channel.workspace = true
+serde.workspace = true
+postcard.workspace = true
