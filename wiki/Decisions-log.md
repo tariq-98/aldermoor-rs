@@ -6,6 +6,8 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | The look draws on RuneScape, Guild Wars, Breath of the Wild and League of Legends, plus Hogwarts Legacy's buildings and roads and nothing else from it; the rules, with numbers, are in docs/ART.md | Chippy's references, replacing "Breath of the Wild in spirit"; Hogwarts Legacy narrowed to architecture the same day | #21 |
+| 2026-10-25 | Visuals first: Looks stays phase 2, before Characters and economy | Chippy's call; the order needed no relabelling | #23 |
 | 2026-10-25 | First dungeon is the Barrow: soloable at ~level 15, scales to 2–5 players, ~25 minutes, golem miniboss and a three-phase Barrow King | Uses the existing creature art and teaches the combat skills | #104 |
 | 2026-10-25 | Player groups are called companies (NPC professional guilds keep the name guild): ranks, chat, shared bank, a hall upgraded together, no friendly fire in the wilderness, one per player, ~100 members | Avoids a name clash with the NPC guilds | #103 |
 | 2026-10-25 | Housing: personal instanced homes (crafted furniture, boss trophies, workshops with small crafting bonuses), plus guild halls | No land shortage in an MMO, cheap to host, gives crafting and bosses more purpose | #91 |
