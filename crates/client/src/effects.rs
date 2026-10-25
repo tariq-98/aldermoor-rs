@@ -1014,22 +1014,21 @@ fn mesh(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame) {
     let (Some(index), l) = (part.mesh, &part.layer) else {
         return;
     };
-    let s = if l.scaled { a.scale } else { 1. };
-    let fade = if life.steady {
-        1.
-    } else {
-        envelope(life.t, l.fade)
-    };
-    let pulse = 1. + l.pulse[0] * (TAU * l.pulse[1] * a.age).sin();
-    let alpha = l.alpha * fade * a.strength * pulse;
-    if alpha <= 0.002 {
+    // Placed like any particle (so a layer can scatter crystals over a field), then turned
+    // with the anchor, or stood on end with a random heading.
+    let p = particle(l, a, life);
+    if p.alpha <= 0.002 {
         return;
     }
-    let size = lerp(l.size[0], l.size[1], life.t) * s;
-    let turn = a.turn * Quat::from_rotation_y(l.angle + l.spin[0] * a.age);
-    let at = a.origin + a.turn * (Vec3::from(l.offset) * s);
-    let scale = Vec3::new(size, size * l.aspect, size * l.length);
-    let model = Mat4::from_scale_rotation_translation(scale, turn, at);
+    let turn = if l.upright {
+        let heading = (hash(life.seed ^ 0x4ead) >> 8) as f32 / (1u32 << 24) as f32 * TAU;
+        Quat::from_rotation_y(heading + p.angle)
+            * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+    } else {
+        a.turn * Quat::from_rotation_y(l.angle + l.spin[0] * a.age)
+    };
+    let scale = Vec3::new(p.size, p.size * l.aspect, p.size * l.length);
+    let model = Mat4::from_scale_rotation_translation(scale, turn, p.at);
     let tile = [0., 0., l.repeat, l.repeat];
     out.meshes.push((
         index,
@@ -1037,7 +1036,7 @@ fn mesh(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame) {
             model: model.to_cols_array_2d(),
             shading: [l.rim[0], l.rim[1], l.mask[0], l.mask[1]],
             terms: [l.twinkle[0], l.twinkle[1], l.texture, l.scroll[1]],
-            material: part.material(life.t, life.seconds, alpha, tile),
+            material: part.material(life.t, life.seconds, p.alpha, tile),
         },
     ));
 }

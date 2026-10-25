@@ -199,8 +199,10 @@ pub struct Layer {
     /// Decals and beams: tile repeats a metre, and drift (UV a second).
     pub repeat: f32,
     pub scroll: [f32; 2],
-    /// Meshes.
+    /// Meshes. `upright` stands one on end (its +z up) with a random heading, for crystals
+    /// growing out of the ground.
     pub mesh: Option<String>,
+    pub upright: bool,
     /// Meshes: rim (Fresnel) power and weight; the vertex mask's start and weight; twinkle
     /// weight and speed; texture weight.
     pub rim: [f32; 2],
@@ -253,6 +255,7 @@ impl Default for Layer {
             repeat: 0.5,
             scroll: [0.; 2],
             mesh: None,
+            upright: false,
             rim: [2., 1.],
             mask: [0., 0.],
             twinkle: [0., 1.],
