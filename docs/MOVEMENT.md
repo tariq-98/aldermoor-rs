@@ -23,8 +23,16 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   or slides along it.
   - A face that tops out within **1.5 m** of your feet (chest height) is climbed: a 0.6 s pull-up
     onto the top, as a forced move (no skills meanwhile, pose `Jump` until climbing art exists).
-  - A taller face stops you. Jumping at a face measures from the feet at that moment, so a jump
-    reaches about 1 m higher ledges.
+  - A taller face stops you, unless you jump at it. In a jump, a face that tops out within
+    **2.2 m** of your feet at that moment is caught and pulled up onto in 0.5 s (a mantle,
+    `ForcedKind::Mantle`), as long as you aren't yet falling faster than 3 m/s. So a jump at the
+    right moment gets you up a ledge about 3.3 m high.
+  - **Vaulting:** running (faster than a walk) at a wall no higher than **1.2 m** and shallower
+    than **0.7 m**, with clear, level ground beyond, hops it in 0.45 s and lands you running at
+    the same speed (`ForcedKind::Vault`). Deeper walls are climbed onto, and walking at a low wall
+    doesn't vault it.
+  - Not while guarding, casting, swimming or downed. Mantles and vaults are forced moves, so no
+    skills meanwhile.
   - The valley has few low faces yet: a few ledges in the limestone terraces west of the
     village. Most of the terraces and the east terrace are tall cliffs.
   - Walking or running off the top of a cliff is a fall (see below), not a slide down it. You
