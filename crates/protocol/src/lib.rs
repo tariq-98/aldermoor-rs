@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -59,6 +59,9 @@ pub enum Command {
     Craft { recipe: String, count: u16 },
     /// Stop gathering or crafting.
     StopWork,
+    /// Eat or drink the consumable in an inventory slot: food only out of combat, and potions
+    /// only once `PlayerState::potion_ready` is 0.
+    UseItem { slot: u8 },
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -291,6 +294,8 @@ pub struct PlayerState {
     pub nodes: Vec<NodeView>,
     /// The station you stand at, with what you could make there.
     pub station: Option<StationView>,
+    /// Seconds until you can drink another potion (they share one cooldown).
+    pub potion_ready: f32,
 }
 
 /// A gathering or crafting skill's level, XP into it and what the next level takes (0 at the cap).

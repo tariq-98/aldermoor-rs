@@ -55,6 +55,18 @@
         (key: "revive_sickness", name: "Weakened", duration: 30.0, debuff: true, dispellable: false, damage_done: -0.1),
         // The riposte after a parry: the next blow lands hard.
         (key: "riposte", name: "Riposte", duration: 2.0, dispellable: false, damage_done: 0.5),
+        // Food and potions from the pack (items.ron's `effect`). Food is eaten out of combat;
+        // potions share content::items::POTION_COOLDOWN.
+        (key: "fed", name: "Fed", duration: 60.0, dispellable: false, tick: Some((3.0, Heal(base: 1.0, coeff: 0.05)))),
+        (
+            key: "well_fed",
+            name: "Well Fed",
+            duration: 180.0,
+            dispellable: false,
+            damage_done: 0.05,
+            tick: Some((3.0, Heal(base: 1.5, coeff: 0.06))),
+        ),
+        (key: "draught_healing", name: "Healing Draught", duration: 8.0, dispellable: false, school: Nature, tick: Some((1.0, Heal(base: 5.0, coeff: 0.25)))),
     ],
     abilities: [
         (

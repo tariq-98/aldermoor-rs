@@ -191,6 +191,7 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::Strike => crate::crafting::strike(world, e),
             Command::Craft { recipe, count } => crate::crafting::craft(world, e, &recipe, count),
             Command::StopWork => crate::crafting::stop(world, e),
+            Command::UseItem { slot } => crate::consumables::use_item(world, e, slot),
             Command::AssignXp { specialty, amount } => {
                 if let Some(s) = crate::Specialty::from_key(&specialty) {
                     crate::progress::assign(world, e, s, amount);

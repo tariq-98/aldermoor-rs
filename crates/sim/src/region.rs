@@ -203,6 +203,7 @@ record! {
     inventory: Inventory,
     skills: crate::crafting::Skills,
     skinned: crate::crafting::Skinned,
+    potion_cooldown: crate::consumables::PotionCooldown,
 }
 
 impl UnitRecord {

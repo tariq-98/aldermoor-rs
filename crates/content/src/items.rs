@@ -26,6 +26,8 @@ pub const FINE_BONUS: f32 = 0.1;
 pub const FINE_VALUE: u32 = 3;
 /// Shops pay this share of an item's value (before the town's demand).
 pub const SELL_SHARE: f32 = 0.4;
+/// Seconds after drinking any potion before another: they share one cooldown.
+pub const POTION_COOLDOWN: f64 = 60.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ItemKind {
@@ -67,9 +69,14 @@ pub struct ItemDef {
     pub stack: u16,
     #[serde(default)]
     pub stats: ItemStats,
-    /// What it is, for shops' demand: "ore", "hide", "herb", "weapon", …
+    /// What it is, for shops' demand: "ore", "hide", "herb", "weapon", … A consumable is
+    /// tagged "food" or "potion".
     #[serde(default)]
     pub tags: Vec<&'static str>,
+    /// A consumable's aura on whoever uses it (a key in the combat tables): food's buff, or a
+    /// potion's heal over time.
+    #[serde(default)]
+    pub effect: Option<&'static str>,
 }
 
 fn one() -> u8 {
@@ -84,6 +91,16 @@ impl ItemDef {
     /// Only single gear (weapons and armour) comes in fine versions.
     pub fn can_be_fine(&self) -> bool {
         self.stack == 1 && matches!(self.kind, ItemKind::Weapon | ItemKind::Armour)
+    }
+
+    /// Eaten: only out of combat.
+    pub fn is_food(&self) -> bool {
+        self.kind == ItemKind::Consumable && self.tags.contains(&"food")
+    }
+
+    /// Drunk: potions share [`POTION_COOLDOWN`].
+    pub fn is_potion(&self) -> bool {
+        self.kind == ItemKind::Consumable && self.tags.contains(&"potion")
     }
 
     /// Its stats, plain or fine.
@@ -311,6 +328,22 @@ impl Economy {
                     d.key
                 ));
             }
+            match (d.kind == ItemKind::Consumable, d.effect) {
+                (true, None) => out.push(format!("item {}: a consumable with no effect", d.key)),
+                (false, Some(_)) => {
+                    out.push(format!("item {}: only consumables have an effect", d.key))
+                }
+                (true, Some(e)) if crate::combat::catalog().aura_id(e).is_none() => out.push(
+                    format!("item {}: effect {e} is no aura in the combat tables", d.key),
+                ),
+                _ => {}
+            }
+            if d.kind == ItemKind::Consumable && d.is_food() == d.is_potion() {
+                out.push(format!(
+                    "item {}: a consumable is tagged food or potion",
+                    d.key
+                ));
+            }
         }
         let mut mobs = HashMap::new();
         for l in &self.loot {
@@ -421,5 +454,30 @@ mod tests {
         };
         assert!(p.iter().any(|p| p.contains("worth nothing")));
         assert!(p.iter().any(|p| p.contains("gear doesn't stack")));
+        let bad: &'static str = r#"(items: [
+            (key: "a", name: "A", kind: Consumable, value: 1, tags: ["food"]),
+            (key: "b", name: "B", kind: Consumable, value: 1, tags: ["food"], effect: Some("nope")),
+            (key: "c", name: "C", kind: Material, value: 1, effect: Some("fed")),
+            (key: "d", name: "D", kind: Consumable, value: 1, effect: Some("fed")),
+        ])"#;
+        let Err(LoadError::Problems(p)) = Economy::from_files(&[("bad.ron", bad)]) else {
+            panic!("a bad table loaded")
+        };
+        for want in [
+            "a: a consumable with no effect",
+            "b: effect nope is no aura",
+            "c: only consumables have an effect",
+            "d: a consumable is tagged food or potion",
+        ] {
+            assert!(p.iter().any(|p| p.contains(want)), "{want} in {p:?}");
+        }
+    }
+
+    #[test]
+    fn every_consumable_is_food_or_a_potion() {
+        let e = economy();
+        assert!(e.item("bread").unwrap().is_food());
+        assert!(e.item("grilled_trout").unwrap().is_food());
+        assert!(e.item("healing_draught").unwrap().is_potion());
     }
 }
