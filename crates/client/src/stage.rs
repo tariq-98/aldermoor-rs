@@ -8,8 +8,8 @@ use protocol::{AreaView, AuraView, CastBar, CombatView, Event, ProjectileView, S
 use protocol::{UnitCombat, UnitState};
 use std::f32::consts::FRAC_PI_2;
 
-/// Missiles crossing in front of the lineup: look, school, speed (m/s), height and lane (z).
-/// Speeds are the content's.
+/// Missiles crossing in front of the lineup: look, school, speed (m/s), height above the
+/// ground and lane (z). Speeds are the content's.
 const LANES: [(&str, School, f32, f32, f32); 8] = [
     ("fire_bolt", School::Fire, 26., 1.5, 25.),
     ("frost_lance", School::Frost, 30., 1.9, 24.4),
@@ -151,7 +151,11 @@ impl Stage {
         let mut events = Vec::new();
         // Each lane fires on its own period, offset so the lanes don't move together.
         for (lane, &(visual, school, speed, height, z)) in LANES.iter().enumerate() {
+            // Each lane flies straight at its height over the ground at either end.
+            let start = Vec3::new(FROM, ground(FROM, z) + height, z);
+            let end = Vec3::new(TO, ground(TO, z) + height, z);
             let flight = (TO - FROM) / speed;
+            let velocity = (end - start) / flight;
             let period = flight + GAP;
             let offset = period * (lane as f32 * 0.37).fract();
             let shot = ((time + offset) / period).floor();
@@ -173,8 +177,8 @@ impl Stage {
                 }
                 fight.projectiles.push(ProjectileView {
                     id,
-                    position: Vec3::new(FROM + speed * elapsed, height, z),
-                    velocity: Vec3::new(speed, 0., 0.),
+                    position: start + velocity * elapsed,
+                    velocity,
                     visual: visual.into(),
                     school,
                 });
@@ -184,7 +188,7 @@ impl Stage {
                 events.push((
                     Event::ProjectileEnded {
                         id,
-                        at: Vec3::new(TO, height, z),
+                        at: end,
                         hit: None,
                     },
                     launched + flight,
@@ -335,16 +339,22 @@ mod tests {
                 "{visual} never flies in the review"
             );
         }
-        let kinds: HashSet<_> = AURAS
+        // Worn between them: a shell (a mesh), marks at the feet (decals) and something
+        // circling the head.
+        let layers: Vec<_> = AURAS
             .iter()
             .flat_map(|keys| keys.iter())
-            .map(|key| format!("{:?}", table.auras[*key].kind))
+            .flat_map(|key| table.layers(&table.auras[*key]).expect("an aura's effect"))
             .collect();
-        assert_eq!(
-            kinds.len(),
-            3,
-            "a shell, a ring and a halo are all worn: {kinds:?}"
+        assert!(
+            layers.iter().any(|l| l.kind == assets::LayerKind::Mesh),
+            "a shell"
         );
+        assert!(
+            layers.iter().any(|l| l.kind == assets::LayerKind::Decal),
+            "a mark"
+        );
+        assert!(layers.iter().any(|l| l.orbit != 0.), "a halo");
         for (_, ability, ..) in CASTS {
             assert!(
                 table.casts.contains_key(ability),

@@ -727,7 +727,7 @@ impl Catalog {
 
         // Combat effects: every glow they name exists, and the numbers make sense.
         if let Some(fx) = &self.effects {
-            for p in fx.problems() {
+            for p in fx.problems().into_iter().chain(fx.art_problems(&self.root)) {
                 problem(p);
             }
         }

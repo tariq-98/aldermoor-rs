@@ -1,252 +1,464 @@
-//! How combat looks (`assets/catalog/effects.json`): glows for each school and field, the
-//! missiles in flight, the glow in a caster's hands, auras on units and marks on the ground.
+//! How combat looks (`assets/catalog/effects.json`): named effects built from layers of authored
+//! art (`assets/effects/`: a sprite atlas, tiling strips and meshes made by
+//! `art/blender/build_effects.py`), and which effect plays for each missile, cast, aura, field,
+//! warning and impact.
 //!
-//! Effects are drawn from simple shapes (soft glows facing the camera, streaks, and ground
-//! marks with glowing edges) lit by their own glow, so every look value lives here and the
-//! client only supplies the geometry.
+//! An effect is a list of [`Layer`]s. Each layer is one kind of thing drawn at the effect's
+//! anchor: camera-facing sprites (often many particles), beams, trails of sprites left along a
+//! missile's path, marks projected on the ground, or effect meshes. All look values (colours,
+//! ramps, sizes, timings) live here; the client only places and animates layers by these numbers.
 
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EffectCatalog {
     pub version: u32,
-    /// Named glows. Schools use their lowercase names (`"fire"`), combo fields `"field.<name>"`,
-    /// ground marks `"hostile"` and `"friendly"`, a combo's burst `"combo"`, and a thrown
-    /// axe's haft `"wood"`.
-    pub glows: BTreeMap<String, Glow>,
+    /// The sprite atlas and its index (`atlas.json`), relative to the asset root.
+    pub atlas: String,
+    pub frames: String,
+    /// Tiling strips by name; their order (by name) is their layer in the tile array.
+    pub tiles: BTreeMap<String, String>,
+    /// Effect meshes by name.
+    pub meshes: BTreeMap<String, String>,
+    /// Colour ramps: stops of `[position 0…1, r, g, b]`, linear and any brightness. A sprite's
+    /// heat picks its colour from its layer's ramp.
+    pub ramps: BTreeMap<String, Vec<[f32; 4]>>,
+    pub effects: BTreeMap<String, Effect>,
     /// By `ProjectileView::visual`.
     pub projectiles: BTreeMap<String, ProjectileLook>,
-    /// Abilities whose cast or channel glows in the caster's hands, and the glow it takes.
-    /// Wind-ups for heavy blows aren't listed: the swing shows them.
+    /// Abilities whose cast or channel shows on the caster, and the effect it plays. Wind-ups
+    /// for heavy blows aren't listed: the swing shows them.
     pub casts: BTreeMap<String, String>,
     /// By aura key. Auras that aren't listed show only on the HUD.
-    pub auras: BTreeMap<String, AuraLook>,
-    pub style: EffectStyle,
-}
-
-/// Light that an effect gives off. Effects are blended, unshadowed and lit mostly by this.
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct Glow {
-    /// Linear RGB.
-    pub colour: [f32; 3],
-    /// Emission is `colour × strength`. At 0 the glow is a solid thing that gives no light
-    /// (an arrow's shaft, an axe's head), drawn opaque and lit like any other mesh.
-    pub strength: f32,
-    /// The surface's own colour is `colour × albedo`, lit by the sun like anything else.
-    #[serde(default = "dim")]
-    pub albedo: f32,
-}
-
-fn dim() -> f32 {
-    0.15
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectileKind {
-    /// A ball of light with a halo and a tapering trail.
-    Bolt,
-    /// A long shard pointing along its flight, with a trail.
-    Lance,
-    /// A shaft along its flight with a faint streak behind.
-    Arrow,
-    /// A flat head that tumbles end over end.
-    Axe,
+    pub auras: BTreeMap<String, String>,
+    /// Lasting combo fields by name (`AreaView::field`); a field with no entry uses its school.
+    /// `<name>.hostile`, if listed, is shown instead when the field threatens the viewer.
+    pub fields: BTreeMap<String, String>,
+    /// Per school (lowercase): the field a school's area leaves when it has no named field, and
+    /// the burst where a warned-of blow lands.
+    pub schools: BTreeMap<String, SchoolLook>,
+    /// Warnings of a blow about to land, by who they threaten.
+    pub warnings: Warnings,
+    /// A combo's burst, and the circle a ground skill is aimed with.
+    pub combo: String,
+    pub aim: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Warnings {
+    pub hostile: String,
+    pub friendly: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchoolLook {
+    pub field: String,
+    pub impact: String,
+}
+
+/// An effect: its layers, or another effect's layers with some ramps swapped (a frost cast is
+/// a fire cast in the frost ramps).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Effect {
+    Layers(Vec<Layer>),
+    Like {
+        like: String,
+        #[serde(default)]
+        ramps: BTreeMap<String, String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectileLook {
-    pub kind: ProjectileKind,
-    /// The bright part: a bolt's core, a lance's shard, an arrow's shaft or an axe's head.
-    pub glow: String,
-    /// The halo and trail, if different.
+    /// Plays on the missile while it flies: +z along its flight.
+    pub flight: String,
+    /// Left along its path: the layers' particles stay where they were dropped.
     #[serde(default)]
-    pub trail_glow: Option<String>,
-    /// Core radius (metres); an arrow's or lance's thickness.
-    pub size: f32,
-    /// Shaft or shard length (arrows, lances, axes).
+    pub trail: Option<String>,
+    /// Plays once where it stops.
+    pub impact: String,
+    /// A solid, lit mesh carried by the missile (an arrow), tip at the missile's position.
     #[serde(default)]
-    pub length: f32,
-    /// Halo radius around a bolt (0 for none).
-    #[serde(default)]
-    pub halo: f32,
-    /// Trail length behind it (metres, 0 for none) and its radius where it leaves the core.
-    #[serde(default)]
-    pub trail: f32,
-    #[serde(default)]
-    pub trail_width: f32,
-    /// Turns a second (axes).
+    pub mesh: Option<String>,
+    /// Turns a second end over end (a thrown axe's mesh), about `pivot` in the mesh's frame.
     #[serde(default)]
     pub spin: f32,
-    /// The flash where it stops: radius in metres.
-    pub burst: f32,
+    #[serde(default)]
+    pub pivot: [f32; 3],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AuraKind {
-    /// A see-through bubble around the body (wards, shields, invulnerability).
-    Shell,
-    /// A ring on the ground at the feet (buffs, conditions).
-    Ring,
-    /// A small spinning ring above the head (stuns, fear, sleep).
-    Halo,
+pub enum LayerKind {
+    /// Camera-facing sprites (`count` of them), or streaks when `stretch` is set.
+    Sprite,
+    /// One beam behind the anchor, from its position back along its flight (`size` is its
+    /// half width at the head and tail, `length` its length).
+    Beam,
+    /// Sprites dropped along a missile's path, `rate` a metre, each then living on its own.
+    Trail,
+    /// A mark projected down onto the ground.
+    Decal,
+    /// An effect mesh.
+    Mesh,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct AuraLook {
-    pub kind: AuraKind,
-    pub glow: String,
-    /// A shell's radius per metre of the unit's height, or a ring's radius in metres.
-    pub size: f32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecalShape {
+    /// The layer's sprite or tile, `size` its half width.
+    Texture,
+    /// The area's own shape (circle, cone or line) with a glowing edge and a fill that grows
+    /// as a warning ripens.
+    Area,
 }
 
-/// Opacity, sizes and timings shared by every effect.
+/// One part of an effect. Every field has a default, so a layer names only what it changes.
+///
+/// Particles: a layer with `life` cycles `count` particles through lives of that many seconds
+/// (staggered), each born somewhere in `spread` around `offset` and flying off; with `life` 0
+/// it is one steady thing. In a one-shot effect (an impact) particles live once, starting after
+/// a `delay`. Over a particle's life `t` runs 0…1; sizes, erosion and heat follow it.
 #[derive(Debug, Clone, Deserialize)]
-pub struct EffectStyle {
-    /// Opacity at the heart of a hot core: a bolt's or a cast's, a flash, a mote.
-    pub core_alpha: f32,
-    /// How far a hot core runs from its glow's colour towards white (0…1), and how many times
-    /// brighter than the glow it burns.
-    pub core_white: f32,
-    pub core_boost: f32,
-    /// Opacity at the middle of the softer glow round a bolt or a cast, and along a trail.
-    pub halo_alpha: f32,
-    pub trail_alpha: f32,
-    /// A shell's opacity at its rim; its middle is far fainter, so the body shows through.
-    pub shell_alpha: f32,
-    pub ring_alpha: f32,
-    /// A ring's band, as a share of its radius.
-    pub ring_width: f32,
-    pub halo_ring_alpha: f32,
-    /// A warning's whole shape (the peak of its glowing edge; its body is fainter), and the
-    /// part already filled in.
-    pub warning_outline_alpha: f32,
-    pub warning_fill_alpha: f32,
-    /// A lasting field's pool and its rim.
-    pub field_alpha: f32,
-    pub field_rim_alpha: f32,
-    /// How far in from a mark's edge its glowing band reaches, in metres.
-    pub rim_width: f32,
-    /// The orb in a caster's hands: radius when a cast begins and when it completes.
-    pub cast_orb: [f32; 2],
-    pub cast_orb_alpha: f32,
-    /// The circle at a caster's feet: radius and opacity.
-    pub cast_circle: f32,
-    pub cast_circle_alpha: f32,
-    /// How long a missile's flash and a landed blow's burst last (seconds).
-    pub burst_seconds: f32,
-    pub burst_alpha: f32,
-    /// Seconds an aura takes to fade in and out.
-    pub aura_fade: f32,
+#[serde(deny_unknown_fields, default)]
+pub struct Layer {
+    pub kind: LayerKind,
+    /// A sprite or flipbook in the atlas, or a tiling strip (`tile`).
+    pub frame: Option<String>,
+    pub tile: Option<String>,
+    pub ramp: Option<String>,
+    /// Linear tint, any brightness, and opacity.
+    pub colour: [f32; 3],
+    pub alpha: f32,
+    /// 0 adds light; 1 covers what's behind like paint (smoke, frost on the ground).
+    pub blend: f32,
+    pub count: u32,
+    pub life: f32,
+    /// Trails: particles per metre of flight.
+    pub rate: f32,
+    /// Half size in metres at birth and at death. Decals: half width. Meshes: radius. A steady
+    /// layer (no `life`) on a cast or warning goes from the first to the second as it ripens,
+    /// and so does its erosion.
+    pub size: [f32; 2],
+    /// Each particle's size differs from the layer's by up to this share either way.
+    pub vary: f32,
+    /// Height over width (sprites, meshes).
+    pub aspect: f32,
+    /// Beams: length in metres. Meshes: length along z, as a share of their size.
+    pub length: f32,
+    /// Sprites become streaks this many seconds of their flight long.
+    pub stretch: f32,
+    /// Turn speed range (radians a second, either way round); and a fixed turn.
+    pub spin: [f32; 2],
+    pub angle: f32,
+    /// Where particles are born, in the anchor's frame (x right, y up, z forward), and how
+    /// far either side of it (an ellipsoid). `ring` puts them on its rim instead, and `orbit`
+    /// (radians a second) sets them evenly round it, circling.
+    pub offset: [f32; 3],
+    pub spread: [f32; 3],
+    pub ring: bool,
+    pub orbit: f32,
+    /// Outward speed range from where they're born, a steady velocity in the anchor's frame,
+    /// gravity (m/s², down) and drag (per second).
+    pub speed: [f32; 2],
+    pub velocity: [f32; 3],
+    pub gravity: f32,
+    pub drag: f32,
+    /// Shares of a life spent fading in and out.
+    pub fade: [f32; 2],
+    /// Erosion threshold at birth and at death (sprites dissolve as it rises).
+    pub erode: [f32; 2],
+    /// Soft-particle depth in metres (0: clip hard against what's in front).
+    pub soft: f32,
+    /// Share of its heat a particle loses over its life (fire cooling to embers).
+    pub cool: f32,
+    /// One-shot effects: start delay range in seconds.
+    pub delay: [f32; 2],
+    /// Flipbooks: 0 plays once over a life; otherwise frames a second, looping.
+    pub fps: f32,
+    /// Brightness wobble: amount and speed (Hz).
+    pub pulse: [f32; 2],
+    /// Sprites are moved this many metres towards the camera.
+    pub towards: f32,
+    /// Sizes, offsets, spread and speeds scale with the anchor (a field's radius, a unit's
+    /// height), and so does `count` for decals' particles over an area.
+    pub scaled: bool,
+    /// Particles stay where they were born instead of moving with the anchor.
+    pub world: bool,
+    /// Decals.
+    pub shape: DecalShape,
+    /// Decals: the glowing edge's width (metres) and the fill's colour and opacity.
+    pub edge: f32,
+    pub fill: [f32; 4],
+    /// Decals and beams: tile repeats a metre, and drift (UV a second).
+    pub repeat: f32,
+    pub scroll: [f32; 2],
+    /// Meshes.
+    pub mesh: Option<String>,
+    /// Meshes: rim (Fresnel) power and weight; the vertex mask's start and weight; twinkle
+    /// weight and speed; texture weight.
+    pub rim: [f32; 2],
+    pub mask: [f32; 2],
+    pub twinkle: [f32; 2],
+    pub texture: f32,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self {
+            kind: LayerKind::Sprite,
+            frame: None,
+            tile: None,
+            ramp: None,
+            colour: [1.; 3],
+            alpha: 1.,
+            blend: 0.,
+            count: 1,
+            life: 0.,
+            rate: 0.,
+            size: [0.5; 2],
+            vary: 0.,
+            aspect: 1.,
+            length: 1.,
+            stretch: 0.,
+            spin: [0.; 2],
+            angle: 0.,
+            offset: [0.; 3],
+            spread: [0.; 3],
+            ring: false,
+            orbit: 0.,
+            speed: [0.; 2],
+            velocity: [0.; 3],
+            gravity: 0.,
+            drag: 0.,
+            fade: [0.1, 0.3],
+            erode: [0.; 2],
+            soft: 0.25,
+            cool: 0.,
+            delay: [0.; 2],
+            fps: 0.,
+            pulse: [0.; 2],
+            towards: 0.,
+            scaled: false,
+            world: false,
+            shape: DecalShape::Texture,
+            edge: 0.15,
+            fill: [0.; 4],
+            repeat: 0.5,
+            scroll: [0.; 2],
+            mesh: None,
+            rim: [2., 1.],
+            mask: [0., 0.],
+            twinkle: [0., 1.],
+            texture: 1.,
+        }
+    }
 }
 
 impl EffectCatalog {
-    pub fn glow(&self, name: &str) -> Option<&Glow> {
-        self.glows.get(name)
+    /// An effect's layers, following `like` (to any depth) and swapping its ramps.
+    pub fn layers(&self, name: &str) -> Option<Vec<Layer>> {
+        let mut swaps: Vec<&BTreeMap<String, String>> = Vec::new();
+        let mut at = name;
+        for _ in 0..8 {
+            match self.effects.get(at)? {
+                Effect::Layers(layers) => {
+                    let mut out = layers.clone();
+                    for layer in &mut out {
+                        // The nearest `like` wins: apply the outermost swaps last.
+                        for swap in swaps.iter().rev() {
+                            if let Some(r) = layer.ramp.as_ref().and_then(|r| swap.get(r)) {
+                                layer.ramp = Some(r.clone());
+                            }
+                        }
+                    }
+                    return Some(out);
+                }
+                Effect::Like { like, ramps } => {
+                    swaps.push(ramps);
+                    at = like;
+                }
+            }
+        }
+        None
     }
 
-    /// The glow for a school (`protocol::School`'s name, any case).
-    pub fn school(&self, school: &str) -> Option<&Glow> {
-        self.glows.get(&school.to_lowercase())
+    /// Every effect a missile, cast, aura, field, school or warning names, with what names it.
+    fn named(&self) -> Vec<(String, &str)> {
+        let mut out = Vec::new();
+        for (id, p) in &self.projectiles {
+            out.push((format!("projectile {id}"), p.flight.as_str()));
+            out.push((format!("projectile {id} impact"), p.impact.as_str()));
+            if let Some(t) = &p.trail {
+                out.push((format!("projectile {id} trail"), t.as_str()));
+            }
+        }
+        for (k, e) in &self.casts {
+            out.push((format!("cast {k}"), e.as_str()));
+        }
+        for (k, e) in &self.auras {
+            out.push((format!("aura {k}"), e.as_str()));
+        }
+        for (k, e) in &self.fields {
+            out.push((format!("field {k}"), e.as_str()));
+        }
+        for (k, s) in &self.schools {
+            out.push((format!("school {k} field"), s.field.as_str()));
+            out.push((format!("school {k} impact"), s.impact.as_str()));
+        }
+        out.push(("hostile warnings".into(), self.warnings.hostile.as_str()));
+        out.push(("friendly warnings".into(), self.warnings.friendly.as_str()));
+        out.push(("combos".into(), self.combo.as_str()));
+        out.push(("aiming".into(), self.aim.as_str()));
+        out
     }
 
-    /// Everything wrong with the effects table.
+    /// Everything wrong with the effects table that can be seen without its art files.
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for (name, g) in &self.glows {
-            if !(g
-                .colour
-                .iter()
-                .chain([&g.strength, &g.albedo])
-                .all(|v| v.is_finite() && *v >= 0.0))
+        for (what, name) in self.named() {
+            if !self.effects.contains_key(name) {
+                out.push(format!("effects: {what} plays {name}, which isn't defined"));
+            }
+        }
+        for school in ["physical", "fire", "frost", "arcane", "nature", "holy", "shadow"] {
+            if !self.schools.contains_key(school) {
+                out.push(format!("effects: school {school} has no look"));
+            }
+        }
+        for (name, ramp) in &self.ramps {
+            if ramp.len() < 2 || ramp.iter().flatten().any(|v| !v.is_finite() || *v < 0.) {
+                out.push(format!("effects: ramp {name} needs two or more stops of finite, non-negative values"));
+            }
+        }
+        for (name, effect) in &self.effects {
+            let Some(layers) = self.layers(name) else {
+                out.push(format!("effects: {name} is like an effect that isn't defined (or loops)"));
+                continue;
+            };
+            if let Effect::Like { ramps, .. } = effect {
+                for to in ramps.values() {
+                    if !self.ramps.contains_key(to) {
+                        out.push(format!("effects: {name} swaps in ramp {to}, which isn't defined"));
+                    }
+                }
+            }
+            for (i, l) in layers.iter().enumerate() {
+                let what = format!("effects: {name} layer {i}");
+                if let Some(r) = &l.ramp
+                    && !self.ramps.contains_key(r)
+                {
+                    out.push(format!("{what} uses ramp {r}, which isn't defined"));
+                }
+                if let Some(t) = &l.tile
+                    && !self.tiles.contains_key(t)
+                {
+                    out.push(format!("{what} uses tile {t}, which isn't defined"));
+                }
+                match l.kind {
+                    LayerKind::Mesh => match &l.mesh {
+                        Some(m) if self.meshes.contains_key(m) => {}
+                        _ => out.push(format!("{what} draws no mesh the catalogue has")),
+                    },
+                    LayerKind::Decal if l.shape == DecalShape::Area => {}
+                    _ if l.frame.is_none() && l.tile.is_none() => {
+                        out.push(format!("{what} has neither a frame nor a tile"));
+                    }
+                    _ => {}
+                }
+                if l.kind == LayerKind::Trail && l.rate <= 0. {
+                    out.push(format!("{what} is a trail dropping nothing (rate 0)"));
+                }
+                let numbers = l
+                    .colour
+                    .iter()
+                    .chain(&l.size)
+                    .chain(&l.fill)
+                    .chain([&l.alpha, &l.life, &l.rate, &l.aspect, &l.length, &l.soft, &l.edge]);
+                if numbers.clone().any(|v| !v.is_finite() || *v < 0.) {
+                    out.push(format!("{what} has a negative or non-finite size, colour or time"));
+                }
+                if !(0.0..=1.0).contains(&l.blend) || !(0.0..=1.0).contains(&l.cool) {
+                    out.push(format!("{what}: blend and cool must be 0…1"));
+                }
+                if l.fade.iter().any(|f| !(0.0..=1.0).contains(f)) {
+                    out.push(format!("{what}: fade shares must be 0…1"));
+                }
+            }
+        }
+        for (id, p) in &self.projectiles {
+            if let Some(m) = &p.mesh
+                && !self.meshes.contains_key(m)
             {
-                out.push(format!(
-                    "effects: glow {name} has a negative or non-finite value"
-                ));
-            }
-        }
-        let mut named = |what: String, glow: &str| {
-            if !self.glows.contains_key(glow) {
-                out.push(format!(
-                    "effects: {what} names glow {glow}, which isn't defined"
-                ));
-            }
-        };
-        for (id, p) in &self.projectiles {
-            named(format!("projectile {id}"), &p.glow);
-            if let Some(t) = &p.trail_glow {
-                named(format!("projectile {id} trail"), t);
-            }
-        }
-        for (ability, glow) in &self.casts {
-            named(format!("cast {ability}"), glow);
-        }
-        for (key, a) in &self.auras {
-            named(format!("aura {key}"), &a.glow);
-        }
-        for glow in ["hostile", "friendly", "combo", "wood"] {
-            named("the client".into(), glow);
-        }
-        for school in [
-            "physical", "fire", "frost", "arcane", "nature", "holy", "shadow",
-        ] {
-            named("school".into(), school);
-        }
-        let mut sizes: Vec<(String, f32)> = Vec::new();
-        for (id, p) in &self.projectiles {
-            sizes.extend([
-                (format!("projectile {id} size"), p.size),
-                (format!("projectile {id} burst"), p.burst),
-                (format!("projectile {id} length"), p.length),
-                (format!("projectile {id} trail"), p.trail),
-            ]);
-            if p.size <= 0.0 {
-                out.push(format!("effects: projectile {id} has no size"));
-            }
-        }
-        for (key, a) in &self.auras {
-            sizes.push((format!("aura {key} size"), a.size));
-        }
-        let s = &self.style;
-        for (what, alpha) in [
-            ("core_alpha", s.core_alpha),
-            ("core_white", s.core_white),
-            ("halo_alpha", s.halo_alpha),
-            ("trail_alpha", s.trail_alpha),
-            ("shell_alpha", s.shell_alpha),
-            ("ring_alpha", s.ring_alpha),
-            ("halo_ring_alpha", s.halo_ring_alpha),
-            ("warning_outline_alpha", s.warning_outline_alpha),
-            ("warning_fill_alpha", s.warning_fill_alpha),
-            ("field_alpha", s.field_alpha),
-            ("field_rim_alpha", s.field_rim_alpha),
-            ("cast_orb_alpha", s.cast_orb_alpha),
-            ("cast_circle_alpha", s.cast_circle_alpha),
-            ("burst_alpha", s.burst_alpha),
-        ] {
-            if !(0.0..=1.0).contains(&alpha) {
-                out.push(format!("effects: style {what} must be 0…1"));
-            }
-        }
-        if !(0.0..1.0).contains(&s.ring_width) {
-            out.push("effects: style ring_width must be below 1".into());
-        }
-        sizes.extend([
-            ("style core_boost".into(), s.core_boost),
-            ("style rim_width".into(), s.rim_width),
-            ("style cast_circle".into(), s.cast_circle),
-            ("style burst_seconds".into(), s.burst_seconds),
-            ("style aura_fade".into(), s.aura_fade),
-            ("style cast_orb".into(), s.cast_orb[0]),
-            ("style cast_orb".into(), s.cast_orb[1]),
-        ]);
-        for (what, v) in sizes {
-            if !v.is_finite() || v < 0.0 {
-                out.push(format!("effects: {what} must be a positive number"));
+                out.push(format!("effects: projectile {id} carries mesh {m}, which isn't defined"));
             }
         }
         out
     }
+}
+
+impl EffectCatalog {
+    /// The atlas index (`frames`), from the asset root.
+    pub fn atlas_index(&self, root: &Path) -> Result<AtlasIndex, crate::Error> {
+        crate::read_json(&root.join(&self.frames))
+    }
+
+    /// Problems only the art files show: a file that isn't there, or a frame the atlas lacks.
+    pub fn art_problems(&self, root: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let files = [&self.atlas, &self.frames]
+            .into_iter()
+            .chain(self.tiles.values())
+            .chain(self.meshes.values());
+        for f in files {
+            if !root.join(f).exists() {
+                out.push(format!("effects: {f} is missing"));
+            }
+        }
+        let index = match self.atlas_index(root) {
+            Ok(i) => i,
+            Err(e) => {
+                out.push(format!("effects: the atlas index won't load: {e}"));
+                return out;
+            }
+        };
+        for (name, f) in &index.frames {
+            let [x, y, w, h] = f.rect;
+            if x + w > index.size[0] || y + h > index.size[1] || f.count == 0 || f.cols == 0 {
+                out.push(format!("effects: atlas frame {name} doesn't fit the atlas"));
+            }
+        }
+        for name in self.effects.keys() {
+            for (i, l) in self.layers(name).unwrap_or_default().iter().enumerate() {
+                if let Some(f) = &l.frame
+                    && !index.frames.contains_key(f)
+                {
+                    out.push(format!("effects: {name} layer {i} uses frame {f}, which the atlas lacks"));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// The atlas index written beside the atlas by the Blender build.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AtlasIndex {
+    pub size: [u32; 2],
+    pub frames: BTreeMap<String, AtlasFrame>,
+}
+
+/// A sprite, or a flipbook whose `count` frames fill `rect` in `cols` columns, left to right
+/// and top to bottom.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AtlasFrame {
+    pub rect: [u32; 4],
+    pub count: u32,
+    pub cols: u32,
 }

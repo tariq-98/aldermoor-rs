@@ -39,6 +39,11 @@ struct Options {
     showcase: bool,
     smoke: bool,
     effects_review: bool,
+    /// The showcase camera: 0 is the whole scene; 1–3 come in close on parts of the staged
+    /// fight (the left of the lineup, its right, the missiles' lanes).
+    view: usize,
+    /// Every frame after the warmup is captured into this folder (for review videos).
+    sequence: Option<PathBuf>,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -70,6 +75,8 @@ impl Options {
             showcase: false,
             smoke: false,
             effects_review: false,
+            view: 0,
+            sequence: None,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -104,6 +111,15 @@ impl Options {
                 "--capture" => {
                     o.capture = Some(PathBuf::from(
                         args.next().context("--capture needs a .png path")?,
+                    ))
+                }
+                "--view" => {
+                    o.view = args.next().context("--view needs 0..3")?.parse()?;
+                    ensure!(o.view <= 3, "--view needs 0..3");
+                }
+                "--sequence" => {
+                    o.sequence = Some(PathBuf::from(
+                        args.next().context("--sequence needs a folder")?,
                     ))
                 }
                 "--frames" => {
@@ -169,7 +185,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --specialty NAME\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nWASD move · Shift walk · Space jump · V dodge · Tab target\nRight-drag orbit/strafe · Left-click target · 1–9/0 skills · Q guard · ` swap · E revive · R respawn · Esc quit\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup)\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --specialty NAME\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -239,6 +255,8 @@ struct Game {
     aim_slot: Option<u8>,
     valley: world::Valley,
     effects: Option<effects::Effects>,
+    /// The effects' art, for each renderer to upload.
+    effects_art: Option<render::fx::Library>,
     /// The fight staged for `--effects-review`.
     stage: Option<stage::Stage>,
 }
@@ -246,7 +264,14 @@ impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
         let host = server::Host::start_as(0xa1de, "Traveller", options.specialty);
-        let effects = catalog.effects.clone().map(effects::Effects::new);
+        let mut cache = ModelCache::default();
+        let (effects, effects_art) = match catalog.effects.clone() {
+            Some(table) => {
+                let (fx, art) = effects::Effects::load(table, &options.assets, &mut cache)?;
+                (Some(fx), Some(art))
+            }
+            None => (None, None),
+        };
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
@@ -254,7 +279,7 @@ impl Game {
             host,
             snaps: interpolate::Snapshots::new(first),
             catalog,
-            cache: ModelCache::default(),
+            cache,
             characters: HashMap::new(),
             terrain: render::terrain::valley(),
             scenery: None,
@@ -284,6 +309,7 @@ impl Game {
             aim_slot: None,
             valley: world::Valley::new(),
             effects,
+            effects_art,
             stage: None,
         };
         g.scenery = Some(render::scenery::Scenery::new(&g.catalog, &mut g.cache)?);
@@ -366,9 +392,16 @@ impl Game {
             };
         }
         if self.options.showcase {
-            let target = Vec3::new(2., world::height(2., 22.) + 1.25, 22.);
+            // Target (x, z, height over the ground), and the eye's offset from it.
+            let (x, z, up, from) = match self.options.view {
+                1 => (-1.5, 24.2, 1.0, Vec3::new(3.2, 1.7, 6.8)),
+                2 => (5.6, 23.6, 1.0, Vec3::new(2.6, 1.8, 6.6)),
+                3 => (0.5, 25., 1.5, Vec3::new(1.6, 0.9, 7.5)),
+                _ => (2., 22., 1.25, Vec3::new(8., 3.5, 14.)),
+            };
+            let target = Vec3::new(x, world::height(x, z) + up, z);
             return Camera {
-                eye: target + Vec3::new(8., 3.5, 14.),
+                eye: target + from,
                 target,
                 fov: 45f32.to_radians(),
             };
@@ -698,10 +731,16 @@ impl Game {
             .context("no local player in snapshot")?;
         self.frame += 1;
         let done = self.options.frames.is_some_and(|n| self.frame >= n);
+        let frame_file = self
+            .options
+            .sequence
+            .as_ref()
+            .filter(|_| self.frame > self.options.warmup)
+            .map(|dir| dir.join(format!("{:05}.png", self.frame)));
         let capture = if done {
             self.options.capture.as_deref()
         } else {
-            None
+            frame_file.as_deref()
         };
         let raw = self.hud_input.take().unwrap_or_else(|| egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -734,7 +773,7 @@ impl Game {
                     fx.event(e, *at);
                 }
             }
-            draws.extend(fx.draws(&effects::Scene {
+            let (solids, frame) = fx.draws(&effects::Scene {
                 fight: staged.as_ref().map_or(&*self.fight, |f| &f.fight),
                 units: &units,
                 height: &|id| characters.get(&id).map_or(1.8, |c| c.rig_height),
@@ -746,8 +785,9 @@ impl Game {
                 },
                 time: scene_time,
                 aim: staged.as_ref().map_or(aim.zip(radius), |f| Some(f.aim)),
-                eye: camera.eye,
-            }));
+            });
+            draws.extend(solids);
+            r.effects = Some(frame);
         }
         let projection = combat::Projection {
             matrix: camera.matrix(r.width as f32 / r.height as f32),
@@ -1041,6 +1081,9 @@ impl ApplicationHandler for App {
                 r.load_surface_assets(path, &self.game.options.assets)?;
                 eprintln!("SURFACES {}", path.display());
             }
+            if let Some(art) = &self.game.effects_art {
+                r.load_effects(art)?;
+            }
             self.egui_state = Some(egui_winit::State::new(
                 self.game.hud_context.clone(),
                 egui::ViewportId::ROOT,
@@ -1244,6 +1287,9 @@ fn main() -> Result<()> {
         if let Some(path) = &game.options.surface_assets {
             renderer.load_surface_assets(path, &game.options.assets)?;
             eprintln!("SURFACES {}", path.display());
+        }
+        if let Some(art) = &game.effects_art {
+            renderer.load_effects(art)?;
         }
         let mut deadline = Instant::now();
         loop {

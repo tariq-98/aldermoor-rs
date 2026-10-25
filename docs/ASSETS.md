@@ -358,40 +358,59 @@ maps expect.
 ## Combat effects: `catalog/effects.json`
 
 How a fight looks, as data (checked by `Catalog::check`, and against the combat content by
-`crates/sim/tests/looks.rs`). The client draws every effect from a handful of shapes built once:
-soft glows and bubbles turned to face the camera, streaks, shafts and crystals, and flat rings,
-discs, fans and strips that carry their glowing edges in their vertices. They are blended,
-unshadowed and lit mostly by their own glow, so all look values live here:
+`crates/sim/tests/looks.rs`). Effects are made of authored art in `assets/effects/`, built by
+`art/blender.sh -P art/blender/build_effects.py` (add `-- --review` for a contact sheet in
+`art/out/effects/review.png`):
 
-- `glows`: named colours with an emission `strength` and an `albedo` share. Schools use their
-  lowercase names (`fire`), combo fields `field.<name>`, ground marks `hostile` and `friendly`,
-  plus `combo` (a combo's burst) and `wood` (a thrown axe's haft). A glow of strength 0 (`wood`,
-  `iron`) is a solid thing, drawn opaque and lit like any mesh. The tone mapper turns bright
-  light white, so colours are strongly saturated (their weaker channels low) and strengths stay
-  around 1 to 2.5; a pale colour or a strength much above that shows as white.
-- `projectiles`, by `ProjectileView.visual`: `kind` (`bolt`, `lance`, `arrow`, `axe`), its glow
-  and trail glow, size, length, halo, trail length and width, spin, and the flash where it stops.
-  Every missile in the content must have one.
-- `casts`: abilities whose cast or channel glows in the hands, and with what. Every spell (a cast
-  or channel outside the physical school) must be listed; heavy blows' wind-ups are not.
-- `auras`, by aura key: `shell` (a bubble: wards, shields), `ring` (at the feet: buffs and
-  conditions) or `halo` (motes circling the head: stuns, fear, sleep), with a glow and size.
-  Unlisted auras show only on the HUD.
-- `style`: opacities (mostly peaks: a glow's heart, a mark's edge, a shell's rim), how far hot
-  cores (a bolt's heart, a cast's orb, flashes, sparks and embers) run towards white and how much
-  brighter they burn, ring and rim widths, the cast orb and circle, burst and aura fade timings.
+- `atlas.png` and its index `atlas.json`: every sprite and flipbook. Each texel is three data
+  channels, not a colour: heat (R) picks a colour from a ramp, cover (G) is opacity, and erosion
+  order (B) says where a sprite dissolves first as it ages. Sprites: glow, flare, spark, shock,
+  ring, runes and sigil (casting circles), star, snowflake, shard, bubble, ripple, scorch, frost
+  and four lightning strips. Flipbooks, one life from first frame to last: flame and puff
+  (painted in numpy), wisp, and fire, smoke and burst (Cycles volume renders, cached in
+  `art/out/effects/`; `--only=volumes` renders them again).
+- `tile.*.png`: tiling strips (trail streaks, three noises, a honeycomb) that trails, marks and
+  shells scroll through.
+- `shell.glb` (a Goldberg sphere of hexagonal cells for wards), `column.glb` (light rising from
+  the ground), `crystal.glb` (a frost lance's ice) and `arrow.glb` (a solid, lit arrow).
 
-Warnings glow at their edges and fill from the caster outwards as they ripen; fields pulse and
-send up embers; both are edged in red when they threaten the viewer. Missiles flash and throw
-sparks where they land. These are placeholder looks, sized and coloured to read in a fight;
-authored spell meshes and textures are later work.
+The catalogue names the art and builds effects from it:
+
+- `ramps`: colour ramps as stops of `[position, r, g, b]`, linear and any brightness. Colours
+  hotter than 1 go white through the tone mapper, which is what makes a core burn.
+- `effects`: named lists of layers. A layer is `sprite` (camera-facing particles, or streaks
+  with `stretch`), `beam` (a ribbon behind a missile), `trail` (sprites dropped along a missile's
+  path, `rate` a metre), `decal` (a mark projected onto the ground: a sprite, or the area's own
+  shape with a glowing edge and a fill that grows as a warning ripens) or `mesh`. Layers give
+  their art (`frame`, `tile`, `mesh`), `ramp`, `colour`, `alpha` and `blend` (0 adds light, 1
+  covers like paint), and how their particles live: `count`, `life` (0 for one steady thing),
+  `size` at birth and death, `offset`, `spread`, `ring`, `orbit`, `speed`, `velocity`,
+  `gravity`, `drag`, `spin`, `vary`, `fade`, `erode`, `cool`, `delay`, `fps`, `pulse`, `soft`.
+  `scaled` layers scale with what they play on: a unit's height, an area's reach. Steady layers
+  on a cast or a warning go from their first size and erosion to their second as it ripens (a
+  casting circle draws itself in). An effect can instead be `{"like": other, "ramps": {...}}`,
+  the same layers in other colours.
+- `projectiles` (by `ProjectileView.visual`): the effect it plays in `flight`, the `trail` it
+  leaves, its `impact`, and a solid `mesh` it carries (with `spin` and `pivot` for a thrown
+  axe). `casts`, `auras`, `fields` (with optional `<name>.hostile` variants), `schools` (each
+  school's fallback field and the burst where its warned-of blows land), `warnings` (hostile and
+  friendly), `combo` and `aim` name the effect each plays.
+
+Every missile in the content needs a projectile entry, and every spell (a cast or channel
+outside the physical school) a cast. Unlisted auras show only on the HUD.
+
+The renderer draws effects in its own pass (docs/RENDERER.md): marks inside the scene pass,
+everything else after tone mapping, so they never blur under temporal AA.
 
 To review them, `scripts/run_client.sh --effects-review` stages a fight in the showcase scene
 (`crates/client/src/stage.rs`): every missile look crosses in front of the lineup, which wears a
-shell, rings and halos and casts three spells, while warnings of each shape, two fields, the aiming
-circle and flashes lie on the ground. It runs on frame time alone, so `--capture` with a given
-`--frames` always shows the same moment. `--showcase` is the same scene without the effects, so
-`scripts/benchmark_renderer.py --effects-review` against a plain run gives their GPU cost.
+shell, buffs, conditions and a stun and casts three spells, while warnings of each shape, two
+fields, the aiming circle and bursts lie on the ground. It runs on frame time alone, so
+`--capture` with a given `--frames` always shows the same moment. `--view 1`, `2` and `3` come
+in close (the lineup's left and right, and the missiles' lanes), and `--sequence DIR` writes
+every frame after `--warmup` for a review video. `--showcase` is the same scene without the
+effects, so `scripts/benchmark_renderer.py --effects-review` against a plain run gives their
+GPU cost.
 
 ## Materials and file details
 
