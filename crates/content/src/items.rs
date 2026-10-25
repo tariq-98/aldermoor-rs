@@ -34,6 +34,8 @@ pub enum ItemKind {
     Armour,
     /// Crafting materials: ore, hides, herbs, wood. They stack.
     Material,
+    /// Gathers for a skill while in the pack (`content::crafts`): a pickaxe, a rod, …
+    Tool,
     /// Eaten or drunk. They stack.
     Consumable,
     /// Worth only what a shop pays.

@@ -66,6 +66,12 @@ Each `Snapshot` (protocol version 6) has:
   - `Damage` (with `school`, and `periodic` for conditions ticking), `Heal`, and `Avoided` with
     why (evaded, blocked, parried, absorbed, immune, reflected, missed): show these as floating
     numbers and words;
+  - `Hit`, for every blow that reached its victim, landed, blocked or parried (not conditions
+    ticking or a field's pulses): `attacker`, `victim`, `dir` (the way the blow travelled on the
+    ground, a yaw in 256ths of a turn, 0 toward +z and 64 toward +x), `weight` (light, heavy,
+    critical, blocked, parried, or big for a monster's warned slam) and `hitstop_ms` (how long to
+    freeze both bodies' poses, at most 120). It goes to everyone, so remote bodies flinch too;
+    the sim never pauses. See COMBAT.md, "Weight on screen";
   - `AbilityUsed`, `CastStarted`, `CastInterrupted`, `AuraApplied`, `AuraRemoved`;
   - `ProjectileLaunched` and `ProjectileEnded` (where it stopped, and on whom), `AreaImpact`
     (a warned blow landing: a burst of dust, frost or fire), `Combo`;

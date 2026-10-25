@@ -203,6 +203,8 @@ record! {
     progress: Progress,
     credit: Credit,
     inventory: Inventory,
+    skills: crate::crafting::Skills,
+    skinned: crate::crafting::Skinned,
 }
 
 impl UnitRecord {

@@ -186,6 +186,11 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::Loot { pile } => crate::loot::take(world, e, pile),
             Command::Buy { shop, item, count } => crate::loot::buy(world, e, &shop, &item, count),
             Command::Sell { shop, slot, count } => crate::loot::sell(world, e, &shop, slot, count),
+            Command::Gather { node } => crate::crafting::gather(world, e, node),
+            Command::Skin { target } => crate::crafting::skin(world, e, target),
+            Command::Strike => crate::crafting::strike(world, e),
+            Command::Craft { recipe, count } => crate::crafting::craft(world, e, &recipe, count),
+            Command::StopWork => crate::crafting::stop(world, e),
             Command::AssignXp { specialty, amount } => {
                 if let Some(s) = crate::Specialty::from_key(&specialty) {
                     crate::progress::assign(world, e, s, amount);

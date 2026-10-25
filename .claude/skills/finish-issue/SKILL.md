@@ -38,6 +38,10 @@ Never leave a claimed issue silent. Pick the case that fits.
    then `merge_pull_request` with `merge_method: squash`; gh: `gh pr ready <pr>` then
    `gh pr merge <pr> --squash --delete-branch`). Merging closes the issue. If any item fails, leave
    the PR open and comment exactly what's missing.
+8. **Clean up after the merge.** Run `cargo clean` in your checkout (or delete its `target/`), and
+   any extra worktrees you made for this issue. Keep the checkout itself and reuse it for your next
+   issue; one checkout per agent, never a `CARGO_TARGET_DIR` shared between agents (cargo's lock
+   would make their builds wait on each other).
 
 ## Stopping before it's done: release
 

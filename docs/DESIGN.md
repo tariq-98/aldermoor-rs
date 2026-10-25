@@ -82,8 +82,9 @@ provisional until a coherent draft is reviewed.
 - **Getting gear:** crafting, shops, quests, enemy drops, bosses and factions all offer good gear.
   - Requirements are skill levels, sometimes plus quests.
   - Named items have fixed identities and deliberate upgrade paths (materials, crafting, quests).
-- **Crafting:** smithing, tailoring, leatherworking and enchanting are learned independently.
-  Crafted gear stays competitive at high level, partly through rare boss materials.
+- **Crafting:** smithing, tailoring, leatherworking and enchanting are learned independently,
+  with cooking and alchemy, and five gathering skills that feed them (CRAFTING.md). Crafted gear
+  stays competitive at high level, partly through rare boss materials.
 - **No durability loss.**
 - **Death:**
   - You keep your equipment, inventory and skills.

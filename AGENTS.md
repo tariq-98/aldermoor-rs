@@ -45,6 +45,9 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
   `12-camera-smoothing`. Tools that name branches themselves (`codex/...`, `claude/...`) are fine:
   the link to the issue is `Closes #<n>` in the PR body. Never commit issue work straight to `main`.
 - Push work in progress to the branch at least at the end of each session.
+- Keep one checkout per agent and reuse it from ticket to ticket (switch branches in it rather than
+  cloning again), so each agent has a single `target/`. Don't point agents at one shared
+  `CARGO_TARGET_DIR`: cargo locks it for the whole build, so agents would wait on each other.
 - If you are blocked, add `status:blocked` and comment why.
 - CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux for the portable crates and
   on macOS for `render` and `client`. Keep it green; run the same commands locally before pushing.
@@ -85,6 +88,8 @@ removing someone else's lock.
   review comments or requested changes; no `status:needs-decision` issue blocking it; and the PR is
   mergeable without conflicts. Then mark it ready for review and squash-merge. If any of those
   isn't true, leave the PR open and say in it exactly what's missing.
+- Once your PR merges, run `cargo clean` in your checkout (or delete its `target/`). Build folders
+  fill the Mac's disk quickly when several agents keep old ones around.
 - If you stop before finishing, comment `Released: <what is done, what is left>` and set the
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are

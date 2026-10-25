@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -47,6 +47,18 @@ pub enum Command {
     Buy { shop: String, item: String, count: u16 },
     /// Sell `count` from an inventory slot to the shop you stand at.
     Sell { shop: String, slot: u8, count: u16 },
+    /// Start gathering from a node within reach (see `PlayerState::nodes`), swing after swing
+    /// until it runs out, your pack fills, or you move.
+    Gather { node: u32 },
+    /// Start skinning a dead beast within reach.
+    Skin { target: UnitId },
+    /// Strike in the current swing's sweet spot for a bonus. Only the first strike each swing
+    /// counts, so mashing it doesn't help.
+    Strike,
+    /// Make `count` of a recipe at the station you stand at, one after another.
+    Craft { recipe: String, count: u16 },
+    /// Stop gathering or crafting.
+    StopWork,
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -124,6 +136,22 @@ pub enum Avoid {
     Reflected,
     /// An aimed shot that flew past.
     Missed,
+}
+
+/// How hard a blow that reached its victim was, for the client's hitstop, camera kick and
+/// flinch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HitWeight {
+    Light,
+    /// A blow that winds up first.
+    Heavy,
+    Critical,
+    /// Stopped by a guard.
+    Blocked,
+    /// Stopped by a guard raised just in time.
+    Parried,
+    /// A monster's big blow, warned of on the ground.
+    Big,
 }
 
 /// The ground an area covers. Cones and lines point along the area's yaw.
@@ -292,6 +320,76 @@ pub struct PlayerState {
     pub loot: Vec<LootView>,
     /// The shop whose counter you stand at.
     pub shop: Option<ShopView>,
+    /// Every gathering and crafting skill, in `content::crafts::Skill` order (mining,
+    /// woodcutting, skinning, herbalism, fishing, smithing, tailoring, leatherworking,
+    /// enchanting, cooking, alchemy).
+    pub skills: Vec<SkillView>,
+    /// The gathering or crafting under way.
+    pub work: Option<WorkView>,
+    /// Gathering nodes nearby, depleted or not.
+    pub nodes: Vec<NodeView>,
+    /// The station you stand at, with what you could make there.
+    pub station: Option<StationView>,
+}
+
+/// A gathering or crafting skill's level, XP into it and what the next level takes (0 at the cap).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SkillView {
+    pub level: u8,
+    pub xp: u32,
+    pub xp_next: u32,
+}
+
+/// A swing at a node, or one item being made.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorkView {
+    /// The skill at work ("mining", "smithing", …).
+    pub skill: String,
+    /// What's being worked: the node's or the recipe's output's name.
+    pub name: String,
+    /// Seconds into this swing or item, and how long it takes.
+    pub elapsed: f32,
+    pub duration: f32,
+    /// The sweet spot, in seconds into the swing (both 0 when crafting, which has none).
+    pub sweet_from: f32,
+    pub sweet_to: f32,
+    /// This swing's strike landed in the sweet spot, or missed it.
+    pub struck: Option<bool>,
+    /// Items left to make after this one (crafting).
+    pub left: u16,
+}
+
+/// A gathering node: an ore vein, a tree, a herb patch, a fishing spot.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NodeView {
+    pub id: u32,
+    /// Its key in the craft tables (what to draw).
+    pub node: String,
+    pub name: String,
+    pub position: Vec3,
+    /// The skill level it takes.
+    pub level: u8,
+    /// False while it's run out and growing back.
+    pub ready: bool,
+}
+
+/// A crafting station and its recipes.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StationView {
+    pub station: String,
+    pub name: String,
+    pub recipes: Vec<RecipeView>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RecipeView {
+    pub recipe: String,
+    pub skill: String,
+    pub level: u8,
+    pub inputs: Vec<ItemView>,
+    pub output: ItemView,
+    /// How many you could make now from what you carry (0 below the level).
+    pub can_make: u16,
 }
 
 /// Some of one item: in a slot, a pile or a shop.
@@ -430,11 +528,17 @@ pub enum Event {
     /// `periodic` damage comes from a condition (bleeding, burning…), not a blow.
     Damage { target: UnitId, source: UnitId, amount: f32, crit: bool, school: School, periodic: bool },
     Heal { target: UnitId, source: UnitId, amount: f32, crit: bool },
+    /// A blow reached `victim`: it landed, or a guard stopped it. `dir` is the way it travelled
+    /// on the ground, as a yaw in 256ths of a turn (0 is +z, 64 is +x). `hitstop_ms` is how long
+    /// the client may freeze both bodies' poses; the sim itself never pauses.
+    Hit { attacker: UnitId, victim: UnitId, dir: u8, weight: HitWeight, hitstop_ms: u8 },
     /// A blow or effect that did no harm, and why.
     Avoided { target: UnitId, source: UnitId, how: Avoid },
     Died { unit: UnitId, killer: Option<UnitId> },
     /// A player's specialty reached a new level.
     LevelUp { unit: UnitId, specialty: String, level: u8 },
+    /// A player's gathering or crafting skill reached a new level.
+    SkillUp { unit: UnitId, skill: String, level: u8 },
     Respawned { unit: UnitId },
     Jumped { unit: UnitId },
     Dodged { unit: UnitId },

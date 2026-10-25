@@ -56,4 +56,4 @@ yet. Losing some coins in a recoverable pouch on death (DESIGN.md) is its own fo
 
 The player's own state carries `coins`, every `inventory` slot (with what the shop you stand at
 pays for each), the `loot` piles nearby you may take, and the `shop` you stand at with its wares
-and prices. Protocol version 7. The loot window, bags and shop screen are client work (#179).
+and prices. Protocol version 7 (8 with gathering and crafting, CRAFTING.md). The loot window, bags and shop screen are client work (#179).
