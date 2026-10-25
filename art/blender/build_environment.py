@@ -22,7 +22,7 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from aldermoor_art import env, export, fur, golem, review, scene as sc, sdf, shapes as sh  # noqa: E402
+from aldermoor_art import env, export, fur, golem, masonry, review, scene as sc, sdf, shapes as sh  # noqa: E402
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 ONLY = next((a.split("=", 1)[1].split(",") for a in ARGS if a.startswith("--only=")), None)
@@ -929,18 +929,37 @@ prop("signpost", "Signpost", "prop")(signpost)
 prop("bench", "Bench", "prop")(bench)
 prop("woodpile", "Woodpile", "prop")(woodpile)
 
+# Masonry stands where the `world` crate puts its solids (crates/world/src/masonry.rs), each piece
+# built to fill its blocks; they build their own levels of detail (aldermoor_art/masonry.py).
+MASONRY = masonry.pieces()
+HEADS = masonry.heads(MASONRY)
+for _id, _piece in MASONRY.items():
+    _blocks = [{k: b[k] for k in ("part", "center", "half", "yaw", "top", "rise")} for b in _piece["blocks"]]
+    if _id.startswith("wall.field."):
+        prop(_id, "Dry-stone wall", "masonry", blocks=_blocks, levels=True)(
+            lambda lod, piece=_piece, pid=_id: masonry.field_wall(piece, HEADS[pid], lod, seed=sum(map(ord, pid))))
+    elif _id == "ruin.hall":
+        prop(_id, "Ruined hall", "masonry", blocks=_blocks, levels=True)(lambda lod, piece=_piece: masonry.ruin_hall(piece, lod, seed=7))
+
 
 def triangles(objs):
     return sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in objs if o.type == "MESH")
 
 
 def build(p):
-    sc.reset()
-    objs = p["fn"]()
     path = env.OUT / f"{p['id']}.gltf"
-    export.rigid(path, objs)
+    if p.get("levels"):
+        # Builds each level of detail itself, LOD 0 last so its objects are the ones reviewed.
+        for lod in (2, 1, 0):
+            sc.reset()
+            objs = p["fn"](lod)
+            export.rigid(export.lod_path(path, lod) if lod else path, objs, lods=False)
+    else:
+        sc.reset()
+        objs = p["fn"]()
+        export.rigid(path, objs)
     pts = [o.matrix_world @ v.co for o in objs for v in o.data.vertices]
-    entry = {k: v for k, v in p.items() if k != "fn"}
+    entry = {k: v for k, v in p.items() if k not in ("fn", "levels")}
     entry["file"] = str(path.relative_to(sc.OUT))
     entry["height"] = round(max(q.z for q in pts), 3)
     entry["triangles"] = triangles(objs)

@@ -287,13 +287,14 @@ fn cliffs_taller_than_chest_height_stop_you() {
     assert!(t.y < sim.land().ground(-42.0, -10.0) - 2.0, "got up the cliff to {t}");
 }
 
-/// A player on the road with a wall `rise` metres tall across their way 3 m east, walking at it.
+/// A player on the road with a wall `rise` metres tall across their way 3 m east, walking at it
+/// (by the field gate, so nothing but the field lies beyond it).
 fn at_a_wall(rise: f32) -> (Sim, u32, f32) {
     let mut sim = Sim::new(7);
-    let at = Vec2::new(5.0, 10.0);
+    let at = Vec2::new(5.0, 12.0);
     let wall = at + Vec2::new(3.0, 0.0);
     let top = sim.land().ground(wall.x, wall.y) + rise;
-    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top) });
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
     let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
     sim.step();
     go(&mut sim, id, Vec2::X, false);
@@ -319,6 +320,56 @@ fn a_wall_taller_than_chest_height_stops_you() {
     let t = sim.get::<Transform>(id).unwrap().pos;
     assert!(t.x < 7.6 && t.x > 6.5, "stopped at x = {}", t.x);
     assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "left the road for {t}");
+}
+
+/// How far above the terrain a unit is standing (on a wall, its height).
+fn up_off_the_terrain(sim: &Sim, id: u32) -> f32 {
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    t.y - sim.land().surface(t.x, t.z)
+}
+
+#[test]
+fn climbs_a_field_wall_by_the_road_and_walks_along_its_top() {
+    // On the road below the field gate, running east into the dry-stone wall.
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", Vec2::new(6.0, 8.0), std::f32::consts::FRAC_PI_2);
+    sim.step();
+    go(&mut sim, id, Vec2::X, false);
+    assert!(climb(&mut sim, id, 90), "never climbed the wall");
+    let up = up_off_the_terrain(&sim, id);
+    assert!(up > 0.85 && up < 1.25, "stood {up} m up");
+    // Along the top, down the road's slope toward the village: walked, not climbed.
+    let along = (Vec2::new(9.65, 6.0) - Vec2::new(10.75, 10.4)).normalize();
+    sim.command(id, Command::Move { direction: along, walk: true, sprint: false, face_yaw: None });
+    for _ in 0..40 {
+        sim.step();
+        assert!(sim.get::<Motion>(id).unwrap().forced.is_none(), "climbed a step along the top");
+    }
+    let up = up_off_the_terrain(&sim, id);
+    assert!(up > 0.85 && up < 1.25, "walked off the wall: {up} m up");
+}
+
+#[test]
+fn climbs_the_ruins_broken_wall_step_by_step_but_not_its_gable() {
+    // East of the ruined hall's broken east wall, by its lowest stump.
+    let mut sim = Sim::new(7);
+    let ruin = sim.land().masonry.iter().find(|m| m.prop == "ruin.hall").unwrap().origin;
+    let id = sim.spawn_player("Hero", Vec2::new(-12.0, 51.6), -std::f32::consts::FRAC_PI_2);
+    sim.step();
+    go(&mut sim, id, -Vec2::X, false);
+    assert!(climb(&mut sim, id, 90), "never climbed the stump");
+    // North along the top, up each broken step to the lookout under the gable.
+    go(&mut sim, id, -Vec2::Y, false);
+    sim.run_for(6.0);
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    assert!((t.y - (ruin.y + 4.2)).abs() < 0.05, "stopped at {t}, below the lookout");
+    assert!(t.z > 42.4, "went into the gable");
+    // From the ground, the gable stops you.
+    let id = sim.spawn_player("Hero", Vec2::new(-18.0, 39.0), 0.0);
+    sim.step();
+    go(&mut sim, id, Vec2::Y, false);
+    assert!(!climb(&mut sim, id, 90), "climbed the gable");
+    assert!(xz(&sim, id).y < 41.25, "walked into the gable to {}", xz(&sim, id));
 }
 
 #[test]
@@ -474,10 +525,37 @@ fn a_pack_from_one_side_fans_out_round_its_prey() {
 
 #[test]
 fn bodies_stacked_on_one_spot_ease_apart() {
+    // A player and a monster, and two players on opposing sides (Wilderness, team modes).
+    let mut sim = Sim::new(7);
+    let road = Vec2::new(5.0, 10.0);
+    let a = sim.spawn_player("A", road, 0.0);
+    let wolf = sim.spawn_mob("wolf", road).unwrap();
+    let e = sim.entity(wolf).unwrap();
+    sim.world.entity_mut(e).remove::<sim::Brain>();
+    sim.run_for(0.5);
+    assert!(worst_overlap(&sim, &[a, wolf]) < 0.05, "still stacked {:.2} m apart", (xz(&sim, a) - xz(&sim, wolf)).length());
+
+    let mut sim = Sim::new(7);
+    let a = sim.spawn_player("A", road, 0.0);
+    let b = sim.spawn_player("B", road, 0.0);
+    sim.get_mut::<sim::Unit>(b).unwrap().faction = sim::Faction::Hostile;
+    sim.run_for(0.5);
+    assert!(worst_overlap(&sim, &[a, b]) < 0.05, "still stacked {:.2} m apart", (xz(&sim, a) - xz(&sim, b)).length());
+}
+
+#[test]
+fn players_on_the_same_side_pass_through_each_other() {
     let mut sim = Sim::new(7);
     let road = Vec2::new(5.0, 10.0);
     let a = sim.spawn_player("A", road, 0.0);
     let b = sim.spawn_player("B", road, 0.0);
     sim.run_for(0.5);
-    assert!(worst_overlap(&sim, &[a, b]) < 0.05, "still stacked {:.2} m apart", (xz(&sim, a) - xz(&sim, b)).length());
+    assert!((xz(&sim, a) - xz(&sim, b)).length() < 0.01, "two friends were pushed apart");
+    // One walks straight through the other, without being turned aside.
+    let start = xz(&sim, b);
+    go(&mut sim, b, Vec2::new(1.0, 0.0), false);
+    sim.run_for(0.5);
+    let moved = xz(&sim, b) - start;
+    assert!(moved.y.abs() < 0.01 && (moved.x - 3.0).abs() < 0.2, "walked {moved}");
+    assert!((xz(&sim, a) - road).length() < 0.01, "the one standing still was shoved");
 }

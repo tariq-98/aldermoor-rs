@@ -4,6 +4,8 @@ use glam::Vec2;
 use protocol::{Command, Event};
 use sim::content::progression::{kill_xp, to_next, MAX_LEVEL};
 use sim::content::Rank;
+use sim::combat::effects::{deal_damage, heal};
+use sim::combat::{life, source};
 use sim::{Brain, Credit, Progress, Sim, Specialty, Stats, Transform, Unit, Vitals};
 
 fn wolf(sim: &Sim) -> u32 {
@@ -51,21 +53,84 @@ fn killing_a_monster_pays_the_specialty_you_fought_with() {
 }
 
 #[test]
-fn fight_xp_splits_between_the_specialties_used_by_how_often() {
+fn fight_xp_splits_between_the_specialties_used_by_how_much_each_did() {
     let mut sim = Sim::brambleford(3);
     let hero = sim.spawn_player("Hero", Vec2::new(-38.0, 21.0), 0.0);
     sim.run_for(1.0);
     let w = wolf(&sim);
     let level = sim.get::<Unit>(w).unwrap().level;
-    // Three skills used on it as a mage earlier, and the warrior's blow that finishes it.
-    sim.get_mut::<Credit>(w).unwrap().0.push((hero, Specialty::Mage, 3));
-    sim.get_mut::<Vitals>(w).unwrap().health = 1.0;
-    let mut events = Vec::new();
-    assert!(fight(&mut sim, hero, w, 5.0, &mut events));
+    // Three quarters of the fight as a mage earlier, the rest as the warrior.
+    sim.get_mut::<Credit>(w).unwrap().0 = vec![(hero, Specialty::Mage, 30.0), (hero, Specialty::Warrior, 10.0)];
+    let e = sim.entity(w).unwrap();
+    life::die(&mut sim.world, e, None);
     let p = progress(&sim, hero);
+    let full = kill_xp(level, Rank::Normal, 1) as f64;
+    assert_eq!(p.xp[Specialty::Mage.index()], (full * 0.75).round() as u32);
+    assert_eq!(p.xp[Specialty::Warrior.index()], (full * 0.25).round() as u32);
+}
+
+#[test]
+fn everyone_with_a_tenth_of_the_fight_gets_full_xp_and_a_tap_gets_none() {
+    let mut sim = Sim::brambleford(3);
+    let a = sim.spawn_player("A", Vec2::new(-38.0, 21.0), 0.0);
+    let b = sim.spawn_player("B", Vec2::new(-37.0, 21.0), 0.0);
+    let tap = sim.spawn_player("Tap", Vec2::new(-36.0, 21.0), 0.0);
+    let w = wolf(&sim);
+    let level = sim.get::<Unit>(w).unwrap().level;
+    sim.get_mut::<Credit>(w).unwrap().0 = vec![(a, Specialty::Warrior, 80.0), (b, Specialty::Warrior, 12.0), (tap, Specialty::Warrior, 8.0)];
+    let e = sim.entity(w).unwrap();
+    life::die(&mut sim.world, e, None);
     let full = kill_xp(level, Rank::Normal, 1);
-    assert_eq!(p.xp[Specialty::Mage.index()], full * 3 / 4);
-    assert_eq!(p.xp[Specialty::Warrior.index()], full / 4);
+    let xp = |id| progress(&sim, id).xp[Specialty::Warrior.index()];
+    assert_eq!((xp(a), xp(b), xp(tap)), (full, full, 0));
+}
+
+#[test]
+fn blows_count_without_the_overkill_and_so_do_blows_taken() {
+    let mut sim = Sim::brambleford(3);
+    let hero = sim.spawn_player("Hero", Vec2::new(-38.0, 21.0), 0.0);
+    sim.run_for(1.0);
+    let w = wolf(&sim);
+    let mut events = Vec::new();
+    assert!(!fight(&mut sim, hero, w, 3.0, &mut events));
+    let dealt: f32 = events.iter().filter_map(|e| match e {
+        Event::Damage { target, source, amount, .. } if *target == w && *source == hero => Some(*amount),
+        _ => None,
+    }).sum();
+    let taken: f32 = events.iter().filter_map(|e| match e {
+        Event::Damage { target, source, amount, .. } if *target == hero && *source == w => Some(*amount),
+        _ => None,
+    }).sum();
+    assert!(dealt > 0.0 && taken > 0.0, "a real fight: dealt {dealt}, taken {taken}");
+    let counted = sim.get::<Credit>(w).unwrap().of(hero);
+    assert!((counted - (dealt + taken)).abs() < 0.5, "counted {counted} of {dealt} dealt and {taken} taken");
+    // A blow that fells counts only the health that was left: here the wolf's on the hero.
+    sim.get_mut::<Vitals>(hero).unwrap().health = 1.0;
+    let (we, he) = (sim.entity(w).unwrap(), sim.entity(hero).unwrap());
+    let src = source(&sim.world, we, None).unwrap();
+    deal_damage(&mut sim.world, &src, he, 500.0, false, false);
+    let after = sim.get::<Credit>(w).unwrap().of(hero);
+    assert!((after - counted - 1.0).abs() < 0.01, "the overkill counted: {counted} became {after}");
+}
+
+#[test]
+fn healing_the_fighters_is_a_share_of_the_kill() {
+    let mut sim = Sim::brambleford(3);
+    let hero = sim.spawn_player("Hero", Vec2::new(-38.0, 21.0), 0.0);
+    let healer = sim.spawn_hero("Healer", Specialty::Healer, 1, Vec2::new(-40.0, 18.0), 0.0);
+    sim.run_for(1.0);
+    let w = wolf(&sim);
+    let mut events = Vec::new();
+    fight(&mut sim, hero, w, 1.0, &mut events);
+    assert_eq!(sim.get::<Brain>(w).unwrap().mode, sim::Mode::Chase, "the wolf isn't fighting");
+    sim.get_mut::<Vitals>(hero).unwrap().health -= 40.0;
+    let (he, ee) = (sim.entity(hero).unwrap(), sim.entity(healer).unwrap());
+    let src = source(&sim.world, ee, None).unwrap();
+    let healed = heal(&mut sim.world, &src, he, 30.0, false);
+    assert!(healed > 0.0);
+    let c = sim.get::<Credit>(w).unwrap();
+    assert_eq!(c.of(healer), healed);
+    assert!(c.0.iter().any(|&(id, s, _)| id == healer && s == Specialty::Healer));
 }
 
 #[test]
@@ -77,6 +142,9 @@ fn a_monster_that_gets_away_pays_nothing() {
     let mut events = Vec::new();
     assert!(!fight(&mut sim, hero, w, 1.0, &mut events));
     assert!(!sim.get::<Credit>(w).unwrap().0.is_empty(), "the blows weren't counted");
+    // Break off and run: no more swings, so the result doesn't hang on whether the pack, wandering
+    // round the walls and the ruin, catches up.
+    sim.command(hero, Command::SetAutoAttack(false));
     sim.command(hero, Command::Move { direction: Vec2::new(1.0, 0.0), walk: false, sprint: false, face_yaw: None });
     sim.run_for(15.0);
     assert_eq!(progress(&sim, hero).xp, [0; 6]);

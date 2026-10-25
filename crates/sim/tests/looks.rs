@@ -74,3 +74,25 @@ fn every_look_names_real_art() {
         }
     }
 }
+
+#[test]
+fn every_missile_cast_and_aura_effect_names_real_content() {
+    let cat = catalog();
+    let fx = cat.effects.as_ref().expect("assets/catalog/effects.json");
+    let content = sim::content::catalog();
+    for a in &content.abilities {
+        if let Some(m) = &a.missile {
+            assert!(fx.projectiles.contains_key(m.visual), "{} flies a {}, which has no look", a.key, m.visual);
+        }
+        // A spell's cast glows in the hands; a heavy blow's wind-up shows in the swing.
+        if (a.cast > 0.0 || a.channel > 0.0) && a.school != protocol::School::Physical {
+            assert!(fx.casts.contains_key(a.key), "{} is cast but its hands don't glow", a.key);
+        }
+    }
+    for key in fx.casts.keys() {
+        assert!(content.abilities.iter().any(|a| a.key == key), "effects name a cast {key} that isn't an ability");
+    }
+    for key in fx.auras.keys() {
+        assert!(content.auras.iter().any(|a| a.key == key), "effects name an aura {key} that doesn't exist");
+    }
+}

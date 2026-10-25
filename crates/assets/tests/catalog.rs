@@ -156,6 +156,36 @@ fn the_valley_has_scenery_for_everything_world_places() {
 }
 
 #[test]
+fn masonry_is_built_for_the_blocks_world_stands_it_on() {
+    let cat = assets::Catalog::load(root()).unwrap();
+    let env = cat.environment.as_ref().expect("an environment catalogue");
+    let valley = world::Valley::new();
+    for m in &valley.masonry {
+        let prop = env.props.iter().find(|p| p.id == m.prop).unwrap_or_else(|| panic!("no prop {}: rebuild the environment art", m.prop));
+        assert_eq!(prop.kind, "masonry", "{}", m.prop);
+        assert_eq!(prop.blocks.len(), m.blocks.len(), "{} was built for other blocks: rebuild the environment art", m.prop);
+        for (a, b) in prop.blocks.iter().zip(&m.blocks) {
+            let near = |x: f32, y: f32| (x - y).abs() < 0.002;
+            let same = near(a.center[0], b.center.x)
+                && near(a.center[1], b.center.y)
+                && near(a.half[0], b.half.x)
+                && near(a.half[1], b.half.y)
+                && near(a.yaw, b.yaw)
+                && near(a.rise, b.rise)
+                && match (a.top, b.top) {
+                    (Some(x), Some(y)) => near(x, y),
+                    (None, None) => true,
+                    _ => false,
+                };
+            assert!(same, "{}'s {} block moved in world: rebuild the environment art", m.prop, b.part);
+        }
+    }
+    for p in env.props.iter().filter(|p| p.kind == "masonry") {
+        assert!(valley.masonry.iter().any(|m| m.prop == p.id), "world no longer places {}", p.id);
+    }
+}
+
+#[test]
 fn the_valley_has_ground_water_sky_and_light() {
     let root = root();
     assert!(root.join("catalog/surfaces.json").exists() && root.join("catalog/look.json").exists());

@@ -27,7 +27,13 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Walls and ruins can be climbed too. A `world::Solid` with a `top` is ground, not an
     obstacle: its sides are faces like any cliff's, so one that tops out within 1.5 m is climbed
     and stood on, and a taller one stops you. Buildings and trees have no top and only block.
-    None stand in the valley yet; they arrive with their art (#153).
+    A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
+    a step at a time.
+  - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
+    top: climb on and walk along them. The ruined hall on the hill south-west of the village
+    (#160) breaks down in steps along its east wall, each a climb from the last, up to a lookout
+    4.2 m up under its gable; the gable, its buttresses and the door's jambs are too tall to climb
+    (`crates/world/src/masonry.rs`).
 - **Swimming:** the river is no longer a wall.
   - Water deeper than 0.5 m is swum (until it's shallower than 0.4 m). Swimmers float with
     their feet 0.5 m under the surface (`world::WATER_LEVEL`), at 0.45× run speed.
@@ -49,6 +55,10 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   a pack spreads round a player instead of shoving them about. Nobody is
   pushed up a wall or off a cliff. Rolls, leaps, lunges and climbs pass through bodies, and
   whoever they land on is eased apart afterwards.
+- **Friendly players pass through each other.** Two players who can't harm each other overlap
+  freely, so nobody can block a doorway, a bridge or a vendor (as in WoW and Guild Wars 2).
+  Players on opposing sides still collide, and so do players and monsters, so body-blocking stays
+  part of a fight.
 - **Packs surround their prey.** Once a melee monster is close to its target, it makes for its own
   place on a ring just inside its reach. It starts from the side it came in on and moves round
   until it has its share of the circle: evenly split between everyone fighting that target, or

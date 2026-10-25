@@ -34,8 +34,8 @@ use std::sync::{Arc, OnceLock};
 pub use components::*;
 pub use content::Specialty;
 pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
-pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, PILE_PRIVATE, SLOTS};
-pub use progress::{Credit, Progress};
+pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
+pub use progress::{Credit, Progress, SHARE_FLOOR};
 pub use rng::Rng;
 pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
 

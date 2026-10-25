@@ -27,9 +27,13 @@ Agreed with Chippy on 25 October 2026 (#71). The tables are `crates/content/item
   table says otherwise; the golem 15%, the Barrow King 25%). Summons drop nothing.
 - Loot rolls use their own random sequence from the world's seed, so the same seed and commands
   give the same drops, and loot doesn't shift the fight's own rolls.
-- What drops lies in a **pile** where the monster fell. The player who used the most skills on
-  it can take it straight away (`Command::Loot`, within 3 m), anyone after 60 seconds, and it's
-  gone after 3 minutes. What doesn't fit in your pack stays in the pile.
+- **Personal loot:** every player who earned the kill's XP (a tenth of the fight or more, see
+  PROGRESSION.md) gets their own roll of the table, in their own **pile** where the monster
+  fell. Only they see it and only they can take it (`Command::Loot`, within 3 m), so there's no
+  race for drops and no ninja looting. It's gone after 3 minutes. What doesn't fit in your pack
+  stays in the pile.
+- The Wilderness keeps its own rule: a player who dies there drops everything for anyone to
+  take (#76).
 
 ## Shops
 
