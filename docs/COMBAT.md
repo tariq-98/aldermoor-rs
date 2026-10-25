@@ -1,8 +1,9 @@
 # How fighting works
 
 The combat core (milestone 2), as built in `crates/sim`. The content tables (abilities, auras,
-weapons, specialties and monsters) are in `crates/sim/src/content/`; the rules are in
-`crates/sim/src/combat/`. What the client receives is in [CONTRACT.md](CONTRACT.md).
+weapons, specialties and monsters) are RON files in `crates/content/combat/`, loaded and checked
+by `crates/content/src/combat.rs` (a bad file names its line and column; the types there document
+every field and its default); the rules are in `crates/sim/src/combat/`. What the client receives is in [CONTRACT.md](CONTRACT.md).
 
 The feel: tab-targeting and a skill bar like Guild Wars 2 and World of Warcraft, with WASD
 movement and action-game defence (rolling, guarding, parrying, aiming). Levels carry most of the

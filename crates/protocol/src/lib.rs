@@ -150,6 +150,7 @@ pub enum Pose {
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
 /// from `assets/catalog/`. Empty or `None` fields mean the body type's defaults.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Look {
     /// A `body_types` key in `humanoid.json` (e.g. "male", "elf_female", "goblin_male",
     /// "skeleton"), or a creature id in `creatures.json` (e.g. "wolf.grey").
