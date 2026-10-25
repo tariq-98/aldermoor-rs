@@ -10,12 +10,18 @@ on:
   issues:
     types: [opened, labeled]
 
+# A new issue fires one labeled event per label; queue them per issue so they don't race each
+# other's milestone update.
+concurrency:
+  group: tracking-${{ github.event.issue.number || 'all' }}
+
 permissions:
   issues: write
   contents: read
 
 jobs:
   sync:
+    if: github.event_name != 'issues' || github.event.action == 'opened' || startsWith(github.event.label.name, 'phase:')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
