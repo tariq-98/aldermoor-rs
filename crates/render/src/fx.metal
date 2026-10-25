@@ -9,7 +9,7 @@ struct Frame {
 };
 struct Material {float4 colour,frame,next,params,extra;};
 struct Quad {float4 position,a,b;Material m;};
-struct Decal {float4x4 to_decal,to_world;float4 shape,size,fill;Material m;};
+struct Decal {float4x4 to_decal,to_world;float4 shape,size,area,fill;Material m;};
 struct MeshInstance {float4x4 model;float4 shading,terms;Material m;};
 struct Vertex {float4 position,normal,tangent,color,uv;uint4 joints;float4 weights;};
 // Output size (w, h, 1/w, 1/h); the camera's right (xyz) and scene time (w); its up (xyz).
@@ -198,17 +198,17 @@ fragment float4 decal_fragment(DecalVary i [[stage_in]],float4 motion [[color(1)
     float grown=d.shape.z;
     float inside,front;
     if(kind==2){
-        // From the apex, which sits size.w behind the box's centre; the reach is twice size.z.
-        p.y+=d.size.w;
-        float reach=d.size.z*2.,r=length(p),angle=atan2(p.x,p.y);
+        // From the apex, which sits area.z behind the box's centre; the reach is twice area.y.
+        p.y+=d.area.z;
+        float reach=d.area.y*2.,r=length(p),angle=atan2(p.x,p.y);
         inside=min(reach-r,(d.shape.y-abs(angle))*max(r,0.001));
         front=r-reach*grown;
     }else if(kind==3){
-        inside=min(d.size.x-abs(p.x),d.size.z-abs(p.y));
-        front=p.y+d.size.z-2.*d.size.z*grown;
+        inside=min(d.area.x-abs(p.x),d.area.y-abs(p.y));
+        front=p.y+d.area.y-2.*d.area.y*grown;
     }else{
         float r=length(p);
-        inside=d.size.x-r;front=r-d.size.x*grown;
+        inside=d.area.x-r;front=r-d.area.x*grown;
     }
     float aa=max(fwidth(inside),1e-4);
     device const Material& m=d.m;

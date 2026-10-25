@@ -197,8 +197,7 @@ def ornate_ring(n=256, seed=97):
     sparkle = angular_noise(theta, 4, seed, 24) ** 4
     heat = np.clip(lines * (0.8 + 0.2 * sparkle) + 0.3 * glow, 0, 1)
     cover = np.clip(lines + 0.45 * glow, 0, 1)
-    sweep = (math.pi / 2 - theta) % math.tau / math.tau
-    return pack(heat, cover, 1 - sweep * 0.97)
+    return pack(heat, cover, _drawn_from_top(theta))
 
 
 # Elder Futhark, drawn as strokes in a box 0.6 wide and 1 tall, base at y = 0.
@@ -257,10 +256,17 @@ def _circle_coverage(r, radius, width, aa):
     return stroke(np.abs(r - radius), width, aa)
 
 
+def _drawn_from_top(theta):
+    """Erosion order for a circle drawn in from its top both ways round, meeting at the
+    bottom: no seam shows as it draws in or fades out."""
+    sweep = (math.pi / 2 - theta) % math.tau / math.tau
+    return 0.03 + 0.97 * (1 - 2 * np.minimum(sweep, 1 - sweep))
+
+
 def runes(n=512, seed=23):
     """A casting circle: two outer rings with a band of runes between, a ring of beads, an
-    eight-pointed star and an inner ring round a small sun. Erosion runs round it, so a rising threshold
-    draws the circle in by hand, sweep by sweep."""
+    eight-pointed star and an inner ring round a small sun. Erosion runs round it from the top,
+    so a falling threshold draws the circle in by hand and a rising one wipes it away."""
     x, y = grid(n)
     r = np.hypot(x, y)
     theta = np.arctan2(y, x)
@@ -304,8 +310,7 @@ def runes(n=512, seed=23):
     glow *= smooth(1.0, 0.95, r)
     heat = np.clip(lines + 0.28 * glow, 0, 1)
     cover = np.clip(lines * 0.95 + 0.4 * glow, 0, 1)
-    sweep = (math.pi / 2 - theta) % math.tau / math.tau
-    return pack(heat, cover, 1 - sweep * 0.97)
+    return pack(heat, cover, _drawn_from_top(theta))
 
 
 def sigil(n=512, seed=29):
@@ -345,8 +350,7 @@ def sigil(n=512, seed=29):
     glow *= smooth(1.0, 0.95, r)
     heat = np.clip(lines + 0.25 * glow, 0, 1)
     cover = np.clip(lines * 0.95 + 0.42 * glow, 0, 1)
-    sweep = (math.pi / 2 - theta) % math.tau / math.tau
-    return pack(heat, cover, 1 - sweep * 0.97)
+    return pack(heat, cover, _drawn_from_top(theta))
 
 
 # --- Shapes ------------------------------------------------------------------------------------

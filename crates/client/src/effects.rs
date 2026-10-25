@@ -703,7 +703,8 @@ fn area_anchor(a: &AreaView, s: &Scene) -> Anchor {
     );
     anchor.scale = reach;
     anchor.shape = Some(a.shape);
-    anchor.ground = Ground::fit(a.center, reach, s.ground);
+    // Marks on an area reach a little past it (a field's burn, a warning's glow).
+    anchor.ground = Ground::fit(a.center, reach * 1.2, s.ground);
     if a.warning {
         anchor.progress = ((a.elapsed + s.since) / a.duration.max(0.001)).clamp(0., 1.);
     }
@@ -1073,7 +1074,14 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
             a.turn
         };
     let origin = Vec3::new(a.origin.x, g.y, a.origin.z) + tilt * (a.turn * centre);
-    let to_world = Mat4::from_scale_rotation_translation(half, turn, origin);
+    // A shape's box reaches past it, so the glow round its edge isn't cut off square.
+    let margin = if kind == fx::Decal::TEXTURE {
+        0.
+    } else {
+        l.edge * 5. + 0.08
+    };
+    let reach = half + Vec3::new(margin, 0., margin);
+    let to_world = Mat4::from_scale_rotation_translation(reach, turn, origin);
     let tile = [a.age * l.scroll[0], a.age * l.scroll[1], l.repeat, l.repeat];
     let material = part.material(life.t, life.seconds, alpha, tile);
     let fill = [l.fill[0], l.fill[1], l.fill[2], l.fill[3] * alpha];
@@ -1081,12 +1089,13 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
         to_decal: to_world.inverse().to_cols_array_2d(),
         to_world: to_world.to_cols_array_2d(),
         shape: [kind, cone, a.progress, l.edge],
-        // A cone's apex is half its box behind the box's centre.
-        size: [
+        size: [reach.x, reach.y, reach.z, 0.],
+        // A cone's apex is half its reach behind the box's centre.
+        area: [
             half.x,
-            half.y,
             half.z,
             if kind == fx::Decal::CONE { half.z } else { 0. },
+            0.,
         ],
         fill,
         material,
