@@ -144,9 +144,10 @@ def _frames(points):
 
 def field_wall(piece, heads, lod, seed):
     """One piece of dry-stone field wall at a level of detail (0, 1 or 2): a battered body of
-    walling stone, a coping of flat worn slabs exactly on the line you walk along, through-stones
-    and footings, and grass at its foot. `heads` says whether its start and end are the wall's
-    ends (finished with big end stones) or joints with the next piece. Returns its objects."""
+    walling stone under a coping of flat worn slabs, laid exactly on the line you walk along, with
+    footings along its foot. Rough grass round it comes from the ground's weights, not the prop.
+    `heads` says whether its start and end are the wall's ends (closed off) or joints with the
+    next piece. Returns its objects."""
     rng = random.Random(seed)
     ground = Ground(piece["ground"])
     width = 2 * piece["blocks"][0]["half"][1]
@@ -155,8 +156,6 @@ def field_wall(piece, heads, lod, seed):
     pts = [line[i] for i in keep]
     frames = _frames(pts)
     drystone, dressed = env.surface("drystone")[0], env.surface("dressed")[0]
-    grass = env.flat("grass", (0.36, 0.52, 0.16), rough=0.85)
-    grass.use_backface_culling = False
     # Arc length along the piece at each kept point.
     along = [0.0]
     for a, b in zip(pts, pts[1:]):
@@ -251,7 +250,7 @@ def field_wall(piece, heads, lod, seed):
         th = rng.uniform(0.1, 0.15)
         w = width + 2 * OVERHANG + rng.uniform(-0.03, 0.03)
         centre = Vector((p.x, p.y, p.z)) - rot @ Vector((0, 0, th / 2))
-        slab = _box("slab", centre, (l, w, th), dressed, rot=rot, bevel=(0.035, 0.025, 0.0)[lod], segments=(2, 1, 1)[lod])
+        slab = _box("slab", centre, (l, w, th), dressed, rot=rot, bevel=(0.035, 0.0, 0.0)[lod], segments=1)
         if lod < 2:
             # Weathered and knocked about: each corner of the outline wanders a little, top and
             # bottom together, so the top stays flat where you stand.
@@ -274,37 +273,19 @@ def field_wall(piece, heads, lod, seed):
                 c = p.xy + n * (BASE_WIDTH / 2 + rng.uniform(-0.02, 0.04))
                 parts.append(_lump("footing", Vector((c.x, c.y, g + r * 0.1)), r, (rng.uniform(1.3, 1.9), 1.0, 0.75),
                                    math.atan2(d.y, d.x), dressed, rng, subdiv=1))
-                u += rng.uniform(0.9, 1.6)
-
-    # Grass at the foot of the wall, where the mower never reaches.
-    tufts = []
-    if lod < 2:
-        for side in (1, -1):
-            u = rng.uniform(0.1, 0.6)
-            while u < length - 0.1:
-                p, d, _ = at(u)
-                n = Vector((-d.y, d.x)) * side
-                xy = p.xy + n * (BASE_WIDTH / 2 + rng.uniform(0.02, 0.18)) + d * rng.uniform(-0.15, 0.15)
-                tufts.append(_tuft(Vector((xy.x, xy.y, ground(xy.x, xy.y) - 0.03)), rng, grass, lod))
-                u += rng.uniform(1.1, 2.0) * (1 if lod == 0 else 2.0)
+                u += rng.uniform(1.6, 2.6)
 
     _uvs_in_world(parts[1:], origin)
     for ob in parts:
         env.shade(ob, _wall_shade(ground, seed, ob.name.split(".")[0]))
-    if tufts:
-        grass_ob = env.join(tufts, "grass")
-        env.wind(grass_ob, lambda co: min(1.0, max(0.0, co.z - ground(co.x, co.y)) / 0.4) ** 1.5)
-        for p in grass_ob.data.polygons:
-            p.use_smooth = True
-        parts.append(grass_ob)
     # One mesh, so the renderer draws it a material at a time, not a stone at a time.
     return [env.join(parts, "wall")]
 
 
 def _wall_shade(ground, seed, kind):
     """COLOR_0 for walling: darker and greener toward the damp ground, broad patches of
-    weathering. A slab's worn top stays at full brightness, the lip you climb onto; the dressed
-    stones set in the face (through-stones, footings) take the walling's tone."""
+    weathering. A slab's worn top stays at full brightness, the lip you climb onto; the footings
+    take the walling's tone."""
     def fn(co, n):
         h = co.z - ground(co.x, co.y)
         damp = 0.62 + 0.38 * _smooth(0.0, 0.5, h)

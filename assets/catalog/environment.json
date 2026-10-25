@@ -612,7 +612,7 @@
    ],
    "file": "environment/wall.field.1.gltf",
    "height": 1.943,
-   "triangles": 2676
+   "triangles": 1028
   },
   {
    "id": "wall.field.2",
@@ -678,7 +678,7 @@
    ],
    "file": "environment/wall.field.2.gltf",
    "height": 1.64,
-   "triangles": 3494
+   "triangles": 1290
   },
   {
    "id": "wall.field.3",
@@ -730,7 +730,7 @@
    ],
    "file": "environment/wall.field.3.gltf",
    "height": 1.309,
-   "triangles": 3248
+   "triangles": 1282
   },
   {
    "id": "wall.field.4",
@@ -782,7 +782,7 @@
    ],
    "file": "environment/wall.field.4.gltf",
    "height": 1.185,
-   "triangles": 3294
+   "triangles": 1246
   },
   {
    "id": "wall.field.5",
@@ -820,7 +820,7 @@
    ],
    "file": "environment/wall.field.5.gltf",
    "height": 1.399,
-   "triangles": 1898
+   "triangles": 748
   },
   {
    "id": "wall.field.6",
@@ -900,7 +900,7 @@
    ],
    "file": "environment/wall.field.6.gltf",
    "height": 1.415,
-   "triangles": 3792
+   "triangles": 1446
   },
   {
    "id": "wall.field.7",
@@ -938,7 +938,7 @@
    ],
    "file": "environment/wall.field.7.gltf",
    "height": 1.129,
-   "triangles": 2316
+   "triangles": 896
   },
   {
    "id": "wall.field.8",
@@ -976,7 +976,7 @@
    ],
    "file": "environment/wall.field.8.gltf",
    "height": 1.096,
-   "triangles": 2478
+   "triangles": 940
   },
   {
    "id": "wall.field.9",
@@ -1028,7 +1028,7 @@
    ],
    "file": "environment/wall.field.9.gltf",
    "height": 1.418,
-   "triangles": 3942
+   "triangles": 1516
   },
   {
    "id": "well",
