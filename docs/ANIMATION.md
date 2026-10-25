@@ -16,8 +16,10 @@ is due at its level of detail (see Level of detail below), it calls `update_comb
 the unit's combat view and calls `update`, which builds the pose in this order:
 
 1. **Base clip** (`clip_for`): the action's clip if one is playing (`action_clip`), otherwise the
-   pose's: idle, walk, jog or sprint by speed, jump, fall, roll, hit or death. Beasts map poses to
-   their role clips.
+   pose's: idle (each unit at its own phase), walk, jog or sprint by speed, the jump's take-off and
+   loop on one timeline, roll, hit or death. Beasts map poses to their role clips. Just before it,
+   `anim::Landing` notes a touchdown, and a standing body that fell far enough to hurt plays
+   `Jump_Land` (#217, see Weight below).
 2. **Body yaw** (`anim::Turn`, #211): the yaw the body is drawn at (`body_yaw`), which lags the
    sim's while turning on the spot, and where the upper body aims. The stride reads the travel
    against it.
@@ -27,33 +29,38 @@ the unit's combat view and calls `update`, which builds the pose in this order:
    once (`ClipSet`, #204), and every character with the same skeleton and clips shares it through
    `ModelCache::clip_set`. A clip samples only the tracks the body uses: humanoid clips turn every
    bone but move only the pelvis, and never scale.
-4. **Legs under actions** (#186): an attack or cast on the move keeps the stride on the legs
+4. **Reaching for the ground** (#217): falling, a humanoid's legs mix toward `Jump_Land`'s first
+   frame by when the body will touch down.
+5. **Legs under actions** (#186): an attack or cast on the move keeps the stride on the legs
    (`walk_under`, `Bones::Lower`), and notes where the action faced the chest.
-5. **Upper-body layers** (`Bones::Upper` is `spine_01` and everything under it), in this order, the
+6. **Upper-body layers** (`Bones::Upper` is `spine_01` and everything under it), in this order, the
    last one applied winning: a drawn weapon's idle while moving, the guard (or the parry), and the
    ready or stow transition.
-6. **Hips toward the travel** (`turn_hips`, #110): the hips turn round the vertical toward where
+7. **Hips toward the travel** (`turn_hips`, #110): the hips turn round the vertical toward where
    the body travels, taking the legs and planted feet with them, and the spine turns the chest back,
    spread evenly over its three bones: to the front, or under an action to where the action faced
    it, and on by however far the aim is round from the body. The chest stops `MAX_TWIST` (60°)
    round from the hips, or at the clip's own twist if that is more, and the neck and head share up
    to `HEAD_TWIST` (30°) of what it can't take.
-7. **Feet stepping round** (`step_round`, #211): while the body turns on the spot, the legs reach
+8. **Feet stepping round** (`step_round`, #211): while the body turns on the spot, the legs reach
    with two-bone IK to where the feet stand.
-8. **Gaze** (`follow_gaze`, #212): the spine, neck and head turn toward where the character
-   looks, so a drawn bow points where the crosshair does and heads turn to targets (see Aim and
-   look-at below). Before `perform`, so the hands keep their grips on what the arms now point.
-9. **World matrices**, then `perform`: the hand reaching for the sheath, the off hand on a
-   two-handed grip, and the bow's string and arrow morphs.
-10. **The blender** (`anim::Blender`): when anything switched since the last frame it starts
+9. **Lean** (`anim::Lean`, `lean_body`, #217): the body tips toward its acceleration, the pelvis
+   about the ground beneath it and the spine the rest of the way.
+10. **Gaze** (`follow_gaze`, #212): the spine, neck and head turn toward where the character
+    looks, so a drawn bow points where the crosshair does and heads turn to targets (see Aim and
+    look-at below). It takes the lean back out of the pitch. Before `perform`, so the hands keep
+    their grips on what the arms now point.
+11. **World matrices**, then `perform`: the hand reaching for the sheath, the off hand on a
+    two-handed grip, and the bow's string and arrow morphs.
+12. **The blender** (`anim::Blender`): when anything switched since the last frame it starts
     carrying the old motion into the new, and while a switch settles it changes `local`, so the
     world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
     letting go of or taking a grip.
-11. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops and the legs
-    reach for the ground, and planted feet hold still (see Feet on the ground below). After the
-    blender, so nothing smooths the feet off the ground, and the blender keeps the pose from
-    before it.
-12. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
+13. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops (and dips on
+    landing, #217) and the legs reach for the ground, and planted feet hold still (see Feet on the
+    ground below). After the blender, so nothing smooths the feet off the ground, and the blender
+    keeps the pose from before it.
+14. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
 
 ## Locomotion
 
@@ -210,13 +217,70 @@ the world:
   rest of the pose.
 - **A swing owns the head.** While an action's clip plays (an attack, a cast, a roll, a flinch,
   lying downed and getting back up, but not a shot, a bolt or a channel, which are aimed) and at
-  quarter detail, the gaze fades out on a 0.1 s spring, and back in after. A shot keeps its aim, so the arrow leaves the bow where the crosshair
-  points.
+  quarter detail, the gaze fades out on a 0.1 s spring, and back in after. A shot keeps its aim,
+  so the arrow leaves the bow where the crosshair points.
 - **Settled, it's free.** A spring that has all but got where it's going, and all but stopped,
   stops there and isn't run again until it has somewhere new to go, so a character looking ahead
   turns no bones, and one faded right out (at quarter detail, say) skips the gaze altogether. Fading
   back in, it starts turned the way it now looks, rather than sweeping across from where it looked
   before.
+
+## Weight
+
+The clips play upright and the same for everyone, and the sim changes a body's speed at once. On
+their own, a run sets off, stops and corners as if the body weighed nothing, a jump plays all of
+`Jump_Start`'s crouch after the body has left the ground, landings go straight back to running,
+and a crowd spawned together breathes in step. #217 adds the small procedural layers that give a
+body its weight (Overgrowth's approach, and Fortnite Chapter 5's procedural layering), in
+`anim::Lean`, `anim::Landing` and `anim::idle`:
+
+- **Lean.** `Lean::update` follows the body's velocity over the ground on a critically damped
+  spring with a half-life of 0.1 s (`VELOCITY_HALF_LIFE`), and the spring's rate of change is the
+  body's acceleration, smoothed. The body tips toward it by about a third (`SHARE`) of the angle
+  that would balance it (`atan(a / g)`, as a runner leans into a bend), up to 8° forward or back
+  and 10° to the side (`MAX_PITCH`, `MAX_BANK`). Below a jog (`FULL_SPEED`, 5 m/s) the caps shrink
+  in step with the speed, so a walker barely leans. The tilt follows on a spring of its own (0.07
+  s, `TILT_HALF_LIFE`), so it builds and goes without a jump whether the sim changes the speed at
+  once, as now, or ramps it (#195). Setting off at a run, the body leans the full 8° for about a
+  third of a second; running round at 6 m/s and 70° a second, it banks the full 10°.
+- **Where the lean goes.** The pelvis takes 60% of it (`LEAN_BODY`), tipping the whole body about
+  the point on the ground beneath it so the feet stay about where they were, and the spine bends
+  the rest of the way, a third at each bone. The gaze, after it, takes the lean back out of its
+  pitch, so an aimed bow stays on the crosshair. In the air, on a wall (#247), rolling, dead,
+  downed or getting back up, and at quarter detail, the body comes upright on the tilt's spring. At
+  a steady pace it leans no way at all, and costs nothing. `--lean off` keeps everyone upright, to
+  compare.
+- **Jumps.** The sim's jump leaves the ground at once at 6.6 m/s and tops out 1.09 m up a third
+  of a second later, while `Jump_Start` crouches for its first frames and pushes off. One timeline
+  runs through the air: it starts 0.07 s into `Jump_Start` (`TAKEOFF`), the legs already straight,
+  plays at whatever pace brings the clip's tuck (0.3 s in, `TUCK`) to the top of the jump, and runs
+  on into `Jump_Loop` where `Jump_Start` ends. `Pose::Jump` and `Pose::Fall` share it, so the
+  change from rising to falling changes nothing, and falling off an edge starts in the loop. On a
+  wall (#247) the climbing clips play instead: climbing up from a hang, which the sim also poses
+  as a jump, isn't in the air.
+- **Reaching for the ground.** Falling, a humanoid's legs reach for the ground as it nears:
+  `Jump_Land`'s first frame (legs out, the feet just meeting the ground) mixes in over the last 0.2
+  s before touching down (`REACH`), eased in and out. It's timed by when the body will land under
+  the sim's gravity (`anim::land::time_to_land`, from the height over the ground and how fast it
+  falls), not by the clip, the way Paragon's distance-matched landings are, so a hop and a long
+  fall both meet the ground with the legs ready. The reach changes no faster than 10 a second
+  (`REACH_RATE`, more than any fall needs), so passing over the edge of a ledge it lands on doesn't
+  snap the legs down. Not while an action plays.
+- **Landing.** Touching down, `Landing::update` says how fast the body fell and how far, and the
+  pelvis dips 1 cm for every m/s (`DIP`), up to 15 cm (`MAX_DIP`): 6.6 cm from a jump on the flat.
+  The dip is a critically damped spring kicked downward (0.1 s, `DIP_HALF_LIFE`), so it bottoms out
+  after about 0.07 s and is back after about 0.4 s, without bouncing. It goes on the pelvis's drop
+  in the feet step, so the knees bend and the feet stay on the ground, at full detail only.
+  Catching a hold on a wall (#247) isn't touching down.
+- **A fall that hurts** (past the sim's safe height, 4 m, `SAFE_FALL`) onto a body standing still
+  plays `Jump_Land` in full, a deep squat and back up, and ends as soon as the body moves. On the
+  move, the stride goes on and the dip goes the full 15 cm: the landing clip plays in place, so the
+  feet would slide.
+- **Idle phases.** Each unit's idle starts at its own phase and plays at its own pace
+  (`anim::idle::time`). The phase steps by the golden ratio's fraction from one id to the next, and
+  ids handed out together are consecutive, so neighbours start at least 0.38 of a loop apart and
+  any five at least a seventh. The pace is up to 5% faster or slower (`SPREAD`), so none stay in
+  step. The drawn idle layered over a moving upper body is offset the same way.
 
 ## Switches
 
@@ -341,7 +405,16 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   neck and head 85%), and a look round turns the chest a fifth; it fades out smoothly through a
   swing and comes back after; faded right out it stops, and fades back in turned the way it now
   looks; and as the point jumps about, passes behind and goes, the head never turns 25° in a frame,
-  and behind, it looks ahead.
+  and behind, it looks ahead. For weight: the body leans forward speeding up, back stopping and
+  into turns either way, whichever way it faces, never past the caps but up to them, and the caps
+  shrink with the speed (setting off at a walk, it barely leans); a speed that changes at once and
+  one ramped over a quarter second both lean without a jump and settle exactly upright; a body
+  first seen running doesn't lean, and one held upright comes back without a jump. Touching down
+  says how fast and how far the body fell (jumps from 0, 2 and 5 m up); the dip goes with the fall
+  speed up to its most, comes back without bouncing and settles; and the legs reach for the ground
+  only falling, from 0.2 s out to all the way on touching down, and without a jump when the body
+  passes over the edge of a ledge it lands on. Units with ids in a row start their idles well
+  apart, neighbours don't come in step over four loops, and the pace stays within 5%.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
   bone carries on at every switch, where cuts jump by over 0.5 rad (with the feet left as the
@@ -364,8 +437,9 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   `half_rate_blends_the_frames_between_a_rebuild_behind_and_quarter_rate_holds` runs three knights
   side by side at each tier: at half rate the hand moves every frame, its biggest step within a
   quarter of the full-rate knight's, and stays within 1 cm of where that knight's was two frames
-  before; at quarter rate it holds between rebuilds. `a_new_character_shows_its_pose_on_its_first_frame_at_any_tier` checks that
-  nobody shows the rest pose. `below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step`
+  before; at quarter rate it holds between rebuilds.
+  `a_new_character_shows_its_pose_on_its_first_frame_at_any_tier` checks that nobody shows the rest
+  pose. `below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step`
   drops a caped knight to half rate: the cape eases to the pose, its tip moving no more than a
   tenth of the way in a frame, and turning on the spot the feet stay put.
   `a_drawn_bow_pitches_the_spine_with_the_aim_and_a_look_mostly_the_head` has an archer look 30° up
@@ -375,16 +449,30 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   it at 70° for a point 100° round and looks ahead for one 150° round, the chest taking a fifth.
   `a_swing_takes_the_head_back_and_a_shot_keeps_its_aim` has a swordsman looking 45° round and 20°
   up slash: the gaze fades below 5% over the swing, never moving the head 5° in a frame, while an
-  archer loosing a shot stays aimed within 3°. The model tests check
-  that even keys are indexed and blended exactly (slerp for steps over 30°), uneven keys are
+  archer loosing a shot stays aimed within 3°.
+  `a_jump_takes_off_straight_tucks_at_the_top_and_lands_with_a_dip` jumps a knight on flat ground:
+  the pelvis leaves the ground over 0.8 m up, not crouched, the feet tuck highest within 3 frames of
+  the top of the jump and are within 5 cm of the ground touching down, and the pelvis dips 4.5 to
+  8.5 cm with the feet never sinking 1 cm.
+  `a_fall_that_hurts_lands_in_full_standing_and_dips_on_the_run` drops one 6 m beside a twin that
+  doesn't fall: standing, it plays `Jump_Land`, the pelvis going over 25 cm below the twin's;
+  running, the stride goes on, the pelvis dipping within 3 cm of `MAX_DIP` and back within 2 cm of
+  the twin's after 0.75 s. `runners_lean_forward_setting_off_back_stopping_and_into_turns` runs a
+  knight beside one that doesn't lean: the head goes forward setting off, back stopping and to the
+  inside running round, within the caps. `on_a_wall_the_body_neither_lands_nor_leans_nor_jumps`
+  drops one onto a hold (#247), shimmies it along the wall and climbs it up: no dip, no lean and no
+  timeline in the air. `neighbours_spawned_together_idle_out_of_step` checks that
+  knights with ids in a row stand differently, and the same knight twice the same. The model tests
+  check that even keys are indexed and blended exactly (slerp for steps over 30°), uneven keys are
   resampled, a constant track keeps one key and step keys hold.
 - The client's `--crowd` test checks that nobody in the crowd passes through anybody, even at 200,
   and that walkers and runners go as fast as their speed, the way they face.
 - The client's `--gait` run (`crates/client/src/gait.rs`) is for captures: facing one way, the
   player runs ahead, strafes, backpedals, sweeps the travel round every direction, walks, sprints
   and walks; then turns round, draws a weapon and runs the pattern again; then turns on the spot
-  (a small turn held, a long one, an about face and a spin) and circle-strafes once round. It logs
-  the frame each leg starts on, so a capture can be cut by leg.
+  (a small turn held, a long one, an about face and a spin) and circle-strafes once round; last it
+  jumps standing, sets off into a running jump and stops, and runs round a circle the way it faces
+  (#217). It logs the frame each leg starts on, so a capture can be cut by leg.
 
 ## Cost
 
@@ -398,21 +486,25 @@ clips have them. The cases: `idle`, `walk` (2.5 m/s, between the walk and jog lo
 and `strafe` (running square to the facing) hold their pose, `turn` stands looking 80° either way
 and back every two seconds (the feet step round on every sweep), `slash` and `run + slash` start
 the slash over every half second, and `start-stop` runs and stops every half second, so those
-three are blending most of the time.
+three are blending most of the time, and the body leans setting off and stopping. `circle` runs
+round at 6 m/s, leaning into the turn, and `jump` runs and jumps every second, the legs reaching
+for the ground on the way down and the pelvis dipping on landing.
 
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 |
-| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 |
+| circle | | | | | | | | 61,546 | 63,414 |
+| jump | | | | | | | | 83,542 | 85,944 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -457,6 +549,17 @@ it isn't run at all. Wall clock on
 the cloud runner can't tell it from the noise: posing at full detail measured 9.5 µs a character a
 frame, against 9.6 after #214, and quarter detail is unchanged.
 
+#217 costs 260 to 330 instructions a pose at a steady pace (0.4% to 0.6%), most of it a clip
+lookup a frame for the idle's length, to phase it; the lean, settled, isn't worked out at all, and
+while an action plays it costs next to nothing. Leaning costs more: setting off and stopping twice
+a second (`start-stop`) 1,600 more (1.9%) and running round (`circle`, new with #217, as is `jump`;
+their After #212 numbers are #212's code running them) 1,900 (3.0%), for the springs and turning
+the pelvis and spine; jumping every second (`jump`) 2,400 (2.9%), with the legs reaching for the
+ground (sampling `Jump_Land` on top of the loop) and the pelvis dipping. Wall clock on the cloud
+runner is within the noise: the fastest of six runs of each case measured 1% to 6% slower at full
+detail, where runs of the same build differ by up to 15%. At quarter detail the lean and the dip
+are off, and what's left (the jump's timing, the reach and the idle's phase) costs next to nothing.
+
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are
 the next cost to take on (#243): they're rebuilt every frame at every tier, and half of them are
@@ -464,9 +567,9 @@ copies of another part's.
 
 ## Next
 
-In the plan's order: #217 lean, landings and the idle phase, #218 hit flinches and hitstop (on
-`Event::Hit`, #191), #213 traversal (after #192), and #244 remote players' real aim in the
-snapshot.
+#239 gear changes that keep the character moving (no restart or pop when a look changes), then
+in the plan's order #218 hit flinches and hitstop (once `Event::Hit` is in, #191), #213 traversal
+(after #192), and #244 remote players' real aim in the snapshot.
 
 One thing to watch: combat clips take their time from `UnitCombat::action_time` in each snapshot.
 Snapshots go out every tick today; if the send rate drops to 20–30 Hz (#73), attacks would play in

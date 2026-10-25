@@ -89,6 +89,8 @@ struct Options {
     /// Whether characters' feet go on the ground (#214), or stay as the clips have them, to
     /// compare.
     foot_ik: bool,
+    /// Whether characters lean with their acceleration (#217), or run upright, to compare.
+    lean: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -132,6 +134,7 @@ impl Options {
             crowd: 0,
             anim_tiers: true,
             foot_ik: true,
+            lean: true,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -258,13 +261,20 @@ impl Options {
                         _ => anyhow::bail!("--foot-ik expects on or off"),
                     }
                 }
+                "--lean" => {
+                    o.lean = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--lean expects on or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -1140,6 +1150,9 @@ impl Game {
             if gait::draws(leg) {
                 self.host.send(Command::SetTarget(self.target(false)));
             }
+            if gait::jumps(leg) {
+                self.host.send(Command::Jump);
+            }
         }
         if self.last_move.as_ref() != Some(&command) {
             self.host.send(command.clone());
@@ -1452,6 +1465,7 @@ impl Game {
             c.partial_updates = !self.options.legacy_cpu;
             c.blender.set_method(self.options.blend);
             c.foot_placement = self.options.foot_ik;
+            c.leaning = self.options.lean;
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
             let tier = tiers.get(i).copied().unwrap_or_default();
             counts[tier as usize] += 1;
