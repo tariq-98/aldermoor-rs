@@ -429,7 +429,7 @@ pub(crate) fn spawn_mob(world: &mut World, key: &str, at: Vec2, level: Option<u8
         Anim::default(),
         Brain::new(def.key, at, def.aggro, def.wander),
         Home { pos, yaw },
-        Appearance((def.look)()),
+        Appearance(def.look.clone()),
     ));
     let id = world.resource_mut::<Units>().issue(e);
     // Spread monsters' decisions across the quarter-second so they don't all think at once.

@@ -42,6 +42,24 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 - Issues labelled `needs-mac` must be checked on the Mac. A cloud agent can do the code but must
   say in the PR that it was not run.
 
+## Sharing the Mac
+
+Several agents run on Chippy's Mac at once, and two timed runs on its GPU at the same time give
+void numbers (one overlapping run read 25 fps). Before any benchmark, fps comparison, `--benchmark`
+or timed smoke run, take the shared GPU lock, and release it as soon as the run ends:
+
+```sh
+until mkdir /tmp/aldermoor-gpu.lock 2>/dev/null; do sleep 30; done
+echo "<agent> <issue> $(date -u +%FT%TZ)" > /tmp/aldermoor-gpu.lock/owner
+# ... the timed run ...
+rm -f /tmp/aldermoor-gpu.lock/owner && rmdir /tmp/aldermoor-gpu.lock
+```
+
+`mkdir` either creates the folder or fails, so only one agent holds it. Release it even when the
+run fails. Builds, tests and captures that aren't timed don't need it. If the lock has been held
+for more than 30 minutes, read `owner` and say so on your issue (or to the coordinator) instead of
+removing someone else's lock.
+
 ## Finish or hand back
 
 - Open a draft PR whose body contains `Closes #<n>`. The Tracking workflow then sets
@@ -118,6 +136,8 @@ Codex owns `area:render` issues (see Ownership) and can pick up others when the 
   `network_access = true` under `[sandbox_workspace_write]` in `~/.codex/config.toml`, or approve
   the command). Then claim and finish exactly as above, signing claims `codex`. Name branches
   `codex/<issue number>-<short-slug>` so the Codex guard check applies.
+- Take the shared GPU lock (see [Sharing the Mac](#sharing-the-mac)) around every benchmark or
+  timed run on the Mac.
 - **Codex cloud** has no GitHub access while it works. Start the task with the issue number
   ("Work on #12"), and whoever starts it posts `Claimed by codex (cloud)` on the issue. Codex
   writes `Closes #12` in the PR description; the Tracking workflow moves the labels from there. Mac-only

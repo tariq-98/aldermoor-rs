@@ -28,7 +28,7 @@ fn every_look_names_real_art() {
     let gear: Vec<String> = cat.gear.as_ref().map(|g| g.items.iter().map(|i| i.id.clone()).collect()).unwrap_or_default();
     let creatures: Vec<String> = cat.creatures.as_ref().map(|c| c.creatures.iter().map(|c| c.id.clone()).collect()).unwrap_or_default();
     let mut looks = vec![sim::player_look()];
-    looks.extend(sim::content::catalog().mobs.iter().map(|m| (m.look)()));
+    looks.extend(sim::content::catalog().mobs.iter().map(|m| m.look.clone()));
     // Every specialty, with each of its weapon sets in hand.
     let mut sim = Sim::new(1);
     for s in sim::Specialty::ALL {
