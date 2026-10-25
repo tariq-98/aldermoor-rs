@@ -45,6 +45,9 @@ pub struct Placement {
     pub position: Vec2,
     pub yaw: f32,
     pub scale: f32,
+    /// Which of its family's art the renderer draws, kept when placements before it are dropped
+    /// so a tree doesn't change look when another one goes.
+    pub variant: usize,
 }
 
 /// The Brambleford valley: a village in a river valley, about 560 m across.
@@ -84,7 +87,7 @@ impl Valley {
     pub fn new() -> Valley {
         let mut solids = Vec::with_capacity(128);
         let houses: Vec<Placement> =
-            HOUSES.iter().map(|&(x, z, yaw, scale)| Placement { position: Vec2::new(x, z), yaw, scale }).collect();
+            HOUSES.iter().enumerate().map(|(variant, &(x, z, yaw, scale))| Placement { position: Vec2::new(x, z), yaw, scale, variant }).collect();
         for h in &houses {
             solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None });
         }
@@ -109,6 +112,8 @@ impl Valley {
             candidates.push(Vec2::new(x, z));
         }
         let mut trees = Vec::new();
+        // The art each tree had before trees left cliff faces (#40), so the rest keep theirs.
+        let mut variant = 0;
         for p in candidates {
             if (p.y - river_z(p.x)).abs() < 12.0
                 || path_distance(p.x, p.y) < 5.0
@@ -118,12 +123,14 @@ impl Valley {
             }
             let scale = r.range(0.85, 1.6);
             let yaw = r.range(0.0, std::f32::consts::TAU);
+            let art = variant;
+            variant += 1;
             // Not out of a cliff face. Checked after the draws so the trees that stay keep their
             // size and turn.
             if too_steep_for_a_tree(p) {
                 continue;
             }
-            trees.push(Placement { position: p, yaw, scale });
+            trees.push(Placement { position: p, yaw, scale, variant: art });
             solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None });
         }
         // The bridge's parapets, either side of its deck (after the trees, which are placed
@@ -439,6 +446,10 @@ mod tests {
         let last = v.solids[95];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
+        // Each tree keeps the art it had before the cliff trees went: its place in the 106.
+        assert!(v.trees.windows(2).all(|w| w[0].variant < w[1].variant));
+        assert!(v.trees.last().unwrap().variant < 106);
+        assert!(v.houses.iter().enumerate().all(|(i, h)| h.variant == i));
     }
 
     #[test]
