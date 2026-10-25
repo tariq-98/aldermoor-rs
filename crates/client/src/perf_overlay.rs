@@ -19,6 +19,19 @@ pub struct Overlay {
     cpu_ms: f64,
     frames: Vec<GpuFrame>,
     latest: Option<GpuFrame>,
+    /// This frame's character animation, and every recorded frame's.
+    animation: Animation,
+    animations: Vec<Animation>,
+}
+/// A frame's character animation on the CPU (#215).
+#[derive(Clone, Copy, Default)]
+pub struct Animation {
+    /// Posing the characters, which `anim::Crowd` keeps inside its budget, in milliseconds.
+    pub pose_ms: f64,
+    /// Building their skinning palettes and draws, in milliseconds.
+    pub palettes_ms: f64,
+    /// How many characters rebuild every frame, every other frame and every fourth.
+    pub tiers: [usize; 3],
 }
 impl Options {
     pub fn validate(&self, samples: usize) -> anyhow::Result<()> {
@@ -107,6 +120,17 @@ impl Overlay {
                 ui.label(format!(
                     "Sim steps per frame (last 2 s): 0 × {none} · 1 × {one} · 2+ × {more}"
                 ));
+                let a = self.animation;
+                ui.label(format!(
+                    "Animation: posing {:.3} ms / {} ms · palettes {:.3} ms",
+                    a.pose_ms,
+                    anim::lod::BUDGET_MS,
+                    a.palettes_ms
+                ));
+                ui.label(format!(
+                    "Characters: {} every frame · {} every other · {} every fourth",
+                    a.tiers[0], a.tiers[1], a.tiers[2]
+                ));
                 if let Some(frame) = self.latest {
                     ui.label(format!("GPU frame: {:.3} ms / 12 ms", frame.gpu_ms));
                     ui.label(format!(
@@ -136,6 +160,43 @@ impl Overlay {
                     ui.label("Waiting for a completed GPU frame");
                 }
             });
+    }
+    /// Takes in this frame's character animation, to show and, when `record`, to sum up at the
+    /// end of the run.
+    pub fn animate(&mut self, animation: Animation, record: bool) {
+        self.animation = animation;
+        if record {
+            self.animations.push(animation);
+        }
+    }
+    /// The ANIM line a run ends with: posing and palettes a frame, median and 95th percentile,
+    /// and how many characters rebuilt at each rate on average.
+    pub fn animation_report(&self) -> Option<String> {
+        let n = self.animations.len();
+        if n == 0 {
+            return None;
+        }
+        let spread = |ms: fn(&Animation) -> f64| {
+            let mut v: Vec<_> = self.animations.iter().map(ms).collect();
+            v.sort_by(f64::total_cmp);
+            format!(
+                "median={:.3}ms p95={:.3}ms",
+                v[n / 2],
+                v[(n * 95 / 100).min(n - 1)]
+            )
+        };
+        let mean = |tier: usize| {
+            self.animations.iter().map(|a| a.tiers[tier]).sum::<usize>() as f64 / n as f64
+        };
+        Some(format!(
+            "ANIM characters={} pose {} palettes {} full={:.1} half={:.1} quarter={:.1} samples={n}",
+            self.animation.tiers.iter().sum::<usize>(),
+            spread(|a| a.pose_ms),
+            spread(|a| a.palettes_ms),
+            mean(0),
+            mean(1),
+            mean(2)
+        ))
     }
     pub fn report(&mut self, counters_enabled: bool) {
         self.frames.sort_by_key(|f| f.frame);

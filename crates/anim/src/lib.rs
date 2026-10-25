@@ -4,8 +4,10 @@
 pub mod ik;
 pub mod inertial;
 pub mod locomotion;
+pub mod lod;
 pub mod turn;
 
 pub use inertial::{Blender, Bone, Method, Switch};
 pub use locomotion::{Gait, Step, Stride};
+pub use lod::{Crowd, Importance, Tier};
 pub use turn::{Plant, Stance, Steps, Turn};

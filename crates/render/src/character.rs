@@ -50,20 +50,22 @@ pub struct Character {
     clip_set: Arc<ClipSet>,
     /// The model whose skeleton this character was built on, which clip sets bind to.
     skeleton: Arc<Model>,
-    pub clip_meta: HashMap<String, assets::Clip>,
+    pub clip_meta: HashMap<String, Arc<assets::Clip>>,
     pub rig_height: f32,
     pelvis_ratio: f32,
     reference_pelvis: Vec3,
     humanoid: bool,
     beast_speeds: [f32; 2],
-    role_clips: HashMap<String, String>,
-    main: Option<assets::Item>,
-    off_hand: Option<assets::Item>,
-    combat: Option<UnitCombat>,
+    role_clips: HashMap<String, &'static str>,
+    main: Option<Arc<assets::Item>>,
+    /// The clips the weapon and the off-hand item play in place of the defaults.
+    main_clips: ItemClips,
+    off_hand_clips: ItemClips,
+    combat: Option<Fight>,
     windup: Option<f32>,
     rally_time: Option<f32>,
     was_guarding: bool,
-    idle: String,
+    idle: &'static str,
     gear_scale: f32,
     last_pose: Pose,
     /// How the body was getting about last frame, and the climbing move playing (#247), and
@@ -72,17 +74,17 @@ pub struct Character {
     climb: Option<ClimbMove>,
     shimmied_right: bool,
     attack: usize,
-    transition: Option<(String, f32)>,
+    transition: Option<(&'static str, f32)>,
     last_drawn: bool,
     /// Settles each switch of the clip stack into the next (#210, docs/ANIMATION.md).
     pub blender: anim::Blender,
-    last_clip: String,
+    last_clip: &'static str,
     /// The legs' locomotion clip under an action on the move.
     last_legs: Option<&'static str>,
     /// Whether last frame's base clip was an action or another one-shot.
     last_busy: bool,
     /// Last frame's upper-body layer over the base clip: ready, stow, guard or a drawn idle.
-    last_upper: Option<String>,
+    last_upper: Option<&'static str>,
     /// A switch the clips' names won't show: an action starting over, or a LOD swap.
     forced_switch: Option<anim::Switch>,
     /// Where the walk, jog or sprint cycle is, and the speed and hip turn the legs show (#110). A
@@ -97,11 +99,25 @@ pub struct Character {
     steps: Option<anim::Steps>,
     /// The left and right legs' hip, knee and ankle bones, which step round.
     leg_bones: Option<[[usize; 3]; 2]>,
+    /// The pelvis and the spine up to the chest, which turn toward the travel and the aim.
+    spine_bones: Option<[usize; 4]>,
+    /// The neck and head, which share the turn the chest can't take.
+    head_bones: [Option<usize>; 2],
+    /// Each arm's upper arm, forearm, hand and hand socket, by `Side`, which reach for the
+    /// weapon.
+    arm_bones: [Option<[usize; 4]>; 2],
+    /// Where the weapon rides drawn and stowed, if it has a mesh.
+    main_sockets: Option<[usize; 2]>,
     drawn_now: bool,
     main_offset: f32,
     grab_offset: Option<f32>,
     bow_morph: [f32; 2],
     springs: Vec<crate::springs::SpringBones>,
+    /// How often the pose is rebuilt (#215), and the time since it last was.
+    tier: anim::Tier,
+    since: f32,
+    /// At `Tier::Half`, the last two rebuilds, shown blended between them.
+    between: Option<Between>,
     children: Vec<Vec<usize>>,
     /// Every node after its parent, to rebuild world matrices in one pass.
     order: Vec<usize>,
@@ -126,6 +142,88 @@ enum Bones {
     All,
     Upper,
     Lower,
+}
+/// The clips an item plays in place of the defaults (its catalogue `clips`), by role: one clip,
+/// or a list such as `attacks`.
+#[derive(Default)]
+struct ItemClips(HashMap<String, Box<[&'static str]>>);
+impl ItemClips {
+    fn new(item: &assets::Item) -> Self {
+        use serde_json::Value;
+        let names = |v: &Value| match v {
+            Value::Array(a) => a.iter().filter_map(Value::as_str).map(intern).collect(),
+            v => v.as_str().map(intern).into_iter().collect(),
+        };
+        let roles = item.clips.iter().map(|(role, v)| (role.clone(), names(v)));
+        Self(roles.collect())
+    }
+    /// The clip for `role`, or the first of its list.
+    fn get(&self, role: &str) -> Option<&'static str> {
+        self.list(role).first().copied()
+    }
+    fn list(&self, role: &str) -> &[&'static str] {
+        self.0.get(role).map_or(&[], |names| names)
+    }
+}
+/// A half-rate character's last two rebuilds (#215): their world matrices and body yaws, and the
+/// time between them. The frames between show them blended, a rebuild behind.
+struct Between {
+    from: Vec<Mat4>,
+    to: Vec<Mat4>,
+    yaws: [f32; 2],
+    /// The body yaw shown now.
+    yaw: f32,
+    interval: f32,
+    /// Off while the character is at another tier, so that coming back it starts again from the
+    /// pose shown then.
+    live: bool,
+}
+impl Between {
+    fn new(world: &[Mat4]) -> Self {
+        Self {
+            from: world.to_vec(),
+            to: world.to_vec(),
+            yaws: [0.; 2],
+            yaw: 0.,
+            interval: 1. / 30.,
+            live: false,
+        }
+    }
+}
+/// What the pose goes by in a unit's `UnitCombat`, copied each frame without its names and auras.
+#[derive(Clone, Copy)]
+struct Fight {
+    action: Action,
+    action_time: f32,
+    /// The cast's length, and whether it is channelled.
+    cast: Option<(f32, bool)>,
+    guarding: bool,
+    downed: bool,
+}
+impl From<&UnitCombat> for Fight {
+    fn from(c: &UnitCombat) -> Self {
+        Self {
+            action: c.action,
+            action_time: c.action_time,
+            cast: c.cast.as_ref().map(|c| (c.duration, c.channel)),
+            guarding: c.guarding,
+            downed: c.downed,
+        }
+    }
+}
+/// A hand, which `perform` reaches with; it indexes `arm_bones`.
+#[derive(Clone, Copy, PartialEq)]
+enum Side {
+    Left,
+    Right,
+}
+impl Side {
+    fn other(self) -> Side {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+        }
+    }
 }
 /// How far round from the hips an action on the move may turn the chest, beyond the clip's own
 /// twist, to face where the clip faced it.
@@ -268,6 +366,16 @@ impl Character {
         let leg_bones = leg(["thigh_l", "calf_l", "foot_l"])
             .zip(leg(["thigh_r", "calf_r", "foot_r"]))
             .map(|(left, right)| [left, right]);
+        let all = |bones: [&str; 4]| match bones.map(|n| names.get(n).copied()) {
+            [Some(a), Some(b), Some(c), Some(d)] => Some([a, b, c, d]),
+            _ => None,
+        };
+        let spine_bones = all(["pelvis", "spine_01", "spine_02", "spine_03"]);
+        let arm_bones = [
+            all(["upperarm_l", "lowerarm_l", "hand_l", "socket_hand_l"]),
+            all(["upperarm_r", "lowerarm_r", "hand_r", "socket_hand_r"]),
+        ];
+        let head_bones = ["neck_01", "Head"].map(|n| names.get(n).copied());
         let mut c = Self {
             lod,
             partial_updates: true,
@@ -284,7 +392,7 @@ impl Character {
                 .animations
                 .clips
                 .iter()
-                .map(|c| (c.name.clone(), c.clone()))
+                .map(|c| (c.name.clone(), Arc::new(c.clone())))
                 .collect(),
             rig_height: body.map_or(1., |b| b.height),
             pelvis_ratio: body.map_or(1., |b| b.pelvis[1] / h.animations.pelvis[1]),
@@ -292,20 +400,24 @@ impl Character {
             humanoid: body.is_some(),
             beast_speeds: [1.; 2],
             role_clips: beast
-                .map(|b| b.clips.clone().into_iter().collect())
-                .unwrap_or_default(),
+                .into_iter()
+                .flat_map(|b| &b.clips)
+                .map(|(role, name)| (role.clone(), intern(name)))
+                .collect(),
             main: None,
-            off_hand: look
+            main_clips: ItemClips::default(),
+            off_hand_clips: look
                 .gear
                 .iter()
                 .find(|(slot, _)| slot == "off_hand")
                 .and_then(|(_, id)| catalog.gear.as_ref()?.items.iter().find(|i| i.id == *id))
-                .cloned(),
+                .map(ItemClips::new)
+                .unwrap_or_default(),
             combat: None,
             windup: None,
             rally_time: None,
             was_guarding: false,
-            idle: "Idle_Loop".into(),
+            idle: "Idle_Loop",
             gear_scale: body.and_then(|b| b.gear_scale).unwrap_or(1.),
             last_pose: Pose::Idle,
             last_traversal: Traversal::Ground,
@@ -315,7 +427,7 @@ impl Character {
             transition: None,
             last_drawn: look.drawn,
             blender: anim::Blender::default(),
-            last_clip: String::new(),
+            last_clip: "",
             last_legs: None,
             last_busy: false,
             last_upper: None,
@@ -325,11 +437,18 @@ impl Character {
             turn: anim::Turn::default(),
             steps: None,
             leg_bones,
+            spine_bones,
+            head_bones,
+            arm_bones,
+            main_sockets: None,
             drawn_now: look.drawn,
             main_offset: 0.,
             grab_offset: None,
             bow_morph: [0.; 2],
             springs: Vec::new(),
+            tier: anim::Tier::Full,
+            since: 0.,
+            between: None,
             children: Vec::new(),
             order,
             lod_parts: HashMap::new(),
@@ -350,16 +469,15 @@ impl Character {
                     .context("beast lacks run speed")? as f32,
             ];
             c.add_part(model, 0, None, None, None, false)?;
-            let idle = c
+            let idle = *c
                 .role_clips
                 .get("idle")
-                .cloned()
                 .context("beast must supply an idle clip")?;
             ensure!(
-                c.clips.clips.contains_key(&idle),
+                c.clips.clips.contains_key(idle),
                 "beast idle clip is missing"
             );
-            c.apply_clip(&idle, 0., true, Bones::All);
+            c.apply_clip(idle, 0., true, Bones::All);
             c.world = world_matrices(&c.nodes, &c.local);
             c.last_clip = idle;
             return Ok(c);
@@ -459,7 +577,7 @@ impl Character {
                 .context("missing piece metadata")?;
             c.set_appearance(catalog, cache, look, &p.id, def)?;
             if let Some(i) = &p.idle {
-                c.idle = i.clone();
+                c.idle = intern(i);
             }
         }
         let covers_hair = pieces.iter().any(|p| p.covers_hair);
@@ -510,7 +628,8 @@ impl Character {
                 main: slot == "main_hand",
             };
             if slot == "main_hand" {
-                c.main = Some(i.clone());
+                c.main = Some(Arc::new(i.clone()));
+                c.main_clips = ItemClips::new(i);
             }
             if let Some(f) = &i.file {
                 ensure!(
@@ -519,6 +638,10 @@ impl Character {
                     "missing equipment socket for {}",
                     i.id
                 );
+                if attachment.main {
+                    let sockets = [&attachment.held, &attachment.stowed];
+                    c.main_sockets = Some(sockets.map(|n| c.names[n]));
+                }
                 c.add_part(
                     cache.get_lod(&catalog.path(f), lod)?,
                     0,
@@ -725,43 +848,32 @@ impl Character {
             &self.children,
         );
     }
-    fn item_clip(&self, key: &str, fallback: &str) -> String {
-        self.main
-            .as_ref()
-            .and_then(|i| i.clips.get(key))
-            .and_then(|v| v.as_str())
-            .unwrap_or(fallback)
-            .into()
+    fn item_clip(&self, key: &str, fallback: &'static str) -> &'static str {
+        self.main_clips.get(key).unwrap_or(fallback)
     }
-    fn shield_clip(&self, key: &str, fallback: &str) -> String {
-        self.off_hand
-            .as_ref()
-            .and_then(|i| i.clips.get(key))
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
+    fn shield_clip(&self, key: &str, fallback: &'static str) -> &'static str {
+        self.off_hand_clips
+            .get(key)
             .unwrap_or_else(|| self.item_clip(key, fallback))
     }
-    fn attack_clip(&self, index: usize) -> String {
-        self.main
-            .as_ref()
-            .and_then(|i| i.clips.get("attacks"))
-            .and_then(|v| v.as_array())
-            .and_then(|a| a.get(index.min(a.len().saturating_sub(1))))
-            .and_then(|v| v.as_str())
+    fn attack_clip(&self, index: usize) -> &'static str {
+        let attacks = self.main_clips.list("attacks");
+        attacks
+            .get(index.min(attacks.len().saturating_sub(1)))
+            .copied()
             .unwrap_or("Punch_Jab")
-            .into()
     }
-    fn action_clip(&self, u: &UnitState) -> Option<String> {
+    fn action_clip(&self, u: &UnitState) -> Option<&'static str> {
         let c = self.combat.as_ref()?;
         if c.downed {
-            return Some(if self.humanoid {
-                "Death01".into()
+            return if self.humanoid {
+                Some("Death01")
             } else {
-                self.role_clips.get("death")?.clone()
-            });
+                self.role_clips.get("death").copied()
+            };
         }
         if self.rally_time.is_some() && self.humanoid {
-            return Some("LayToIdle".into());
+            return Some("LayToIdle");
         }
         if c.guarding || c.action == Action::Block {
             return None;
@@ -785,7 +897,7 @@ impl Character {
                 Action::Leap => "jump",
                 _ => return None,
             };
-            return self.role_clips.get(role).cloned();
+            return self.role_clips.get(role).copied();
         }
         let family = self.main.as_ref().map_or("", |i| i.family.as_str());
         Some(match c.action {
@@ -793,43 +905,43 @@ impl Character {
             Action::Slash2 => self.attack_clip(1),
             Action::Thrust => {
                 if family == "spear" {
-                    "Spear_Thrust".into()
+                    "Spear_Thrust"
                 } else {
                     self.attack_clip(2)
                 }
             }
             Action::Overhead | Action::Slam => {
                 if family == "greatsword" {
-                    "GreatSword_Overhead".into()
+                    "GreatSword_Overhead"
                 } else {
-                    "Sword_Overhead".into()
+                    "Sword_Overhead"
                 }
             }
             Action::Spin => {
                 if family == "greatsword" {
-                    "GreatSword_Swing".into()
+                    "GreatSword_Swing"
                 } else {
-                    "Sword_Regular_Combo".into()
+                    "Sword_Regular_Combo"
                 }
             }
             Action::Bash => self.shield_clip("bash", "Punch_Jab"),
-            Action::Parry => "Sword_Block".into(),
+            Action::Parry => "Sword_Block",
             Action::Shoot => match family {
                 "bow" => "Bow_Shoot",
                 "wand" => "Spell_Simple_Shoot",
                 _ => "OverhandThrow",
-            }
-            .into(),
+            },
             Action::CastBolt => self.attack_clip(0),
             Action::CastArea => self.item_clip("slam", "Spell_Simple_Shoot"),
             Action::Channel => self.item_clip("channel", "Spell_Simple_Idle_Loop"),
-            Action::CastSelf => if c.cast.is_some() {
-                "Spell_Simple_Enter"
-            } else {
-                "Spell_Simple_Exit"
+            Action::CastSelf => {
+                if c.cast.is_some() {
+                    "Spell_Simple_Enter"
+                } else {
+                    "Spell_Simple_Exit"
+                }
             }
-            .into(),
-            Action::Kick => "Punch_Cross".into(),
+            Action::Kick => "Punch_Cross",
             Action::Leap => self.shield_clip("dash", "NinjaJump_Start"),
             Action::Charge => self.item_clip(
                 "dash",
@@ -839,18 +951,19 @@ impl Character {
                     "Jog_Fwd_Loop"
                 },
             ),
-            Action::Roar => "Spell_Simple_Enter".into(),
-            Action::Stagger => if self.was_guarding {
-                "Idle_Shield_Break"
-            } else {
-                "Hit_Knockback"
+            Action::Roar => "Spell_Simple_Enter",
+            Action::Stagger => {
+                if self.was_guarding {
+                    "Idle_Shield_Break"
+                } else {
+                    "Hit_Knockback"
+                }
             }
-            .into(),
-            Action::Revive => "Fixing_Kneeling".into(),
+            Action::Revive => "Fixing_Kneeling",
             _ => return None,
         })
     }
-    fn clip_for(&self, u: &UnitState) -> String {
+    fn clip_for(&self, u: &UnitState) -> &'static str {
         if let Some(clip) = self.action_clip(u) {
             return clip;
         }
@@ -864,40 +977,26 @@ impl Character {
                 Pose::Hit => "hit",
                 Pose::Dead => "death",
             };
-            return self.role_clips.get(role).cloned().unwrap_or_default();
+            return self.role_clips.get(role).copied().unwrap_or_default();
         }
-        let drawn_idle = self
-            .main
-            .as_ref()
-            .and_then(|i| i.clips.get("idle"))
-            .and_then(|v| v.as_str());
         match u.pose {
-            Pose::Idle => if u.look.drawn {
-                drawn_idle.unwrap_or(&self.idle)
-            } else {
-                &self.idle
-            }
-            .into(),
-            Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()).into(),
-            Pose::Jump => "Jump_Start".into(),
+            Pose::Idle if u.look.drawn => self.main_clips.get("idle").unwrap_or(self.idle),
+            Pose::Idle => self.idle,
+            Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()),
+            Pose::Jump => "Jump_Start",
             // Hanging borrows the falling loop until the climbing clips land (#247).
-            Pose::Fall | Pose::Hang => "Jump_Loop".into(),
-            Pose::Dodge => "Roll".into(),
-            Pose::Attack | Pose::Cast => self
-                .main
-                .as_ref()
-                .and_then(|i| i.clips.get("attacks"))
-                .and_then(|v| v.as_array())
-                .and_then(|a| a.get(self.attack % a.len().max(1)))
-                .and_then(|v| v.as_str())
-                .unwrap_or(if u.pose == Pose::Cast {
-                    "Spell_Simple_Shoot"
-                } else {
-                    "Sword_Regular_A"
-                })
-                .into(),
-            Pose::Hit => "Hit_Chest".into(),
-            Pose::Dead => "Death01".into(),
+            Pose::Fall | Pose::Hang => "Jump_Loop",
+            Pose::Dodge => "Roll",
+            Pose::Attack | Pose::Cast => {
+                let attacks = self.main_clips.list("attacks");
+                match attacks.get(self.attack % attacks.len().max(1)) {
+                    Some(&attack) => attack,
+                    None if u.pose == Pose::Cast => "Spell_Simple_Shoot",
+                    None => "Sword_Regular_A",
+                }
+            }
+            Pose::Hit => "Hit_Chest",
+            Pose::Dead => "Death01",
         }
     }
     /// What a humanoid on a wall plays (#247; docs/CONTRACT.md, "Poses to animation"), with the
@@ -1024,10 +1123,7 @@ impl Character {
     /// chest faced about the vertical and its twist from its own hips, which `turn_hips` turns the
     /// chest back toward.
     fn walk_under(&mut self, legs: &str, step: Option<anim::Step>) -> Option<(f32, f32)> {
-        let ids = ["pelvis", "spine_03"].map(|n| self.names.get(n).copied());
-        let [Some(pelvis), Some(chest)] = ids else {
-            return None;
-        };
+        let [pelvis, _, _, chest] = self.spine_bones?;
         let clip_hips = heading(
             self.rotation_to(pelvis, None, false),
             self.rotation_to(pelvis, None, true),
@@ -1055,9 +1151,7 @@ impl Character {
     /// while side-on stances (a bow, a wand) still aim forward. The turn back is spread evenly up
     /// the spine, and the neck and head share up to `HEAD_TWIST` of whatever the chest can't take.
     fn turn_hips(&mut self, turn: f32, aim: Option<(f32, f32)>, look: f32) {
-        let ids =
-            ["pelvis", "spine_01", "spine_02", "spine_03"].map(|n| self.names.get(n).copied());
-        let [Some(pelvis), Some(low), Some(mid), Some(chest)] = ids else {
+        let Some([pelvis, low, mid, chest]) = self.spine_bones else {
             return;
         };
         let rest_hips = self.rotation_to(pelvis, None, true);
@@ -1086,10 +1180,8 @@ impl Character {
         }
         let rest = (wanted - twist).clamp(-HEAD_TWIST, HEAD_TWIST) / 2.;
         if rest != 0. {
-            for bone in ["neck_01", "Head"] {
-                if let Some(&i) = self.names.get(bone) {
-                    self.turn_upright(i, rest);
-                }
+            for i in self.head_bones.into_iter().flatten() {
+                self.turn_upright(i, rest);
             }
         }
     }
@@ -1265,7 +1357,7 @@ impl Character {
             let local = &mut self.local[i];
             match b.apply {
                 Apply::Rotation => {
-                    let q = Quat::from_array(v.to_array()).normalize();
+                    let q = Quat::from_vec4(v);
                     local.rotation = if weight < 1. {
                         local.rotation.lerp(q, weight)
                     } else {
@@ -1291,7 +1383,10 @@ impl Character {
     /// The yaw to draw the body at (#211): the sim's, except that turning on the spot the body
     /// lags behind it while the upper body takes up the turn. 0 before the first update.
     pub fn body_yaw(&self) -> f32 {
-        self.turn.yaw().unwrap_or(0.)
+        match &self.between {
+            Some(b) if b.live && self.tier == anim::Tier::Half => b.yaw,
+            _ => self.turn.yaw().unwrap_or(0.),
+        }
     }
     pub fn rallied(&mut self) {
         self.rally_time = Some(0.);
@@ -1317,7 +1412,7 @@ impl Character {
                 self.was_guarding = c.guarding;
             }
         }
-        self.combat = combat.cloned();
+        self.combat = combat.map(Fight::from);
         self.update(u, dt);
     }
     pub fn update(&mut self, u: &UnitState, dt: f32) {
@@ -1339,11 +1434,9 @@ impl Character {
         if u.look.drawn != self.last_drawn {
             self.grab_offset = None;
             self.transition = self
-                .main
-                .as_ref()
-                .and_then(|i| i.clips.get(if u.look.drawn { "ready" } else { "stow" }))
-                .and_then(|v| v.as_str())
-                .map(|s| (s.to_owned(), 0.));
+                .main_clips
+                .get(if u.look.drawn { "ready" } else { "stow" })
+                .map(|name| (name, 0.));
             self.last_drawn = u.look.drawn;
         }
         if matches!(
@@ -1354,7 +1447,7 @@ impl Character {
         }
         if let Some((name, time)) = &mut self.transition {
             *time += dt;
-            if *time >= self.clips.clips.get(name).map_or(0., |a| a.duration) {
+            if *time >= self.clips.clips.get(*name).map_or(0., |a| a.duration) {
                 self.transition = None;
             }
         }
@@ -1364,7 +1457,7 @@ impl Character {
             None
         };
         let name = match climbing {
-            Some((clip, _, _)) => clip.to_owned(),
+            Some((clip, _, _)) => clip,
             None => self.clip_for(u),
         };
         let speed = u.velocity.xz().length();
@@ -1380,7 +1473,7 @@ impl Character {
         let mut switch = self.forced_switch.take();
         if name != self.last_clip || legs != self.last_legs || u.pose != self.last_pose {
             switch = Some(switch_kind(self.last_pose, self.last_busy, u.pose, busy));
-            self.last_clip = name.clone();
+            self.last_clip = name;
             self.last_legs = legs;
         }
         self.last_pose = u.pose;
@@ -1393,24 +1486,19 @@ impl Character {
         let looping = matches!(u.pose, Pose::Idle | Pose::Walk | Pose::Run | Pose::Fall)
             || self.combat.as_ref().is_some_and(|c| {
                 matches!(c.action, Action::Channel | Action::Revive)
-                    || c.action == Action::Spin && c.cast.as_ref().is_some_and(|c| c.channel)
+                    || c.action == Action::Spin && c.cast.is_some_and(|(_, channel)| channel)
             });
         let rate = match u.pose {
             Pose::Walk | Pose::Run => self.stride_rate(u.pose, speed),
-            Pose::Dodge => self
-                .clips
-                .clips
-                .get(&name)
-                .map_or(1., |a| a.duration / 0.45),
-            Pose::Attack => self.clips.clips.get(&name).map_or(1., |a| a.duration / 0.5),
+            Pose::Dodge => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.45),
+            Pose::Attack => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
         };
         // The body turns on the spot behind the sim's yaw (#211): standing, the upper body takes
         // up the turn until the feet step round; moving or acting, the body follows on a spring.
-        // LOD2 and below face the sim's yaw.
-        let stance = if self.lod >= 2 {
-            anim::Stance::Snap
-        } else if self.humanoid && u.pose == Pose::Idle && !busy {
+        // Below full detail (#215) the feet don't step: the body follows on the spring.
+        let full = self.tier == anim::Tier::Full;
+        let stance = if full && self.humanoid && u.pose == Pose::Idle && !busy {
             anim::Stance::Standing
         } else {
             anim::Stance::Moving
@@ -1432,7 +1520,7 @@ impl Character {
         // Without measured loops (beasts), the walk or run plays at `stride_rate`.
         let stride = match moving {
             Some(pose) => Some((locomotion_clip(pose, speed), self.stride_rate(pose, speed))),
-            None => walking.then_some((name.as_str(), rate)),
+            None => walking.then_some((name, rate)),
         };
         if let Some((clip, rate)) = stride.filter(|_| step.is_none()) {
             let length = self
@@ -1445,22 +1533,22 @@ impl Character {
         let mut clip_time = if walking {
             match (step, self.gaits, LOOPS.iter().position(|l| *l == name)) {
                 (Some(_), Some(gaits), Some(i)) => gaits[i].time_at(self.stride.phase),
-                _ => self.stride.phase * self.clips.clips.get(&name).map_or(1., |a| a.duration),
+                _ => self.stride.phase * self.clips.clips.get(name).map_or(1., |a| a.duration),
             }
         } else {
             u.pose_time * rate
         };
         if let Some(c) = &self.combat {
             if c.downed {
-                clip_time = self.clips.clips.get(&name).map_or(0., |a| a.duration);
+                clip_time = self.clips.clips.get(name).map_or(0., |a| a.duration);
             } else if let Some(t) = self.rally_time {
                 clip_time = t;
             } else if let Some(windup) = self.windup.filter(|_| u.pose == Pose::Attack) {
                 // The blow lands on the clip's `hit` marker just as the wind-up ends.
-                let duration = self.clips.clips.get(&name).map_or(1., |a| a.duration);
+                let duration = self.clips.clips.get(name).map_or(1., |a| a.duration);
                 let hit = self
                     .clip_meta
-                    .get(&name)
+                    .get(name)
                     .and_then(|m| m.event("hit"))
                     .unwrap_or(duration * 0.5);
                 clip_time = swing_time(c.action_time, windup, hit, duration);
@@ -1478,21 +1566,16 @@ impl Character {
             climbing.map_or((clip_time, looping), |(_, time, looping)| (time, looping));
         match step.filter(|_| walking) {
             Some(step) => self.apply_step(step, Bones::All),
-            None => self.apply_clip(&name, clip_time, looping, Bones::All),
+            None => self.apply_clip(name, clip_time, looping, Bones::All),
         }
         let aim = legs.and_then(|legs| self.walk_under(legs, step));
         let mut upper = None;
         if locomotion
             && u.look.drawn
             && self.humanoid
-            && let Some(idle) = self
-                .main
-                .as_ref()
-                .and_then(|i| i.clips.get("idle"))
-                .and_then(|v| v.as_str())
-                .map(str::to_owned)
+            && let Some(idle) = self.main_clips.get("idle")
         {
-            self.apply_clip(&idle, u.pose_time, true, Bones::Upper);
+            self.apply_clip(idle, u.pose_time, true, Bones::Upper);
             upper = Some(idle);
         }
         if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
@@ -1504,19 +1587,19 @@ impl Character {
                 c.action_time
             };
             let guard = if parrying {
-                "Sword_Block".into()
+                "Sword_Block"
             } else {
                 self.shield_clip("block", "Sword_Block")
             };
-            let looping = !parrying && self.clip_meta.get(&guard).is_some_and(|m| m.looping);
-            self.apply_clip(&guard, time, looping, Bones::Upper);
+            let looping = !parrying && self.clip_meta.get(guard).is_some_and(|m| m.looping);
+            self.apply_clip(guard, time, looping, Bones::Upper);
             upper = Some(guard);
             self.transition = None;
         }
-        let transition = self.transition.clone();
-        if let Some((n, t)) = &transition {
-            self.apply_clip(n, *t, false, Bones::Upper);
-            upper = Some(n.clone());
+        let transition = self.transition;
+        if let Some((n, t)) = transition {
+            self.apply_clip(n, t, false, Bones::Upper);
+            upper = Some(n);
         }
         if upper != self.last_upper {
             switch = switch.or(Some(anim::Switch::Layer));
@@ -1533,10 +1616,7 @@ impl Character {
         self.pose_world();
         self.drawn_now = u.look.drawn;
         self.main_offset = 0.;
-        let (active, t) = transition
-            .as_ref()
-            .map(|(n, t)| (n.as_str(), *t))
-            .unwrap_or((&name, clip_time));
+        let (active, t) = transition.unwrap_or((name, clip_time));
         self.perform(active, t);
         // Last, so a switch also smooths the hand reaching and gripping that `perform` adds.
         self.blender.update(&mut self.local, switch, dt);
@@ -1546,9 +1626,79 @@ impl Character {
         let root = Mat4::from_rotation_translation(Quat::from_rotation_y(body), u.position);
         let mut springs = std::mem::take(&mut self.springs);
         for s in &mut springs {
-            s.update(self, root, dt);
+            s.update(self, root, dt, full);
         }
         self.springs = springs;
+    }
+    /// How often the pose is rebuilt (#215).
+    pub fn tier(&self) -> anim::Tier {
+        self.tier
+    }
+    /// Sets how often the pose is rebuilt, as `anim::Crowd` ranks the character this frame.
+    pub fn set_tier(&mut self, tier: anim::Tier) {
+        if tier != self.tier
+            && let Some(between) = &mut self.between
+        {
+            // Back at half rate, it starts again from the pose shown then.
+            between.live = false;
+        }
+        self.tier = tier;
+    }
+    /// Rebuilds the pose with the time since it last did, if the character is due on `frame` at
+    /// its tier (#215): every frame, every other frame or every fourth, the frames spread out by
+    /// unit id. Its first pose is built at once, whatever the tier, so nobody shows the rest
+    /// pose. Between rebuilds, at half rate it shows the last two blended, a rebuild behind; at
+    /// quarter rate it holds the last. Returns whether it rebuilt.
+    pub fn animate(
+        &mut self,
+        u: &UnitState,
+        combat: Option<&UnitCombat>,
+        dt: f32,
+        frame: u64,
+    ) -> bool {
+        self.since += dt;
+        let half = self.tier == anim::Tier::Half;
+        let first = self.turn.yaw().is_none();
+        if !first && !self.tier.due(frame, u.id as u64) {
+            if let Some(b) = self.between.as_mut().filter(|b| b.live && half) {
+                let t = (self.since / b.interval.max(1e-4)).min(1.);
+                for ((shown, from), to) in self.world.iter_mut().zip(&b.from).zip(&b.to) {
+                    *shown = *from * (1. - t) + *to * t;
+                }
+                b.yaw = b.yaws[0] + wrap(b.yaws[1] - b.yaws[0]) * t;
+            }
+            return false;
+        }
+        if half {
+            let world = &self.world;
+            let b = self.between.get_or_insert_with(|| Between::new(world));
+            if !b.live {
+                b.from.copy_from_slice(world);
+                b.to.copy_from_slice(world);
+                b.yaws = [self.turn.yaw().unwrap_or(u.yaw); 2];
+                b.live = true;
+            }
+        }
+        let dt = std::mem::take(&mut self.since);
+        self.update_combat(u, combat, dt);
+        if let Some(b) = self.between.as_mut().filter(|b| b.live && half) {
+            if first {
+                // Nothing has been shown yet, so this pose shows at once.
+                b.to.copy_from_slice(&self.world);
+                b.yaws[1] = self.turn.yaw().unwrap_or(u.yaw);
+            }
+            std::mem::swap(&mut b.from, &mut b.to);
+            b.to.copy_from_slice(&self.world);
+            self.world.copy_from_slice(&b.from);
+            b.yaws = [b.yaws[1], self.turn.yaw().unwrap_or(u.yaw)];
+            b.yaw = b.yaws[0];
+            b.interval = dt;
+        }
+        true
+    }
+    /// Where the hand socket on `side` is.
+    fn hand(&self, side: Side) -> Mat4 {
+        self.arm_bones[side as usize].map_or(Mat4::IDENTITY, |[.., s]| self.world[s])
     }
     fn socket(&self, name: &str) -> Mat4 {
         self.names
@@ -1570,24 +1720,13 @@ impl Character {
         self.local[i].rotation = (parent.inverse() * q * world).normalize();
         self.update_chain(i);
     }
-    fn arm_to(&mut self, side: &str, target: Mat4, weight: f32) {
+    fn arm_to(&mut self, side: Side, target: Mat4, weight: f32) {
         if weight <= 0. {
             return;
         }
-        let ids = [
-            format!("upperarm_{side}"),
-            format!("lowerarm_{side}"),
-            format!("hand_{side}"),
-            format!("socket_hand_{side}"),
-        ];
-        let Some(v) = ids
-            .iter()
-            .map(|n| self.names.get(n).copied())
-            .collect::<Option<Vec<_>>>()
-        else {
+        let Some([a, b, h, s]) = self.arm_bones[side as usize] else {
             return;
         };
-        let [a, b, h, s] = [v[0], v[1], v[2], v[3]];
         let want = target * self.local[s].matrix().inverse();
         let goal = want.w_axis.truncate();
         let shoulder = self.world[a].w_axis.truncate();
@@ -1633,23 +1772,19 @@ impl Character {
             return;
         };
         let side = if main.held.as_deref() == Some("socket_hand_l") {
-            "l"
+            Side::Left
         } else {
-            "r"
+            Side::Right
         };
-        let attachment = self
-            .parts
-            .iter()
-            .filter_map(|p| p.attachment.as_ref())
-            .find(|a| a.main && !a.sheath)
-            .cloned();
-        let Some(a) = attachment else { return };
+        let Some([held, stowed]) = self.main_sockets else {
+            return;
+        };
         let mut offset = 0.;
         let grab = meta.event("grab");
         let stow = meta.event("stow");
         if grab.is_some() || stow.is_some() {
-            let socket = self.socket(&a.stowed);
-            let hand = self.socket(&format!("socket_hand_{side}"));
+            let socket = self.world[stowed];
+            let hand = self.hand(side);
             let range = main.grab_range.unwrap_or([0.; 2]);
             let s = ((hand.w_axis.truncate() - socket.w_axis.truncate())
                 .dot(socket.y_axis.truncate().normalize())
@@ -1678,12 +1813,12 @@ impl Character {
             }
         }
         self.main_offset = offset;
-        let item = self.socket(if self.drawn_now { &a.held } else { &a.stowed })
+        let item = self.world[if self.drawn_now { held } else { stowed }]
             * Mat4::from_scale(Vec3::splat(self.gear_scale))
             * Mat4::from_translation(Vec3::Y * offset);
         if let Some(grip) = main.grips.get("off_hand") {
-            let other = if side == "r" { "l" } else { "r" };
-            let hand = self.socket(&format!("socket_hand_{other}"));
+            let other = side.other();
+            let hand = self.hand(other);
             let h = item.inverse().transform_point3(hand.w_axis.truncate());
             let up = Vec3::from_array(grip.up).normalize();
             let range = grip.range.unwrap_or([Vec3::from_array(grip.at).dot(up); 2]);
@@ -1695,9 +1830,8 @@ impl Character {
                 meta.curve("off_hand", t),
             );
         }
-        if let Some(string) = main.string {
-            let other = if side == "r" { "l" } else { "r" };
-            let hand = self.socket(&format!("socket_hand_{other}"));
+        if let Some(string) = &main.string {
+            let hand = self.hand(side.other());
             let h = item.inverse().transform_point3(hand.w_axis.truncate());
             let pull = Vec3::from_array(string.pull);
             self.bow_morph = [
@@ -1897,7 +2031,7 @@ mod combat_tests {
             "stale actions must not override locomotion"
         );
         // A sword's non-looping guard must hold, even when the locomotion pose clock changes.
-        c.off_hand = None;
+        c.off_hand_clips = ItemClips::default();
         u.pose = Pose::Idle;
         fight.guarding = true;
         fight.action = Action::Block;
@@ -2508,6 +2642,138 @@ mod combat_tests {
         assert!(wrap(c.body_yaw() - 1.2).abs() < 0.02, "{}", c.body_yaw());
         assert!(c.turn.offset().abs() < 0.02);
     }
+    /// Animates `c` at `tier` for `frames` frames from `frame`, running on with `u`; returns
+    /// where bone `bone` is each frame, in the model's space, and which frames rebuilt.
+    fn animated(
+        c: &mut Character,
+        u: &mut UnitState,
+        fight: &UnitCombat,
+        tier: anim::Tier,
+        frames: std::ops::Range<u64>,
+        bone: &str,
+    ) -> Vec<(Vec3, bool)> {
+        let i = c.names[bone];
+        c.set_tier(tier);
+        frames
+            .map(|frame| {
+                u.pose_time += 1. / 60.;
+                let rebuilt = c.animate(u, Some(fight), 1. / 60., frame);
+                (c.world[i].w_axis.truncate(), rebuilt)
+            })
+            .collect()
+    }
+    #[test]
+    fn half_rate_blends_the_frames_between_a_rebuild_behind_and_quarter_rate_holds() {
+        let (mut full, mut u, fight) = fighter(6.);
+        let [(mut half, mut v, _), (mut quarter, mut w, _)] = [fighter(6.), fighter(6.)];
+        let full = animated(
+            &mut full,
+            &mut u,
+            &fight,
+            anim::Tier::Full,
+            0..120,
+            "hand_r",
+        );
+        let half = animated(
+            &mut half,
+            &mut v,
+            &fight,
+            anim::Tier::Half,
+            0..120,
+            "hand_r",
+        );
+        let quarter = animated(
+            &mut quarter,
+            &mut w,
+            &fight,
+            anim::Tier::Quarter,
+            0..120,
+            "hand_r",
+        );
+        // Every other frame and every fourth, and the first.
+        let rebuilds = |frames: &[(Vec3, bool)]| frames.iter().filter(|f| f.1).count();
+        assert_eq!((rebuilds(&half), rebuilds(&quarter)), (61, 31));
+        // Running, the hand swings through every frame at half rate, a rebuild (two frames)
+        // behind; it never sits still or jumps.
+        let fastest = |frames: &[(Vec3, bool)]| {
+            let steps = frames[20..].windows(2).map(|p| p[0].0.distance(p[1].0));
+            steps.fold((f32::MAX, 0f32), |(lo, hi), d| (lo.min(d), hi.max(d)))
+        };
+        let (_, full_most) = fastest(&full);
+        let (half_least, half_most) = fastest(&half);
+        assert!(
+            half_most < full_most * 1.25,
+            "{half_most} against {full_most}"
+        );
+        assert!(half_least > 1e-5, "the hand stopped for a frame");
+        for k in 20..120 {
+            let behind = half[k].0.distance(full[k - 2].0);
+            assert!(behind < 0.01, "frame {k}: {:.1} cm off", behind * 100.);
+        }
+        // At quarter rate it holds between rebuilds.
+        for p in quarter.windows(2).filter(|p| !p[1].1) {
+            assert_eq!(p[0].0, p[1].0);
+        }
+    }
+    #[test]
+    fn a_new_character_shows_its_pose_on_its_first_frame_at_any_tier() {
+        let (mut full, mut u, fight) = fighter(6.);
+        let posed = animated(&mut full, &mut u, &fight, anim::Tier::Full, 0..1, "hand_r");
+        for tier in [anim::Tier::Half, anim::Tier::Quarter] {
+            // Unit 1 isn't due on frame 0 at either rate.
+            assert!(!tier.due(0, 1));
+            let (mut c, mut v, _) = fighter(6.);
+            let shown = animated(&mut c, &mut v, &fight, tier, 0..1, "hand_r");
+            assert!(shown[0].1, "{tier:?} didn't build its first pose");
+            let off = shown[0].0.distance(posed[0].0);
+            assert!(off < 1e-5, "{tier:?}: the hand {off} m from its pose");
+        }
+    }
+    #[test]
+    fn below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step() {
+        let (_, mut u, fight) = fighter(6.);
+        std::sync::Arc::make_mut(&mut u.look)
+            .gear
+            .push(("back".into(), "cape.traveller".into()));
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut c = Character::load(&cat, &mut ModelCache::default(), &u.look).unwrap();
+        c.blender.set_method(anim::Method::Off);
+        let tip = "cape_2_4";
+        let swinging = animated(&mut c, &mut u, &fight, anim::Tier::Full, 0..90, tip);
+        let fading = animated(&mut c, &mut u, &fight, anim::Tier::Half, 90..150, tip);
+        // The cape eases down to the pose over half a second, its tip going no more than a
+        // tenth of the way in any frame.
+        let most = |frames: &[(Vec3, bool)]| {
+            let steps = frames.windows(2).map(|p| p[0].0.distance(p[1].0));
+            steps.fold(swinging[89].0.distance(frames[0].0), f32::max)
+        };
+        let far = swinging[89].0.distance(fading[59].0);
+        let fade = most(&fading);
+        assert!(far > 0.3 && fade < far * 0.1, "{fade} of {far}");
+        // Then the springs are off: the cape bones are as the pose has them.
+        for (i, n) in c
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.name.starts_with("cape_"))
+        {
+            assert_eq!(c.local[i].rotation, n.rest.rotation, "{}", n.name);
+        }
+        // Standing and turning, the body follows the sim's yaw on its spring and the feet don't
+        // step round.
+        u.velocity = Vec3::ZERO;
+        u.pose = Pose::Idle;
+        u.yaw = 2.;
+        for frame in 150..210 {
+            u.pose_time += 1. / 60.;
+            c.animate(&u, Some(&fight), 1. / 60., frame);
+            assert!(c.steps.is_none());
+        }
+        assert!(wrap(c.body_yaw() - 2.).abs() < 0.05, "{}", c.body_yaw());
+    }
     /// How clips were applied before #204, looking each track's bone up by name.
     fn apply_by_name(c: &mut Character, name: &str, t: f32, looping: bool, bones: Bones) {
         let clip = c.clips.clips[name].clone();
@@ -2538,9 +2804,7 @@ mod combat_tests {
             }
             let v = track.sample(t);
             match track.property {
-                Property::Rotation => {
-                    c.local[i].rotation = Quat::from_array(v.to_array()).normalize()
-                }
+                Property::Rotation => c.local[i].rotation = Quat::from_vec4(v),
                 Property::Translation if !c.humanoid => c.local[i].translation = v.truncate(),
                 Property::Translation if track.node == "pelvis" => {
                     c.local[i].translation = c.nodes[i].rest.translation
