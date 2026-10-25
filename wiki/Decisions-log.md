@@ -6,6 +6,8 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Team modes (dungeons, capture the flag, more) with no death stakes; respawn at team spawn points | Competitive and co-op play without risk | #77 |
+| 2026-10-25 | A level-banded wilderness with PvP and PvE: players above a band's ceiling are scaled down to it; deeper bands have better loot; dying there drops everything, equipped gear included | Real stakes, while low levels who stay in their band only meet their own strength | #76 |
 | 2026-10-25 | Aldermoor is an MMORPG: large worlds, many players. Built solo against the local server first, every system server-authoritative; online once the first area is fun | Same end state, a fun first area sooner, hosting paid only when worth it. Replaces "solo and offline first" | |
 | 2026-10-25 | Loot has fixed stats (better tiers, named rares, crafting upgrades) with a small chance of a "fine" version; NPC shops with set, region-dependent prices; player trading waits for co-op; coins go on training, perks, recipes, appearance and housing | Fits fixed item identities and keeps crafted gear competitive | #71 |
 | 2026-10-25 | Quests: a handful of big handmade story quests per area plus small jobs from notice boards and townsfolk; quests are linear with no branching world outcomes | Big quests carry the story and best rewards; no branches keeps content cost down | #70 |
