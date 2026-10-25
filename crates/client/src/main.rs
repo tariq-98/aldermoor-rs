@@ -243,6 +243,8 @@ struct Game {
     platform_output: Option<egui::PlatformOutput>,
     fight: Arc<protocol::CombatView>,
     feedback: combat::Feedback,
+    /// Messages from the sim ("You can't fight while swimming."), with seconds left on screen.
+    messages: Vec<(String, f32)>,
     cursor: Vec2,
     viewport: Vec2,
     aim_slot: Option<u8>,
@@ -303,6 +305,7 @@ impl Game {
             platform_output: None,
             fight: Arc::new(protocol::CombatView::default()),
             feedback: combat::Feedback::default(),
+            messages: Vec::new(),
             cursor: Vec2::ZERO,
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
@@ -751,6 +754,10 @@ impl Game {
             }
         }
         self.feedback.update(dt);
+        for m in &mut self.messages {
+            m.1 -= dt;
+        }
+        self.messages.retain(|m| m.1 > 0.);
         if self.options.smoke {
             self.smoke()
         } else {
@@ -761,6 +768,14 @@ impl Game {
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            if let protocol::Event::Message { text } = &e {
+                // The same refusal repeated just refreshes its timer.
+                self.messages.retain(|m| m.0 != *text);
+                self.messages.push((text.clone(), 3.));
+                if self.messages.len() > 3 {
+                    self.messages.remove(0);
+                }
+            }
             if let protocol::Event::Rallied { unit } | protocol::Event::Revived { unit } = &e
                 && let Some(c) = self.characters.get_mut(unit)
             {
@@ -962,6 +977,7 @@ impl Game {
                 );
             }
             actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
+            hud::messages(ctx, &self.messages);
             if crosshair {
                 paint_crosshair(ctx);
             }

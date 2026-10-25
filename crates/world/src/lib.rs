@@ -111,6 +111,11 @@ impl Valley {
             trees.push(Placement { position: p, yaw, scale });
             solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0 });
         }
+        // The bridge's parapets, either side of its deck (after the trees, which are placed
+        // from the solids before them).
+        for side in [-1.0, 1.0] {
+            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0 });
+        }
         let grid = Grid::build(&solids);
         Valley { solids, houses, trees, grid, heights: Heights::build() }
     }
@@ -363,8 +368,9 @@ mod tests {
     fn the_same_trees_grow_in_the_same_places() {
         let v = Valley::new();
         assert_eq!(v.trees.len(), 106);
-        assert_eq!(v.solids.len(), 115);
-        let last = v.solids[v.solids.len() - 1];
+        // 9 buildings, 106 trees, then the bridge's two parapets.
+        assert_eq!(v.solids.len(), 117);
+        let last = v.solids[114];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
     }

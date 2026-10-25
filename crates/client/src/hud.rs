@@ -10,6 +10,48 @@ pub struct Keys {
     pub swap: String,
     pub respawn: String,
 }
+/// White text on a solid colour, readable over any background.
+fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(4.)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .color(egui::Color32::WHITE)
+                    .strong(),
+            );
+        });
+}
+
+/// The sim's messages to the player ("You can't fight while swimming."), newest last, each
+/// with the seconds it has left; they fade over their last half second.
+pub fn messages(ctx: &egui::Context, messages: &[(String, f32)]) {
+    if messages.is_empty() {
+        return;
+    }
+    egui::Area::new(egui::Id::new("messages"))
+        .anchor(egui::Align2::CENTER_TOP, [0., 72.])
+        .interactable(false)
+        .show(ctx, |ui| {
+            for (text, left) in messages {
+                let a = (left / 0.5).clamp(0., 1.);
+                egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha((200. * a) as u8))
+                    .corner_radius(4.)
+                    .inner_margin(egui::Margin::symmetric(10, 4))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .size(16.)
+                                .color(egui::Color32::from_white_alpha((255. * a) as u8)),
+                        );
+                    });
+            }
+        });
+}
+
 pub enum Action {
     Command(Command),
     CycleTarget,
@@ -99,9 +141,9 @@ pub fn draw(
                     ui.label("In combat");
                 }
                 if player.swimming {
-                    ui.label("Swimming · no skills");
+                    badge(ui, "Swimming · no skills", egui::Color32::from_rgb(40, 110, 190));
                 } else if player.sprinting {
-                    ui.label("Sprinting");
+                    badge(ui, "Sprinting", egui::Color32::from_rgb(60, 130, 70));
                 }
                 auras(ui, &player.auras);
             });

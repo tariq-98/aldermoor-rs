@@ -252,9 +252,11 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 m.vel.y = 0.0;
             }
         } else {
-            // On the ground, follow it up and down; off it, fall.
+            // On the ground, follow it up and down; off it, or over the edge of a cliff, fall.
             if m.grounded {
-                if t.pos.y - ground < STEP_DOWN {
+                let run = Vec2::new(t.pos.x - start.x, t.pos.z - start.z).length();
+                let drop = t.pos.y - ground;
+                if drop < STEP_DOWN && drop <= MAX_SLOPE * run + 0.01 {
                     t.pos.y = ground;
                     m.vel.y = 0.0;
                 } else {
@@ -273,10 +275,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 } else if t.pos.y <= ground {
                     t.pos.y = ground;
                     m.vel.y = 0.0;
-                    m.grounded = true;
-                    let fell = m.fall_from - ground;
-                    if fell > SAFE_FALL {
-                        landings.falls.push((e, fell));
+                    // Touching a cliff face on the way down isn't landing: keep falling.
+                    let along = Vec2::new(m.vel.x, m.vel.z).normalize_or_zero() * 0.25;
+                    let ahead = Vec2::new(t.pos.x, t.pos.z) + along;
+                    let cliff = along != Vec2::ZERO && ground - land.ground(ahead.x, ahead.y) > MAX_SLOPE * 0.25 + 0.01;
+                    if !cliff {
+                        m.grounded = true;
+                        let fell = m.fall_from - ground;
+                        if fell > SAFE_FALL {
+                            landings.falls.push((e, fell));
+                        }
                     }
                 }
             }

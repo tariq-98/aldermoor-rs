@@ -132,16 +132,10 @@ fn sprints_half_again_as_fast_out_of_combat_only() {
     assert!(!sim.get::<Motion>(id).unwrap().sprinting);
 }
 
-#[test]
-fn climbs_onto_the_bridge_from_the_bank() {
-    // Beside the north end of the bridge, about 1.2 m below its deck.
-    let mut sim = Sim::new(7);
-    let id = sim.spawn_player("Hero", Vec2::new(-2.5, -50.0), std::f32::consts::FRAC_PI_2);
-    sim.step();
-    let before = sim.get::<Transform>(id).unwrap().pos.y;
-    go(&mut sim, id, Vec2::X, false);
+/// Runs until a climb starts and finishes (or `steps` pass); whether it climbed.
+fn climb(sim: &mut Sim, id: u32, steps: u32) -> bool {
     let mut climbing = false;
-    for _ in 0..120 {
+    for _ in 0..steps {
         sim.step();
         let forced = sim.get::<Motion>(id).unwrap().forced.is_some();
         if climbing && !forced {
@@ -149,10 +143,58 @@ fn climbs_onto_the_bridge_from_the_bank() {
         }
         climbing |= forced;
     }
+    climbing
+}
+
+/// A player at `at` heading along `dir` (and jumping, if asked) for two thirds of a second:
+/// how far up the ledge they climbed was, if they climbed one.
+fn try_climb(at: Vec2, dir: Vec2, jump: bool) -> (Option<f32>, Sim, u32) {
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", at, dir.x.atan2(dir.y));
+    sim.step();
+    go(&mut sim, id, dir, false);
+    if jump {
+        sim.command(id, Command::Jump);
+    }
+    let mut climbed = None;
+    for _ in 0..40 {
+        sim.step();
+        if let Some(f) = sim.get::<Motion>(id).unwrap().forced {
+            climbed = Some(f.to.y - f.from.y);
+        }
+    }
+    (climbed, sim, id)
+}
+
+#[test]
+fn climbs_a_low_ledge_by_walking_into_it() {
+    // A step in the terraces north-west of the village, going south-west.
+    let (climbed, mut sim, id) = try_climb(Vec2::new(-50.0, 26.0), Vec2::new(-1.0, -1.0).normalize(), false);
+    let rise = climbed.expect("never climbed");
+    assert!(rise > 0.3 && rise <= 1.5, "climbed {rise} m");
+    sim.run_for(0.5);
     let t = sim.get::<Transform>(id).unwrap().pos;
-    assert!(climbing, "never started climbing");
-    assert!(t.x > -1.0 && t.y > before + 0.9, "ended at {t} from y {before}");
-    assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "standing on the deck");
+    assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "standing on the top");
+}
+
+#[test]
+fn a_jump_reaches_a_ledge_too_tall_to_walk_up() {
+    // Below a ledge on the eastern hills, going south-west.
+    let at = Vec2::new(106.0, -106.0);
+    let dir = Vec2::new(-1.0, -1.0).normalize();
+    assert!(try_climb(at, dir, false).0.is_none(), "walked up it");
+    assert!(try_climb(at, dir, true).0.is_some(), "the jump didn't reach it");
+}
+
+#[test]
+fn the_bridge_parapets_keep_you_off_its_sides() {
+    // Beside the north end of the bridge, about 1.2 m below its deck: the parapet is in the way.
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", Vec2::new(-2.5, -50.0), std::f32::consts::FRAC_PI_2);
+    sim.step();
+    go(&mut sim, id, Vec2::X, false);
+    assert!(!climb(&mut sim, id, 90), "climbed through the parapet");
+    assert!(xz(&sim, id).x < -0.5);
 }
 
 #[test]
@@ -236,4 +278,24 @@ fn long_falls_hurt_and_short_ones_do_not() {
     assert_eq!(fall(3.9), 0.0);
     let lost = fall(10.0);
     assert!((lost - 0.36).abs() < 0.02, "lost {lost} of max health from 10 m");
+}
+
+#[test]
+fn running_off_a_cliff_is_a_fall() {
+    // On top of the west terraces, running east off the 16 m limestone face.
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", Vec2::new(-50.0, -30.0), std::f32::consts::FRAC_PI_2);
+    sim.step();
+    let top = sim.get::<Transform>(id).unwrap().pos.y;
+    go(&mut sim, id, Vec2::X, true);
+    let mut airborne = false;
+    for _ in 0..240 {
+        sim.step();
+        airborne |= !sim.get::<Motion>(id).unwrap().grounded;
+    }
+    let t = sim.get::<Transform>(id).unwrap().pos;
+    let v = sim.get::<Vitals>(id).unwrap();
+    assert!(top - t.y > 8.0, "only came down {} m", top - t.y);
+    assert!(airborne, "ran down the face");
+    assert!(v.health < v.max_health * 0.8, "fell {} m and kept {} of {}", top - t.y, v.health, v.max_health);
 }

@@ -15,14 +15,20 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     onto the top, as a forced move (no skills meanwhile, pose `Jump` until climbing art exists).
   - A taller face stops you. Jumping at a face measures from the feet at that moment, so a jump
     reaches about 1 m higher ledges.
-  - The valley has few low faces yet. The bridge deck's sides, from the bank near either end,
-    are one. The limestone terraces west of the village and the east terrace are tall cliffs.
+  - The valley has few low faces yet: a few ledges in the limestone terraces west of the
+    village. Most of the terraces and the east terrace are tall cliffs.
+  - Walking or running off the top of a cliff is a fall (see below), not a slide down it. You
+    only stay on the ground going down ground no steeper than 2:1.
+  - The bridge has stone parapets along both sides (solids in `world`), so you can't climb onto
+    the deck from beside it; get on at either end.
 - **Swimming:** the river is no longer a wall.
   - Water deeper than 0.5 m is swum (until it's shallower than 0.4 m). Swimmers float with
     their feet 0.5 m under the surface (`world::WATER_LEVEL`), at 0.45× run speed.
   - Shallower water is waded at 0.7×.
   - Swimmers can't use skills, guard, roll, jump or sprint. Starting to swim drops your guard,
-    breaks off a cast and stops auto-attacking. `PlayerState.swimming` tells the HUD.
+    breaks off a cast and stops auto-attacking. `PlayerState.swimming` tells the HUD, which
+    shows a Swimming badge; refusals such as "You can't fight while swimming." show as
+    messages at the top of the screen.
   - Monsters don't wander into water or spawn in it.
   - The bridge deck is still a single height over the river, so you can't swim under it.
 - **Falls** of up to 4 m are free. Past that, each metre costs 6% of max health (a 10 m drop
