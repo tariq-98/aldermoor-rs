@@ -46,13 +46,16 @@ pub struct Character {
     pub names: HashMap<String, usize>,
     pub look: Look,
     pub clips: Arc<Model>,
+    /// `clips` bound to this character's bones.
+    clip_set: Arc<ClipSet>,
+    /// The model whose skeleton this character was built on, which clip sets bind to.
+    skeleton: Arc<Model>,
     pub clip_meta: HashMap<String, assets::Clip>,
     pub rig_height: f32,
     pelvis_ratio: f32,
     reference_pelvis: Vec3,
     humanoid: bool,
     beast_speeds: [f32; 2],
-    upper: Vec<bool>,
     role_clips: HashMap<String, String>,
     main: Option<assets::Item>,
     off_hand: Option<assets::Item>,
@@ -87,8 +90,10 @@ pub struct Character {
     children: Vec<Vec<usize>>,
     /// Every node after its parent, to rebuild world matrices in one pass.
     order: Vec<usize>,
-    lod_parts: HashMap<usize, (Vec<Part>, Arc<Model>)>,
+    lod_parts: HashMap<usize, Stashed>,
 }
+/// What `set_lod` keeps of a LOD it swapped out: its parts, its clips and their binding.
+type Stashed = (Vec<Part>, Arc<Model>, Arc<ClipSet>);
 
 /// Which bones a clip drives. The upper body is `spine_01` and everything under it.
 #[derive(Clone, Copy, PartialEq)]
@@ -221,6 +226,7 @@ impl Character {
             .iter()
             .find(|n| n.name == "pelvis")
             .map_or(Vec3::ZERO, |n| n.rest.translation);
+        let clip_set = cache.clip_set(&model, &clips, body.is_some());
         let mut c = Self {
             lod,
             partial_updates: true,
@@ -231,6 +237,8 @@ impl Character {
             local,
             look: look.clone(),
             clips,
+            clip_set,
+            skeleton: model.clone(),
             clip_meta: h
                 .animations
                 .clips
@@ -242,7 +250,6 @@ impl Character {
             reference_pelvis,
             humanoid: body.is_some(),
             beast_speeds: [1.; 2],
-            upper: Vec::new(),
             role_clips: beast
                 .map(|b| b.clips.clone().into_iter().collect())
                 .unwrap_or_default(),
@@ -498,20 +505,6 @@ impl Character {
                 c.set_appearance(catalog, cache, look, &i.id, &j)?;
             }
         }
-        c.upper = (0..c.nodes.len())
-            .map(|mut i| {
-                loop {
-                    if c.nodes[i].name == "spine_01" {
-                        return true;
-                    }
-                    if let Some(p) = c.nodes[i].parent {
-                        i = p
-                    } else {
-                        return false;
-                    }
-                }
-            })
-            .collect();
         c.world = world_matrices(&c.nodes, &c.local);
         for (_, id) in &look.gear {
             if let Some(item) = catalog
@@ -580,6 +573,10 @@ impl Character {
                 remap[i] = bind(i, &model, self);
             }
         }
+        if self.order.len() != self.nodes.len() {
+            // A piece brought bones of its own (a cape's): the world matrices cover them too.
+            self.order = parent_first(&self.nodes);
+        }
         self.parts.push(Part {
             appearance: Default::default(),
             model,
@@ -602,7 +599,7 @@ impl Character {
         if lod == self.lod {
             return Ok(());
         }
-        let (parts, clips) = if let Some(parts) = self.lod_parts.remove(&lod) {
+        let (parts, clips, clip_set) = if let Some(parts) = self.lod_parts.remove(&lod) {
             parts
         } else {
             let mut next = Self::load_lod(catalog, cache, &self.look, lod)?;
@@ -616,13 +613,16 @@ impl Character {
                     }
                 }
             }
-            (next.parts, next.clips)
+            // A beast's clips come with each LOD's model; they still drive this skeleton.
+            let clip_set = cache.clip_set(&self.skeleton, &next.clips, self.humanoid);
+            (next.parts, next.clips, clip_set)
         };
         self.lod_parts.insert(
             self.lod,
             (
                 std::mem::replace(&mut self.parts, parts),
                 std::mem::replace(&mut self.clips, clips),
+                std::mem::replace(&mut self.clip_set, clip_set),
             ),
         );
         self.lod = lod;
@@ -927,41 +927,33 @@ impl Character {
         rotation
     }
     fn apply_clip(&mut self, name: &str, t: f32, looping: bool, bones: Bones) {
-        let Some(clip) = self.clips.clips.get(name) else {
+        let Some(bound) = self.clip_set.clips.get(name) else {
             return;
         };
+        let clip = &bound.clip;
         let t = if looping {
             t.rem_euclid(clip.duration.max(0.001))
         } else {
             t.clamp(0., clip.duration)
         };
-        for track in &clip.tracks {
-            let Some(&i) = self.names.get(&track.node) else {
-                continue;
-            };
-            if bones != Bones::All
-                && self.upper.get(i).copied().unwrap_or(false) != (bones == Bones::Upper)
-            {
-                continue;
-            }
-            let v = track.sample(t);
-            match track.property {
-                Property::Rotation => {
+        let tracks = match bones {
+            Bones::All => &bound.tracks[..],
+            Bones::Upper => &bound.tracks[..bound.upper],
+            Bones::Lower => &bound.tracks[bound.upper..],
+        };
+        for b in tracks {
+            let v = clip.tracks[b.track as usize].sample(t);
+            let i = b.bone as usize;
+            match b.apply {
+                Apply::Rotation => {
                     self.local[i].rotation = Quat::from_array(v.to_array()).normalize()
                 }
-                Property::Translation => {
-                    if !self.humanoid {
-                        self.local[i].translation = v.truncate()
-                    } else if track.node == "pelvis" {
-                        self.local[i].translation = self.nodes[i].rest.translation
-                            + (v.truncate() - self.reference_pelvis) * self.pelvis_ratio
-                    }
+                Apply::Translation => self.local[i].translation = v.truncate(),
+                Apply::Pelvis => {
+                    self.local[i].translation = self.nodes[i].rest.translation
+                        + (v.truncate() - self.reference_pelvis) * self.pelvis_ratio
                 }
-                Property::Scale => {
-                    if !self.humanoid {
-                        self.local[i].scale = v.truncate()
-                    }
-                }
+                Apply::Scale => self.local[i].scale = v.truncate(),
             }
         }
     }
@@ -1855,6 +1847,114 @@ mod combat_tests {
                 clip == "Sword_Regular_A",
                 "{clip}: only the pivot is capped"
             );
+        }
+    }
+    /// How clips were applied before #204, looking each track's bone up by name.
+    fn apply_by_name(c: &mut Character, name: &str, t: f32, looping: bool, bones: Bones) {
+        let clip = c.clips.clips[name].clone();
+        let t = if looping {
+            t.rem_euclid(clip.duration.max(0.001))
+        } else {
+            t.clamp(0., clip.duration)
+        };
+        let upper: Vec<bool> = (0..c.nodes.len())
+            .map(|mut i| {
+                loop {
+                    if c.nodes[i].name == "spine_01" {
+                        return c.humanoid;
+                    }
+                    match c.nodes[i].parent {
+                        Some(p) => i = p,
+                        None => return false,
+                    }
+                }
+            })
+            .collect();
+        for track in &clip.tracks {
+            let Some(&i) = c.names.get(&track.node) else {
+                continue;
+            };
+            if bones != Bones::All && upper[i] != (bones == Bones::Upper) {
+                continue;
+            }
+            let v = track.sample(t);
+            match track.property {
+                Property::Rotation => {
+                    c.local[i].rotation = Quat::from_array(v.to_array()).normalize()
+                }
+                Property::Translation if !c.humanoid => c.local[i].translation = v.truncate(),
+                Property::Translation if track.node == "pelvis" => {
+                    c.local[i].translation = c.nodes[i].rest.translation
+                        + (v.truncate() - c.reference_pelvis) * c.pelvis_ratio
+                }
+                Property::Scale if !c.humanoid => c.local[i].scale = v.truncate(),
+                _ => {}
+            }
+        }
+    }
+    #[test]
+    fn bound_clips_pose_exactly_as_looking_bones_up_by_name() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let knight = Look {
+            art: "male".into(),
+            drawn: true,
+            gear: vec![
+                ("main_hand".into(), "sword.arming".into()),
+                ("off_hand".into(), "shield.round".into()),
+            ],
+            ..Default::default()
+        };
+        let wolf = Look {
+            art: "wolf.grey".into(),
+            ..Default::default()
+        };
+        for look in [knight, wolf] {
+            let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+            // LOD 2 swaps in a beast's own LOD clips, bound to the skeleton it was built on.
+            for lod in [0, 2] {
+                c.set_lod(&cat, &mut cache, lod).unwrap();
+                // Off the rest pose, so a bone that one way sets and the other doesn't shows.
+                let start: Vec<Transform> = c
+                    .local
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| Transform {
+                        translation: l.translation + Vec3::splat(0.01 * i as f32),
+                        rotation: (Quat::from_rotation_x(0.1 * i as f32) * l.rotation).normalize(),
+                        scale: Vec3::splat(1.5),
+                    })
+                    .collect();
+                let mut names: Vec<String> = c.clips.clips.keys().cloned().collect();
+                names.sort();
+                for name in &names {
+                    let duration = c.clips.clips[name].duration;
+                    for bones in [Bones::All, Bones::Upper, Bones::Lower] {
+                        for (at, looping) in [(0., false), (0.37, true), (1.6, true), (1.6, false)]
+                        {
+                            let t = at * duration;
+                            c.local.clone_from(&start);
+                            c.apply_clip(name, t, looping, bones);
+                            let bound = c.local.clone();
+                            c.local.clone_from(&start);
+                            apply_by_name(&mut c, name, t, looping, bones);
+                            for (i, (a, b)) in bound.iter().zip(&c.local).enumerate() {
+                                assert!(
+                                    a.rotation == b.rotation
+                                        && a.translation == b.translation
+                                        && a.scale == b.scale,
+                                    "{} lod {lod} {name} at {t}: bone {} differs",
+                                    look.art,
+                                    c.nodes[i].name
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
