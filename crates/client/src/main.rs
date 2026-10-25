@@ -156,7 +156,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · V dodge · Tab target · T, Num Lock or mouse 4 autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -234,7 +234,13 @@ impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
         let host = server::Host::start(0xa1de, "Traveller");
-        let orbit = controls::Orbit::default();
+        let orbit = controls::Orbit {
+            shoulder: match options.scheme {
+                controls::Scheme::Action => 0.6,
+                controls::Scheme::Classic => 0.,
+            },
+            ..Default::default()
+        };
         let pilot = controls::Pilot::new(options.scheme, orbit.yaw);
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
@@ -364,7 +370,7 @@ impl Game {
                 fov: 45f32.to_radians(),
             };
         }
-        let target = controls::Orbit::target(p);
+        let target = self.orbit.target(p);
         let eye = self.orbit.eye(target, |target, eye| match &self.scenery {
             Some(scenery) => scenery.camera_eye(target, eye, 0.25),
             None => eye,
@@ -991,7 +997,10 @@ impl App {
         match button {
             MouseButton::Left => self.game.orbiting = pressed,
             MouseButton::Right => self.game.mouse_look = pressed,
-            MouseButton::Back if pressed => self.game.pilot.toggle_autorun(),
+            // The thumb button rolls, the way the keys point.
+            MouseButton::Back if pressed => self.game.host.send(Command::Dodge {
+                direction: self.game.direction(),
+            }),
             MouseButton::Forward => self.game.host.send(Command::Guard(pressed)),
             _ => return,
         }
@@ -1235,9 +1244,11 @@ impl ApplicationHandler for App {
                                     None
                                 }
                                 KeyCode::Space => Some(Command::Jump),
-                                KeyCode::KeyV => Some(Command::Dodge {
-                                    direction: self.game.direction(),
-                                }),
+                                KeyCode::KeyV | KeyCode::AltLeft | KeyCode::AltRight => {
+                                    Some(Command::Dodge {
+                                        direction: self.game.direction(),
+                                    })
+                                }
                                 KeyCode::Tab => Some(Command::SetTarget(self.game.target(true))),
                                 key if slot_key(key).is_some() => {
                                     Some(self.game.use_slot(slot_key(key).unwrap()))
@@ -1295,7 +1306,7 @@ impl ApplicationHandler for App {
                             self.game.snaps.current.unit(self.game.host.player),
                         )
                     {
-                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · mouse aims · Ctrl pointer · WASD · Space jump · V roll · Tab target · 1–9 skills",p.health,p.max_health,r.stats.gpu_ms));
+                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · mouse aims · Ctrl pointer · WASD · Space jump · Alt roll · Tab target · 1–9 skills",p.health,p.max_health,r.stats.gpu_ms));
                     }
                 }
             }

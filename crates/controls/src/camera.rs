@@ -23,6 +23,8 @@ pub struct Orbit {
     /// Above the horizon, looking down at the player.
     pub pitch: f32,
     pub distance: f32,
+    /// How far right of the player the camera looks, in metres: over the shoulder.
+    pub shoulder: f32,
 }
 
 impl Default for Orbit {
@@ -31,6 +33,7 @@ impl Default for Orbit {
             yaw: std::f32::consts::PI,
             pitch: 0.23,
             distance: 7.,
+            shoulder: 0.,
         }
     }
 }
@@ -47,9 +50,11 @@ impl Orbit {
         self.distance = (self.distance - notches * ZOOM_STEP).clamp(MIN_DISTANCE, MAX_DISTANCE);
     }
 
-    /// The point the camera looks at for a player standing at `feet`.
-    pub fn target(feet: Vec3) -> Vec3 {
-        feet + Vec3::Y * PIVOT_HEIGHT
+    /// The point the camera looks at for a player standing at `feet`: chest height, moved
+    /// right by [`Orbit::shoulder`] so the player stands left of the crosshair.
+    pub fn target(&self, feet: Vec3) -> Vec3 {
+        let right = Vec3::new(-self.yaw.cos(), 0., self.yaw.sin());
+        feet + Vec3::Y * PIVOT_HEIGHT + right * self.shoulder
     }
 
     /// From the target out to where the eye would be with nothing in the way.
@@ -84,7 +89,7 @@ mod tests {
     use super::*;
 
     fn standing_at(x: f32, z: f32) -> Vec3 {
-        Orbit::target(Vec3::new(x, world::height(x, z), z))
+        Orbit::default().target(Vec3::new(x, world::height(x, z), z))
     }
 
     #[test]
@@ -98,6 +103,23 @@ mod tests {
         assert_eq!(o.distance, MIN_DISTANCE);
         o.zoom(-100.);
         assert_eq!(o.distance, MAX_DISTANCE);
+    }
+
+    #[test]
+    fn shoulder_moves_the_view_right() {
+        let mut o = Orbit {
+            shoulder: 0.6,
+            ..Default::default()
+        };
+        for yaw in [0., 1., std::f32::consts::PI, -2.] {
+            o.yaw = yaw;
+            let d = o.target(Vec3::ZERO) - Vec3::Y * PIVOT_HEIGHT;
+            // Right of where the camera faces: forward (sin, cos) turned a quarter clockwise.
+            let forward = Vec3::new(yaw.sin(), 0., yaw.cos());
+            assert!((d.length() - 0.6).abs() < 1e-5);
+            assert!(d.dot(forward).abs() < 1e-5);
+            assert!(forward.cross(d).y < 0.);
+        }
     }
 
     #[test]

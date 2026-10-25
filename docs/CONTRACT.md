@@ -195,7 +195,7 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
   Action scheme the heading is the camera's yaw (the mouse always looks). In the Classic scheme
   A/D turn it, and the right mouse button sets it to the camera's yaw.
 - **Space:** `Jump`.
-- **Dodge key:** `Dodge` (a zero direction rolls backwards).
+- **Dodge key** (Alt, V or mouse button 4): `Dodge` the way the keys point (a zero direction rolls backwards).
 - **Tab or clicking a unit:** `SetTarget`. Right-clicking an enemy: `SetTarget` plus
   `SetAutoAttack(true)`.
 - **1–9 and 0:** `UseSlot` 0–9. Send `ground` with the point under the crosshair (the centre of
