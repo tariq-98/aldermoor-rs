@@ -34,7 +34,8 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 - If you are blocked, add `status:blocked` and comment why.
 - CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux for the portable crates and
   on macOS for `render` and `client`. Keep it green; run the same commands locally before pushing.
-  `perf.yml` reports sim step times and never blocks a merge.
+  `perf.yml` reports sim step times and never blocks a merge. `dashboard.yml` checks the dashboard
+  when a PR touches it.
 - Issues labelled `perf` need before and after numbers against the budgets in
   [docs/PERFORMANCE.md](docs/PERFORMANCE.md) (12 ms GPU on the M1 Air's own screen at 75% render
   scale, 2 ms sim step).
@@ -56,6 +57,23 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are
   taking it, then claim it as above.
+
+## Visuals
+
+Chippy reviews most work from a phone, in the dashboard ([dashboard/](dashboard/README.md)). Its
+Visuals tab collects every capture posted in the standard format, so anything you can see needs
+captures there:
+
+- A PR that changes something visible (looks, terrain, materials, effects, HUD, animation, camera)
+  gets screenshots or a short video of its latest commit, posted on the PR with the
+  `attach-visuals` skill. When it changes how something looks, put main and the branch side by
+  side from the same camera.
+- Every Mac check posts its captures the same way, with `--verdict pass` or `fail` and `--head`
+  set to the commit it built.
+- After a push that changes how it looks, post again. The dashboard flags captures of an older
+  commit than the PR's latest.
+- Codex doesn't post captures (no image files, see Ownership). It says in the PR what to look at,
+  and the Mac check captures it.
 
 ## Ownership
 
@@ -86,9 +104,10 @@ Edit that file, not the GitHub UI, and the Tracking workflow applies it on merge
 
 ## Step by step
 
-Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue` and
-`finish-issue`. Claude Code loads them from there and Codex from `.agents/skills`, which links to
-the same folder. They cover both the `gh` CLI and the GitHub MCP tools.
+Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue`,
+`finish-issue` and `attach-visuals`. Claude Code loads them from there and Codex from
+`.agents/skills`, which links to the same folder. They cover both the `gh` CLI and the GitHub MCP
+tools.
 
 ## Codex
 
