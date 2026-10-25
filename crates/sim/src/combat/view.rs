@@ -69,6 +69,10 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
                     cost: d.cost,
                     range: d.range,
                     ground: matches!(d.targeting, Targeting::Ground { .. }),
+                    radius: match d.targeting {
+                        Targeting::Ground { radius } => radius,
+                        _ => 0.0,
+                    },
                     auto: d.auto,
                 }
             }

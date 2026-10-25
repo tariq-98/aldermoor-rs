@@ -1,4 +1,4 @@
-//! Topology comes from the simulation. Uniform neutral surfaces await Claude's materials.
+//! Topology comes from the simulation; supplied surface catalogues provide terrain and water materials.
 use crate::{model::*, visibility::Bounds};
 use glam::{Mat4, Quat, Vec3};
 use std::{collections::HashMap, sync::Arc};

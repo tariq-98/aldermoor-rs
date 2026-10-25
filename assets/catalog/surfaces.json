@@ -1,0 +1,70 @@
+{
+  "terrain": {
+    "layers": [
+      {
+        "colour": "terrain/grass_colour.jpg",
+        "normal": "terrain/grass_normal.png",
+        "uv_metres": 4.0,
+        "roughness": 0.9
+      },
+      {
+        "colour": "terrain/meadow_colour.jpg",
+        "normal": "terrain/meadow_normal.png",
+        "uv_metres": 5.0,
+        "roughness": 0.92
+      },
+      {
+        "colour": "terrain/earth_colour.jpg",
+        "normal": "terrain/earth_normal.png",
+        "uv_metres": 3.5,
+        "roughness": 0.88
+      },
+      {
+        "colour": "terrain/limestone_colour.jpg",
+        "normal": "terrain/limestone_normal.png",
+        "uv_metres": 6.0,
+        "roughness": 0.82
+      }
+    ],
+    "weights": "terrain/brambleford_weights.png",
+    "bounds": [
+      -280,
+      -280,
+      280,
+      280
+    ]
+  },
+  "water": {
+    "normal": "water/river_normal.png",
+    "uv_metres": 6.0,
+    "normal_strength": 0.55,
+    "flow": [
+      0.35,
+      0.06
+    ],
+    "deep_colour": [
+      0.012,
+      0.045,
+      0.05
+    ],
+    "shallow_colour": [
+      0.07,
+      0.15,
+      0.12
+    ],
+    "absorption": [
+      0.6,
+      0.25,
+      0.18
+    ],
+    "roughness": 0.06,
+    "opacity": 0.9,
+    "reflection_strength": 0.6,
+    "ior": 1.333
+  },
+  "sky": {
+    "texture": "sky/brambleford_day.jpg",
+    "rotation_radians": 0.0,
+    "intensity": 1.0
+  }
+}

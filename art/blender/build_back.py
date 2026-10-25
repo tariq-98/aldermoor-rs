@@ -19,6 +19,8 @@ from aldermoor_art import cloth, export, garments as gm, metal, regions as rg, r
 OUT = sc.OUT / "gear"
 REVIEW = sc.ROOT / "art" / "out" / "review" / "back"
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+# `--only=backpack.travel` rebuilds just the named items.
+ONLY = next((a.split("=", 1)[1].split(",") for a in ARGS if a.startswith("--only=")), None)
 HUMANOID = json.loads((sc.OUT / "catalog" / "humanoid.json").read_text())
 
 CAPES = [
@@ -94,6 +96,8 @@ def main():
         if info.get("dress") is False:
             continue  # Golems and other creatures that wear nothing.
         for style in CAPES:
+            if ONLY and style["id"] not in ONLY:
+                continue
             skel, body = open_body(bt)
             env, trunk = envelope(body)
             parts, chains = cloth.cape(skel, env, style)
@@ -113,10 +117,14 @@ def main():
             if "--review" in ARGS:
                 review_item(bt, style["id"], skel, parts)
         for style in PACKS:
+            if ONLY and style["id"] not in ONLY:
+                continue
             skel, body = open_body(bt)
             env, trunk = envelope(body)
             parts = cloth.backpack(skel, env, style)
             metal.work(parts, [trunk] + clothes_of())
+            # One mesh for the pack: a draw per material, not one per strap and buckle.
+            parts = export.joined(parts, style["id"])
             path = export.piece(OUT / bt / f"{style['id']}.gltf", [skel] + parts)
             e = entries.setdefault(style["id"], {
                 "id": style["id"], "label": style["label"], "family": "backpack", "slot": "back", "back_kind": "backpack",

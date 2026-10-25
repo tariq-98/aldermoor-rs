@@ -437,3 +437,103 @@ fn scenery_uses_only_supplied_placements_and_models() {
             .any(|v| v.normal[3] > 0.)
     }));
 }
+
+#[test]
+fn lod_switch_keeps_the_live_rig_and_skin_palettes_are_shared() {
+    let _guard = ASSET_TEST_LOCK.lock().unwrap();
+    let cat = catalog();
+    let mut cache = ModelCache::default();
+    let look = armoured_look();
+    let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+    let mut u = unit(look);
+    u.pose = Pose::Run;
+    u.velocity = Vec3::X * 6.;
+    for _ in 0..12 {
+        c.update(&u, 1. / 60.);
+    }
+    let local = c.local.iter().map(|t| t.matrix()).collect::<Vec<_>>();
+    let world = c.world.clone();
+    for lod in [1, 2, 0, 2, 1, 0] {
+        c.set_lod(&cat, &mut cache, lod).unwrap();
+        assert_eq!(
+            world, c.world,
+            "LOD must not reset animation or spring transforms"
+        );
+        assert_eq!(
+            local,
+            c.local.iter().map(|t| t.matrix()).collect::<Vec<_>>()
+        );
+    }
+    let draws = c.draws(Vec3::ZERO, 0.);
+    let skinned = draws
+        .iter()
+        .filter(|d| !d.palette.is_empty())
+        .collect::<Vec<_>>();
+    let unique: std::collections::HashSet<_> = skinned.iter().map(|d| d.palette.as_ptr()).collect();
+    assert!(
+        unique.len() < skinned.len() / 2,
+        "share one palette per skin"
+    );
+}
+fn armoured_look() -> Look {
+    Look {
+        art: "male".into(),
+        pieces: [
+            "peasant.top",
+            "peasant.trousers",
+            "peasant.shoes",
+            "plate.cuirass",
+            "plate.legs",
+            "plate.gauntlets",
+            "plate.pauldrons",
+        ]
+        .map(str::to_owned)
+        .into(),
+        gear: vec![
+            ("main_hand".into(), "sword.arming".into()),
+            ("off_hand".into(), "shield.round".into()),
+            ("back".into(), "cape.traveller".into()),
+        ],
+        drawn: true,
+        ..Default::default()
+    }
+}
+#[cfg(target_os = "macos")]
+#[test]
+fn metal_draws_sixty_armoured_characters() {
+    let _guard = ASSET_TEST_LOCK.lock().unwrap();
+    let cat = catalog();
+    let mut cache = ModelCache::default();
+    let mut characters: Vec<_> = (0..60)
+        .map(|_| Character::load(&cat, &mut cache, &armoured_look()).unwrap())
+        .collect();
+    let mut renderer = render::Renderer::new(640, 360, 0.65).unwrap();
+    renderer.set_frames_in_flight(2).unwrap();
+    for frame in 0..3 {
+        let mut draws = Vec::new();
+        for (i, c) in characters.iter_mut().enumerate() {
+            let mut u = unit(armoured_look());
+            u.pose_time = frame as f32 / 60.;
+            c.update(&u, 1. / 60.);
+            let pos = Vec3::new((i % 10) as f32 * 2. - 9., 0., (i / 10) as f32 * 2.);
+            draws.extend(c.draws(pos, 0.).into_iter().map(|mut d| {
+                d.instance |= ((i + 1) as u64) << 32;
+                d
+            }));
+        }
+        let stats = renderer
+            .draw(
+                render::Camera {
+                    eye: Vec3::new(0., 14., 32.),
+                    target: Vec3::new(0., 1., 5.),
+                    fov: 1.1,
+                },
+                &draws,
+                None,
+            )
+            .unwrap();
+        assert!(stats.triangles > 1_000_000);
+        assert!(stats.bone_bytes > 64 * 1024 && stats.bone_capacity >= stats.bone_bytes);
+    }
+    renderer.wait().unwrap();
+}

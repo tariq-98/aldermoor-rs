@@ -1,8 +1,8 @@
 //! Catalogue assembly and animation. The workshop is the reference, not filenames or rig order.
 use crate::model::*;
 use anyhow::{Context, Result, ensure};
-use glam::{Mat4, Quat, Vec3};
-use protocol::{Look, Pose, UnitState};
+use glam::{Mat4, Quat, Vec3, Vec3Swizzles};
+use protocol::{Action, Look, Pose, UnitCombat, UnitState};
 use std::{collections::HashMap, sync::Arc};
 
 pub struct Part {
@@ -30,13 +30,15 @@ pub struct Draw {
     pub model: Arc<Model>,
     pub primitive: usize,
     pub transform: Mat4,
-    pub palette: Vec<Mat4>,
+    pub palette: Arc<[Mat4]>,
     pub hidden: u32,
     pub base: [f32; 4],
     pub morph: [f32; 2],
 }
 pub struct Character {
     pub lod: usize,
+    /// Diagnostic reference path for measuring and checking partial skeleton updates.
+    pub partial_updates: bool,
     pub parts: Vec<Part>,
     pub nodes: Vec<Node>,
     pub local: Vec<Transform>,
@@ -53,6 +55,11 @@ pub struct Character {
     upper: Vec<bool>,
     role_clips: HashMap<String, String>,
     main: Option<assets::Item>,
+    off_hand: Option<assets::Item>,
+    combat: Option<UnitCombat>,
+    windup: Option<f32>,
+    rally_time: Option<f32>,
+    was_guarding: bool,
     idle: String,
     gear_scale: f32,
     last_pose: Pose,
@@ -67,6 +74,8 @@ pub struct Character {
     grab_offset: Option<f32>,
     bow_morph: [f32; 2],
     springs: Vec<crate::springs::SpringBones>,
+    children: Vec<Vec<usize>>,
+    lod_parts: HashMap<usize, (Vec<Part>, Arc<Model>)>,
 }
 
 pub fn region_mask(names: &[String], regions: &[String]) -> u32 {
@@ -105,10 +114,8 @@ impl Character {
         lod: usize,
     ) -> Result<Self> {
         let h = &catalog.humanoid;
-        let raw: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(catalog.path("catalog/humanoid.json"))?)?;
-        let raw_gear: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(catalog.path("catalog/gear.json"))?)?;
+        let raw = cache.metadata(&catalog.path("catalog/humanoid.json"))?;
+        let raw_gear = cache.metadata(&catalog.path("catalog/gear.json"))?;
         let beast = catalog
             .creatures
             .as_ref()
@@ -142,6 +149,7 @@ impl Character {
             .map_or(Vec3::ZERO, |n| n.rest.translation);
         let mut c = Self {
             lod,
+            partial_updates: true,
             parts: Vec::new(),
             world: world_matrices(&nodes, &local),
             nodes,
@@ -165,6 +173,16 @@ impl Character {
                 .map(|b| b.clips.clone().into_iter().collect())
                 .unwrap_or_default(),
             main: None,
+            off_hand: look
+                .gear
+                .iter()
+                .find(|(slot, _)| slot == "off_hand")
+                .and_then(|(_, id)| catalog.gear.as_ref()?.items.iter().find(|i| i.id == *id))
+                .cloned(),
+            combat: None,
+            windup: None,
+            rally_time: None,
+            was_guarding: false,
             idle: "Idle_Loop".into(),
             gear_scale: body.and_then(|b| b.gear_scale).unwrap_or(1.),
             last_pose: Pose::Idle,
@@ -179,10 +197,11 @@ impl Character {
             grab_offset: None,
             bow_morph: [0.; 2],
             springs: Vec::new(),
+            children: Vec::new(),
+            lod_parts: HashMap::new(),
         };
         if beast.is_some() {
-            let raw_creatures: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(catalog.path("catalog/creatures.json"))?)?;
+            let raw_creatures = cache.metadata(&catalog.path("catalog/creatures.json"))?;
             let def = raw_creatures["creatures"]
                 .as_array()
                 .and_then(|a| a.iter().find(|d| d["id"] == look.art))
@@ -496,7 +515,204 @@ impl Character {
         });
         Ok(())
     }
+    /// Swap only geometry and beast clip data; the live rig, blends, draws and springs survive.
+    pub fn set_lod(
+        &mut self,
+        catalog: &assets::Catalog,
+        cache: &mut ModelCache,
+        lod: usize,
+    ) -> Result<()> {
+        if lod == self.lod {
+            return Ok(());
+        }
+        let (parts, clips) = if let Some(parts) = self.lod_parts.remove(&lod) {
+            parts
+        } else {
+            let mut next = Self::load_lod(catalog, cache, &self.look, lod)?;
+            for part in &mut next.parts {
+                for index in &mut part.remap {
+                    if *index != usize::MAX {
+                        *index = *self
+                            .names
+                            .get(&next.nodes[*index].name)
+                            .context("LOD changed skeleton")?;
+                    }
+                }
+            }
+            (next.parts, next.clips)
+        };
+        self.lod_parts.insert(
+            self.lod,
+            (
+                std::mem::replace(&mut self.parts, parts),
+                std::mem::replace(&mut self.clips, clips),
+            ),
+        );
+        self.lod = lod;
+        Ok(())
+    }
+    pub(crate) fn update_chain(&mut self, root: usize) {
+        if !self.partial_updates {
+            self.world = world_matrices(&self.nodes, &self.local);
+            return;
+        }
+        if self.children.len() != self.nodes.len() {
+            self.children = vec![Vec::new(); self.nodes.len()];
+            for (i, n) in self.nodes.iter().enumerate() {
+                if let Some(p) = n.parent {
+                    self.children[p].push(i);
+                }
+            }
+        }
+        fn update(
+            i: usize,
+            nodes: &[Node],
+            local: &[Transform],
+            world: &mut [Mat4],
+            children: &[Vec<usize>],
+        ) {
+            world[i] = nodes[i].parent.map_or(Mat4::IDENTITY, |p| world[p]) * local[i].matrix();
+            for &child in &children[i] {
+                update(child, nodes, local, world, children);
+            }
+        }
+        update(
+            root,
+            &self.nodes,
+            &self.local,
+            &mut self.world,
+            &self.children,
+        );
+    }
+    fn item_clip(&self, key: &str, fallback: &str) -> String {
+        self.main
+            .as_ref()
+            .and_then(|i| i.clips.get(key))
+            .and_then(|v| v.as_str())
+            .unwrap_or(fallback)
+            .into()
+    }
+    fn shield_clip(&self, key: &str, fallback: &str) -> String {
+        self.off_hand
+            .as_ref()
+            .and_then(|i| i.clips.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.item_clip(key, fallback))
+    }
+    fn attack_clip(&self, index: usize) -> String {
+        self.main
+            .as_ref()
+            .and_then(|i| i.clips.get("attacks"))
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.get(index.min(a.len().saturating_sub(1))))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Punch_Jab")
+            .into()
+    }
+    fn action_clip(&self, u: &UnitState) -> Option<String> {
+        let c = self.combat.as_ref()?;
+        if c.downed {
+            return Some(if self.humanoid {
+                "Death01".into()
+            } else {
+                self.role_clips.get("death")?.clone()
+            });
+        }
+        if self.rally_time.is_some() && self.humanoid {
+            return Some("LayToIdle".into());
+        }
+        if c.guarding || c.action == Action::Block {
+            return None;
+        } // upper-body layer, keep the legs moving
+        if !matches!(
+            u.pose,
+            Pose::Attack | Pose::Cast | Pose::Hit | Pose::Jump | Pose::Run
+        ) {
+            return None;
+        }
+        if u.pose == Pose::Run && c.action != Action::Charge
+            || u.pose == Pose::Jump && c.action != Action::Leap
+            || u.pose == Pose::Hit && c.action != Action::Stagger
+        {
+            return None;
+        }
+        if !self.humanoid {
+            let role = match c.action {
+                Action::Bite | Action::Claw => "attack",
+                Action::Roar => "special",
+                Action::Leap => "jump",
+                _ => return None,
+            };
+            return self.role_clips.get(role).cloned();
+        }
+        let family = self.main.as_ref().map_or("", |i| i.family.as_str());
+        Some(match c.action {
+            Action::Slash => self.attack_clip(0),
+            Action::Slash2 => self.attack_clip(1),
+            Action::Thrust => {
+                if family == "spear" {
+                    "Spear_Thrust".into()
+                } else {
+                    self.attack_clip(2)
+                }
+            }
+            Action::Overhead | Action::Slam => {
+                if family == "greatsword" {
+                    "GreatSword_Overhead".into()
+                } else {
+                    "Sword_Overhead".into()
+                }
+            }
+            Action::Spin => {
+                if family == "greatsword" {
+                    "GreatSword_Swing".into()
+                } else {
+                    "Sword_Regular_Combo".into()
+                }
+            }
+            Action::Bash => self.shield_clip("bash", "Punch_Jab"),
+            Action::Parry => "Sword_Block".into(),
+            Action::Shoot => match family {
+                "bow" => "Bow_Shoot",
+                "wand" => "Spell_Simple_Shoot",
+                _ => "OverhandThrow",
+            }
+            .into(),
+            Action::CastBolt => self.attack_clip(0),
+            Action::CastArea => self.item_clip("slam", "Spell_Simple_Shoot"),
+            Action::Channel => self.item_clip("channel", "Spell_Simple_Idle_Loop"),
+            Action::CastSelf => if c.cast.is_some() {
+                "Spell_Simple_Enter"
+            } else {
+                "Spell_Simple_Exit"
+            }
+            .into(),
+            Action::Kick => "Punch_Cross".into(),
+            Action::Leap => self.shield_clip("dash", "NinjaJump_Start"),
+            Action::Charge => self.item_clip(
+                "dash",
+                if u.velocity.xz().length() > 7. {
+                    "Sprint_Loop"
+                } else {
+                    "Jog_Fwd_Loop"
+                },
+            ),
+            Action::Roar => "Spell_Simple_Enter".into(),
+            Action::Stagger => if self.was_guarding {
+                "Idle_Shield_Break"
+            } else {
+                "Hit_Knockback"
+            }
+            .into(),
+            Action::Revive => "Fixing_Kneeling".into(),
+            _ => return None,
+        })
+    }
     fn clip_for(&self, u: &UnitState) -> String {
+        if let Some(clip) = self.action_clip(u) {
+            return clip;
+        }
         if !self.humanoid {
             let role = match u.pose {
                 Pose::Idle => "idle",
@@ -522,7 +738,7 @@ impl Character {
             }
             .into(),
             Pose::Walk => "Walk_Loop".into(),
-            Pose::Run => if u.velocity.length() > 6. {
+            Pose::Run => if u.velocity.xz().length() > 7. {
                 "Sprint_Loop"
             } else {
                 "Jog_Fwd_Loop"
@@ -585,7 +801,44 @@ impl Character {
             }
         }
     }
+    pub fn rallied(&mut self) {
+        self.rally_time = Some(0.);
+    }
+    pub fn update_combat(&mut self, u: &UnitState, combat: Option<&UnitCombat>, dt: f32) {
+        if let Some(c) = combat {
+            let new_action = self
+                .combat
+                .as_ref()
+                .is_none_or(|old| old.action != c.action || c.action_time < old.action_time);
+            if new_action {
+                self.windup = None;
+            }
+            if u.pose == Pose::Attack
+                && let Some(cast) = &c.cast
+                && !cast.channel
+            {
+                self.windup = Some(cast.duration);
+            }
+            if c.action != Action::Stagger {
+                self.was_guarding = c.guarding;
+            }
+        }
+        self.combat = combat.cloned();
+        self.update(u, dt);
+    }
     pub fn update(&mut self, u: &UnitState, dt: f32) {
+        if let Some(t) = &mut self.rally_time {
+            *t += dt;
+            if *t
+                >= self
+                    .clips
+                    .clips
+                    .get("LayToIdle")
+                    .map_or(1.5, |a| a.duration)
+            {
+                self.rally_time = None;
+            }
+        }
         if u.pose == Pose::Attack && self.last_pose != Pose::Attack {
             self.attack += 1;
         }
@@ -623,16 +876,20 @@ impl Character {
             *l = n.rest;
         }
         let locomotion = matches!(u.pose, Pose::Walk | Pose::Run);
-        let looping = matches!(u.pose, Pose::Idle | Pose::Walk | Pose::Run | Pose::Fall);
+        let looping = matches!(u.pose, Pose::Idle | Pose::Walk | Pose::Run | Pose::Fall)
+            || self.combat.as_ref().is_some_and(|c| {
+                matches!(c.action, Action::Channel | Action::Revive)
+                    || c.action == Action::Spin && c.cast.as_ref().is_some_and(|c| c.channel)
+            });
         let rate = match u.pose {
-            Pose::Walk => (u.velocity.length()
+            Pose::Walk => (u.velocity.xz().length()
                 / if self.humanoid {
                     1.5
                 } else {
                     self.beast_speeds[0]
                 })
             .clamp(0.3, 2.),
-            Pose::Run => (u.velocity.length()
+            Pose::Run => (u.velocity.xz().length()
                 / if self.humanoid {
                     4.5
                 } else {
@@ -647,7 +904,32 @@ impl Character {
             Pose::Attack => self.clips.clips.get(&name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
         };
-        self.apply_clip(&name, u.pose_time * rate, looping, false);
+        let mut clip_time = u.pose_time * rate;
+        if let Some(c) = &self.combat {
+            if c.downed {
+                clip_time = self.clips.clips.get(&name).map_or(0., |a| a.duration);
+            } else if let Some(t) = self.rally_time {
+                clip_time = t;
+            } else if let Some(windup) = self.windup.filter(|_| u.pose == Pose::Attack) {
+                // The blow lands on the clip's `hit` marker just as the wind-up ends.
+                let duration = self.clips.clips.get(&name).map_or(1., |a| a.duration);
+                let hit = self
+                    .clip_meta
+                    .get(&name)
+                    .and_then(|m| m.event("hit"))
+                    .unwrap_or(duration * 0.5);
+                clip_time = swing_time(c.action_time, windup, hit, duration);
+            } else if self.action_clip(u).is_some() {
+                clip_time = if c.action == Action::Parry {
+                    c.action_time * 2.
+                } else if u.pose == Pose::Attack {
+                    c.action_time * rate
+                } else {
+                    c.action_time
+                };
+            }
+        }
+        self.apply_clip(&name, clip_time, looping, false);
         if locomotion
             && u.look.drawn
             && self.humanoid
@@ -659,6 +941,23 @@ impl Character {
                 .map(str::to_owned)
         {
             self.apply_clip(&idle, u.pose_time, true, true);
+        }
+        if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
+            let c = self.combat.as_ref().unwrap();
+            let parrying = c.action == Action::Parry && c.action_time < 0.25;
+            let time = if parrying {
+                c.action_time * 2.
+            } else {
+                c.action_time
+            };
+            let guard = if parrying {
+                "Sword_Block".into()
+            } else {
+                self.shield_clip("block", "Sword_Block")
+            };
+            let looping = !parrying && self.clip_meta.get(&guard).is_some_and(|m| m.looping);
+            self.apply_clip(&guard, time, looping, true);
+            self.transition = None;
         }
         let transition = self.transition.clone();
         if let Some((n, t)) = &transition {
@@ -674,7 +973,7 @@ impl Character {
         let (active, t) = transition
             .as_ref()
             .map(|(n, t)| (n.as_str(), *t))
-            .unwrap_or((&name, u.pose_time * rate));
+            .unwrap_or((&name, clip_time));
         self.perform(active, t);
         let root = Mat4::from_rotation_translation(Quat::from_rotation_y(u.yaw), u.position);
         let mut springs = std::mem::take(&mut self.springs);
@@ -701,7 +1000,7 @@ impl Character {
             self.world[p].to_scale_rotation_translation().1
         });
         self.local[i].rotation = (parent.inverse() * q * world).normalize();
-        self.world = world_matrices(&self.nodes, &self.local);
+        self.update_chain(i);
     }
     fn arm_to(&mut self, side: &str, target: Mat4, weight: f32) {
         if weight <= 0. {
@@ -755,7 +1054,7 @@ impl Character {
             .to_scale_rotation_translation()
             .1;
         self.local[h].rotation = (parent.inverse() * now.slerp(target_q, weight)).normalize();
-        self.world = world_matrices(&self.nodes, &self.local);
+        self.update_chain(h);
     }
     fn perform(&mut self, name: &str, t: f32) {
         self.bow_morph = [0.; 2];
@@ -845,20 +1144,25 @@ impl Character {
         let unit = Mat4::from_rotation_translation(Quat::from_rotation_y(yaw), position);
         let mut out = Vec::new();
         for (part_index, part) in self.parts.iter().enumerate() {
-            for (pi, p) in part.model.primitives.iter().enumerate() {
-                if part.eyes_hidden && p.vertices.first().is_some_and(|v| v.position[3] < 0.) {
-                    continue;
-                }
-                let palette = if let Some(si) = p.skin {
-                    let skin = &part.model.skins[si];
+            let palettes: Vec<Arc<[Mat4]>> = part
+                .model
+                .skins
+                .iter()
+                .map(|skin| {
                     skin.joints
                         .iter()
                         .zip(&skin.inverse)
                         .map(|(j, inv)| self.world[part.remap[*j]] * *inv)
                         .collect()
-                } else {
-                    Vec::new()
-                };
+                })
+                .collect();
+            for (pi, p) in part.model.primitives.iter().enumerate() {
+                if part.eyes_hidden && p.vertices.first().is_some_and(|v| v.position[3] < 0.) {
+                    continue;
+                }
+                let palette = p
+                    .skin
+                    .map_or_else(|| Arc::from([]), |si| palettes[si].clone());
                 let mut transform = unit;
                 if let Some(a) = &part.attachment {
                     let held = self.drawn_now || a.always;
@@ -926,4 +1230,198 @@ fn frame(at: Vec3, up: Vec3, front: Vec3) -> Mat4 {
         z.extend(0.),
         at.extend(1.),
     )
+}
+
+/// Piecewise remapping keeps the strike at the authoritative wind-up boundary and recovery at 0.5 s.
+fn swing_time(elapsed: f32, windup: f32, hit: f32, end: f32) -> f32 {
+    if elapsed <= windup {
+        hit * (elapsed / windup.max(0.001)).clamp(0., 1.)
+    } else {
+        hit + (end - hit) * ((elapsed - windup) / 0.5).clamp(0., 1.)
+    }
+}
+#[cfg(test)]
+mod combat_tests {
+    use super::*;
+    #[test]
+    fn actions_locomotion_guard_and_rally_follow_contract() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let look = Look {
+            art: "male".into(),
+            drawn: true,
+            gear: vec![
+                ("main_hand".into(), "sword.arming".into()),
+                ("off_hand".into(), "shield.round".into()),
+            ],
+            ..Default::default()
+        };
+        let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+        let mut u = UnitState {
+            id: 1,
+            kind: protocol::UnitKind::Player,
+            body: "player".into(),
+            name: "test".into(),
+            level: 1,
+            position: Vec3::ZERO,
+            velocity: Vec3::new(6., 8., 0.),
+            yaw: 0.,
+            pose: Pose::Run,
+            pose_time: 0.2,
+            health: 100.,
+            max_health: 100.,
+            hostile: false,
+            target: None,
+            look,
+        };
+        assert_eq!(
+            c.clip_for(&u),
+            "Jog_Fwd_Loop",
+            "slopes must not select sprint"
+        );
+        u.velocity.x = 7.01;
+        assert_eq!(c.clip_for(&u), "Sprint_Loop");
+        let mut fight = UnitCombat {
+            id: 1,
+            action: Action::None,
+            action_time: 0.2,
+            cast: None,
+            auras: vec![],
+            resource_kind: protocol::ResourceKind::Rage,
+            resource: 0.,
+            max_resource: 100.,
+            guarding: false,
+            downed: false,
+            defiance: None,
+        };
+        for (action, expected) in [
+            (Action::Slash, "Sword_Regular_A"),
+            (Action::Slash2, "Sword_Regular_B"),
+            (Action::Thrust, "Sword_Regular_C"),
+            (Action::Overhead, "Sword_Overhead"),
+            (Action::Bash, "Shield_OneShot"),
+            (Action::Channel, "Spell_Simple_Idle_Loop"),
+            (Action::Revive, "Fixing_Kneeling"),
+        ] {
+            u.pose = Pose::Attack;
+            fight.action = action;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            assert_eq!(c.last_clip, expected);
+            let full = world_matrices(&c.nodes, &c.local);
+            assert!(
+                full.iter()
+                    .zip(&c.world)
+                    .all(|(a, b)| (*a - *b).to_cols_array().iter().all(|v| v.abs() < 1e-5)),
+                "partial skeleton updates must match a full solve"
+            );
+        }
+        u.pose = Pose::Run;
+        fight.action = Action::Slash;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(
+            c.last_clip, "Sprint_Loop",
+            "stale actions must not override locomotion"
+        );
+        // A sword's non-looping guard must hold, even when the locomotion pose clock changes.
+        c.off_hand = None;
+        u.pose = Pose::Idle;
+        fight.guarding = true;
+        fight.action = Action::Block;
+        fight.action_time = 3.;
+        c.update_combat(&u, Some(&fight), 0.2);
+        let arm = c.names["upperarm_r"];
+        let held = c.local[arm].rotation;
+        fight.action_time = 4.1;
+        u.pose_time = 0.;
+        c.update_combat(&u, Some(&fight), 0.2);
+        assert!(held.abs_diff_eq(c.local[arm].rotation, 1e-5));
+        fight.guarding = false;
+        fight.downed = true;
+        u.pose = Pose::Dead;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Death01");
+        fight.downed = false;
+        u.pose = Pose::Idle;
+        c.rallied();
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "LayToIdle");
+    }
+    #[test]
+    fn heavy_blow_has_one_continuous_strike_and_recovery() {
+        assert_eq!(super::swing_time(0., 0.4, 0.6, 1.2), 0.);
+        assert!((super::swing_time(0.4, 0.4, 0.6, 1.2) - 0.6).abs() < 1e-6);
+        assert!((super::swing_time(0.9, 0.4, 0.6, 1.2) - 1.2).abs() < 1e-6);
+        let values: Vec<_> = (0..100)
+            .map(|i| super::swing_time(i as f32 / 100., 0.4, 0.6, 1.2))
+            .collect();
+        assert!(values.windows(2).all(|w| w[1] >= w[0]));
+    }
+    #[test]
+    fn wound_up_overhead_strikes_on_its_hit_marker() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let look = Look {
+            art: "male".into(),
+            drawn: true,
+            gear: vec![("main_hand".into(), "sword.arming".into())],
+            ..Default::default()
+        };
+        let mut c = Character::load(&cat, &mut cache, &look).unwrap();
+        let u = UnitState {
+            id: 1,
+            kind: protocol::UnitKind::Player,
+            body: "player".into(),
+            name: "test".into(),
+            level: 1,
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            yaw: 0.,
+            pose: Pose::Attack,
+            pose_time: 0.,
+            health: 100.,
+            max_health: 100.,
+            hostile: false,
+            target: None,
+            look,
+        };
+        let mut fight = UnitCombat {
+            id: 1,
+            action: Action::Overhead,
+            action_time: 0.,
+            cast: Some(protocol::CastBar {
+                ability: "sword_overhead".into(),
+                name: "Overhead".into(),
+                elapsed: 0.,
+                duration: 0.4,
+                channel: false,
+                interruptible: true,
+            }),
+            auras: vec![],
+            resource_kind: protocol::ResourceKind::Rage,
+            resource: 0.,
+            max_resource: 100.,
+            guarding: false,
+            downed: false,
+            defiance: None,
+        };
+        for frame in 0..=24 {
+            fight.action_time = frame as f32 / 60.;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        assert_eq!(c.last_clip, "Sword_Overhead");
+        let hit = c.clip_meta["Sword_Overhead"].event("hit").unwrap();
+        let arm = c.names["upperarm_r"];
+        let struck = c.local[arm].rotation;
+        c.apply_clip("Sword_Overhead", hit, false, false);
+        assert!(
+            struck.abs_diff_eq(c.local[arm].rotation, 1e-4),
+            "the blade must reach its strike as the wind-up ends"
+        );
+    }
 }

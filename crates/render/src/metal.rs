@@ -10,6 +10,7 @@ use glam::{Mat4, Vec3};
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::NSString;
 use objc2_metal::*;
+use objc2_metal_fx::{MTLFXTemporalScaler, MTLFXTemporalScalerBase, MTLFXTemporalScalerDescriptor};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use std::{
     collections::HashMap,
@@ -28,6 +29,7 @@ struct Frame {
     vp: [[f32; 4]; 4],
     previous_vp: [[f32; 4]; 4],
     inverse_vp: [[f32; 4]; 4],
+    jitter: [f32; 4],
     shadows: [[[f32; 4]; 4]; 3],
     eye: [f32; 4],
     sun: [f32; 4],
@@ -71,7 +73,7 @@ struct Slot {
 struct Previous {
     model_key: u64,
     transform: Mat4,
-    palette: Vec<Mat4>,
+    palette: Arc<[Mat4]>,
     morph: [f32; 2],
 }
 struct Prepared {
@@ -89,6 +91,9 @@ pub struct Stats {
     pub draw_calls: usize,
     pub triangles: usize,
     pub culled: usize,
+    pub bone_bytes: usize,
+    pub bone_capacity: usize,
+    pub history_resets: usize,
 }
 #[derive(Clone, Copy)]
 pub struct Camera {
@@ -106,6 +111,11 @@ pub struct Renderer {
     surface_uniform: crate::surfaces::Uniform,
     surface_maps: [Obj<dyn MTLTexture>; 5],
     sky_pipeline: Obj<dyn MTLRenderPipelineState>,
+    prefilter_pipeline: Obj<dyn MTLRenderPipelineState>,
+    sky_reflection: Obj<dyn MTLTexture>,
+    metalfx: Option<Obj<dyn MTLFXTemporalScaler>>,
+    metalfx_output: Option<Obj<dyn MTLTexture>>,
+    metalfx_requested: bool,
     presented: Arc<Mutex<Vec<(usize, f64)>>>,
     pub target_fps: f64,
     gui: crate::gui::Gui,
@@ -136,6 +146,7 @@ pub struct Renderer {
     pub look: LookSettings,
     pub scene_time: Option<f32>,
     pub inline_constants: bool,
+    pub direct_drawable: bool,
     started: Instant,
     meshes: HashMap<(u64, usize), GpuMesh>,
     textures: HashMap<(String, bool), Obj<dyn MTLTexture>>,
@@ -149,7 +160,7 @@ pub struct Renderer {
     previous_time: f32,
     history_valid: bool,
 }
-const BONE_BYTES: usize = 4 * 1024 * 1024;
+const INITIAL_RING_BYTES: usize = 64 * 1024;
 const SHADOW_SIZE: usize = 1024;
 fn ptr<T>(v: &T) -> NonNull<c_void> {
     NonNull::from(v).cast()
@@ -387,6 +398,14 @@ impl Renderer {
             false,
             false,
         )?;
+        let prefilter_pipeline = pipeline(
+            "fullscreen",
+            Some("prefilter_sky"),
+            1,
+            &[MTLPixelFormat::RGBA16Float],
+            false,
+            false,
+        )?;
         let composite = pipeline(
             "fullscreen",
             Some("composite"),
@@ -476,10 +495,16 @@ impl Renderer {
         for _ in 0..1 {
             slots.push(Slot {
                 draws: device
-                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .newBufferWithLength_options(
+                        INITIAL_RING_BYTES,
+                        MTLResourceOptions::StorageModeShared,
+                    )
                     .context("draw ring buffer")?,
                 bones: device
-                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .newBufferWithLength_options(
+                        INITIAL_RING_BYTES,
+                        MTLResourceOptions::StorageModeShared,
+                    )
                     .context("bone ring buffer")?,
                 pending: None,
             });
@@ -502,6 +527,11 @@ impl Renderer {
             surface_uniform: Default::default(),
             surface_maps,
             sky_pipeline,
+            prefilter_pipeline,
+            sky_reflection: fallback[0].clone(),
+            metalfx: None,
+            metalfx_output: None,
+            metalfx_requested: false,
             hud: None,
             presented: Arc::new(Mutex::new(Vec::new())),
             target_fps: 60.,
@@ -531,6 +561,7 @@ impl Renderer {
             look: LookSettings::default(),
             scene_time: None,
             inline_constants: true,
+            direct_drawable: true,
             started: Instant::now(),
             meshes: HashMap::new(),
             textures: HashMap::new(),
@@ -593,10 +624,129 @@ impl Renderer {
             u.sky[0] = s.rotation_radians / std::f32::consts::TAU;
             u.sky[1] = s.intensity;
             u.flags[2] = 1;
+            self.prefilter_sky()?;
         }
         self.surface_uniform = u;
         self.reset_temporal_history();
         Ok(())
+    }
+    fn prefilter_sky(&mut self) -> Result<()> {
+        let desc = MTLTextureDescriptor::new();
+        unsafe {
+            desc.setWidth(256);
+            desc.setHeight(128);
+            desc.setMipmapLevelCount(9);
+        }
+        desc.setPixelFormat(MTLPixelFormat::RGBA16Float);
+        desc.setStorageMode(MTLStorageMode::Private);
+        desc.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
+        let map = self
+            .device
+            .newTextureWithDescriptor(&desc)
+            .context("sky radiance")?;
+        let cb = self
+            .queue
+            .commandBuffer()
+            .context("sky prefilter command")?;
+        for level in 0..9 {
+            let pass = MTLRenderPassDescriptor::new();
+            let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+            c.setTexture(Some(&map));
+            c.setLevel(level);
+            c.setLoadAction(MTLLoadAction::DontCare);
+            c.setStoreAction(MTLStoreAction::Store);
+            let enc = cb
+                .renderCommandEncoderWithDescriptor(&pass)
+                .context("sky prefilter encoder")?;
+            enc.setRenderPipelineState(&self.prefilter_pipeline);
+            let rough = level as f32 / 8.;
+            unsafe {
+                enc.setFragmentBytes_length_atIndex(ptr(&rough), 4, 0);
+                enc.setFragmentTexture_atIndex(Some(&self.surface_maps[4]), 0);
+                enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+            }
+            enc.endEncoding();
+        }
+        cb.commit();
+        cb.waitUntilCompleted();
+        if let Some(e) = cb.error() {
+            anyhow::bail!("sky prefilter: {e}");
+        }
+        self.sky_reflection = map;
+        Ok(())
+    }
+    pub fn enable_metalfx(&mut self, enabled: bool) -> Result<bool> {
+        self.wait()?;
+        self.metalfx_requested = enabled;
+        self.metalfx = None;
+        self.metalfx_output = None;
+        self.reset_temporal_history();
+        if !enabled || !self.temporal {
+            return Ok(false);
+        }
+        unsafe {
+            if !MTLFXTemporalScalerDescriptor::supportsDevice(&self.device) {
+                eprintln!("MetalFX temporal unsupported; using custom TAA");
+                return Ok(false);
+            }
+            let desc = MTLFXTemporalScalerDescriptor::new();
+            desc.setInputWidth(self.hdr.width());
+            desc.setInputHeight(self.hdr.height());
+            desc.setOutputWidth(self.width as usize);
+            desc.setOutputHeight(self.height as usize);
+            desc.setColorTextureFormat(MTLPixelFormat::RGBA16Float);
+            desc.setDepthTextureFormat(MTLPixelFormat::Depth32Float);
+            desc.setMotionTextureFormat(MTLPixelFormat::RGBA16Float);
+            desc.setOutputTextureFormat(MTLPixelFormat::RGBA16Float);
+            desc.setAutoExposureEnabled(false);
+            let Some(scaler) = desc.newTemporalScalerWithDevice(&self.device) else {
+                eprintln!("MetalFX allocation unavailable; using custom TAA");
+                return Ok(false);
+            };
+            // Respect MetalFX's required input usage flags instead of assuming shader-read only.
+            let rt = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
+            self.hdr = texture(
+                &self.device,
+                self.hdr.width(),
+                self.hdr.height(),
+                MTLPixelFormat::RGBA16Float,
+                1,
+                rt | scaler.colorTextureUsage(),
+            )?;
+            self.motion = texture(
+                &self.device,
+                self.hdr.width(),
+                self.hdr.height(),
+                MTLPixelFormat::RGBA16Float,
+                1,
+                rt | scaler.motionTextureUsage(),
+            )?;
+            self.depth = texture(
+                &self.device,
+                self.hdr.width(),
+                self.hdr.height(),
+                MTLPixelFormat::Depth32Float,
+                1,
+                rt | scaler.depthTextureUsage(),
+            )?;
+            self.metalfx_output = Some(texture(
+                &self.device,
+                self.width as usize,
+                self.height as usize,
+                MTLPixelFormat::RGBA16Float,
+                1,
+                scaler.outputTextureUsage()
+                    | MTLTextureUsage::ShaderRead
+                    | MTLTextureUsage::ShaderWrite,
+            )?);
+            scaler.setInputContentWidth(self.hdr.width());
+            scaler.setInputContentHeight(self.hdr.height());
+            scaler.setDepthReversed(false);
+            scaler.setPreExposure(1.);
+            self.metalfx = Some(scaler);
+        }
+        eprintln!("TEMPORAL MetalFX");
+        Ok(true)
     }
     fn blended(&self, d: &Draw) -> bool {
         let m = &d.model.primitives[d.primitive].material;
@@ -617,11 +767,17 @@ impl Renderer {
             self.slots.push(Slot {
                 draws: self
                     .device
-                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .newBufferWithLength_options(
+                        INITIAL_RING_BYTES,
+                        MTLResourceOptions::StorageModeShared,
+                    )
                     .context("draw ring buffer")?,
                 bones: self
                     .device
-                    .newBufferWithLength_options(BONE_BYTES, MTLResourceOptions::StorageModeShared)
+                    .newBufferWithLength_options(
+                        INITIAL_RING_BYTES,
+                        MTLResourceOptions::StorageModeShared,
+                    )
                     .context("bone ring buffer")?,
                 pending: None,
             });
@@ -729,6 +885,9 @@ impl Renderer {
                 height as f64,
             ));
         }
+        if self.metalfx_requested {
+            self.enable_metalfx(true)?;
+        }
         Ok(())
     }
     fn image(&mut self, t: &Texture, srgb: bool) -> Result<Obj<dyn MTLTexture>> {
@@ -823,7 +982,12 @@ impl Renderer {
         let aspect = self.width as f32 / self.height as f32;
         let unjittered = camera.matrix(aspect);
         let jitter = if self.temporal {
-            let i = self.frame % 16 + 1;
+            let phases = if self.metalfx.is_some() {
+                (8. / (self.scale * self.scale)).ceil() as usize
+            } else {
+                16
+            };
+            let i = self.frame % phases + 1;
             Vec3::new(
                 (halton(i, 2) - 0.5) * 2. / width,
                 (halton(i, 3) - 0.5) * 2. / height,
@@ -841,7 +1005,8 @@ impl Renderer {
                     < 0.75
         });
         let valid = self.history_valid && !cut;
-        let previous_vp = if valid { self.previous_vp } else { vp };
+        self.stats.history_resets += usize::from(!valid);
+        let previous_vp = if valid { self.previous_vp } else { unjittered };
         let sun = Vec3::from_array(self.look.sun_direction).normalize();
         let cascades = stable_cascades(
             camera.eye,
@@ -857,9 +1022,10 @@ impl Renderer {
             .scene_time
             .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
         let f = Frame {
-            vp: vp.to_cols_array_2d(),
+            vp: unjittered.to_cols_array_2d(),
             previous_vp: previous_vp.to_cols_array_2d(),
             inverse_vp: vp.inverse().to_cols_array_2d(),
+            jitter: [jitter.x, jitter.y, jitter.x * 0.5, -jitter.y * 0.5],
             shadows: cascades.map(|m| m.to_cols_array_2d()),
             eye: camera.eye.extend(1.).to_array(),
             sun: sun.extend(self.look.sun_intensity).to_array(),
@@ -873,7 +1039,11 @@ impl Renderer {
             params: [
                 self.look.exposure,
                 (self.look.tone_map == ToneMap::Aces) as u32 as f32,
-                0.,
+                if self.metalfx.is_some() {
+                    self.scale.log2()
+                } else {
+                    0.
+                },
                 0.,
             ],
             clock: [
@@ -885,10 +1055,46 @@ impl Renderer {
             viewport: [width, height, 1. / width, 1. / height],
             splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
         };
+        // Size before writing, after this slot's fence. Buffers only grow and remain alive
+        // until their submitted command buffer completes. Count each shared skin once.
+        let mut unique = std::collections::HashSet::new();
+        let bone_need = 256
+            + draws
+                .iter()
+                .filter(|d| !d.palette.is_empty() && unique.insert(d.palette.as_ptr() as usize))
+                .map(|d| ((std::mem::size_of_val(&*d.palette) + 255) & !255) * 2)
+                .sum::<usize>();
+        let stride = (std::mem::size_of::<DrawUniform>() + 255) & !255;
+        // Base constants plus worst-case packed instances for scene and three shadows.
+        let draw_need = draws.len().max(1) * stride * 5;
+        let frame_slot = &mut self.slots[slot];
+        for (buffer, need) in [
+            (&mut frame_slot.bones, bone_need),
+            (&mut frame_slot.draws, draw_need),
+        ] {
+            if buffer.length() < need {
+                *buffer = self
+                    .device
+                    .newBufferWithLength_options(
+                        need.next_power_of_two(),
+                        MTLResourceOptions::StorageModeShared,
+                    )
+                    .context("grow frame ring")?;
+            }
+        }
         let bones = self.slots[slot].bones.clone();
         let uniform_buffer = self.slots[slot].draws.clone();
         let mut uniform_used = 0;
-        let mut used = 0;
+        // Rigid primitives share a single identity matrix at zero.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                Mat4::IDENTITY.to_cols_array().as_ptr().cast::<u8>(),
+                bones.contents().as_ptr().cast::<u8>(),
+                64,
+            );
+        }
+        let mut used = 256;
+        let mut palette_offsets = HashMap::new();
         let mut prepared = Vec::new();
         let mut new_previous = HashMap::new();
         let mut calls = 0;
@@ -918,35 +1124,30 @@ impl Renderer {
             let old = self.previous.get(&d.instance).filter(|old| {
                 valid && old.model_key == d.model.id && old.palette.len() == d.palette.len()
             });
-            let identity = [Mat4::IDENTITY];
-            let current = if d.palette.is_empty() {
-                &identity[..]
+            let (current, previous) = if d.palette.is_empty() {
+                (0, 0)
             } else {
-                &d.palette
+                *palette_offsets
+                    .entry(d.palette.as_ptr() as usize)
+                    .or_insert_with(|| {
+                        let current = &*d.palette;
+                        let prev = old.map_or(current, |o| &*o.palette);
+                        let mut put = |data: &[Mat4]| {
+                            let size = std::mem::size_of_val(data);
+                            let at = used;
+                            unsafe {
+                                std::ptr::copy_nonoverlapping(
+                                    data.as_ptr().cast::<u8>(),
+                                    bones.contents().as_ptr().cast::<u8>().add(at),
+                                    size,
+                                );
+                            }
+                            used = (used + size + 255) & !255;
+                            at
+                        };
+                        (put(current), put(prev))
+                    })
             };
-            let prev = old.map_or(current, |o| {
-                if o.palette.is_empty() {
-                    &identity[..]
-                } else {
-                    &o.palette
-                }
-            });
-            let mut put = |data: &[Mat4]| -> Result<usize> {
-                let size = std::mem::size_of_val(data);
-                ensure!(used + size <= BONE_BYTES, "frame bone budget exceeded");
-                let at = used;
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        data.as_ptr().cast::<u8>(),
-                        bones.contents().as_ptr().cast::<u8>().add(at),
-                        size,
-                    );
-                }
-                used = (used + size + 255) & !255;
-                Ok(at)
-            };
-            let current = put(current)?;
-            let previous = put(prev)?;
             let m = &p.material;
             let u = DrawUniform {
                 model: d.transform.to_cols_array_2d(),
@@ -986,7 +1187,7 @@ impl Renderer {
             };
 
             ensure!(
-                uniform_used + std::mem::size_of::<DrawUniform>() <= BONE_BYTES,
+                uniform_used + std::mem::size_of::<DrawUniform>() <= uniform_buffer.length(),
                 "draw constant budget exceeded"
             );
             unsafe {
@@ -1116,7 +1317,21 @@ impl Renderer {
         )?;
         enc.endEncoding();
         let history_index = self.frame % 2;
-        if self.temporal {
+        if let Some(scaler) = &self.metalfx {
+            unsafe {
+                scaler.setColorTexture(Some(&self.hdr));
+                scaler.setDepthTexture(Some(&self.depth));
+                scaler.setMotionTexture(Some(&self.motion));
+                scaler.setOutputTexture(self.metalfx_output.as_deref());
+                // Our vectors are currentUV - previousUV. MetalFX expects previous - current in pixels.
+                scaler.setMotionVectorScaleX(-width);
+                scaler.setMotionVectorScaleY(-height);
+                scaler.setJitterOffsetX(jitter.x * width * 0.5);
+                scaler.setJitterOffsetY(-jitter.y * height * 0.5);
+                scaler.setReset(!valid);
+                scaler.encodeToCommandBuffer(&cb);
+            }
+        } else if self.temporal {
             let pass = MTLRenderPassDescriptor::new();
             let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
             c.setTexture(Some(&self.history[history_index]));
@@ -1137,9 +1352,18 @@ impl Renderer {
             enc.endEncoding();
             calls += 1;
         }
+        let drawable = self.layer.as_ref().and_then(|l| l.nextDrawable());
+        let target = if self.direct_drawable && capture.is_none() {
+            drawable
+                .as_ref()
+                .map(|d| d.texture())
+                .unwrap_or_else(|| self.output.clone())
+        } else {
+            self.output.clone()
+        };
         let output = MTLRenderPassDescriptor::new();
         let c = unsafe { output.colorAttachments().objectAtIndexedSubscript(0) };
-        c.setTexture(Some(&self.output));
+        c.setTexture(Some(&target));
         c.setLoadAction(MTLLoadAction::DontCare);
         c.setStoreAction(MTLStoreAction::Store);
         let enc = cb
@@ -1149,7 +1373,9 @@ impl Renderer {
         unsafe {
             enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
             enc.setFragmentTexture_atIndex(
-                Some(if self.temporal {
+                Some(if let Some(output) = &self.metalfx_output {
+                    output
+                } else if self.temporal {
                     &self.history[history_index]
                 } else {
                     &self.hdr
@@ -1161,15 +1387,16 @@ impl Renderer {
         enc.endEncoding();
         calls += 1;
         if let Some(hud) = &hud {
-            calls += self.gui.paint(&cb, &self.output, hud, self.frame)?;
+            calls += self.gui.paint(&cb, &target, hud, self.frame)?;
         }
-        let drawable = self.layer.as_ref().and_then(|l| l.nextDrawable());
         if let Some(drawable) = &drawable {
-            let blit = cb.blitCommandEncoder().context("present blit")?;
-            unsafe {
-                blit.copyFromTexture_toTexture(&self.output, &drawable.texture());
+            if !self.direct_drawable || capture.is_some() {
+                let blit = cb.blitCommandEncoder().context("present blit")?;
+                unsafe {
+                    blit.copyFromTexture_toTexture(&self.output, &drawable.texture());
+                }
+                blit.endEncoding();
             }
-            blit.endEncoding();
             let samples = self.presented.clone();
             let number = self.frame;
             let handler =
@@ -1237,7 +1464,7 @@ impl Renderer {
         }
         self.slots[slot].pending = Some(cb);
         self.previous = new_previous;
-        self.previous_vp = vp;
+        self.previous_vp = unjittered;
         self.previous_camera = Some(camera);
         self.previous_time = time;
         self.history_valid = true;
@@ -1245,6 +1472,8 @@ impl Renderer {
         self.stats.draw_calls = calls;
         self.stats.triangles = triangles;
         self.stats.culled = culled;
+        self.stats.bone_bytes = used;
+        self.stats.bone_capacity = bones.length();
         Ok(self.stats)
     }
     fn encode(
@@ -1274,6 +1503,7 @@ impl Renderer {
                     std::mem::size_of::<crate::surfaces::Uniform>(),
                     3,
                 );
+                enc.setFragmentTexture_atIndex(Some(&self.sky_reflection), 12);
                 for (i, texture) in self.surface_maps.iter().enumerate() {
                     enc.setFragmentTexture_atIndex(Some(texture), 7 + i);
                 }
@@ -1356,7 +1586,7 @@ impl Renderer {
                 let at = *packed_used;
                 let stride = std::mem::size_of::<DrawUniform>();
                 ensure!(
-                    at + group.len() * stride <= BONE_BYTES,
+                    at + group.len() * stride <= uniform_buffer.length(),
                     "instanced draw constant budget exceeded"
                 );
                 unsafe {
@@ -1528,4 +1758,68 @@ fn texture_array(
     blit.endEncoding();
     cb.commit();
     Ok(array)
+}
+
+#[cfg(test)]
+mod temporal_tests {
+    use super::*;
+    #[test]
+    fn static_scene_motion_excludes_halton_jitter() {
+        let mut r = Renderer::new(64, 64, 1.).unwrap();
+        r.prefilter_sky().unwrap(); // Exercise every lighting mip using the existing neutral fallback.
+        assert_eq!(r.sky_reflection.mipmapLevelCount(), 9);
+        let terrain = crate::terrain::valley();
+        let draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        r.draw(camera, &draws, None).unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let bytes = 64 * 64 * 8;
+        let buffer = r
+            .device
+            .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+            .unwrap();
+        let cb = r.queue.commandBuffer().unwrap();
+        let blit = cb.blitCommandEncoder().unwrap();
+        unsafe {
+            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                &r.motion,0,0,MTLOrigin{x:0,y:0,z:0},MTLSize{width:64,height:64,depth:1},&buffer,0,512,bytes);
+        }
+        blit.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        assert!(cb.error().is_none());
+        let values = unsafe {
+            std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u16>(), bytes / 2)
+        };
+        let mut covered = 0;
+        for pixel in values.as_chunks::<4>().0 {
+            if pixel[3] != 0 {
+                covered += 1;
+                assert_eq!(pixel[0] & 0x7fff, 0, "static horizontal motion");
+                assert_eq!(pixel[1] & 0x7fff, 0, "static vertical motion");
+            }
+        }
+        assert!(covered > 100, "the test must actually rasterise geometry");
+    }
 }

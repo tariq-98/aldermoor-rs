@@ -168,7 +168,7 @@ relative to `assets/`. Positions are glTF (metres, +Y up, +Z forward).
 | `dyes` | The dye palette: `id`, `label` and `linear` RGB |
 | `body_types.<id>` | `label`, `file` (the body with the skeleton and sockets), `pelvis`, `height`, `skin_reference`, `sockets`, `colliders` (cloth capsules: `bone`, `radius`, and ends `a` and `b` in the bone's node frame) |
 | `defaults.<body type>` | A starting look: pieces, hair, brows, beard, tone and hair colour |
-| `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`; our own clips add `source: "authored"`, and may add `upper_body`, `curves` and `events`: see "Clips, curves and events") |
+| `animations` | `file` (`anims.glb`: the reference skeleton plus every clip), `pelvis`, `fps`, and `clips` (each with `name`, `seconds`, `loop`, `group` and `tags`; our own clips add `source: "authored"` and cut ones `source: "cut"`; clips may add `upper_body`, `curves` and `events`: see "Clips, curves and events") |
 | `hair[]` | `id`, `kind` (`hair`, `beard` or `brows`), `label`, and `files.<body type>` |
 | `pieces[]` | `id`, `slot`, `layer`, `label`, `files.<body type>`, `hides.<body type>`, `covers_hair`, `coverage` (diagnostic), and for dyeable pieces `dye` and `dye_channels`. `source` names the build that owns the piece; `idle` names the clip to stand in while it's worn |
 | `texture_variants`, `texture_variant_labels` | Base texture name mapped to its alternatives, and display names for each colourway |
@@ -206,7 +206,8 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 
 ## Clips, curves and events
 
-The library is the Universal Animation Library's 84 clips plus 29 of our own, built by
+The library is the Universal Animation Library's 84 clips, one swing cut from them, and 29 of
+our own, built by
 `art/blender/build_clips.py`. Ours are keyed in code on the broad frame's skeleton: each pose
 places the item and the hands follow their sockets, so on that body every grip is exact.
 
@@ -237,6 +238,14 @@ later key wins. `assets::curve` implements this, and the workshop's `perform.js`
 **Events** mark moments: `grab` (the item moves to the hand), `stow` (it moves back to where it
 rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands) and `cast` (a
 spell leaves).
+
+Every attack clip says when its blow lands, so a clip can be timed to strike when the
+simulation resolves the blow (CONTRACT.md, "Poses to animation"). Ours are authored; the
+vendor's are measured (`art/blender/measure_strikes.py`: a slash lands at the swinging hand's
+fastest, a punch or a shield bash at full stretch) and set in `build_clips.py`'s
+`VENDOR_EVENTS`. Combos land several times (`Sword_Regular_Combo` three, `Sword_Heavy_Combo`
+four), so `Sword_Overhead` is the heavy combo's last blow cut on its own (`source: "cut"`,
+landing at 0.3 s), for a one-handed overhead.
 
 **Off-hand IK.** Clips play on bodies with other proportions, so the off hand drifts off
 two-handed items. While `off_hand` > 0, find where the clip puts that hand's socket, measure
@@ -295,6 +304,56 @@ same kit the Swift village used, remade at the characters' quality.
   is rooted and 1 at its tips. The workshop moves each vertex along the wind by
   `_WIND × strength × (gust + flutter) × 0.12 m`, phased by world position (`scenery.js`).
   Props with `wind: true` have it on every mesh.
+
+## Ground, water, sky and light: `catalog/surfaces.json` and `catalog/look.json`
+
+`build_world.py` paints the valley's ground, river and sky (`aldermoor_art/ground.py`), and
+writes the two files the renderer takes as `--surface-assets` and `--look-settings`
+(`render::surfaces`, `render::settings`). Paths inside are relative to `assets/`.
+
+- **Ground:** four tiling layers in `terrain/`, each a colour map (sRGB JPEG) and a normal map,
+  all 1024 px so they stack into texture arrays:
+
+  | Layer | Metres per tile | Roughness | What |
+  |---|---|---|---|
+  | `grass` | 4 | 0.9 | Lush turf for the valley floor: dense blades in clumps, the odd clover flower |
+  | `meadow` | 5 | 0.92 | Drier straw-and-olive grass with buttercups, daisies and clover |
+  | `earth` | 3.5 | 0.88 | Packed earth for roads, yards and banks: dusty and damp patches, gravel, pebbles |
+  | `limestone` | 6 | 0.82 | Bedded limestone: irregular blocks wider than tall, crossed by undulating bedding partings, with grime and moss in the partings, rain streaks, pits, lichen and iron staining |
+
+- **Weights** (`terrain/brambleford_weights.png`, 2048 px, linear): the share of each layer
+  in R, G, B and A, in the order above, over `bounds` [−280, −280, 280, 280]: row 0 is the
+  north edge (z = −280) and column 0 the west edge, about 27 cm a texel. They come from the
+  `world` crate's own fields (`crates/world/examples/ground_fields.rs`: height, slope, road
+  distance, the river, the trees and houses), so the earth runs exactly along the game's roads
+  and the village square, and rock shows exactly where the ground is steep:
+  - limestone on slopes steeper than about 30°, a few outcrops on the high tops, and stones in
+    the riverbed;
+  - earth on the roads, the riverbanks, round the houses, under the trees and in bare patches;
+  - meadow on high ground and slopes facing the sun, in patches, along the roads' verges and
+    under the trees; lush grass by the river and everywhere else.
+  The fourth channel is a weight, not transparency: the file is written byte for byte
+  (`aldermoor_art/png.py`), never through an image library that premultiplies alpha.
+- **River:** `water/river_normal.png` (ripples, 6 m a tile), drifting with `flow` (metres a
+  second along x and z), with deep and shallow colours, absorption per metre, roughness,
+  opacity, reflection strength and index of refraction.
+- **Sky:** `sky/brambleford_day.jpg`, 4096 × 2048, equirectangular as the renderer samples it:
+  direction (x, y, z) at u = atan2(z, x) / 2π + ½ and v = acos(y) / π. Fair weather: blue
+  overhead fading to haze at the horizon, the sun's glow and disc, and cumulus lit from the
+  sun's side. The sun in it sits exactly at the look's `sun_direction`.
+- **Light** (`look.json`, linear colours): a warm late-morning sun from the south-east, about
+  38° up (behind the default camera's right shoulder as it looks north over the village); a
+  cool sky-coloured ambient; haze the colour of the horizon; filmic (ACES) tone mapping and an
+  8% saturation lift.
+- **Normal maps** here follow glTF like every other asset: +Y toward the top of the image.
+
+The renderer loads `catalog/surfaces.json` and `catalog/look.json` by default when they exist
+(its flags override them). It samples the terrain layers triplanar, and the side projections
+stand upright: u runs along the face and v down it. So paint a layer the right way up: its rows
+lie level on a cliff (the limestone's bedding runs along them) and its columns hang plumb (the
+rain streaks run down them). Tangent frames built from screen derivatives, for meshes without
+tangents such as the terrain and the river, have their bitangent along −∂P/∂v, as glTF's normal
+maps expect.
 
 ## Materials and file details
 
@@ -367,7 +426,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Script | Builds | Writes |
 |---|---|---|
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
-| `build_clips.py` | The clip library: the 84 vendor clips plus our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
+| `build_clips.py` | The clip library: the 84 vendor clips (with their strikes measured), a swing cut from one, and our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
 | `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`); the dwarven beard, grown as locks from each dwarf's face into two braids with bronze rings (`aldermoor_art/beard.py`) | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig. The golem's hewn stones are fields (`aldermoor_art/golem.py`) painted with lichen, moss and glowing runes | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
@@ -376,6 +435,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks and normal maps (the weave, and folds hanging from the waist; capes' from the shoulders) | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig: anatomy as a signed distance field with sculpted locks of fur (`aldermoor_art/wolf.py`, `sdf.py`), painted coats and generated gaits | `creatures/`, `catalog/creatures.json` |
 | `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
+| `build_world.py` | The valley's ground layers and the weights that blend them (from `world`'s own fields, sampled first by `cargo run -p world --release --example ground_fields`), the river's ripples, the sky, and the light | `terrain/`, `water/`, `sky/`, `catalog/surfaces.json`, `catalog/look.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
   share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
@@ -390,6 +450,12 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - both levels of detail beside every file, on the same skeleton;
   - `_REGION` on every skinned piece;
   - that every dressable body type has a fit for every piece;
+  - that no piece costs more than four draws beyond its materials: parts that share a
+    material are joined into one mesh at export (`export.joined`), so the renderer draws plate
+    a material at a time, not a plate at a time;
+  - that the ground, river and sky files exist, the terrain's layers match in size (they stack
+    into texture arrays), the weights are square, the sky is twice as wide as tall, and the
+    light's numbers make sense;
   - that no id or label mentions spiders, arachnids or webs.
 
 ## What exists (24 October 2026)
@@ -406,12 +472,14 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
 | Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile |
+| Ground, water, sky | Lush grass, meadow, packed earth and limestone, blended across the valley by its roads, slopes, river, trees and houses; river ripples; a fair-weather sky; the valley's light (25 October 2026) |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
 **Gaps, next in line:**
 - weapon-ready locomotion (until then, layer the drawn idle's upper body over the run);
 - more beasts the way the wolves are made (boars, bears and deer), and hostile humanoid outfits;
-- terrain materials and the dungeon's kit.
+- scenery scatter: where the rocks, grass tufts, flowers, bushes and reeds go;
+- the dungeon's kit.
 
 ## Milestones
 
