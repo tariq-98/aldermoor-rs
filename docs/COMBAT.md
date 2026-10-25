@@ -101,6 +101,11 @@ Health, power and armour are multipliers on the level's base numbers (below).
   moves can make them miss. Players aim instant shots with the point they send; cast bolts fly at
   where the target is when they're loosed. Monsters lead a moving target, so running in a straight
   line won't save you; changing direction will.
+- **Shot magnetism:** an aimed missile that passes within 0.3 m of a monster's body (`MAGNETISM`)
+  strikes it, so a shot that looks like a hit is one. Against players the margin is 0.1 m
+  (`MAGNETISM_PVP`), so PvP stays a matter of aim. The first body along the flight still takes
+  it, and walls still stop it. There's no friction slowing the crosshair: on a mouse it fights
+  muscle memory.
 - **Piercing** missiles strike everything along their flight.
 - **Shield Wall** turns missiles back on whoever loosed them.
 

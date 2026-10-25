@@ -8,7 +8,7 @@
 
 use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
-use protocol::{Avoid, Event, Shape, UnitId};
+use protocol::{Avoid, Event, Shape, UnitId, UnitKind};
 
 use super::effects::{self, Delivery};
 use super::{auras, chest, emit, entity, guard, now, unit_id, HitSource};
@@ -18,8 +18,13 @@ use crate::{Body, Land, Motion, PlayerControl, Transform, Unit, Vitals, DT};
 
 /// How much further than its range an aimed missile flies before it falls.
 const OVERSHOOT: f32 = 6.0;
-/// A missile's own thickness.
+/// A homing missile's own thickness.
 const THICKNESS: f32 = 0.15;
+/// Shot magnetism (#225): an aimed missile strikes a monster it passes within this of (beyond
+/// its body), so a shot that looks like a hit is one.
+pub const MAGNETISM: f32 = 0.3;
+/// The same against players, kept small so PvP stays a matter of aim.
+pub const MAGNETISM_PVP: f32 = 0.1;
 
 pub struct Projectile {
     pub id: u32,
@@ -228,7 +233,12 @@ fn struck(world: &World, p: &Projectile, from: Vec3, to: Vec3) -> Vec<(Entity, f
         }
         let body = world.get::<Body>(e).copied().unwrap_or(Body { radius: 0.4, height: 1.8 });
         let s = if len2 > 1e-8 { ((c - a).dot(seg) / len2).clamp(0.0, 1.0) } else { 0.0 };
-        if (a + seg * s - c).length() > body.radius + THICKNESS {
+        let margin = match (p.homing, u.kind) {
+            (true, _) => THICKNESS,
+            (false, UnitKind::Player) => MAGNETISM_PVP,
+            (false, _) => MAGNETISM,
+        };
+        if (a + seg * s - c).length() > body.radius + margin {
             continue;
         }
         let y = from.y + (to.y - from.y) * s;
