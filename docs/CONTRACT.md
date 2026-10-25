@@ -206,8 +206,12 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
   not while guarding or casting.
 - **Space:** `Jump`.
 - **Dodge key** (Alt, V or mouse button 4): `Dodge` the way the keys point (a zero direction rolls backwards).
-- **Tab or clicking a unit:** `SetTarget`. Right-clicking an enemy: `SetTarget` plus
+- **Tab or clicking a unit:** `SetTarget`. In Classic, right-clicking an enemy: `SetTarget` plus
   `SetAutoAttack(true)`.
+- **Action scheme mouse:** the left button sends `SetTarget` for the unit under the crosshair (if
+  any) and `UseSlot` for the basic attack, again every 0.1 s while held (presses mid-swing are
+  ignored), then `SetAutoAttack(false)` when released. The right button is `Guard(true)` while
+  held, like the guard key.
 - **1–9 and 0:** `UseSlot` 0–9. Send `ground` with the point under the crosshair (the centre of
   the screen) while the mouse is looking, otherwise under the cursor: ground skills land there, and straight-flying shots fly at it, so
   a player can lead a moving target. Show slots with `ground` as a circle of the skill's radius
