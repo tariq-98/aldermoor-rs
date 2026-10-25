@@ -87,12 +87,16 @@ fn main() -> anyhow::Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     let cat = assets::Catalog::load(&root)?;
     let mut cache = ModelCache::default();
-    // "idle" and "run" hold their pose throughout. "slash" and "run + slash" start the slash over
-    // every half second, and "start-stop" runs and stops every half second, so those three are
-    // blending clips most of the time.
+    // "idle", "walk", "run" and "strafe" hold their pose throughout: "walk" blends the walk and
+    // jog loops, and "strafe" runs square to the facing, the hips turned toward the travel and the
+    // chest turned back. "slash" and "run + slash" start the slash over every half second, and
+    // "start-stop" runs and stops every half second, so those three are blending clips most of the
+    // time.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
+        ("walk", Pose::Walk, 2.5, Action::None),
         ("run", Pose::Run, 6., Action::None),
+        ("strafe", Pose::Run, 6., Action::None),
         ("slash", Pose::Attack, 0., Action::Slash),
         ("run + slash", Pose::Attack, 6., Action::Slash),
         ("start-stop", Pose::Run, 6., Action::None),
@@ -107,6 +111,11 @@ fn main() -> anyhow::Result<()> {
             let mut units: Vec<_> = (0..count)
                 .map(|i| unit(i as u32, look(i), pose, speed))
                 .collect();
+            if label == "strafe" {
+                for u in &mut units {
+                    u.velocity = Vec3::new(speed, 0., 0.);
+                }
+            }
             let fight = |id: u32, t: f32| UnitCombat {
                 id,
                 action,
@@ -131,7 +140,7 @@ fn main() -> anyhow::Result<()> {
                         u.velocity.z = if running { speed } else { 0. };
                     }
                     let cycle = t % 0.5;
-                    u.pose_time = if matches!(label, "idle" | "run") {
+                    u.pose_time = if matches!(label, "idle" | "walk" | "run" | "strafe") {
                         t
                     } else {
                         cycle

@@ -85,8 +85,12 @@ pub struct Character {
     last_upper: Option<String>,
     /// A switch the clips' names won't show: an action starting over, or a LOD swap.
     forced_switch: Option<anim::Switch>,
-    /// Where the walk, jog or sprint cycle is, from 0 to 1.
-    stride: f32,
+    /// Where the walk, jog or sprint cycle is, and the speed and hip turn the legs show (#110). A
+    /// beast's phase runs from 0 to 1 through its walk or run clip.
+    stride: anim::Stride,
+    /// The humanoid loops' gaits on this skeleton, slowest first. Without them (beasts) the walk
+    /// or run plays at `stride_rate`.
+    gaits: Option<[anim::Gait; 3]>,
     drawn_now: bool,
     main_offset: f32,
     grab_offset: Option<f32>,
@@ -120,7 +124,10 @@ enum Bones {
 /// How far round from the hips an action on the move may turn the chest, beyond the clip's own
 /// twist, to face where the clip faced it.
 const MAX_TWIST: f32 = std::f32::consts::FRAC_PI_3;
-/// The humanoid loop for walking or running at `speed`.
+/// The humanoid locomotion loops, slowest first, which blend by speed (#110).
+const LOOPS: [&str; 3] = ["Walk_Loop", "Jog_Fwd_Loop", "Sprint_Loop"];
+/// The humanoid loop for walking or running at `speed`, which the clip stack's switches and
+/// `perform` go by. What shows is a blend of `LOOPS`.
 fn locomotion_clip(pose: Pose, speed: f32) -> &'static str {
     match pose {
         Pose::Walk => "Walk_Loop",
@@ -294,7 +301,8 @@ impl Character {
             last_busy: false,
             last_upper: None,
             forced_switch: None,
-            stride: 0.,
+            stride: anim::Stride::default(),
+            gaits: None,
             drawn_now: look.drawn,
             main_offset: 0.,
             grab_offset: None,
@@ -522,6 +530,11 @@ impl Character {
                 )?;
                 c.set_appearance(catalog, cache, look, &i.id, &j)?;
             }
+        }
+        let set = c.clip_set.clone();
+        c.gaits = *set.gaits.get_or_init(|| c.measure_gaits());
+        for (n, l) in c.nodes.iter().zip(&mut c.local) {
+            *l = n.rest;
         }
         c.world = world_matrices(&c.nodes, &c.local);
         for (_, id) in &look.gear {
@@ -984,32 +997,114 @@ impl Character {
             .clamp(0.5, 1.6)
         }
     }
-    /// Puts walking legs under the action just applied: `legs` drives the hips and legs at the
-    /// stride phase, and the upper body turns about the vertical back toward where the action's
-    /// own hips faced it. The turn stops once the chest is `MAX_TWIST` round from the hips (or the
-    /// clip's own twist, if that is more), so swings that pivot the whole body keep a believable
-    /// spine while side-on stances (a bow, a wand) still aim forward.
-    fn walk_under(&mut self, legs: &str) {
-        let ids = ["pelvis", "spine_01", "spine_03"].map(|n| self.names.get(n).copied());
-        let [Some(pelvis), Some(spine), Some(chest)] = ids else {
+    /// Puts walking legs under the action just applied: the step's loops (or `legs` at the
+    /// stride phase, without measured gaits) drive the hips and legs. Returns where the action's
+    /// chest faced about the vertical and its twist from its own hips, which `turn_hips` turns the
+    /// chest back toward.
+    fn walk_under(&mut self, legs: &str, step: Option<anim::Step>) -> Option<(f32, f32)> {
+        let ids = ["pelvis", "spine_03"].map(|n| self.names.get(n).copied());
+        let [Some(pelvis), Some(chest)] = ids else {
+            return None;
+        };
+        let clip_hips = heading(
+            self.rotation_to(pelvis, None, false),
+            self.rotation_to(pelvis, None, true),
+        );
+        let clip_chest = heading(
+            self.rotation_to(chest, None, false),
+            self.rotation_to(chest, None, true),
+        );
+        match step {
+            Some(step) => self.apply_step(step, Bones::Lower),
+            None => {
+                let time =
+                    self.stride.phase * self.clips.clips.get(legs).map_or(1., |a| a.duration);
+                self.apply_clip(legs, time, true, Bones::Lower);
+            }
+        }
+        Some((clip_chest, wrap(clip_chest - clip_hips)))
+    }
+    /// Turns the hips `turn` round the vertical through the model's origin, so the legs and their
+    /// planted feet turn with them toward where the body travels (orientation warping, #110). Then
+    /// turns the upper body back toward `aim`: where the chest should face and its own twist from
+    /// the hips, or where it faced before the turn when `None`. The chest stops `MAX_TWIST` round
+    /// from the hips (or its own twist, if that is more), so swings that pivot the whole body keep
+    /// a believable spine while side-on stances (a bow, a wand) still aim forward. The turn back is
+    /// spread evenly up the spine.
+    fn turn_hips(&mut self, turn: f32, aim: Option<(f32, f32)>) {
+        let ids =
+            ["pelvis", "spine_01", "spine_02", "spine_03"].map(|n| self.names.get(n).copied());
+        let [Some(pelvis), Some(low), Some(mid), Some(chest)] = ids else {
             return;
         };
         let rest_hips = self.rotation_to(pelvis, None, true);
         let rest_chest = self.rotation_to(chest, None, true);
-        let clip_hips = heading(self.rotation_to(pelvis, None, false), rest_hips);
-        let clip_chest = heading(self.rotation_to(chest, None, false), rest_chest);
-        let time = self.stride * self.clips.clips.get(legs).map_or(1., |a| a.duration);
-        self.apply_clip(legs, time, true, Bones::Lower);
-        let hips = self.rotation_to(pelvis, None, false);
-        let hips_heading = heading(hips, rest_hips);
-        let chest_heading = heading(self.rotation_to(chest, None, false), rest_chest);
-        let own = wrap(clip_chest - clip_hips);
-        let twist = wrap(clip_chest - hips_heading).clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
-        // A turn about the vertical, applied above the hips, adds straight onto the chest's heading.
-        let turn = wrap(hips_heading + twist - chest_heading);
-        self.local[spine].rotation =
-            (hips.inverse() * Quat::from_rotation_y(turn) * hips * self.local[spine].rotation)
-                .normalize();
+        let facing = |c: &Self, i: usize, rest: Quat| heading(c.rotation_to(i, None, false), rest);
+        let (aim, own) = aim.unwrap_or_else(|| {
+            let chest = facing(self, chest, rest_chest);
+            (chest, wrap(chest - facing(self, pelvis, rest_hips)))
+        });
+        if turn != 0. {
+            let above = self.nodes[pelvis]
+                .parent
+                .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+            let spin = above.inverse() * Quat::from_rotation_y(turn) * above;
+            let hips = &mut self.local[pelvis];
+            hips.rotation = (spin * hips.rotation).normalize();
+            hips.translation = spin * hips.translation;
+        }
+        let hips = facing(self, pelvis, rest_hips);
+        let twist = wrap(aim - hips).clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
+        // Turns about the vertical, applied above the hips, add straight onto the chest's heading.
+        let back = wrap(hips + twist - facing(self, chest, rest_chest)) / 3.;
+        for bone in [low, mid, chest] {
+            let above = self.nodes[bone]
+                .parent
+                .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+            self.local[bone].rotation =
+                (above.inverse() * Quat::from_rotation_y(back) * above * self.local[bone].rotation)
+                    .normalize();
+        }
+    }
+    /// Samples a step's two loops into the pose, blended by its weight, or one alone where the
+    /// blend is nearly all one of them.
+    fn apply_step(&mut self, step: anim::Step, bones: Bones) {
+        let ((a, at), (b, bt)) = (step.from, step.to);
+        if step.weight > 0.98 {
+            self.apply_clip(LOOPS[b], bt, true, bones);
+            return;
+        }
+        self.apply_clip(LOOPS[a], at, true, bones);
+        if step.weight >= 0.02 {
+            self.mix_clip(LOOPS[b], bt, true, bones, step.weight);
+        }
+    }
+    /// Measures the humanoid loops on this skeleton (#110), from where the balls of the feet are
+    /// at evenly spaced times through each cycle. `None` if a loop is missing or won't measure, or
+    /// they don't get faster from walk to sprint.
+    fn measure_gaits(&mut self) -> Option<[anim::Gait; 3]> {
+        const SAMPLES: usize = 64;
+        let feet = [*self.names.get("ball_l")?, *self.names.get("ball_r")?];
+        // Pieces may have brought bones since the world matrices were last built (a cape's).
+        self.world.resize(self.nodes.len(), Mat4::IDENTITY);
+        let mut gaits = [None; 3];
+        for (gait, name) in gaits.iter_mut().zip(LOOPS) {
+            let duration = self.clip_set.clips.get(name)?.clip.duration;
+            let mut at = Vec::with_capacity(SAMPLES);
+            for k in 0..SAMPLES {
+                for (n, l) in self.nodes.iter().zip(&mut self.local) {
+                    *l = n.rest;
+                }
+                self.apply_clip(name, duration * k as f32 / SAMPLES as f32, true, Bones::All);
+                self.pose_world();
+                at.push(feet.map(|i| self.world[i].w_axis.truncate()));
+            }
+            *gait = anim::Gait::measure(&at, duration);
+        }
+        let [Some(walk), Some(jog), Some(sprint)] = gaits else {
+            return None;
+        };
+        (walk.speed() < jog.speed() && jog.speed() < sprint.speed()).then_some([walk, jog, sprint])
     }
     /// The rotation from `top`'s frame (the model's when `None`) down to bone `i`'s, in the live
     /// pose or the rest pose.
@@ -1028,6 +1123,10 @@ impl Character {
         rotation
     }
     fn apply_clip(&mut self, name: &str, t: f32, looping: bool, bones: Bones) {
+        self.mix_clip(name, t, looping, bones, 1.);
+    }
+    /// Samples a clip into the pose, `weight` of the way from the pose as it is (all of it at 1).
+    fn mix_clip(&mut self, name: &str, t: f32, looping: bool, bones: Bones, weight: f32) {
         let Some(bound) = self.clip_set.clips.get(name) else {
             return;
         };
@@ -1045,16 +1144,29 @@ impl Character {
         for b in tracks {
             let v = clip.tracks[b.track as usize].sample(t);
             let i = b.bone as usize;
+            let local = &mut self.local[i];
             match b.apply {
                 Apply::Rotation => {
-                    self.local[i].rotation = Quat::from_array(v.to_array()).normalize()
+                    let q = Quat::from_array(v.to_array()).normalize();
+                    local.rotation = if weight < 1. {
+                        local.rotation.lerp(q, weight)
+                    } else {
+                        q
+                    };
                 }
-                Apply::Translation => self.local[i].translation = v.truncate(),
-                Apply::Pelvis => {
-                    self.local[i].translation = self.nodes[i].rest.translation
-                        + (v.truncate() - self.reference_pelvis) * self.pelvis_ratio
+                Apply::Translation | Apply::Pelvis | Apply::Scale => {
+                    let mut to = v.truncate();
+                    if b.apply == Apply::Pelvis {
+                        to = self.nodes[i].rest.translation
+                            + (to - self.reference_pelvis) * self.pelvis_ratio;
+                    }
+                    let at = if b.apply == Apply::Scale {
+                        &mut local.scale
+                    } else {
+                        &mut local.translation
+                    };
+                    *at = if weight < 1. { at.lerp(to, weight) } else { to };
                 }
-                Apply::Scale => self.local[i].scale = v.truncate(),
             }
         }
     }
@@ -1170,22 +1282,37 @@ impl Character {
             Pose::Attack => self.clips.clips.get(&name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
         };
-        // One stride phase runs through attacks on the move and through changes between walk,
-        // jog and sprint (all three loops start on the left foot), so the feet never restart.
+        // The humanoid loops follow the body (#110): blended by speed, the hips turned toward
+        // where it travels. One stride phase runs through attacks on the move and every change of
+        // speed or direction, so the feet never restart.
+        let step = match self.gaits.as_ref().filter(|_| walking || moving.is_some()) {
+            Some(gaits) => {
+                let travel = Quat::from_rotation_y(-u.yaw) * u.velocity;
+                Some(self.stride.advance(gaits, travel.xz(), dt))
+            }
+            None => {
+                self.stride.stop();
+                None
+            }
+        };
+        // Without measured loops (beasts), the walk or run plays at `stride_rate`.
         let stride = match moving {
             Some(pose) => Some((locomotion_clip(pose, speed), self.stride_rate(pose, speed))),
             None => walking.then_some((name.as_str(), rate)),
         };
-        if let Some((clip, rate)) = stride {
+        if let Some((clip, rate)) = stride.filter(|_| step.is_none()) {
             let length = self
                 .clips
                 .clips
                 .get(clip)
                 .map_or(1., |a| a.duration.max(0.001));
-            self.stride = (self.stride + dt * rate / length).fract();
+            self.stride.phase = (self.stride.phase + dt * rate / length).fract();
         }
         let mut clip_time = if walking {
-            self.stride * self.clips.clips.get(&name).map_or(1., |a| a.duration)
+            match (step, self.gaits, LOOPS.iter().position(|l| *l == name)) {
+                (Some(_), Some(gaits), Some(i)) => gaits[i].time_at(self.stride.phase),
+                _ => self.stride.phase * self.clips.clips.get(&name).map_or(1., |a| a.duration),
+            }
         } else {
             u.pose_time * rate
         };
@@ -1215,10 +1342,11 @@ impl Character {
         }
         let (clip_time, looping) =
             climbing.map_or((clip_time, looping), |(_, time, looping)| (time, looping));
-        self.apply_clip(&name, clip_time, looping, Bones::All);
-        if let Some(legs) = legs {
-            self.walk_under(legs);
+        match step.filter(|_| walking) {
+            Some(step) => self.apply_step(step, Bones::All),
+            None => self.apply_clip(&name, clip_time, looping, Bones::All),
         }
+        let aim = legs.and_then(|legs| self.walk_under(legs, step));
         let mut upper = None;
         if locomotion
             && u.look.drawn
@@ -1259,6 +1387,9 @@ impl Character {
         if upper != self.last_upper {
             switch = switch.or(Some(anim::Switch::Layer));
             self.last_upper = upper;
+        }
+        if step.is_some() || aim.is_some() {
+            self.turn_hips(step.map_or(0., |s| s.turn), aim);
         }
         self.pose_world();
         self.drawn_now = u.look.drawn;
@@ -1791,32 +1922,32 @@ mod combat_tests {
     }
     #[test]
     fn attacks_on_the_move_keep_the_legs_striding() {
+        // A twin keeps jogging alongside, with no swing.
         let (mut c, mut u, mut fight) = fighter(4.5);
+        let (mut twin, jog, calm) = fighter(4.5);
+        let both = |c: &mut Character, twin: &mut Character, u: &UnitState, fight: &UnitCombat| {
+            c.update_combat(u, Some(fight), 1. / 60.);
+            twin.update_combat(&jog, Some(&calm), 1. / 60.);
+            (c.stride.phase - twin.stride.phase).abs() < 1e-6
+        };
         for _ in 0..20 {
-            c.update_combat(&u, Some(&fight), 1. / 60.);
+            both(&mut c, &mut twin, &u, &fight);
         }
-        let jog = c.clips.clips["Jog_Fwd_Loop"].duration;
-        let start = c.stride;
         u.pose = Pose::Attack;
         fight.action = Action::Slash;
         for frame in 0..30 {
             fight.action_time = frame as f32 / 60.;
             u.pose_time = fight.action_time;
-            c.update_combat(&u, Some(&fight), 1. / 60.);
+            assert!(
+                both(&mut c, &mut twin, &u, &fight),
+                "the stride runs on through the swing"
+            );
         }
         assert_eq!(c.last_clip, "Sword_Regular_A");
         assert_eq!(c.last_legs, Some("Jog_Fwd_Loop"));
-        let stride = (start + 30. / 60. / jog).fract();
-        assert!(
-            (c.stride - stride).abs() < 1e-4,
-            "the stride runs on through the swing"
-        );
         for leg in ["thigh_l", "calf_l", "foot_r"] {
-            let jogging = sampled(&c, "Jog_Fwd_Loop", leg, c.stride * jog);
-            assert!(
-                same(c.local[c.names[leg]].rotation, jogging),
-                "{leg} keeps jogging under the swing"
-            );
+            let [a, b] = [&c, &twin].map(|c| c.local[c.names[leg]].rotation);
+            assert!(same(a, b), "{leg} keeps jogging under the swing");
         }
         let swing = c.clips.clips["Sword_Regular_A"].duration;
         let arm = sampled(&c, "Sword_Regular_A", "upperarm_r", 29. / 60. * swing / 0.5);
@@ -1826,12 +1957,11 @@ mod combat_tests {
         );
         u.pose = Pose::Run;
         u.pose_time = 0.;
-        c.update_combat(&u, Some(&fight), 1. / 60.);
-        assert_eq!(c.last_clip, "Jog_Fwd_Loop");
         assert!(
-            (c.stride - (stride + 1. / 60. / jog).fract()).abs() < 1e-4,
+            both(&mut c, &mut twin, &u, &fight),
             "the jog carries on mid-stride after the swing"
         );
+        assert_eq!(c.last_clip, "Jog_Fwd_Loop");
         let (mut still, mut u, mut fight) = fighter(0.);
         u.pose = Pose::Attack;
         fight.action = Action::Slash;
@@ -1960,6 +2090,149 @@ mod combat_tests {
                 capped,
                 clip == "Sword_Regular_A",
                 "{clip}: only the pivot is capped"
+            );
+        }
+    }
+    /// A swordsman travelling at `speed` m/s, `travel` degrees round from the way they face.
+    fn traveller(speed: f32, travel: f32) -> (Character, UnitState) {
+        let (c, mut u, _) = fighter(0.);
+        u.yaw = 0.3;
+        let way = u.yaw + travel.to_radians();
+        u.velocity = Vec3::new(way.sin(), 0., way.cos()) * speed;
+        u.pose = if speed > 3.2 { Pose::Run } else { Pose::Walk };
+        (c, u)
+    }
+    /// The furthest a planted foot slides over the ground in one contact, travelling at `speed`
+    /// m/s `travel` degrees round from the facing. A foot is planted while the ball of the foot is
+    /// within 1 cm of the lowest it gets.
+    fn foot_skate(speed: f32, travel: f32) -> f32 {
+        let (mut c, mut u) = traveller(speed, travel);
+        let feet = ["ball_l", "ball_r"].map(|n| c.names[n]);
+        let mut track = Vec::new();
+        for frame in 0..240 {
+            c.update(&u, 1. / 60.);
+            u.position += u.velocity / 60.;
+            let root = Mat4::from_rotation_translation(Quat::from_rotation_y(u.yaw), u.position);
+            if frame >= 60 {
+                track.push(feet.map(|i| root.transform_point3(c.world[i].w_axis.truncate())));
+            }
+        }
+        let mut worst = 0f32;
+        for foot in 0..2 {
+            let low = track.iter().map(|t| t[foot].y).fold(f32::MAX, f32::min);
+            let mut planted = None;
+            for at in track.iter().map(|t| t[foot]) {
+                if at.y < low + 0.01 {
+                    let from = *planted.get_or_insert(at);
+                    worst = worst.max((at - from).with_y(0.).length());
+                } else {
+                    planted = None;
+                }
+            }
+        }
+        worst
+    }
+    #[test]
+    fn planted_feet_stay_put_walking_running_and_sprinting_every_way() {
+        // Ahead, to either side and backward, at the sim's speeds (backpedalling at 0.6 of them).
+        for (speed, gait) in [(2.5, "walk"), (6., "run"), (9., "sprint")] {
+            for travel in [0., 90., -90., 180.] {
+                if gait == "walk" && travel == 180. {
+                    continue;
+                }
+                let speed = if travel == 180. { speed * 0.6 } else { speed };
+                let skate = foot_skate(speed, travel);
+                assert!(
+                    skate < 0.02,
+                    "{gait} at {travel}°: planted feet slide {:.1} cm",
+                    skate * 100.
+                );
+            }
+        }
+        // Backing off at a walk (1.5 m/s, as behind a raised guard) is mostly the walk clip,
+        // whose trailing foot slides as it lifts even at the clip's own pace (4 cm on this body).
+        // The blend mustn't make that worse; foot locking (#214) will pin it.
+        let own = traveller(0., 0.).0.gaits.unwrap()[0].speed();
+        let (back, clip) = (foot_skate(1.5, 180.), foot_skate(own, 0.));
+        assert!(
+            back <= clip,
+            "backing off at a walk: {:.1} cm, the walk clip alone {:.1} cm",
+            back * 100.,
+            clip * 100.
+        );
+    }
+    #[test]
+    fn a_cape_with_bones_of_its_own_still_lets_the_loops_be_measured() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let load = |gear: Vec<(String, String)>| {
+            let look = Look {
+                art: "male".into(),
+                gear,
+                ..Default::default()
+            };
+            // A cache of its own, so this body is the first to play the clips and measures them.
+            Character::load(&cat, &mut ModelCache::default(), &look).unwrap()
+        };
+        let caped = load(vec![("back".into(), "cape.traveller".into())]);
+        assert!(
+            caped.nodes.len() > load(vec![]).nodes.len(),
+            "the cape brings bones"
+        );
+        assert!(caped.gaits.is_some(), "the loops measure under a cape");
+    }
+    #[test]
+    fn strafing_turns_the_hips_and_keeps_the_chest_to_the_front() {
+        // How far round the hips and chest face, against their rest pose.
+        let facing = |c: &Character| {
+            ["pelvis", "spine_03"].map(|n| {
+                let i = c.names[n];
+                heading(c.rotation_to(i, None, false), c.rotation_to(i, None, true))
+            })
+        };
+        // Each strafe beside a twin going straight ahead or straight back, whose legs keep the
+        // same stride: the strafer's hips turn toward the travel, and the chest turns back.
+        for (travel, straight, turn) in [
+            (45., 0., 45.),
+            (-45., 0., -45.),
+            (90., 0., 90.),
+            (-90., 0., -90.),
+            (135., 180., -45.),
+            (-135., 180., 45.),
+        ] {
+            let speed = if straight == 180. { 3.6 } else { 6. };
+            let ((mut c, u), (mut twin, v)) =
+                (traveller(speed, travel), traveller(speed, straight));
+            let mut capped = false;
+            for frame in 0..60 {
+                c.update(&u, 1. / 60.);
+                twin.update(&v, 1. / 60.);
+                let [hips, chest] = facing(&c);
+                let [twin_hips, twin_chest] = facing(&twin);
+                assert!(
+                    wrap(hips - twin_hips - f32::to_radians(turn)).abs() < 1e-3,
+                    "{travel}° at frame {frame}: hips {}° round from the twin's",
+                    wrap(hips - twin_hips).to_degrees()
+                );
+                // The chest faces where the twin's does, unless that twists it further round from
+                // the hips than MAX_TWIST (or the clip's own twist).
+                let own = wrap(twin_chest - twin_hips);
+                let wanted = wrap(twin_chest - hips);
+                let twist = wanted.clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
+                assert!(
+                    wrap(chest - hips - twist).abs() < 1e-3,
+                    "{travel}° at frame {frame}: twist {}° for {}°",
+                    wrap(chest - hips).to_degrees(),
+                    twist.to_degrees()
+                );
+                capped |= twist != wanted;
+            }
+            // Square to the facing, the hips turn further round than the chest may follow.
+            assert!(
+                capped || travel.abs() != 90.,
+                "{travel}°: the twist is capped"
             );
         }
     }

@@ -2,5 +2,7 @@
 //! `render` crate needs Metal). `render::character` builds each frame's pose from clips and hands
 //! it to these for blending. How the pieces fit together: docs/ANIMATION.md.
 pub mod inertial;
+pub mod locomotion;
 
 pub use inertial::{Blender, Bone, Method, Switch};
+pub use locomotion::{Gait, Step, Stride};
