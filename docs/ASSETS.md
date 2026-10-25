@@ -226,7 +226,11 @@ places the item and the hands follow their sockets, so on that body every grip i
 
 **Upper-body clips** (`upper_body: true`, the draws) play on the spine, arms, neck and head over
 whatever the legs are doing. The same goes for a drawn idle while the unit moves: legs from the
-locomotion clip, the rest from the item's `idle`.
+locomotion clip, the rest from the item's `idle`; and for attacks and casts on the move, which
+the renderer plays over the walk or jog (CONTRACT.md, "Poses to animation"), so attack clips can
+keep their own footwork for standing swings. `Walk_Loop`, `Jog_Fwd_Loop` and `Sprint_Loop` share
+one stride phase, so each must start on the same foot (all three start with the left foot down
+and forward).
 
 **Curves** are lists of `[seconds, value]` keys. Between keys the value is linear; before the
 first and after the last it holds; two keys at the same time make a step, and at that instant the

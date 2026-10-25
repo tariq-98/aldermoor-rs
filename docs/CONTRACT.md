@@ -110,6 +110,14 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 | Hit | Holds 0.25 s; while thrown by a knockback; 0.5 s when staggered by a parry |
 | Dead | Until respawn. The downed lie as the dead do: check `downed` in the combat view |
 
+Attack and Cast hold whether or not the unit is moving, and units keep their speed through them.
+While a humanoid in either pose moves faster than 0.3 m/s, its legs keep the walk (or, above
+3.2 m/s, the jog or sprint) for its speed, on a stride phase that runs on through the action, and
+the action's clip plays from `spine_01` up. The upper body turns about the vertical toward where
+the clip's own hips faced it, until the chest is 60° round from the moving hips (or the clip's own
+twist, if more), so side-on stances still aim forward and whole-body pivots keep a believable spine.
+Kneeling (Revive), the downed and getting up stay whole-body. Beasts play actions on the whole body.
+
 The combat view's `action` says which motion to play within the pose. Clips from `anims.glb`
 and the held item's `clips` (docs/ASSETS.md):
 
