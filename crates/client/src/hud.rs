@@ -36,11 +36,14 @@ fn auras(ui: &mut egui::Ui, auras: &[protocol::AuraView]) {
         }
     });
 }
+// Laid out by hand: rustfmt would reflow the whole ability bar.
+#[rustfmt::skip]
 pub fn draw(
     ctx: &egui::Context,
     snapshot: &Snapshot,
     fight: &CombatView,
     ground: Option<glam::Vec3>,
+    hint: &str,
 ) -> Vec<Action> {
     let mut actions = Vec::new();
     let Some(player) = snapshot.player.as_ref() else {
@@ -156,7 +159,7 @@ pub fn draw(
                 if ui.add_enabled(player.swap_ready<=0.,egui::Button::new(format!("` · Set {} · {:.1}s",player.weapon_set+1,player.swap_ready))).clicked(){actions.push(Action::Command(Command::SwapWeapons));}
                 if player.can_respawn && ui.button("R · Respawn").clicked(){actions.push(Action::Command(Command::Respawn));}
             });
-            ui.label("WASD · Shift walk · Space jump · V dodge · Hold Q guard · E revive · Right-drag camera");
+            ui.label(hint);
         });
     });
     ctx.memory_mut(|m| {
@@ -187,7 +190,7 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| actions = draw(ctx, snapshot, &CombatView::default(), ground),
+                |ctx| actions = draw(ctx, snapshot, &CombatView::default(), ground, ""),
             );
             actions
         };

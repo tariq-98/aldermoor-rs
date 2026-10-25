@@ -723,6 +723,14 @@ impl Game {
                     .unwrap_or(1.),
         };
         let crosshair = self.aiming() && !self.options.showcase;
+        let hint = match self.pilot.scheme {
+            controls::Scheme::Action => {
+                "WASD · Shift walk · Space jump · Alt roll · Hold F guard · G revive · Hold Ctrl for the pointer"
+            }
+            controls::Scheme::Classic => {
+                "W/S · A/D turn · Q/E strafe · Space jump · Alt roll · Hold F guard · G revive · Left-drag look · Right-drag steer"
+            }
+        };
         let output = ctx.run(raw, |ctx| {
             if !self.options.showcase {
                 combat::paint(
@@ -735,7 +743,7 @@ impl Game {
                     &self.valley,
                 );
             }
-            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim);
+            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, hint);
             if crosshair {
                 paint_crosshair(ctx);
             }
