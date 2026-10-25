@@ -107,6 +107,12 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         xp: progress.zip(f.specialty).map_or(0, |(p, s)| p.xp[s.index()]),
         xp_next: progress.zip(f.specialty).and_then(|(p, s)| crate::content::progression::to_next(p.level(s))).unwrap_or(0),
         unassigned_xp: progress.map_or(0, |p| p.unassigned),
+        specialties: progress.map_or_else(Vec::new, |p| {
+            crate::Specialty::ALL
+                .into_iter()
+                .map(|s| protocol::SpecialtyLevel { specialty: s.key().to_string(), level: p.level(s) })
+                .collect()
+        }),
         coins,
         inventory,
         loot,

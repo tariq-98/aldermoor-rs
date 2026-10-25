@@ -141,6 +141,8 @@ fn levelling_the_equipped_specialty_makes_you_stronger_at_once() {
     assert!(sim.get::<Vitals>(hero).unwrap().max_health > health * 1.1);
     let me = sim.snapshot(Some(hero)).player.unwrap();
     assert_eq!((me.specialty.as_str(), me.level, me.xp, me.xp_next), ("warrior", 3, 0, to_next(3).unwrap()));
+    let levels: Vec<(&str, u8)> = me.specialties.iter().map(|s| (s.specialty.as_str(), s.level)).collect();
+    assert_eq!(levels, [("warrior", 3), ("archer", 1), ("mage", 1), ("necromancer", 1), ("rogue", 1), ("healer", 1)]);
 }
 
 #[test]

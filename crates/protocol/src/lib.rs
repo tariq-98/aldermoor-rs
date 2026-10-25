@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -243,6 +243,9 @@ pub struct PlayerState {
     pub xp: u32,
     pub xp_next: u32,
     pub unassigned_xp: u32,
+    /// Every specialty's own level, in the sim's order (warrior, archer, mage, necromancer,
+    /// rogue, healer).
+    pub specialties: Vec<SpecialtyLevel>,
     pub coins: u32,
     /// Every inventory slot in order; an empty one has an empty `item`. Each `price` is what
     /// the shop you stand at pays for it (0 if none, or it doesn't buy that).
@@ -251,6 +254,14 @@ pub struct PlayerState {
     pub loot: Vec<LootView>,
     /// The shop whose counter you stand at.
     pub shop: Option<ShopView>,
+}
+
+/// One specialty and the level it has reached.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpecialtyLevel {
+    /// "warrior", "mage", …: what `Command::AssignXp` takes.
+    pub specialty: String,
+    pub level: u8,
 }
 
 /// Some of one item: in a slot, a pile or a shop.
