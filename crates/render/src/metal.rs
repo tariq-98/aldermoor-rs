@@ -985,19 +985,32 @@ impl Renderer {
         self.layer = Some(layer);
     }
     pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
+        self.resize_at_scale(width, height, self.scale)
+    }
+    /// Resize only the internal targets; presentation and HUD stay at native resolution.
+    pub fn set_render_scale(&mut self, scale: f32) -> Result<()> {
+        ensure!(
+            scale.is_finite() && (0.25..=1.).contains(&scale),
+            "invalid render scale"
+        );
+        if self.scale == scale {
+            return Ok(());
+        }
+        self.resize_at_scale(self.width, self.height, scale)
+    }
+    fn resize_at_scale(&mut self, width: u32, height: u32, scale: f32) -> Result<()> {
         if width == 0 || height == 0 {
             return Ok(());
         }
         self.wait()?;
-        self.width = width;
-        self.height = height;
+        let output_changed = width != self.width || height != self.height;
         let (w, h) = (
-            (width as f32 * self.scale).round().max(1.) as usize,
-            (height as f32 * self.scale).round().max(1.) as usize,
+            (width as f32 * scale).round().max(1.) as usize,
+            (height as f32 * scale).round().max(1.) as usize,
         );
         let rt = MTLTextureUsage::RenderTarget;
         let read = MTLTextureUsage::ShaderRead;
-        self.hdr = texture(
+        let hdr = texture(
             &self.device,
             w,
             h,
@@ -1005,7 +1018,7 @@ impl Renderer {
             1,
             rt | read,
         )?;
-        self.msaa = texture(
+        let msaa = texture(
             &self.device,
             w,
             h,
@@ -1013,7 +1026,7 @@ impl Renderer {
             self.samples,
             rt,
         )?;
-        self.motion = texture(
+        let motion = texture(
             &self.device,
             w,
             h,
@@ -1021,7 +1034,7 @@ impl Renderer {
             1,
             rt | read,
         )?;
-        self.motion_msaa = texture(
+        let motion_msaa = texture(
             &self.device,
             w,
             h,
@@ -1029,7 +1042,7 @@ impl Renderer {
             self.samples,
             rt,
         )?;
-        self.depth = texture(
+        let depth = texture(
             &self.device,
             w,
             h,
@@ -1037,7 +1050,7 @@ impl Renderer {
             self.samples,
             rt | read,
         )?;
-        self.history = [
+        let history = [
             texture(
                 &self.device,
                 w,
@@ -1055,17 +1068,34 @@ impl Renderer {
                 rt | read,
             )?,
         ];
-        self.output = texture(
-            &self.device,
-            width as usize,
-            height as usize,
-            MTLPixelFormat::BGRA8Unorm_sRGB,
-            1,
-            rt | read,
-        )?;
+        let output = if output_changed {
+            Some(texture(
+                &self.device,
+                width as usize,
+                height as usize,
+                MTLPixelFormat::BGRA8Unorm_sRGB,
+                1,
+                rt | read,
+            )?)
+        } else {
+            None
+        };
+        // All allocations have succeeded and the old in-flight users have completed.
+        self.hdr = hdr;
+        self.msaa = msaa;
+        self.motion = motion;
+        self.motion_msaa = motion_msaa;
+        self.depth = depth;
+        self.history = history;
+        if let Some(output) = output {
+            self.output = output;
+        }
+        self.width = width;
+        self.height = height;
+        self.scale = scale;
         self.history_valid = false;
         self.previous.clear();
-        if let Some(l) = &self.layer {
+        if output_changed && let Some(l) = &self.layer {
             l.setDrawableSize(objc2_core_foundation::CGSize::new(
                 width as f64,
                 height as f64,
@@ -2118,6 +2148,44 @@ mod temporal_tests {
             r.device.name()
         );
         false
+    }
+
+    #[test]
+    fn resolution_changes_drain_slots_preserve_native_output_and_reset_history() {
+        let mut r = Renderer::new(64, 64, 0.75).unwrap();
+        r.set_frames_in_flight(3).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        r.draw(camera, &[], None).unwrap();
+        r.draw(camera, &[], None).unwrap();
+        assert!(r.slots.iter().any(|slot| slot.pending.is_some()));
+        let output = r.output.clone();
+        r.set_render_scale(0.55).unwrap();
+        assert!(r.slots.iter().all(|slot| slot.pending.is_none()));
+        assert_eq!((r.hdr.width(), r.hdr.height()), (35, 35));
+        assert_eq!((r.history[0].width(), r.history[1].height()), (35, 35));
+        assert_eq!((r.output.width(), r.output.height()), (64, 64));
+        assert!(std::ptr::eq(r.output.as_ref(), output.as_ref()));
+        assert!(!r.history_valid);
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert!(r.history_valid);
+        let history = r.history[0].clone();
+        r.set_render_scale(0.55).unwrap();
+        assert!(std::ptr::eq(r.history[0].as_ref(), history.as_ref()));
+        assert!(r.history_valid, "unchanged scale must not discard history");
+        assert!(r.set_render_scale(f32::NAN).is_err());
+        assert!(r.set_render_scale(0.1).is_err());
+        assert_eq!(r.scale, 0.55);
+        r.resize(96, 80).unwrap();
+        assert_eq!((r.hdr.width(), r.hdr.height()), (53, 44));
+        assert_eq!((r.output.width(), r.output.height()), (96, 80));
+        assert!(!r.history_valid);
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
     }
 
     #[test]
