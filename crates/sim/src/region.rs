@@ -253,6 +253,23 @@ impl Sim {
         *self.world.resource::<Region>()
     }
 
+    /// The players living here (not neighbours' ghosts), in ID order.
+    pub fn players(&mut self) -> Vec<UnitId> {
+        let mut q = self.world.query_filtered::<&Unit, (With<PlayerControl>, Without<Ghost>)>();
+        let mut ids: Vec<UnitId> = q.iter(&self.world).map(|u| u.id).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Puts a region that hasn't stepped yet at `tick`, so a layer opened later steps with the
+    /// rest of its world.
+    pub fn set_tick(&mut self, tick: u64) {
+        let mut clock = self.world.resource_mut::<crate::Clock>();
+        assert!(clock.tick == 0, "only a new region is set to a tick");
+        clock.tick = tick;
+        clock.time = tick as f64 / crate::TICK_RATE as f64;
+    }
+
     /// Units at least [`HANDOFF`] past this region's edge and on one of `others`' ground, with
     /// where each goes, in ID order.
     pub fn departures(&mut self, others: &[(u32, Bounds)]) -> Vec<(UnitId, u32)> {
