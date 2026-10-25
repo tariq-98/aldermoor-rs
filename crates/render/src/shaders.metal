@@ -42,9 +42,6 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
     float2 uv[3]={float2(position.z,-position.y),position.xz,float2(position.x,-position.y)};
     float2 gx[3]={float2(dx.z,-dx.y),dx.xz,float2(dx.x,-dx.y)},gy[3]={float2(dy.z,-dy.y),dy.xz,float2(dy.x,-dy.y)};
     TerrainSample result={float3(0),float3(0)};
-    // The projection count is fixed. Unroll so coordinates, gradients and normal
-    // orientation are constants for each axis instead of dynamically indexed arrays.
-    #pragma clang loop unroll(full)
     for(uint axis=0;axis<3;axis++) {
         if(weights[axis]<0.001)continue;
         gradient2d grad(gx[axis]*exp2(mip_bias),gy[axis]*exp2(mip_bias));
@@ -76,6 +73,9 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
         for(uint layer=surfaces.flags.x;layer<4;layer++)weights[layer]=0.;
         float sum=dot(weights,float4(1));weights=sum>0.0001?weights/sum:float4(1,0,0,0);
         float3 projections=pow(abs(normalize(i.normal)),float3(4));
+        // Fade negligible projections to zero before renormalising, so skipping them
+        // does not darken the layer or introduce a hard weight jump at the cutoff.
+        projections=max(projections-dot(projections,float3(1))*0.05,float3(0));
         projections/=max(dot(projections,float3(1)),0.0001);
         albedo.rgb=0.;surface_roughness=0.;
         for(uint layer=0;layer<surfaces.flags.x;layer++){
