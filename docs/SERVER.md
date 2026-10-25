@@ -79,7 +79,7 @@ A region needs one core of its own. Per tick, at 200 players and 2,000 monsters:
 | Step | 4 ms p99 | 2.3 ms p99 alone, 3.6 ms with every core busy |
 | Interest (grid and 200 lookups, a third of the players each tick at 20 Hz) | 0.5 ms | 0.065 + 0.3 ms |
 | Encode and send views (a third of the players each tick) | 3 ms | not built (#34) |
-| Ghosts, handoffs and cross-border requests | 0.5 ms | not built (#168) |
+| Ghosts, handoffs and cross-border requests | 0.5 ms | 0.46 ms mean, 1.5 ms p99 with about 500 ghosts each way (#168) |
 | Lag compensation history | 0.1 ms | 0.015 ms |
 | **Total, against the 16.7 ms tick** | **8 ms**, half the tick spare | |
 
@@ -206,11 +206,32 @@ deltas, 20 to 30 Hz) is the fix, and this table is the before. The `players` sce
 `crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
 the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
 
+## The region host today
+
+`server::regions::Realm` runs a world of regions, each a `Sim::region` on its own thread
+(`sim::region` is a region's side; #168). Each tick every region, side by side, takes in the units
+handed to it, the requests aimed at its units and its neighbours' ghosts, then steps; the host
+then routes what each produced, always in region order. A region sends its neighbours a ghost's
+name, body and look only when they don't have it yet; after that, only what moves.
+
+- `cargo test -p server --test regions`: a player walks across a border and keeps their level,
+  XP, coins and auras; a blow across a border lands in the other region; a wolf turns back at
+  its border; two runs with the same seeds and commands give the same worlds.
+- `cargo run -p server --release --example realm`: four regions of 50 players and 500 monsters,
+  their crowds packed against the borders, so about 500 ghosts go each way every tick. Cloud
+  Linux, 25 October 2026: tick 1.8 ms mean, slowest region step 0.75 ms, ghosts and handoffs
+  0.46 ms mean and 1.5 ms p99 a region, about 19 handoffs a second.
+- Not yet (#208): the headless server and solo host still run one region; the combat view
+  leaves ghosts out; a hit across a border doesn't build the attacker's rage or count toward
+  their XP, because the attacker is only a ghost where it lands.
+
 ## Follow-up work
 
 - #167 (done): each map's land is shared between sims.
-- #168: the region host, several region sims on threads in one process, with global unit ID
-  blocks, ghosts and border handoff.
+- #168 (done): the region host, several region sims on threads in one process, with global unit
+  ID blocks, ghosts and border handoff (below).
+- #208: serving a multi-region world over the network, ghosts in the combat view, attacker-side
+  credit for hits across a border, and sleeping quiet regions.
 - #169: lag compensation, a position history and rewound PvP hit tests.
 - #170: region layers and region player caps.
 - Already filed: #34 (views from the grid, deltas, 20–30 Hz), #33 (sleeping regions, no

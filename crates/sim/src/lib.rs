@@ -17,6 +17,7 @@ mod loot;
 mod movement;
 mod progress;
 mod queries;
+pub mod region;
 mod rng;
 mod spatial;
 pub mod stats;
@@ -26,6 +27,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
 use glam::{Vec2, Vec3};
 use protocol::{CombatView, Command, Event, Snapshot, UnitId, UnitKind};
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 pub use components::*;
@@ -69,37 +71,70 @@ pub struct Inbox(pub Vec<(UnitId, Command)>);
 #[derive(Resource, Default)]
 pub struct Outbox(pub Vec<Event>);
 
-/// Unit IDs, handed out in order, and where each unit lives.
+/// Unit IDs, handed out in order from this region's block, and where each unit lives: its own,
+/// those that crossed in from other regions, and the read-only ghosts of its neighbours' units.
 #[derive(Resource, Default)]
 pub struct Units {
+    /// The first ID of this region's block (`region << 24`).
+    base: UnitId,
     next: UnitId,
+    /// This region's own IDs, at `id - base`.
     entities: Vec<Option<Entity>>,
+    /// Units from other regions' blocks that live here now.
+    foreign: BTreeMap<UnitId, Entity>,
+    pub(crate) ghosts: BTreeMap<UnitId, Entity>,
 }
 
 impl Units {
     fn issue(&mut self, e: Entity) -> UnitId {
         self.next += 1;
-        let id = self.next;
-        if self.entities.len() <= id as usize {
-            self.entities.resize(id as usize + 1, None);
-        }
-        self.entities[id as usize] = Some(e);
+        assert!(self.next < region::BLOCK, "a region's block of unit IDs ran out");
+        let id = self.base + self.next;
+        self.put(id, e);
         id
     }
 
+    fn put(&mut self, id: UnitId, e: Entity) {
+        match id.checked_sub(self.base).filter(|&i| i < region::BLOCK) {
+            Some(i) => {
+                if self.entities.len() <= i as usize {
+                    self.entities.resize(i as usize + 1, None);
+                }
+                self.entities[i as usize] = Some(e);
+            }
+            None => {
+                self.foreign.insert(id, e);
+            }
+        }
+    }
+
+    /// A unit that lives here, or a neighbour's ghost.
     pub fn entity(&self, id: UnitId) -> Option<Entity> {
-        self.entities.get(id as usize).copied().flatten()
+        match id.checked_sub(self.base).filter(|&i| i < region::BLOCK) {
+            Some(i) => self.entities.get(i as usize).copied().flatten(),
+            None => self.foreign.get(&id).copied(),
+        }
+        .or_else(|| self.ghosts.get(&id).copied())
     }
 
-    /// Every unit, in ID order.
+    /// Every unit that lives here, in ID order. Not the ghosts.
     pub fn all(&self) -> impl Iterator<Item = Entity> + '_ {
-        self.entities.iter().filter_map(|e| *e)
+        let below = self.foreign.range(..self.base).map(|(_, &e)| e);
+        let above = self.foreign.range(self.base.saturating_add(region::BLOCK)..).map(|(_, &e)| e);
+        below.chain(self.entities.iter().filter_map(|e| *e)).chain(above)
     }
 
-    /// A unit that's gone for good (a summon's remains).
+    /// A unit that's gone for good (a summon's remains), or gone to another region.
     pub(crate) fn forget(&mut self, id: UnitId) {
-        if let Some(slot) = self.entities.get_mut(id as usize) {
-            *slot = None;
+        match id.checked_sub(self.base).filter(|&i| i < region::BLOCK) {
+            Some(i) => {
+                if let Some(slot) = self.entities.get_mut(i as usize) {
+                    *slot = None;
+                }
+            }
+            None => {
+                self.foreign.remove(&id);
+            }
         }
     }
 }
@@ -112,7 +147,12 @@ struct UnitList(Vec<Entity>);
 pub(crate) fn take_units(world: &mut World) -> Vec<Entity> {
     let mut list = std::mem::take(&mut world.resource_mut::<UnitList>().0);
     list.clear();
-    list.extend(world.resource::<Units>().all());
+    let units = world.resource::<Units>();
+    if units.foreign.is_empty() {
+        list.extend(units.entities.iter().filter_map(|e| *e));
+    } else {
+        list.extend(units.all());
+    }
     list
 }
 
@@ -140,6 +180,8 @@ impl Sim {
         world.insert_resource(loot::Loot::new(seed));
         world.insert_resource(queries::Queries::default());
         world.insert_resource(combat::life::Fallen::default());
+        world.insert_resource(region::Region::default());
+        world.insert_resource(region::Outgoing::default());
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());
@@ -427,6 +469,33 @@ impl Sim {
                     l.drawn = f.target.is_some() || f.guard_since.is_some() || time - v.last_combat < COMBAT_TIMEOUT;
                     l
                 },
+            });
+        }
+        // Neighbours' units near the border, as their regions published them.
+        let mut q = self.world.query::<(&Unit, &Transform, &Vitals, &Anim, &region::Ghost, Option<&Appearance>)>();
+        for (u, t, v, a, g, look) in q.iter(&self.world) {
+            if let Some(c) = center && (t.pos - c).length_squared() > combat::view::VIEW_RANGE * combat::view::VIEW_RANGE {
+                continue;
+            }
+            if v.dead && time - v.died_at > 8.0 && u.kind != UnitKind::Player {
+                continue;
+            }
+            units.push(protocol::UnitState {
+                id: u.id,
+                kind: u.kind,
+                body: u.body.to_string(),
+                name: u.name.clone(),
+                level: u.level,
+                position: t.pos,
+                velocity: g.velocity,
+                yaw: t.yaw,
+                pose: a.pose,
+                pose_time: (time - a.since) as f32,
+                health: v.health,
+                max_health: v.max_health,
+                hostile: u.faction == Faction::Hostile,
+                target: g.target,
+                look: protocol::Look { drawn: g.drawn, ..look.map(|a| a.0.clone()).unwrap_or_default() },
             });
         }
         units.sort_by_key(|u| u.id);
