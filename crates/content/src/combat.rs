@@ -37,6 +37,53 @@ pub const UNARMED_SWING: f32 = 1.4;
 /// away from, short enough to feel quick. The tables write it as `cast: 0.4`.
 pub const WINDUP: f64 = 0.4;
 
+/// How long the client freezes poses when a blow reaches its victim, by weight, in ms. The sim
+/// never pauses; this rides on `Event::Hit`. Conditions ticking get none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hitstop {
+    pub light: u8,
+    pub heavy: u8,
+    pub critical: u8,
+    pub blocked: u8,
+    pub parried: u8,
+    /// A monster's big, warned-of blow.
+    pub big: u8,
+    /// Missiles get this fraction: the archer is far from the arrow.
+    pub missile: f32,
+    pub cap: u8,
+}
+
+pub const HITSTOP: Hitstop = Hitstop {
+    light: 40,
+    heavy: 80,
+    critical: 110,
+    blocked: 60,
+    parried: 110,
+    big: 120,
+    missile: 0.5,
+    cap: 120,
+};
+
+impl Hitstop {
+    pub fn ms(&self, weight: protocol::HitWeight, missile: bool) -> u8 {
+        use protocol::HitWeight::*;
+        let ms = match weight {
+            Light => self.light,
+            Heavy => self.heavy,
+            Critical => self.critical,
+            Blocked => self.blocked,
+            Parried => self.parried,
+            Big => self.big,
+        }
+        .min(self.cap);
+        if missile {
+            (ms as f32 * self.missile).round() as u8
+        } else {
+            ms
+        }
+    }
+}
+
 /// Who or where an ability is aimed. Shapes in front of the user take the ability's range as
 /// their length.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

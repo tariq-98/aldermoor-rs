@@ -3,10 +3,10 @@
 
 use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
-use protocol::{Avoid, Event, Pose, School, Shape};
+use protocol::{Avoid, Event, HitWeight, Pose, School, Shape};
 
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
-use crate::content::{catalog, AbilityDef, Effect, Field, Finisher};
+use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, HITSTOP, WINDUP};
 use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
 use crate::region::Landing;
 use crate::spatial::Spatial;
@@ -401,6 +401,11 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
     if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
         let target = unit_id(world, t).unwrap_or(0);
         emit(world, Event::Avoided { target, source: src.unit, how });
+        match how {
+            Avoid::Blocked => hit(world, src, t, HitWeight::Blocked, delivery),
+            Avoid::Parried => hit(world, src, t, HitWeight::Parried, delivery),
+            _ => {}
+        }
         return;
     }
     if hostile && def.is_some() && let Some(u) = user {
@@ -415,6 +420,15 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
     let mut hurt = false;
     for e in rest {
         hurt |= apply(world, e, t, src, def, crit, center, mult);
+    }
+    if hurt && hostile {
+        let weight = match def {
+            Some(d) if d.telegraph => HitWeight::Big,
+            _ if crit => HitWeight::Critical,
+            Some(d) if d.cast >= WINDUP && !d.is_channel() => HitWeight::Heavy,
+            _ => HitWeight::Light,
+        };
+        hit(world, src, t, weight, delivery);
     }
     if hurt && let Some(u) = user {
         auras::remove_key(world, u, "riposte");
@@ -436,6 +450,25 @@ pub(crate) fn land_request(world: &mut World, te: Entity, landing: Landing) {
         }
     }
     super::life::release_deaths(world);
+}
+
+/// Tells the client a blow reached `te`: which way it travelled and how hard, for hitstop and
+/// flinches. A field's pulses aren't blows, so they say nothing.
+fn hit(world: &mut World, src: &HitSource, te: Entity, weight: HitWeight, delivery: Delivery) {
+    if delivery == Delivery::Pulse {
+        return;
+    }
+    let (Some(victim), Some(at)) = (unit_id(world, te), world.get::<Transform>(te).map(|t| t.xz())) else { return };
+    let d = at - Vec2::new(src.from.x, src.from.z);
+    let d = if d.length_squared() > 1e-6 { d } else { -world.get::<Transform>(te).map_or(Vec2::Y, |t| t.forward()) };
+    let dir = quantise_yaw(d.x.atan2(d.y));
+    let hitstop_ms = HITSTOP.ms(weight, delivery == Delivery::Missile);
+    emit(world, Event::Hit { attacker: src.unit, victim, dir, weight, hitstop_ms });
+}
+
+/// A yaw in 256ths of a turn, 0 facing +z.
+pub fn quantise_yaw(yaw: f32) -> u8 {
+    (yaw / std::f32::consts::TAU * 256.0).round().rem_euclid(256.0) as u8
 }
 
 /// One effect on one target. Returns whether it did damage.
