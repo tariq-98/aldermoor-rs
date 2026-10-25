@@ -116,6 +116,7 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         work,
         nodes,
         station,
+        potion_ready: crate::consumables::potion_ready(world, e, t),
     })
 }
 

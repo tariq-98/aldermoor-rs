@@ -57,7 +57,7 @@ Agreed with Chippy on 25 October 2026 (#68). The tables are `crates/content/craf
 - The chains: mine copper → smelt ingots → smith a dagger, pickaxe or sword (with an oak log for
   the handle); skin wolves → tan leather → a jerkin or (with oak) a bow; pick flax → linen → a
   padded coat; pick marigolds → a healing draught; catch trout → cook it.
-- Crafted gear isn't fine yet, and food and potions can't be used yet (#205).
+- Crafted gear isn't fine yet. Food and potions are used from the pack (ECONOMY.md).
 
 ## What the player sees
 
