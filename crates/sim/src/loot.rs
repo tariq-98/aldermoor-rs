@@ -1,7 +1,7 @@
 //! Inventories, loot and shops (#71, docs/ECONOMY.md).
 //!
-//! A monster that dies leaves a pile of what its loot table rolled. The player who did most to
-//! it can take it at once, anyone after [`PILE_PRIVATE`] seconds, and it's gone after
+//! A monster that dies leaves each player who did a fair share of the fight (#201) a pile of
+//! their own, rolled from its loot table, that only they can see and take. It's gone after
 //! [`PILE_LASTS`]. Shops sell at set prices and pay what their town pays. Items are the content
 //! crate's (`content::items`), referred to by key.
 
@@ -15,8 +15,7 @@ use crate::{Brain, Clock, Credit, Rng, Summoned, Transform, Unit};
 
 /// Inventory slots. Materials and food stack in one; gear takes one each.
 pub const SLOTS: usize = 28;
-/// Seconds a pile is only for the player who earned it, and how long it lies there at all.
-pub const PILE_PRIVATE: f64 = 60.0;
+/// Seconds a pile lies there.
 pub const PILE_LASTS: f64 = 180.0;
 /// How close you stand to a pile to pick it up, and to see it in your state.
 pub const PILE_REACH: f32 = 3.0;
@@ -103,33 +102,26 @@ impl Loot {
     }
 }
 
-/// Rolls a dying monster's loot table into a pile where it fell. Summons leave nothing.
+/// Rolls a dying monster's loot table once for each player who earned a share of it, into a
+/// pile of their own where it fell. Summons leave nothing.
 pub(crate) fn drop_loot(world: &mut World, dead: Entity) {
     if world.get::<Summoned>(dead).is_some() {
         return;
     }
     let Some(table) = world.get::<Brain>(dead).and_then(|b| economy().loot_for(b.mob)) else { return };
     let Some(at) = world.get::<Transform>(dead).map(|t| t.pos) else { return };
-    // The pile is for whoever used the most skills on it (the first of them, on a tie).
-    let owner = world.get::<Credit>(dead).and_then(|c| {
-        let mut best: Option<(UnitId, u32)> = None;
-        for &(id, _, _) in &c.0 {
-            let total: u32 = c.0.iter().filter(|e| e.0 == id).map(|e| e.2).sum();
-            if best.is_none_or(|b| total > b.1) {
-                best = Some((id, total));
-            }
-        }
-        best.map(|b| b.0)
-    });
+    let earners = world.get::<Credit>(dead).map(|c| c.earners()).unwrap_or_default();
     let t = world.resource::<Clock>().time;
     let mut loot = world.resource_mut::<Loot>();
-    let pile = roll(&mut loot.rng, table, at, owner, t);
-    if pile.items.is_empty() && pile.coins == 0 {
-        return;
+    for owner in earners {
+        let pile = roll(&mut loot.rng, table, at, Some(owner), t);
+        if pile.items.is_empty() && pile.coins == 0 {
+            continue;
+        }
+        loot.next += 1;
+        let id = loot.next;
+        loot.piles.push(Pile { id, ..pile });
     }
-    loot.next += 1;
-    let id = loot.next;
-    loot.piles.push(Pile { id, ..pile });
 }
 
 /// One roll of a loot table: each line on its own, gear sometimes fine.
@@ -156,10 +148,9 @@ pub fn roll(rng: &mut Rng, table: &content::items::LootTable, at: Vec3, owner: O
 /// Takes what fits from a pile within reach that the player may loot.
 pub(crate) fn take(world: &mut World, e: Entity, pile: u32) {
     let (Some(id), Some(p)) = (world.get::<Unit>(e).map(|u| u.id), world.get::<Transform>(e).map(|t| t.pos)) else { return };
-    let t = world.resource::<Clock>().time;
     let Some(i) = world.resource::<Loot>().piles.iter().position(|q| q.id == pile) else { return };
     let q = world.resource::<Loot>().piles[i].clone();
-    if flat(q.at - p) > PILE_REACH || !may_loot(&q, id, t) {
+    if flat(q.at - p) > PILE_REACH || !may_loot(&q, id) {
         return;
     }
     let Some(mut inv) = world.get_mut::<Inventory>(e) else { return };
@@ -185,8 +176,9 @@ pub(crate) fn take(world: &mut World, e: Entity, pile: u32) {
     }
 }
 
-fn may_loot(p: &Pile, who: UnitId, now: f64) -> bool {
-    p.owner.is_none_or(|o| o == who) || now - p.dropped >= PILE_PRIVATE
+/// A pile with an owner is theirs alone.
+fn may_loot(p: &Pile, who: UnitId) -> bool {
+    p.owner.is_none_or(|o| o == who)
 }
 
 fn flat(d: Vec3) -> f32 {
@@ -273,12 +265,11 @@ pub(crate) fn player_view(world: &World, e: Entity) -> (u32, Vec<ItemView>, Vec<
             None => ItemView::default(),
         })
         .collect();
-    let t = world.resource::<Clock>().time;
     let piles = world
         .resource::<Loot>()
         .piles
         .iter()
-        .filter(|q| flat(q.at - p) <= PILE_SEEN && may_loot(q, id, t))
+        .filter(|q| flat(q.at - p) <= PILE_SEEN && may_loot(q, id))
         .map(|q| LootView { id: q.id, position: q.at, coins: q.coins, items: q.items.iter().map(|s| view(s, 0)).collect() })
         .collect();
     let shop = shop.map(|s| ShopView {
