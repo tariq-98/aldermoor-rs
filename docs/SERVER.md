@@ -17,6 +17,7 @@ Cloud x86 (4 vCPU Xeon at 2.1 GHz, shared), release build, 25 October 2026:
 | Interest: bucket every unit into a 32 m grid | 0.065 ms a step |
 | Interest: every one of the 200 players finds its neighbours within 60 m | 0.91 ms for all, 0.0046 ms each, 229 units each |
 | Lag compensation: record everyone's position and facing | 0.015 ms a step, 2.9 MB for one second |
+| Layers: 600 players in a town capped at 200, so three layers of 1,000 monsters each, beside open country (`cargo run -p server --release --example layers`, four regions on four cores) | 2.29 ms mean, 4.86 ms p99 tick; 1.43 ms mean, 3.38 ms p99 slowest step; 0.28 ms ghosts and handoffs |
 | Match instance (10 players, 30 monsters): create | 0.24 ms on the shared land (12.7 ms before #167, which built the land each time) |
 | Match instance: memory | 0.24 MB (0.63 MB before #167) |
 | The shared land, built once per map | about 10–12 ms and 0.39 MB |
@@ -64,11 +65,21 @@ in exactly one region at a time, and only that region changes it.
   turn back, the way they give up a chase today.
 - **Quiet regions sleep.** With no players inside or in their ghost band, a region steps once a
   second (wandering, respawns) instead of 60 times (#33).
-- **Layers:** when a region passes its player cap (a capital on launch night), the world opens a
-  second copy of it, a layer, and new arrivals go there; groups and companies are kept together.
-  Layers merge back when both are quiet. The Wilderness is never layered, so a fight with real
-  death stakes can't be dodged by changing layer; instead its entrances stop letting players in
-  at its cap (#170).
+- **Layers** (#170): when a region passes its player cap (a capital on launch night), the world
+  opens another copy of its ground, a layer, and new arrivals go there. A layer is a region like
+  any other: its own thread, its own monsters, its own region ID and block of unit IDs (never
+  reused, so a unit's ID still never changes). Players in different layers of a ground don't see
+  each other. Next door, layer *n* pairs with the neighbour's layer *n*, and the last layer of
+  the ground with fewer pairs with all the rest, so open country beside a layered town sees every
+  layer's side of the border. Crossing over, a player goes to the layer paired with the one they
+  left while it has room, so people walking in together stay together, and otherwise to the
+  first layer below the cap. Once a second the host looks at each ground's last layer, and when
+  it and the one before it hold no more than half a cap together, its players move into the one
+  before where they stand and it closes. Groups and companies aren't built yet; when they are,
+  placing a player should go to a layer with their group in it first.
+- **The Wilderness is never layered**, so a fight with real death stakes can't be dodged by
+  changing layer. At its cap a player stepping over its border is put back just inside the
+  ground they came from, and joining inside it is refused, until someone leaves.
 
 ### Machines
 

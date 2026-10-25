@@ -5,7 +5,7 @@ use glam::Vec2;
 use protocol::Command;
 use server::regions::Realm;
 use sim::combat::{auras, source};
-use sim::region::{Bounds, BLOCK};
+use sim::region::{Bounds, BLOCK, HANDOFF};
 use sim::{brambleford_land, Brain, Inventory, Progress, Sim, Specialty, Vitals};
 
 /// The border runs north–south at x = 5, across the open north road.
@@ -145,4 +145,116 @@ fn the_same_seeds_and_commands_give_the_same_world() {
     }
     let (first, second) = (world(), world());
     assert!(first == second, "two runs of the same world came out differently");
+}
+
+mod layers {
+    use super::*;
+    use server::regions::Layering;
+
+    const CAP: usize = 4;
+
+    /// The west as a town layered at `CAP` (or never, when `wild`), the east open country.
+    fn layered(wild: bool) -> Realm {
+        let (a, b) = two_regions(21);
+        let land = brambleford_land();
+        let open = Box::new(move |ground: u32, id: u32| {
+            assert_eq!(ground, 0, "only the town fills up");
+            Sim::region(land.clone(), 100 + id as u64, id, west())
+        });
+        Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: if wild { vec![0] } else { Vec::new() }, open })
+    }
+
+    #[test]
+    fn players_past_the_cap_go_to_a_new_layer() {
+        let mut realm = layered(false);
+        let ids: Vec<u32> = (0..CAP * 2 + 1).map(|n| realm.spawn_player("Hero", Vec2::new(-20.0, n as f32)).unwrap()).collect();
+        let layers = realm.layers(0);
+        assert_eq!(layers.len(), 3);
+        assert_eq!(layers.iter().map(|&l| realm.players_in(l)).collect::<Vec<_>>(), vec![CAP, CAP, 1]);
+        assert_eq!(realm.layers(1), vec![1], "the empty east was layered too");
+        // Each lives in its own layer, with IDs from that layer's block.
+        assert_eq!(realm.region_of(ids[CAP]), layers[1]);
+        assert_eq!(ids[CAP] / BLOCK, layers[1]);
+        run(&mut realm, 0.5);
+        assert_eq!(realm.stats().regions, 4);
+        assert!(realm.snapshot(ids[CAP * 2]).player.is_some_and(|p| p.unit == ids[CAP * 2]));
+        // Layers don't see each other.
+        let seen = realm.snapshot(ids[0]).units;
+        assert!(seen.iter().any(|u| u.id == ids[1]) && !seen.iter().any(|u| u.id == ids[CAP]), "a layer sees into another");
+    }
+
+    #[test]
+    fn walking_into_a_full_town_opens_a_layer_and_layers_see_their_side_of_the_border() {
+        let mut realm = layered(false);
+        for n in 0..CAP {
+            realm.spawn_player("Local", Vec2::new(-40.0, n as f32 * 2.0)).unwrap();
+        }
+        let east = realm.with(1, |sim| (0..2).map(|n| sim.spawn_player("Visitor", Vec2::new(BORDER + 2.0, 10.0 + n as f32), 0.0)).collect::<Vec<_>>());
+        for &v in &east {
+            walk(&mut realm, v, -Vec2::X);
+        }
+        run(&mut realm, 2.0);
+        let town = realm.layers(0);
+        assert_eq!(town.len(), 2, "the visitors didn't open a layer");
+        assert!(east.iter().all(|&v| realm.region_of(v) == town[1]), "the visitors aren't in the new layer together");
+        // The east, with one copy, pairs with both, so the visitors still see who's across it.
+        let watcher = realm.with(1, |sim| sim.spawn_player("Watcher", Vec2::new(BORDER + 3.0, 12.0), 0.0));
+        run(&mut realm, 0.1);
+        assert!(realm.snapshot(east[0]).units.iter().any(|u| u.id == watcher), "the layer can't see across the border");
+        assert!(realm.snapshot(watcher).units.iter().any(|u| u.id == east[0]), "the border can't see into the layer");
+    }
+
+    #[test]
+    fn quiet_layers_fold_back_into_the_first() {
+        let mut realm = layered(false);
+        let ids: Vec<u32> = (0..CAP + 1).map(|n| realm.spawn_player("Hero", Vec2::new(-20.0, n as f32)).unwrap()).collect();
+        let town = realm.layers(0);
+        assert_eq!(town.len(), 2);
+        realm.with_unit(ids[CAP], |sim, id| sim.get_mut::<Inventory>(id).unwrap().coins = 41);
+        run(&mut realm, 1.5);
+        assert_eq!(town.len(), 2, "full layers merged");
+        // Three leave the first copy, so the two layers together hold half a cap.
+        for &id in &ids[..3] {
+            realm.with(town[0], move |sim| sim.export(id));
+        }
+        run(&mut realm, 1.5);
+        assert_eq!(realm.layers(0), vec![0], "the quiet layer is still open");
+        assert_eq!(realm.layers(1), vec![1]);
+        let last = ids[CAP];
+        assert_eq!(realm.region_of(last), 0);
+        assert_eq!(realm.with_unit(last, |sim, id| sim.get::<Inventory>(id).unwrap().coins), 41, "its player lost something on the way");
+        assert_eq!(realm.players_in(0), 2);
+        assert_eq!(realm.stats().regions, 2);
+        // It plays on in the first copy.
+        walk(&mut realm, last, Vec2::Y);
+        let y = realm.with_unit(last, |sim, id| sim.get::<sim::Transform>(id).unwrap().pos.z);
+        run(&mut realm, 1.0);
+        assert!(realm.with_unit(last, |sim, id| sim.get::<sim::Transform>(id).unwrap().pos.z) > y + 3.0);
+    }
+
+    #[test]
+    fn a_full_wilderness_turns_players_back_at_its_border() {
+        let mut realm = layered(true);
+        for n in 0..CAP {
+            realm.spawn_player("Inside", Vec2::new(-40.0, n as f32 * 2.0)).unwrap();
+        }
+        assert_eq!(realm.spawn_player("Late", Vec2::new(-40.0, 20.0)), None, "joined a full Wilderness");
+        let outside = realm.with(1, |sim| sim.spawn_player("Outside", Vec2::new(BORDER + 2.0, 10.0), 0.0));
+        walk(&mut realm, outside, -Vec2::X);
+        let mut turned = 0;
+        for _ in 0..3 * 60 {
+            realm.step();
+            turned += realm.stats().turned_back;
+            assert_eq!(realm.region_of(outside), 1, "walked into a full Wilderness");
+        }
+        assert!(turned > 0);
+        assert_eq!(realm.layers(0), vec![0], "the Wilderness was layered");
+        let x = realm.with(1, move |sim| sim.get::<sim::Transform>(outside).unwrap().pos.x);
+        assert!((BORDER - HANDOFF..BORDER + 1.0).contains(&x), "turned back to {x}");
+        // Once someone leaves, it lets them in.
+        let one = realm.with(0, |sim| sim.players()[0]);
+        realm.with(0, move |sim| sim.export(one));
+        run(&mut realm, 2.0);
+        assert_eq!(realm.region_of(outside), 0);
+    }
 }
