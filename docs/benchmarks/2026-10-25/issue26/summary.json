@@ -1,6 +1,6 @@
 {
-  "base_revision": "eed4a4f",
-  "implementation_revision": "7b8bab7ff3e9738ff226f391200ad40c3c0b3df1",
+  "base_revision": "08011c1",
+  "implementation_revision": "4fbc9ad9e94648cf8693e7fa6b06ce2319bc1850",
   "hardware": "Apple M1, 7 GPU cores, 16 GB; built-in panel 2560x1600",
   "output": "2560x1600",
   "internal": "2560x1600",
@@ -13,13 +13,13 @@
     "frames_per_block": 4,
     "on_samples": 1800,
     "off_samples": 1800,
-    "mean_delta_ms": 0.0045645138897675176,
-    "median_delta_ms": -0.004833333377973759,
+    "mean_delta_ms": -0.007119560187271015,
+    "median_delta_ms": 0.005635416755467304,
     "batch_count": 30,
     "blocks_per_batch": 30,
     "batch_mean_95pct_t_interval_ms": [
-      -0.024707591580047632,
-      0.03383661935958267
+      -0.0723400004726357,
+      0.058100880098093666
     ],
     "interval_method": "Descriptive batch-means t interval, df=29; 2.045 critical value. This is not a hardware guarantee.",
     "observed_gpu_overhead_below_0_1ms": true
