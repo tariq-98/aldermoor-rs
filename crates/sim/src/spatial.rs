@@ -1,3 +1,5 @@
+use std::hash::{BuildHasherDefault, Hasher};
+
 use bevy_ecs::prelude::*;
 use glam::Vec2;
 use protocol::UnitId;
@@ -10,7 +12,33 @@ const CELL: f32 = 8.0;
 /// Who is near what: living units bucketed into 8 m cells, rebuilt every step.
 #[derive(Resource, Default)]
 pub struct Spatial {
-    cells: std::collections::HashMap<(i32, i32), Vec<(UnitId, Vec2)>>,
+    cells: std::collections::HashMap<(i32, i32), Vec<(UnitId, Vec2)>, BuildHasherDefault<CellHash>>,
+}
+
+/// A quick hash for cell keys (the multiply-and-rotate one rustc uses). Cell keys aren't chosen
+/// by anyone hostile, so the default hasher's flood resistance would only cost time; every unit
+/// lands in a cell each step and every nearby search looks a few up.
+#[derive(Default)]
+struct CellHash(u64);
+
+impl Hasher for CellHash {
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u32(b as u32);
+        }
+    }
+
+    fn write_u32(&mut self, i: u32) {
+        self.0 = (self.0.rotate_left(5) ^ i as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    fn write_i32(&mut self, i: i32) {
+        self.write_u32(i as u32);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
 }
 
 impl Spatial {

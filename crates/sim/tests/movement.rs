@@ -339,6 +339,30 @@ fn a_pack_spreads_round_its_prey_instead_of_piling_on() {
 }
 
 #[test]
+fn a_pack_from_one_side_fans_out_round_its_prey() {
+    // The meadow's wolf pack, with the player just south of it so all three arrive from the north.
+    let mut sim = Sim::brambleford(7);
+    let hero = sim.spawn_player("Hero", Vec2::new(-38.0, 26.0), 0.0);
+    sim.step();
+    let wolves: Vec<u32> = sim.snapshot(None).units.iter().filter(|u| u.body == "wolf").map(|u| u.id).collect();
+    assert_eq!(wolves.len(), 3);
+    sim.run_for(15.0);
+    let mut bearings: Vec<f32> = wolves
+        .iter()
+        .map(|&w| {
+            let to = xz(&sim, w) - xz(&sim, hero);
+            let gap = to.length() - sim.get::<sim::Body>(w).unwrap().radius - sim.get::<sim::Body>(hero).unwrap().radius;
+            assert!(gap < 1.9, "a wolf waits {gap:.1} m off, out of bite range");
+            to.y.atan2(to.x).to_degrees()
+        })
+        .collect();
+    bearings.sort_by(f32::total_cmp);
+    // The widest empty arc between neighbouring wolves; the pack covers the rest of the circle.
+    let widest = (0..3).map(|i| if i < 2 { bearings[i + 1] - bearings[i] } else { bearings[0] + 360.0 - bearings[2] }).fold(0.0, f32::max);
+    assert!(360.0 - widest > 150.0, "the pack bunched on one side: bearings {bearings:?}");
+}
+
+#[test]
 fn bodies_stacked_on_one_spot_ease_apart() {
     let mut sim = Sim::new(7);
     let road = Vec2::new(5.0, 10.0);
