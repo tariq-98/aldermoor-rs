@@ -34,6 +34,10 @@ aldermoor-wgpu-slice --backend metal --assets /absolute/path/to/aldermoor-rs/ass
   --width 2560 --height 1600 --scale 0.75 --frames 480 --warmup 120 > metal.json
 ```
 
+For the Mac capture worker, add `--capture /path/to/output.png` to each backend invocation.
+Only an explicit capture argument writes an image. Capture invocations are for visual checks;
+do not use their timing reports for adoption (the native capture includes encoding overhead).
+
 Run with `--validate` before performance runs. Benchmark builds default to backend API validation
 off, without disabling wgpu's safety checks. Both paths use one frame in flight and split scene
 passes so sky, opaque and water can be measured individually. The report contains every measured

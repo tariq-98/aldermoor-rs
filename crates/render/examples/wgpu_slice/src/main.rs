@@ -71,6 +71,7 @@ mod backend;
 pub struct Options {
     assets: PathBuf,
     backend: String,
+    capture: Option<PathBuf>,
     width: u32,
     height: u32,
     scale: f32,
@@ -83,6 +84,7 @@ impl Options {
         let mut o = Self {
             assets: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../assets"),
             backend: "wgpu".into(),
+            capture: None,
             width: 2560,
             height: 1600,
             scale: 0.75,
@@ -98,7 +100,7 @@ impl Options {
             }
             if arg == "--help" {
                 println!(
-                    "wgpu-slice [--backend wgpu|metal] [--assets PATH] [--width N] [--height N] [--scale F] [--frames N] [--warmup N] [--validate]\nOffscreen, fixed camera, one frame in flight. JSON report on stdout. Hold /tmp/aldermoor-gpu.lock for every run."
+                    "wgpu-slice [--backend wgpu|metal] [--assets PATH] [--width N] [--height N] [--scale F] [--frames N] [--warmup N] [--validate] [--capture PATH]\nOffscreen, fixed camera, one frame in flight. JSON report on stdout. Hold /tmp/aldermoor-gpu.lock for every run."
                 );
                 std::process::exit(0);
             }
@@ -107,6 +109,7 @@ impl Options {
                 .with_context(|| format!("missing value for {arg}"))?;
             match arg.as_str() {
                 "--assets" => o.assets = value.into(),
+                "--capture" => o.capture = Some(value.into()),
                 "--backend" => o.backend = value,
                 "--width" => o.width = value.parse()?,
                 "--height" => o.height = value.parse()?,
@@ -201,7 +204,15 @@ fn metal(o: &Options, camera: Camera, draws: &[character::Draw]) -> Result<Vec<S
     for frame in 0..o.frames {
         r.scene_time = Some(frame as f32 / 60.);
         let start = Instant::now();
-        r.draw(camera, draws, None)?;
+        r.draw(
+            camera,
+            draws,
+            if frame + 1 == o.frames {
+                o.capture.as_deref()
+            } else {
+                None
+            },
+        )?;
         let cpu_encode_ms = start.elapsed().as_secs_f64() * 1000.;
         r.wait()?;
         let frame_work_ms = start.elapsed().as_secs_f64() * 1000.;
@@ -254,6 +265,7 @@ fn main() -> Result<()> {
     ensure!(!samples.is_empty(), "no measured samples");
     let report = serde_json::json!({
         "settings": o, "device": device, "passes": PASSES,
+        "debug_build": cfg!(debug_assertions),
         "gpu_ms": distribution(samples.iter().map(|s| s.gpu_ms)),
         "cpu_encode_ms": distribution(samples.iter().map(|s| s.cpu_encode_ms)),
         "frame_work_ms": distribution(samples.iter().map(|s| s.frame_work_ms)),

@@ -1278,6 +1278,56 @@ pub fn run(
         drop(bytes);
         readback.unmap();
     }
+    if let Some(path) = &o.capture {
+        // Explicit opt-in for the Mac capture worker. Benchmark invocations omit this.
+        let row = (o.width * 4).div_ceil(256) * 256;
+        let pixels = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("capture readback"),
+            size: u64::from(row) * u64::from(o.height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = d.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &output.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &pixels,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: Some(o.height),
+                },
+            },
+            wgpu::Extent3d {
+                width: o.width,
+                height: o.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        q.submit([encoder.finish()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        pixels.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        d.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        })?;
+        rx.recv()??;
+        let mapped = pixels.slice(..).get_mapped_range()?;
+        let mut rgba = Vec::with_capacity((o.width * o.height * 4) as usize);
+        for line in mapped.chunks_exact(row as usize) {
+            for pixel in line[..o.width as usize * 4].chunks_exact(4) {
+                rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+            }
+        }
+        image::save_buffer(path, &rgba, o.width, o.height, image::ColorType::Rgba8)?;
+    }
     Ok((format!("{} ({:?})", info.name, info.backend), samples))
 }
 
