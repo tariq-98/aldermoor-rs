@@ -76,18 +76,24 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
         emit(world, Event::Damage { target, source: src.unit, amount: dealt, crit, school: src.school, periodic });
         auras::remove_where(world, te, |d| d.breaks_on_damage);
     }
-    let (lethal, finished) = {
+    let (lethal, finished, counted) = {
         let mut v = world.get_mut::<Vitals>(te).unwrap();
         v.last_combat = t;
+        // What counts toward a kill share: not the overkill.
         if v.downed {
+            let counted = dealt.min(v.downed_health.max(0.0)) + absorbed;
             v.downed_health -= dealt;
-            (false, v.downed_health <= 0.0)
+            (false, v.downed_health <= 0.0, counted)
         } else {
+            let counted = dealt.min(v.health.max(0.0)) + absorbed;
             v.health -= dealt;
-            (v.health <= 0.0, false)
+            (v.health <= 0.0, false, counted)
         }
     };
     if let Some(a) = attacker {
+        // A share of the kill for hurting a monster, or for taking its blows.
+        crate::progress::credit(world, a, te, counted);
+        crate::progress::credit(world, te, a, counted);
         if let Some(mut v) = world.get_mut::<Vitals>(a) {
             v.last_combat = t;
         }
@@ -190,11 +196,17 @@ pub fn heal(world: &mut World, src: &HitSource, te: Entity, raw: f32, crit: bool
         super::life::rally(world, te, super::life::RALLY_HEALTH);
     }
     if effective > 0.0 && src.faction == Faction::Player {
-        let healer_mult = entity(world, src.unit).map_or(1.0, |h| auras::threat_multiplier(world, h));
-        let mut q = world.query::<(&mut Threat, &Brain)>();
-        for (mut th, b) in q.iter_mut(world) {
+        let healer = entity(world, src.unit);
+        let healer_mult = healer.map_or(1.0, |h| auras::threat_multiplier(world, h));
+        // Healing the fighters is a share of each kill they're in.
+        let earner = healer.and_then(|h| crate::progress::earner(world, h));
+        let mut q = world.query::<(&mut Threat, &Brain, Option<&mut crate::Credit>)>();
+        for (mut th, b, credit) in q.iter_mut(world) {
             if b.mode == Mode::Chase && th.contains(target) {
                 th.add(src.unit, effective * 0.5 * healer_mult);
+                if let (Some(mut c), Some((id, spec))) = (credit, earner) {
+                    c.add(id, spec, effective);
+                }
             }
         }
     }
@@ -407,9 +419,6 @@ fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSour
             _ => {}
         }
         return;
-    }
-    if hostile && def.is_some() && let Some(u) = user {
-        crate::progress::note_use(world, u, t);
     }
     let crit = world.resource_mut::<Rng>().chance(src.crit);
     // Striking from behind: harder, and backstabs harder still.

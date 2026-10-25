@@ -71,7 +71,8 @@ def surface(name):
 
 
 ROUGH = {"plaster": 0.92, "stone": 0.82, "planks": 0.8, "planks_dark": 0.8, "thatch": 0.95, "roof_tiles": 0.8,
-         "cobbles": 0.85, "bark": 0.9, "rock": 0.9, "foliage": 0.8, "needles": 0.85}
+         "cobbles": 0.85, "bark": 0.9, "rock": 0.9, "foliage": 0.8, "needles": 0.85, "drystone": 0.88, "rubble": 0.87,
+         "dressed": 0.8}
 
 
 def flat(name, colour, rough=0.8, metal=0.0, glow=0.0):

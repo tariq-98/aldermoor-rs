@@ -16,7 +16,8 @@ step build_back.py       # capes and packs for every body type
 step build_armour.py     # plate for every body type
 step build_garments.py   # robes, tunic, coat, apron and hats for every body type
 step build_beasts.py     # wolves on their own rig
-step build_environment.py # buildings, trees, rocks, plants and village props
-echo "== ground fields"
+echo "== ground fields"      # world's ground, trees, houses and masonry, for the environment and world steps
 (cd $ROOT && cargo run -q -p world --release --example ground_fields -- $ROOT/art/out/world)
+step build_environment.py # buildings, trees, rocks, plants, village props, field walls and the ruin
+step build_effects.py    # combat effects: sprite atlas, tiling strips and effect meshes
 step build_world.py      # the valley's ground, river and sky, and its light

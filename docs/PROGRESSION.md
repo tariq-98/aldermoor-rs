@@ -20,12 +20,14 @@ How specialties level, agreed with Chippy on 25 October 2026 (#66). The rules ar
 
 - A monster pays XP only when it **dies**. One that gets away, resets, or never dies (a training
   dummy) pays nothing, so there's nothing to farm.
-- Every use of a skill on a monster (auto attacks included; heals and boons on friends don't
-  count) is noted against the player and the specialty they had equipped. A summon's skills
-  count for its owner.
-- When it dies, **each** player who used skills on it gets its XP, split between the
-  specialties they used in proportion to how many uses each had. Players don't share one pool:
-  bringing a friend doesn't halve your XP.
+- Each monster keeps a tally of the fight (`Credit`): for every player, the damage they dealt
+  it (not counting overkill, but counting what a shield soaked), the damage it dealt them, and
+  the healing they gave anyone it's fighting. Each amount is noted against the specialty the
+  player had equipped. A summon's share counts for its owner.
+- When it dies, **every** player with at least a tenth of the fight (`SHARE_FLOOR`) gets its
+  full XP, split between the specialties they used in proportion to how much each did. Players
+  don't share one pool, so bringing a friend doesn't halve your XP, but a single tap on someone
+  else's kill earns nothing (#201, decided 2026-10-25).
 - What a kill pays is `KILL_XP` for the monster's level, times 4 for an elite and 15 for a boss.
   Monsters more than 5 levels below the specialty pay less, falling to nothing 10 levels below.
 - Summoned monsters and other players pay nothing (Wilderness kill rewards are #76).

@@ -1,7 +1,7 @@
 Metal: Apple M1 | 2560x1378 -> 2560x1378 | 1x samples | TAA | cascades=3x1024
 GPU_COUNTERS stage-boundary
-LOOK /Users/tariqal-radhi/code/aldermoor-rs/crates/client/../../assets/catalog/look.json
-SURFACES /Users/tariqal-radhi/code/aldermoor-rs/crates/client/../../assets/catalog/surfaces.json
+LOOK ~/code/aldermoor-rs/crates/client/../../assets/catalog/look.json
+SURFACES ~/code/aldermoor-rs/crates/client/../../assets/catalog/surfaces.json
 frame=120 gpu=14.22ms draws=697 triangles=327353 sim=0.105ms units=6
 frame=240 gpu=14.64ms draws=697 triangles=327353 sim=0.112ms units=6
 frame=360 gpu=14.73ms draws=697 triangles=327353 sim=0.118ms units=6

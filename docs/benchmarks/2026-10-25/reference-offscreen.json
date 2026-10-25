@@ -227,10 +227,10 @@
     }
   },
   "gpu_samples": 3600,
-  "binary": "/Users/tariqal-radhi/code/aldermoor-worker-a/target/release/client",
+  "binary": "~/code/aldermoor-worker-a/target/release/client",
   "binary_sha256": "108b89099f4aee70ddccb57a6436b70ca991a537868c7f53dad3c597468c58b0",
   "command": [
-    "/Users/tariqal-radhi/code/aldermoor-worker-a/target/release/client",
+    "~/code/aldermoor-worker-a/target/release/client",
     "--showcase",
     "--benchmark",
     "--fps",
@@ -254,8 +254,8 @@
   "counter_overhead": false,
   "split_scene": false,
   "overlay_visible": false,
-  "look_settings": "/Users/tariqal-radhi/code/aldermoor-worker-a/assets/catalog/look.json",
-  "surface_assets": "/Users/tariqal-radhi/code/aldermoor-worker-a/assets/catalog/surfaces.json",
+  "look_settings": "~/code/aldermoor-worker-a/assets/catalog/look.json",
+  "surface_assets": "~/code/aldermoor-worker-a/assets/catalog/surfaces.json",
   "history_resets": 1,
   "mean_fps": 52.188,
   "interval_p95_ms": 25.337,

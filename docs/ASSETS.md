@@ -284,7 +284,7 @@ always meets the hand, whatever the archer's size. The drawing hand is the one n
 `build_environment.py` builds the valley's buildings, trees, rocks, plants and props, the
 same kit the Swift village used, remade at the characters' quality.
 - **Props** (`props[]`): `id`, `label`, `kind` (house, landmark, bridge, tree, plant, rock,
-  grass, flower, prop or part), `file`, `height`, `triangles`, and, for obstacles, `footprint`
+  grass, flower, prop, part or masonry), `file`, `height`, `triangles`, and, for obstacles, `footprint`
   (width and depth in metres at scale 1). Each is centred on its footprint at ground level,
   facing +Z, with levels of detail beside it like everything else.
 - **Placements** (`placements`) say which prop stands where `world::Valley` puts things:
@@ -298,10 +298,23 @@ same kit the Swift village used, remade at the characters' quality.
   - `scatter` lists, by kind, the props for scattering: rocks, grass, flowers, bushes, riverbank
     reeds and forest pines. Where each one goes comes from Claude with the valley's dressing
     data (still to do); the renderer draws what it's given and doesn't place things itself.
+- **Masonry** (`kind` "masonry": the dry-stone field walls `wall.field.<n>` and the ruined hall
+  `ruin.hall`) stands where `world::Valley::masonry` puts it, at its `origin` turned by its
+  `yaw`, and adds that list's solids to the valley: boxes you climb onto (a `top`, which may rise
+  along the box so a wall follows a slope) and masonry too tall to climb, which blocks. The
+  `world` crate owns the list (`crates/world/src/masonry.rs`); `ground_fields` writes it out
+  with the drawn ground under each piece, and `aldermoor_art/masonry.py` builds each prop to
+  fill its blocks exactly, so the stone you see is the stone you stand on. Each prop records
+  its `blocks` (as `world` gave them, in its own frame), and `cargo test -p assets` fails if
+  `world` has moved them since: rebuild the environment art. A climbable top carries a lip of
+  worn, pale dressed stone (ART.md, "Reading the world"); masonry too tall to climb ends in
+  broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
+  metre-high wall is seen at LOD 2 from about 11 m.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
 - **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
-  thatch, clay tiles, cobbles, bark, foliage, needles), each a colour map and a normal map,
+  thatch, clay tiles, cobbles, bark, foliage, needles, and for masonry dry-stone walling, coursed
+  rubble and worn dressed stone), each a colour map and a normal map,
   with UVs in metres, so samplers repeat. `COLOR_0` multiplies the base colour, as glTF says:
   grime at the foot of walls, shade under the eaves, canopies darker inside. Oak and bush
   canopies are fields of leafy clumps under the foliage tile (drawn leaves with midribs). Rocks are the
@@ -365,6 +378,72 @@ lie level on a cliff (the limestone's bedding runs along them) and its columns h
 rain streaks run down them). Tangent frames built from screen derivatives, for meshes without
 tangents such as the terrain and the river, have their bitangent along −∂P/∂v, as glTF's normal
 maps expect.
+
+## Combat effects: `catalog/effects.json`
+
+How a fight looks, as data (checked by `Catalog::check`, and against the combat content by
+`crates/sim/tests/looks.rs`). Effects are made of authored art in `assets/effects/`, built by
+`art/blender.sh -P art/blender/build_effects.py` (add `-- --review` for a contact sheet in
+`art/out/effects/review.png`):
+
+- `atlas.png` and its index `atlas.json`: every sprite and flipbook. Each texel is three data
+  channels, not a colour: heat (R) picks a colour from a ramp, cover (G) is opacity, and erosion
+  order (B) says where a sprite dissolves first as it ages. Sprites: glow, flare, spark, shock,
+  ring, seal, runes and sigil (casting circles), star, snowflake, shard, bubble, ripple, scorch,
+  frost, starburst, four lightning strips and status icons (zzz, drop, hush, mark, skull,
+  chevron, vine: bold shapes with a dark outline, for over a head or at the feet). Flipbooks,
+  one life from first frame to last: flame (stylised fire in three crisp bands, tongues tearing
+  into blobs), puff, swirl and wisp (painted in numpy), and fire, smoke and burst (Cycles volume
+  renders, cached in `art/out/effects/`; `--only=volumes` renders them again).
+- `tile.*.png`: tiling strips (trail streaks, three noises, a honeycomb) that trails, marks and
+  shells scroll through.
+- `shell.glb` (a Goldberg sphere of hexagonal cells for wards), `column.glb` (light rising from
+  the ground), `crystal.glb` (a frost lance's ice) and `arrow.glb` (a solid, lit arrow).
+
+The catalogue names the art and builds effects from it:
+
+- `ramps`: colour ramps as stops of `[position, r, g, b]`, linear and any brightness. Colours
+  hotter than 1 go white through the tone mapper, which is what makes a core burn.
+- `effects`: named lists of layers. A layer is `sprite` (camera-facing particles, or streaks
+  with `stretch`; `upright` ones stand on their base, like flames), `beam` (a ribbon behind a
+  missile: with a `tile` it cools and thins away to its tail), `trail` (sprites dropped along a missile's
+  path, `rate` a metre), `decal` (a mark projected onto the ground: a sprite, or the area's own
+  shape with a glowing edge and a fill that grows as a warning ripens) or `mesh`. Layers give
+  their art (`frame`, `tile`, `mesh`), `ramp`, `colour`, `alpha` and `blend` (0 adds light, 1
+  covers like paint), and how their particles live: `count`, `life` (0 for one steady thing),
+  `size` at birth and death, `offset`, `spread`, `ring`, `orbit`, `speed`, `velocity`,
+  `gravity`, `drag`, `spin`, `vary`, `fade`, `erode`, `cool`, `delay`, `fps`, `pulse`, `soft`.
+  `scaled` layers scale with what they play on: a unit's height, an area's reach. Steady layers
+  on a cast or a warning go from their first size and erosion to their second as it ripens (a
+  casting circle draws itself in). An effect can instead be `{"like": other, "ramps": {...}}`,
+  the same layers in other colours.
+- `projectiles` (by `ProjectileView.visual`): the effect it plays in `flight`, the `trail` it
+  leaves, its `impact`, and a solid `mesh` it carries (with `spin` and `pivot` for a thrown
+  axe). `casts`, `auras`, `fields` (with optional `<name>.hostile` variants), `schools` (each
+  school's fallback field and the burst where its warned-of blows land), `warnings` (hostile and
+  friendly), `combo` and `aim` name the effect each plays.
+
+Every missile in the content needs a projectile entry, and every spell (a cast or channel
+outside the physical school) a cast. Unlisted auras show only on the HUD.
+
+The renderer draws effects in its own pass (docs/RENDERER.md): marks inside the scene pass,
+everything else after tone mapping, so they never blur under temporal AA.
+
+To review them, `scripts/run_client.sh --effects-review` stages a fight in the showcase scene
+(`crates/client/src/stage.rs`): every missile look crosses in front of the lineup, which wears a
+shell, buffs, conditions and a stun and casts three spells, while warnings of each shape, two
+fields, the aiming circle and bursts lie on the ground. It runs on frame time alone, so
+`--capture` with a given `--frames` always shows the same moment. `--view 1`, `2` and `3` come
+in close (the lineup's left and right, and the missiles' lanes), and `--sequence DIR` writes
+every frame after `--warmup` for a review video (`--sequence-step N` keeps every Nth, for
+contact sheets). `--showcase` is the same scene without the effects, so
+`scripts/benchmark_renderer.py --effects-review` against a plain run gives their GPU cost.
+
+`--effects-reel` shows the same effects one at a time instead, each close up and captioned:
+every missile at full speed and again in slow motion, then casts, auras (those that differ only
+in colour three at a time), fields, every school's blow landing from a warning, the cone and
+line warnings and the combo. It starts as the warmup ends and prints its length;
+`--reel-from SECONDS` starts it partway in, to look at one shot.
 
 ## Materials and file details
 
@@ -445,8 +524,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
 | `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks and normal maps (the weave, and folds hanging from the waist; capes' from the shoulders) | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig: anatomy as a signed distance field with sculpted locks of fur (`aldermoor_art/wolf.py`, `sdf.py`), painted coats and generated gaits | `creatures/`, `catalog/creatures.json` |
-| `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
-| `build_world.py` | The valley's ground layers and the weights that blend them (from `world`'s own fields, sampled first by `cargo run -p world --release --example ground_fields`), the river's ripples, the sky, and the light | `terrain/`, `water/`, `sky/`, `catalog/surfaces.json`, `catalog/look.json` |
+| `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props; the field walls and the ruined hall, from `world`'s masonry (sampled first by `cargo run -p world --release --example ground_fields`) | `environment/`, `catalog/environment.json` |
+| `build_world.py` | The valley's ground layers and the weights that blend them (from `world`'s own fields, sampled by the same example), the river's ripples, the sky, and the light | `terrain/`, `water/`, `sky/`, `catalog/surfaces.json`, `catalog/look.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
   share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
@@ -464,6 +543,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - that no piece costs more than four draws beyond its materials: parts that share a
     material are joined into one mesh at export (`export.joined`), so the renderer draws plate
     a material at a time, not a plate at a time;
+  - that every masonry prop was built for the blocks `world` stands it on;
   - that the ground, river and sky files exist, the terrain's layers match in size (they stack
     into texture arrays), the weights are square, the sky is twice as wide as tall, and the
     light's numbers make sense;
@@ -482,7 +562,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
-| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile |
+| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile; nine pieces of dry-stone field wall along the north road and a ruined hall on the hill (#160) |
 | Ground, water, sky | Lush grass, meadow, packed earth and limestone, blended across the valley by its roads, slopes, river, trees and houses; river ripples; a fair-weather sky; the valley's light (25 October 2026) |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 
