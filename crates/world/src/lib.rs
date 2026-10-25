@@ -7,8 +7,10 @@
 
 use glam::{Vec2, Vec3};
 
+mod holds;
 mod masonry;
 mod noise;
+pub use holds::{Hold, Holds, HANG_MIN_DROP};
 pub use masonry::{Block, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
 pub use noise::{fbm, hash, mix, noise, smooth, Lcg};
 
@@ -81,6 +83,8 @@ pub struct Valley {
     /// The field walls and the ruin: what the renderer draws, and the solids at the end of
     /// `solids` that you climb onto (or that stop you).
     pub masonry: Vec<Masonry>,
+    /// The edges you can hang from (docs/MOVEMENT.md, "Climbing").
+    pub holds: Holds,
     grid: Grid,
     /// The solids with a top, for [`Valley::ground`], and the box round them all (most of the
     /// valley has none, and `ground` is called a lot).
@@ -170,7 +174,9 @@ impl Valley {
         solids.extend(masonry.iter().flat_map(Masonry::solids));
         let (grid, tops) = Grid::split(&solids);
         let tops_box = tops_box(&solids);
-        Valley { solids, houses, trees, masonry, grid, tops, tops_box, heights }
+        let mut valley = Valley { solids, houses, trees, masonry, holds: Holds::default(), grid, tops, tops_box, heights };
+        valley.holds = Holds::build(&valley);
+        valley
     }
 
     /// Adds a solid after the valley is built (for tests, and props placed by later layers).
@@ -178,6 +184,7 @@ impl Valley {
         self.solids.push(s);
         (self.grid, self.tops) = Grid::split(&self.solids);
         self.tops_box = tops_box(&self.solids);
+        self.holds = Holds::build(self);
     }
 
     /// The ground a walker stands on, including the bridge deck: the terrain as it is drawn
@@ -216,6 +223,36 @@ impl Valley {
             return true;
         }
         self.grid.near(p, radius).any(|i| self.solids[i as usize].overlaps(p, radius))
+    }
+
+    /// The first top of a solid that a walker at `from` going along `dir` (a unit vector) meets
+    /// within `dist`: a point on it halfway through (or `dist` along, if that comes first), and
+    /// its height there. Finds walls too thin for [`Valley::ground`]'s samples to catch.
+    pub fn top_ahead(&self, from: Vec2, dir: Vec2, dist: f32) -> Option<(Vec2, f32)> {
+        let mut best: Option<(f32, Vec2, f32)> = None;
+        for i in self.tops.near(from, dist.min(1.5)) {
+            let s = &self.solids[i as usize];
+            let Some(top) = s.top else { continue };
+            let (o, d) = (s.local(from), s.local(from + dir) - s.local(from));
+            let (mut t0, mut t1) = (0.0f32, dist);
+            for (o, d, h) in [(o.x, d.x, s.half.x), (o.y, d.y, s.half.y)] {
+                if d.abs() < 1e-6 {
+                    if o.abs() >= h {
+                        t1 = -1.0;
+                    }
+                    continue;
+                }
+                let (a, b) = ((-h - o) / d, (h - o) / d);
+                t0 = t0.max(a.min(b));
+                t1 = t1.min(a.max(b));
+            }
+            if t0 < t1 && best.is_none_or(|b| t0 < b.0) {
+                let t = (t0 + t1) / 2.0;
+                let p = from + dir * t;
+                best = Some((t0, p, top + s.rise * s.local(p).x));
+            }
+        }
+        best.map(|(_, p, h)| (p, h))
     }
 
     /// How deep the river is at (x, z): from its surface down to the ground (or the bridge

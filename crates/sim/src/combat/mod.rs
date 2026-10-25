@@ -175,6 +175,8 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::Guard(up) => {
                 if up && world.get::<Motion>(e).is_some_and(|m| m.swimming) {
                     tell(world, e, "You can't guard while swimming.");
+                } else if up && world.get::<Motion>(e).is_some_and(|m| m.hang.is_some()) {
+                    tell(world, e, "You can't guard while climbing.");
                 } else if up {
                     guard::raise(world, e);
                 } else {
@@ -225,6 +227,10 @@ fn roll(world: &mut World, e: Entity, id: UnitId, direction: Vec2, now: f64) {
         m.dodge_queued = None;
     }
     let ctl = control(world, e);
+    // Hanging, Roll lets go; at an edge, rolling toward the drop lowers you to hang from it.
+    if crate::climbing::roll(world, e, direction, now, ctl.can_move() && !ctl.stunned) {
+        return;
+    }
     let swimming = world.get::<Motion>(e).is_some_and(|m| m.swimming);
     if ctl.stunned || ctl.fleeing.is_some() || swimming || world.get::<Vitals>(e).is_none_or(|v| v.downed || v.dead) {
         return;

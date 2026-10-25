@@ -50,6 +50,32 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     (#160) breaks down in steps along its east wall, each a climb from the last, up to a lookout
     4.2 m up under its gable; the gable, its buttresses and the door's jambs are too tall to climb
     (`crates/world/src/masonry.rs`).
+- **Climbing** on handholds (#245, part of the climbing epic #251;
+  `crates/sim/src/climbing.rs`). A hold is an edge the hands close on: `world::Valley::holds`,
+  today every top edge of a `Solid` with a top that drops at least 1.6 m (`world::HANG_MIN_DROP`),
+  joined along straight walls. In the valley that's the ruined hall's taller broken walls; sills,
+  beams, eaves and cliff ledges come with the routes in #249.
+  - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
+    higher, the body out from the wall by its radius and facing it. Pose `Hang`.
+  - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at
+    1.2 m/s (`SHIMMY_SPEED`), stopping 0.2 m short of the hold's ends or hopping in 0.3 s to a
+    hold that carries on within 0.6 m (`HOLD_GAP`). Into the wall climbs onto the top in 0.8 s
+    when there's room (`CLIMB_UP_TIME`), or else to a hold up to 1 m higher (`HOLD_CLIMB`, in
+    0.4 s). Away from the wall climbs down to a hold up to 1 m lower, and does nothing if there
+    isn't one, so you never fall by accident.
+  - **Roll** lets go: you drop, pushing off the wall. Standing on a top within 1 m of its edge,
+    Roll toward the drop (or with no direction, backing onto it) lowers you over the edge to hang
+    from it in 0.6 s. Rolling along the edge or away from it still rolls.
+  - **Catching:** with Shift held out of combat, falling or jumping past a hold grabs it when the
+    hands (2.1 m above the feet) pass within 0.3 m of it, settling in 0.2 s. A hold you just let
+    go of can't be caught again for 0.4 s, so letting go with Shift held catches the next hold
+    down. Without Shift you fall past.
+  - No skills or guard while climbing ("You can't fight while climbing."). A knockback throws
+    you off the wall; being downed makes you let go. Hanging bodies neither push nor are pushed.
+  - Leaps, ejects, wall runs and corners are #246; the climbing clips (#247) replace the hang
+    pose's stand-in, `Jump_Loop`.
+- A low wall too thin for the climb's ground samples (under about 0.5 m deep) is climbed onto
+  like a deep one (#238).
 - **Swimming:** the river is no longer a wall.
   - Water deeper than 0.5 m is swum (until it's shallower than 0.4 m). Swimmers float with
     their feet 0.5 m under the surface (`world::WATER_LEVEL`), at 0.45× run speed.
@@ -81,9 +107,9 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   at least a body's width once a crowd is too big for that. Three wolves end up about 100°
   apart. Places are rechecked four times a second.
 
-Every unit's `traversal` in the snapshot says whether it's wading, swimming or in a forced move
-(roll, leap, charge, climb, knockback, with where and when it starts and ends), so animation can
-show it on other players and monsters too (CONTRACT.md).
+Every unit's `traversal` in the snapshot says whether it's wading, swimming, hanging from a hold
+or in a forced move (roll, leap, charge, climb, a move onto a hold, knockback, with where and when
+it starts and ends), so animation can show it on other players and monsters too (CONTRACT.md).
 
-Not yet: free climbing anywhere, mounts, and climbing or swimming animations (pose `Jump` for
-climbing; walk and idle in water).
+Not yet: free climbing anywhere (holds only, by design), mounts, and climbing or swimming
+animations (pose `Jump` for pulling up, `Jump_Loop` while hanging; walk and idle in water).

@@ -806,7 +806,7 @@ impl Character {
                 Pose::Idle => "idle",
                 Pose::Walk => "walk",
                 Pose::Run | Pose::Dodge => "run",
-                Pose::Jump | Pose::Fall => "jump",
+                Pose::Jump | Pose::Fall | Pose::Hang => "jump",
                 Pose::Attack | Pose::Cast => "attack",
                 Pose::Hit => "hit",
                 Pose::Dead => "death",
@@ -827,7 +827,8 @@ impl Character {
             .into(),
             Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()).into(),
             Pose::Jump => "Jump_Start".into(),
-            Pose::Fall => "Jump_Loop".into(),
+            // Hanging borrows the falling loop until the climbing clips land (#247).
+            Pose::Fall | Pose::Hang => "Jump_Loop".into(),
             Pose::Dodge => "Roll".into(),
             Pose::Attack | Pose::Cast => self
                 .main
