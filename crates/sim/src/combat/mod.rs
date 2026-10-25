@@ -129,9 +129,9 @@ pub fn apply_commands(world: &mut World) {
         let Some(e) = entity(world, id) else { continue };
         let dead = world.get::<Vitals>(e).is_none_or(|v| v.dead);
         match c {
-            Command::Move { direction, walk, face_yaw } => {
+            Command::Move { direction, walk, sprint, face_yaw } => {
                 if let Some(mut m) = world.get_mut::<Motion>(e) {
-                    m.intent = MoveIntent { direction, walk, face_yaw };
+                    m.intent = MoveIntent { direction, walk, sprint, face_yaw };
                 }
             }
             Command::Jump => {
@@ -143,7 +143,8 @@ pub fn apply_commands(world: &mut World) {
             }
             Command::Dodge { direction } => {
                 let ctl = control(world, e);
-                if ctl.stunned || ctl.fleeing.is_some() || world.get::<Vitals>(e).is_some_and(|v| v.downed) {
+                let swimming = world.get::<Motion>(e).is_some_and(|m| m.swimming);
+                if ctl.stunned || ctl.fleeing.is_some() || swimming || world.get::<Vitals>(e).is_some_and(|v| v.downed) {
                     continue;
                 }
                 let rolled = world.resource_scope(|world, land: Mut<Land>| {
@@ -174,7 +175,9 @@ pub fn apply_commands(world: &mut World) {
             Command::UseSlot { .. } => {}
             Command::Respawn => life::respawn_player(world, e),
             Command::Guard(up) => {
-                if up {
+                if up && world.get::<Motion>(e).is_some_and(|m| m.swimming) {
+                    tell(world, e, "You can't guard while swimming.");
+                } else if up {
                     guard::raise(world, e);
                 } else {
                     guard::lower(world, e);

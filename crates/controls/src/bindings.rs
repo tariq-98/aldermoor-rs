@@ -15,6 +15,7 @@ pub enum Control {
     StrafeLeft,
     StrafeRight,
     Walk,
+    Sprint,
     Jump,
     Roll,
     Guard,
@@ -38,7 +39,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the menu lists them.
-    pub const ALL: [Control; 26] = [
+    pub const ALL: [Control; 27] = [
         Self::Forward,
         Self::Back,
         Self::Left,
@@ -46,6 +47,7 @@ impl Control {
         Self::StrafeLeft,
         Self::StrafeRight,
         Self::Walk,
+        Self::Sprint,
         Self::Jump,
         Self::Roll,
         Self::Guard,
@@ -75,7 +77,8 @@ impl Control {
             Self::Right => "Right (strafe in Action, turn in Classic)",
             Self::StrafeLeft => "Strafe left",
             Self::StrafeRight => "Strafe right",
-            Self::Walk => "Walk (hold)",
+            Self::Walk => "Walk or run (toggle)",
+            Self::Sprint => "Sprint (hold, out of combat)",
             Self::Jump => "Jump",
             Self::Roll => "Roll",
             Self::Guard => "Guard (hold)",
@@ -113,7 +116,8 @@ impl Control {
             Self::Right => &["KeyD"],
             Self::StrafeLeft => &["KeyQ"],
             Self::StrafeRight => &["KeyE"],
-            Self::Walk => &["ShiftLeft", "ShiftRight"],
+            Self::Walk => &["Slash"],
+            Self::Sprint => &["ShiftLeft", "ShiftRight"],
             Self::Jump => &["Space"],
             Self::Roll => &["AltLeft", "AltRight", "KeyV", "Mouse4"],
             Self::Guard => &["KeyF", "Mouse5"],
@@ -172,6 +176,7 @@ impl Input {
         }
         match n {
             "Backquote" => "`".into(),
+            "Slash" => "/".into(),
             "NumLock" => "Num Lock".into(),
             n => n.into(),
         }

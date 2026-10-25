@@ -153,7 +153,7 @@ mod tests {
         let mut host = Host::start(1, "Hero");
         let start = host.snapshot().unwrap();
         let p0 = start.unit(host.player).unwrap().position;
-        host.send(Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, face_yaw: None });
+        host.send(Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, sprint: false, face_yaw: None });
         std::thread::sleep(Duration::from_millis(1000));
         let now = host.snapshot().unwrap();
         let ticks = now.tick - start.tick;

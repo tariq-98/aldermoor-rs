@@ -141,6 +141,9 @@ pub fn use_ability(world: &mut World, e: Entity, id: AbilityId, explicit: Option
     if motion.and_then(|m| m.forced).is_some_and(|fm| fm.kind != ForcedKind::Dodge) {
         return false;
     }
+    if motion.is_some_and(|m| m.swimming) {
+        return fail(world, "You can't fight while swimming.");
+    }
     // A basic attack winding up, or a channel, gives way to another skill (once that skill is
     // known to be usable); anything else in progress has to finish first.
     let mut give_way = false;

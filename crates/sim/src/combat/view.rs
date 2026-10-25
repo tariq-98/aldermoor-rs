@@ -98,6 +98,8 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         downed: v.downed,
         weapon_set: f.active_set as u8,
         swap_ready: (f.swap_ready_at - t).max(0.0) as f32,
+        swimming: world.get::<crate::Motion>(e).is_some_and(|m| m.swimming),
+        sprinting: world.get::<crate::Motion>(e).is_some_and(|m| m.sprinting),
     })
 }
 

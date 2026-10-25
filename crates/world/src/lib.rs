@@ -55,6 +55,10 @@ pub struct Valley {
 pub const BOUNDS: f32 = 280.0;
 /// Where the bridge crosses the river.
 pub const BRIDGE_X: f32 = 1.5;
+/// The river's surface, where the renderer draws the water.
+pub const WATER_LEVEL: f32 = -0.78;
+/// Half-width of the river's water, either side of [`river_z`].
+pub const RIVER_HALF_WIDTH: f32 = 6.0;
 
 const HOUSES: [(f32, f32, f32, f32); 7] = [
     (-12.0, -12.0, 0.18, 1.04),
@@ -107,6 +111,11 @@ impl Valley {
             trees.push(Placement { position: p, yaw, scale });
             solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0 });
         }
+        // The bridge's parapets, either side of its deck (after the trees, which are placed
+        // from the solids before them).
+        for side in [-1.0, 1.0] {
+            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0 });
+        }
         let grid = Grid::build(&solids);
         Valley { solids, houses, trees, grid, heights: Heights::build() }
     }
@@ -128,16 +137,22 @@ impl Valley {
         self.heights.at(x, z)
     }
 
-    /// True when a walker of `radius` can't stand at `p`: deep river (away from the bridge), an
-    /// obstacle, or the edge of the map.
+    /// True when a walker of `radius` can't stand at `p`: an obstacle or the edge of the map.
+    /// The river isn't a wall: walkers swim it (see [`Valley::water_depth`]).
     pub fn blocked(&self, p: Vec2, radius: f32) -> bool {
         if p.x.abs() > BOUNDS || p.y.abs() > BOUNDS {
             return true;
         }
-        if (p.y - river_z(p.x)).abs() < 6.5 && (p.x - BRIDGE_X).abs() > 2.5 {
-            return true;
-        }
         self.grid.near(p, radius).any(|i| self.solids[i as usize].overlaps(p, radius))
+    }
+
+    /// How deep the river is at (x, z): from its surface down to the ground (or the bridge
+    /// deck, which is above it). 0 away from the river.
+    pub fn water_depth(&self, x: f32, z: f32) -> f32 {
+        if (z - river_z(x)).abs() > RIVER_HALF_WIDTH {
+            return 0.0;
+        }
+        (WATER_LEVEL - self.ground(x, z)).max(0.0)
     }
 
     /// Moves `from` by `delta`, sliding along anything in the way (in short steps so nothing is
@@ -307,10 +322,11 @@ mod tests {
 
     // Values from the Swift original (aldermoor-wild), computed on 2026-10-23, except where the
     // river now cuts through the west ledge (#41): (-40, -60) sat 0.76 m up on the buried river.
+    // The river no longer blocks (#65: you swim it), so (-40, -60) in it isn't blocked either.
     const SPOTS: [(f32, f32, f32, f32, f32, bool); 9] = [
         (0.0, 0.0, 4.9790773, -58.0, 4.0, false),
         (6.0, 28.0, 9.586473, -57.12033, 2.7604523, false),
-        (-40.0, -60.0, -1.55, -63.2125, 34.453495, true),
+        (-40.0, -60.0, -1.55, -63.2125, 34.453495, false),
         (120.0, -20.0, 9.364937, -53.923687, 115.06778, false),
         (-70.0, -30.0, 23.01629, -64.96447, 69.12138, false),
         (76.0, -85.0, 31.035648, -51.002224, 68.842804, false),
@@ -352,8 +368,9 @@ mod tests {
     fn the_same_trees_grow_in_the_same_places() {
         let v = Valley::new();
         assert_eq!(v.trees.len(), 106);
-        assert_eq!(v.solids.len(), 115);
-        let last = v.solids[v.solids.len() - 1];
+        // 9 buildings, 106 trees, then the bridge's two parapets.
+        assert_eq!(v.solids.len(), 117);
+        let last = v.solids[114];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
     }
@@ -392,9 +409,10 @@ mod tests {
         let start = Vec2::new(-12.0, 0.0);
         let end = v.slide(start, Vec2::new(0.0, -20.0), 0.4);
         assert!(end.y > -9.5 && end.y < -5.0, "stopped at {end}");
-        // The river blocks, except on the bridge.
-        assert!(v.blocked(Vec2::new(20.0, river_z(20.0)), 0.3));
-        assert!(!v.blocked(Vec2::new(BRIDGE_X, river_z(BRIDGE_X)), 0.3));
+        // The river is deep in the middle and dry on the bridge.
+        assert!(v.water_depth(20.0, river_z(20.0)) > 0.7);
+        assert_eq!(v.water_depth(20.0, river_z(20.0) + 8.0), 0.0);
+        assert_eq!(v.water_depth(BRIDGE_X, river_z(BRIDGE_X)), 0.0);
         assert!(v.ground(BRIDGE_X, river_z(BRIDGE_X)) > 2.9);
     }
 }

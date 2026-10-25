@@ -20,7 +20,7 @@ it, and S backpedals. Hold Ctrl to get the pointer back for the HUD. `--scheme c
 WoW-style instead: W runs, S backpedals, A/D turn the character and camera, Q/E strafe (A/D strafe
 too while the right button is held), left-drag looks around without turning, right-drag steers and
 both buttons run forward. Drags there hide and hold the pointer; a press that moves under 4 px is a
-click. In both, T or Num Lock toggles autorun. Shift walks, Space jumps, and
+click. In both, T or Num Lock toggles autorun. Shift sprints (out of combat), / toggles walking, Space jumps, and
 Alt (Option), V or mouse button 4 rolls the way the keys point. Action looks over the right shoulder. Tab cycles enemies; click selects, right-click starts auto-attacks.
 1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
 (screen centre while mouse-looking). Hovering/selecting a ground skill previews its actual radius.
