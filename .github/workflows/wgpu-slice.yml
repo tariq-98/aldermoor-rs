@@ -32,7 +32,7 @@ jobs:
         run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
       - name: Install software Vulkan
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers
       - name: Format isolated sources
         run: rustfmt --edition 2024 --config skip_children=true --check crates/render/examples/wgpu_slice/src/main.rs crates/render/examples/wgpu_slice/src/backend.rs
       - name: Lint

@@ -45,7 +45,9 @@ frame and identifies the adapter. CPU encode time includes preparation and submi
 work also includes waiting and timestamp readback. The GPU span includes pass boundaries.
 
 On Linux the backend is Vulkan. With Mesa lavapipe selected, a small validation run proves the
-portable path draws; it is not a GPU performance comparison. CI exercises both platforms.
+portable path draws; it is not a GPU performance comparison. The dedicated CI workflow targets
+both platforms, but account billing currently prevents it from starting. The local Linux build
+and seven tests passed; the emulated lavapipe draw timed out and remains unverified.
 
 ## Evidence required before adoption
 
@@ -57,7 +59,8 @@ portable path draws; it is not a GPU performance comparison. CI exercises both p
   foliage cut-outs, shadow edges, reflections, water blending and TAA over moving foliage.
 - A draw-count stress or 200-character equivalent, launch and memory measurements for #93.
 
-No adoption recommendation has been established yet. The full visual and performance gates
-remain open until their reports are attached. ASTC upload is deliberately rejected if compressed
+The initial M1 slice misses the GPU adoption gate; keep the shipped Metal renderer. See the
+[ABBA report](../../../../docs/benchmarks/2026-10-25/wgpu-slice/README.md). Visual parity and the
+remaining acceptance gates are still open. ASTC upload is deliberately rejected if compressed
 catalogues arrive during the experiment: silently decoding only one backend would invalidate
 comparison with Metal. Asset compression and any required packing changes belong to Claude.
