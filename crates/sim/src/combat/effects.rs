@@ -8,6 +8,7 @@ use protocol::{Avoid, Event, Pose, School, Shape};
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
 use crate::content::{catalog, AbilityDef, Effect, Field, Finisher};
 use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
+use crate::region::Landing;
 use crate::spatial::Spatial;
 use crate::stats::{armor_reduction, scale, CRIT_MULTIPLIER};
 use crate::{Anim, Auras, Body, Brain, Faction, Fighter, Forced, ForcedKind, Land, Mode, Motion, Rng, Stats, Threat, Transform, Unit, Vitals};
@@ -377,27 +378,61 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
     // Everyone it fells is let go of together once it has landed on all of them.
     super::life::hold_deaths(world);
     for &t in targets {
-        let hostile = user.is_none_or(|u| can_attack(world, u, t)) || world.get::<Unit>(t).is_some_and(|tu| tu.faction.is_enemy(src.faction));
-        if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
-            let target = unit_id(world, t).unwrap_or(0);
-            emit(world, Event::Avoided { target, source: src.unit, how });
+        // A neighbour's unit: its own region lands it, next step.
+        if let Some(region) = crate::region::ghost_region(world, t) {
+            let effects: Vec<Effect> = rest.iter().map(|e| (*e).clone()).collect();
+            let hurts = effects.iter().any(|e| matches!(e, Effect::Damage { .. }));
+            let ability = def.and_then(|d| catalog().ability_id(d.key));
+            crate::region::send(world, region, t, Landing::Effects { effects, src: *src, ability, center, delivery });
+            if hurts && let Some(u) = user {
+                auras::remove_key(world, u, "riposte");
+            }
             continue;
         }
-        if hostile && def.is_some() && let Some(u) = user {
-            crate::progress::note_use(world, u, t);
+        land(world, user, &rest, src, def, t, center, delivery);
+    }
+    super::life::release_deaths(world);
+}
+
+/// An ability's effects on one target: dodges and guards first, then each effect.
+#[allow(clippy::too_many_arguments)]
+fn land(world: &mut World, user: Option<Entity>, rest: &[&Effect], src: &HitSource, def: Option<&AbilityDef>, t: Entity, center: Vec3, delivery: Delivery) {
+    let hostile = user.is_none_or(|u| can_attack(world, u, t)) || world.get::<Unit>(t).is_some_and(|tu| tu.faction.is_enemy(src.faction));
+    if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
+        let target = unit_id(world, t).unwrap_or(0);
+        emit(world, Event::Avoided { target, source: src.unit, how });
+        return;
+    }
+    if hostile && def.is_some() && let Some(u) = user {
+        crate::progress::note_use(world, u, t);
+    }
+    let crit = world.resource_mut::<Rng>().chance(src.crit);
+    // Striking from behind: harder, and backstabs harder still.
+    let mut mult = 1.0;
+    if hostile && guard::behind(world, t, src.from) {
+        mult *= FLANK * def.map_or(1.0, |d| d.backstab);
+    }
+    let mut hurt = false;
+    for e in rest {
+        hurt |= apply(world, e, t, src, def, crit, center, mult);
+    }
+    if hurt && let Some(u) = user {
+        auras::remove_key(world, u, "riposte");
+    }
+}
+
+/// Lands what another region aimed at one of this region's units (`te`).
+pub(crate) fn land_request(world: &mut World, te: Entity, landing: Landing) {
+    let cat = catalog();
+    super::life::hold_deaths(world);
+    match landing {
+        Landing::Effects { effects, src, ability, center, delivery } => {
+            let user = entity(world, src.unit);
+            let rest: Vec<&Effect> = effects.iter().collect();
+            land(world, user, &rest, &src, ability.map(|a| cat.ability(a)), te, center, delivery);
         }
-        let crit = world.resource_mut::<Rng>().chance(src.crit);
-        // Striking from behind: harder, and backstabs harder still.
-        let mut mult = 1.0;
-        if hostile && guard::behind(world, t, src.from) {
-            mult *= FLANK * def.map_or(1.0, |d| d.backstab);
-        }
-        let mut hurt = false;
-        for e in &rest {
-            hurt |= apply(world, e, t, src, def, crit, center, mult);
-        }
-        if hurt && let Some(u) = user {
-            auras::remove_key(world, u, "riposte");
+        Landing::Effect { effect, src, ability, crit, center, mult } => {
+            apply(world, &effect, te, &src, ability.map(|a| cat.ability(a)), crit, center, mult);
         }
     }
     super::life::release_deaths(world);
@@ -406,6 +441,11 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
 /// One effect on one target. Returns whether it did damage.
 #[allow(clippy::too_many_arguments)]
 fn apply(world: &mut World, e: &Effect, te: Entity, src: &HitSource, def: Option<&AbilityDef>, crit: bool, center: Vec3, mult: f32) -> bool {
+    if let Some(region) = crate::region::ghost_region(world, te) {
+        let ability = def.and_then(|d| catalog().ability_id(d.key));
+        crate::region::send(world, region, te, Landing::Effect { effect: e.clone(), src: *src, ability, crit, center, mult });
+        return matches!(e, Effect::Damage { .. });
+    }
     match e {
         Effect::Damage { base, coeff } => {
             let mut amount = (base * scale(src.level) + coeff * src.power) * mult;
