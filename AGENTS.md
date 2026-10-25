@@ -69,3 +69,9 @@ Edit that file, not the GitHub UI, and the Tracking workflow applies it on merge
 Claude Code sessions have skills for each step in [.claude/skills](.claude/skills):
 `claim-issue`, `file-issue` and `finish-issue`. Other agents can read those files as
 instructions; they cover both the `gh` CLI and the GitHub MCP tools.
+
+## Wiki
+
+The GitHub wiki is published from [wiki/](wiki/) on every merge to `main`. Edit pages there, not
+on the wiki. When Chippy answers a `status:needs-decision` issue, add a row to
+[wiki/Decisions-log.md](wiki/Decisions-log.md) in the same PR that acts on it.
