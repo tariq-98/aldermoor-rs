@@ -40,11 +40,17 @@ struct Options {
     showcase: bool,
     smoke: bool,
     effects_review: bool,
+    /// The effects review as a captioned reel of close shots, one effect at a time, from this
+    /// many seconds in.
+    reel: bool,
+    reel_from: f32,
     /// The showcase camera: 0 is the whole scene; 1–3 come in close on parts of the staged
     /// fight (the left of the lineup, its right, the missiles' lanes).
     view: usize,
-    /// Every frame after the warmup is captured into this folder (for review videos).
+    /// Every frame after the warmup (or every `sequence_step`th) is captured into this folder
+    /// (for review videos and contact sheets).
     sequence: Option<PathBuf>,
+    sequence_step: u64,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -79,8 +85,11 @@ impl Options {
             showcase: false,
             smoke: false,
             effects_review: false,
+            reel: false,
+            reel_from: 0.,
             view: 0,
             sequence: None,
+            sequence_step: 1,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -122,6 +131,13 @@ impl Options {
                 "--view" => {
                     o.view = args.next().context("--view needs 0..3")?.parse()?;
                     ensure!(o.view <= 3, "--view needs 0..3");
+                }
+                "--sequence-step" => {
+                    o.sequence_step = args
+                        .next()
+                        .context("--sequence-step needs a count")?
+                        .parse()?;
+                    ensure!(o.sequence_step > 0, "--sequence-step needs a count above 0");
                 }
                 "--sequence" => {
                     o.sequence = Some(PathBuf::from(
@@ -185,6 +201,14 @@ impl Options {
                     o.effects_review = true;
                     o.showcase = true;
                 }
+                "--effects-reel" => {
+                    o.effects_review = true;
+                    o.reel = true;
+                    o.showcase = true;
+                }
+                "--reel-from" => {
+                    o.reel_from = args.next().context("--reel-from needs seconds")?.parse()?
+                }
                 "--scheme" => {
                     o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
@@ -201,7 +225,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --specialty NAME\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N --specialty NAME\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -290,6 +314,8 @@ struct Game {
     effects_art: Option<render::fx::Library>,
     /// The fight staged for `--effects-review`.
     stage: Option<stage::Stage>,
+    /// Seconds into the effects reel (it starts as the warmup ends).
+    reel_time: f32,
 }
 impl Game {
     fn new(options: Options) -> Result<Self> {
@@ -361,9 +387,17 @@ impl Game {
             effects,
             effects_art,
             stage: None,
+            reel_time: 0.,
         };
         g.scenery = Some(render::scenery::Scenery::new(&g.catalog, &mut g.cache)?);
-        if g.options.effects_review {
+        if g.options.reel {
+            eprintln!(
+                "effects reel: {:.1} s ({} frames after the warmup)",
+                stage::reel_seconds(),
+                (stage::reel_seconds() * 60.).ceil()
+            );
+            g.stage = Some(stage::Stage::reel());
+        } else if g.options.effects_review {
             g.stage = Some(stage::Stage::default());
         }
         if g.options.showcase {
@@ -619,6 +653,10 @@ impl Game {
         if self.options.showcase {
             // Target (x, z, height over the ground), and the eye's offset from it.
             let (x, z, up, from) = match self.options.view {
+                _ if self.options.reel => {
+                    let (x, z, up, from) = stage::shot(self.reel_time).camera;
+                    (x, z, up, Vec3::from(from))
+                }
                 1 => (-1.5, 24.2, 1.0, Vec3::new(3.2, 1.7, 6.8)),
                 2 => (5.6, 23.6, 1.0, Vec3::new(2.6, 1.8, 6.6)),
                 3 => (0.5, 25., 1.5, Vec3::new(1.6, 0.9, 7.5)),
@@ -856,6 +894,8 @@ impl Game {
             self.snaps.units(!self.options.legacy_cpu)
         };
         let time = self.frame as f32 / 60.;
+        self.reel_time =
+            self.options.reel_from + (self.frame as f32 - self.options.warmup as f32) / 60.;
         if self.options.showcase {
             for u in &mut units {
                 u.pose_time = time;
@@ -985,7 +1025,10 @@ impl Game {
             .options
             .sequence
             .as_ref()
-            .filter(|_| self.frame > self.options.warmup)
+            .filter(|_| {
+                self.frame > self.options.warmup
+                    && (self.frame - self.options.warmup).is_multiple_of(self.options.sequence_step)
+            })
             .map(|dir| dir.join(format!("{:05}.png", self.frame)));
         let capture = if done {
             self.options.capture.as_deref()
@@ -1014,11 +1057,20 @@ impl Game {
             let characters = &self.characters;
             let valley = &self.valley;
             let ground = |x, z| valley.ground(x, z);
+            let stage_time = if self.options.reel {
+                self.reel_time
+            } else {
+                scene_time
+            };
             let staged = self
                 .stage
                 .as_mut()
-                .map(|s| s.frame(scene_time, &units, &ground));
+                .map(|s| s.frame(stage_time, &units, &ground));
             if let Some(f) = &staged {
+                // A new shot starts clean: nothing left lying from the last.
+                if f.cut {
+                    fx.clear();
+                }
                 for (e, at) in &f.events {
                     fx.event(e, *at);
                 }
@@ -1033,8 +1085,8 @@ impl Game {
                 } else {
                     self.snaps.received.elapsed().as_secs_f32()
                 },
-                time: scene_time,
-                aim: staged.as_ref().map_or(aim.zip(radius), |f| Some(f.aim)),
+                time: staged.as_ref().map_or(scene_time, |f| f.clock),
+                aim: staged.as_ref().map_or(aim.zip(radius), |f| f.aim),
             });
             draws.extend(solids);
             r.effects = Some(frame);
@@ -1064,7 +1116,11 @@ impl Game {
                     world_effects,
                 );
             }
-            actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
+            if self.options.reel {
+                paint_caption(ctx, stage::shot(self.reel_time).caption);
+            } else {
+                actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
+            }
             if crosshair {
                 paint_crosshair(ctx);
             }
@@ -1304,6 +1360,22 @@ fn paint_crosshair(ctx: &egui::Context) {
             painter.line_segment([c + d * 7., c + d * 13.], stroke);
         }
     }
+}
+/// The reel's caption, top centre on a dark plate.
+fn paint_caption(ctx: &egui::Context, text: &str) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("caption"),
+    ));
+    let galley = painter.layout_no_wrap(
+        text.into(),
+        egui::FontId::proportional(24.),
+        egui::Color32::from_white_alpha(235),
+    );
+    let top = egui::pos2(ctx.content_rect().center().x - galley.size().x / 2., 22.);
+    let plate = egui::Rect::from_min_size(top, galley.size()).expand2(egui::vec2(16., 8.));
+    painter.rect_filled(plate, 6., egui::Color32::from_black_alpha(150));
+    painter.galley(top, galley, egui::Color32::WHITE);
 }
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;

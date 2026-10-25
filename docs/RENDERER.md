@@ -409,7 +409,8 @@ Metal side is `crates/render/src/metal/fx_pass.rs`. Neither part adds a render p
 - **Quads and meshes** are drawn at the end of the composite pass, straight onto the output
   after exposure, grade and ACES (each tone-mapped as it's drawn), with soft-particle fades
   against the scene depth. They never enter TAA history, so fast sparks and trails aren't
-  smeared or dimmed. Meshes go first, then quads farthest first, in one instanced draw.
+  smeared or dimmed. Meshes go first, then quads farthest first, in one instanced draw. A beam
+  drawn with a tile is a missile's ribbon: its heat and cover fall away towards its tail.
 
 The MSAA comparison mode draws no effects (they need single-sample depth). In the staged fight
 (`--effects-review`), at 2560×1600 output / 1920×1200 internal on the M1, effects added

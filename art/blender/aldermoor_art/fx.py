@@ -1,5 +1,6 @@
 """Combat effect sprites painted with numpy: glows, flares, sparks, rings, rune circles, frost,
-scorch marks, lightning and wisps, and the tiling strips trails and shields scroll through.
+scorch marks, lightning, wisps, flames and status icons, and the tiling strips trails and
+shields scroll through.
 
 Every sprite is three data channels, packed into the effects atlas as linear RGBA8:
 
@@ -257,8 +258,8 @@ def _circle_coverage(r, radius, width, aa):
 
 
 def runes(n=512, seed=23):
-    """A casting circle: two outer rings with a band of runes between, a ring of beads, a
-    hexagram and an inner ring round a small sun. Erosion runs round it, so a rising threshold
+    """A casting circle: two outer rings with a band of runes between, a ring of beads, an
+    eight-pointed star and an inner ring round a small sun. Erosion runs round it, so a rising threshold
     draws the circle in by hand, sweep by sweep."""
     x, y = grid(n)
     r = np.hypot(x, y)
@@ -282,10 +283,13 @@ def runes(n=512, seed=23):
     nearest = np.round(theta / (math.tau / beads)) * (math.tau / beads)
     bx, by = 0.745 * np.cos(nearest), 0.745 * np.sin(nearest)
     lines = np.maximum(lines, stroke(np.hypot(x - bx, y - by), 0.009, aa))
-    # A hexagram inscribed in the beads, and its inner ring.
-    tri_a = _polygon(3, 0.7, math.pi / 2)
-    tri_b = _polygon(3, 0.7, -math.pi / 2)
-    star = np.minimum(polyline_distance(x, y, tri_a, closed=True), polyline_distance(x, y, tri_b, closed=True))
+    # An eight-pointed star of two squares inscribed in the beads, a small ring at each point,
+    # and its inner ring.
+    sq_a = _polygon(4, 0.7, math.pi / 2)
+    sq_b = _polygon(4, 0.7, math.pi / 4)
+    star = np.minimum(polyline_distance(x, y, sq_a, closed=True), polyline_distance(x, y, sq_b, closed=True))
+    for px, py in sq_a + sq_b:
+        star = np.minimum(star, np.abs(np.hypot(x - px * 0.93, y - py * 0.93) - 0.035))
     lines = np.maximum(lines, stroke(star, 0.007, aa))
     lines = np.maximum(lines, _circle_coverage(r, 0.36, 0.006, aa))
     lines = np.maximum(lines, _circle_coverage(r, 0.33, 0.003, aa))
@@ -305,8 +309,8 @@ def runes(n=512, seed=23):
 
 
 def sigil(n=512, seed=29):
-    """A darker circle for shadow and arcane: a ring of ticks like a dial, a pentagram with
-    beads at its points and two rings of runes turning against each other."""
+    """A darker circle for shadow and arcane: a ring of ticks like a dial, three rings
+    interlocking round the middle with beads round them, and a ring of runes."""
     x, y = grid(n)
     r = np.hypot(x, y)
     theta = np.arctan2(y, x)
@@ -318,12 +322,14 @@ def sigil(n=512, seed=29):
     long_tick = (np.round(theta / (math.tau / ticks)) % 6 == 0)
     reach = np.where(long_tick, 0.84, 0.88)
     lines = np.maximum(lines, stroke(across, 0.004, aa) * smooth(reach - 0.01, reach, r) * smooth(0.935, 0.925, r))
-    points = _polygon(5, 0.66, math.pi / 2)
-    pentagram = [points[i * 2 % 5] for i in range(5)]
-    star = polyline_distance(x, y, pentagram, closed=True)
+    # Three rings interlocking round the middle, a bead where each pair crosses the outer ring.
+    points = _polygon(3, 0.3, math.pi / 2)
+    star = np.full(np.shape(r), np.inf, np.float32)
+    for px, py in points:
+        star = np.minimum(star, np.abs(np.hypot(x - px, y - py) - 0.36))
     lines = np.maximum(lines, stroke(star, 0.007, aa))
     lines = np.maximum(lines, _circle_coverage(r, 0.66, 0.005, aa))
-    for px, py in points:
+    for px, py in _polygon(3, 0.66, -math.pi / 2):
         d = np.hypot(x - px, y - py)
         lines = np.maximum(lines, _circle_coverage(d, 0.055, 0.006, aa))
         lines = np.maximum(lines, stroke(d, 0.018, aa))
@@ -344,6 +350,128 @@ def sigil(n=512, seed=29):
 
 
 # --- Shapes ------------------------------------------------------------------------------------
+
+# Status icons over a head or at the feet: bold, flat shapes with a dark outline (low heat,
+# full cover) so they read on bright ground and sky alike.
+
+def _icon(d, n, line=0.05, shade=None):
+    """A filled shape from its signed distance d (negative inside): a bright face with a soft
+    light at its top, a dark outline round it."""
+    aa = 2.0 / n
+    face = smooth(aa, -aa, d)
+    rim = smooth(line + aa, line - aa, d) * (1 - face)
+    x, y = grid(n)
+    light = 0.72 + 0.16 * np.clip(y, -1, 1) if shade is None else shade
+    heat = face * light
+    cover = np.clip(face + rim * 0.85, 0, 1)
+    return heat, cover
+
+
+def zzz(n=128):
+    """A sleeper's Z: a bold, slanted letter."""
+    x, y = grid(n)
+    xs = x - 0.22 * y
+    pts = [(-0.42, 0.52), (0.42, 0.52), (-0.42, -0.52), (0.42, -0.52)]
+    d = polyline_distance(xs, y, pts) - 0.12
+    heat, cover = _icon(d, n, 0.07)
+    return pack(heat, cover, cover)
+
+
+def drop(n=128):
+    """A drop of blood (or water): round below, drawn to a point above, a glint on it."""
+    x, y = grid(n)
+    cy, r, top = -0.3, 0.46, 0.82
+    v = np.clip((y - cy) / (top - cy), 0, 1)
+    circle = np.hypot(x, y - cy) - r
+    upper = np.where(y >= cy, np.maximum(np.abs(x) - r * (1 - v) ** 1.5, y - top), np.inf)
+    d = np.minimum(circle, upper)
+    glint = np.exp(-(((x + 0.17) / 0.09) ** 2 + ((y + 0.16) / 0.15) ** 2))
+    heat, cover = _icon(d, n, 0.06, shade=0.62 + 0.25 * np.clip(-y, 0, 1) * 0 + 0.3 * glint)
+    return pack(np.clip(heat + glint * 0.25, 0, 1), cover, cover)
+
+
+def hush(n=128):
+    """Silence: a ring struck through."""
+    x, y = grid(n)
+    r = np.hypot(x, y)
+    ring = np.abs(r - 0.6) - 0.11
+    slash = segment_distance(x, y, (-0.43, -0.43), (0.43, 0.43)) - 0.11
+    d = np.minimum(ring, slash)
+    heat, cover = _icon(d, n, 0.07)
+    return pack(heat, cover, cover)
+
+
+def mark(n=128):
+    """Taunted: an exclamation mark, a wedge over a dot."""
+    x, y = grid(n)
+    v = np.clip((y + 0.02) / 0.82, 0, 1)
+    width = 0.07 + 0.11 * v
+    bar = np.where((y > -0.02) & (y < 0.84), np.abs(x) - width, np.minimum(np.abs(y + 0.02), np.abs(y - 0.84)) + np.maximum(np.abs(x) - width, 0))
+    bar = np.where((y > -0.02) & (y < 0.84), bar, np.hypot(np.maximum(np.abs(x) - width, 0), np.minimum(np.abs(y + 0.02), np.abs(y - 0.84))))
+    dot = np.hypot(x, y + 0.5) - 0.15
+    d = np.minimum(bar, dot)
+    heat, cover = _icon(d, n, 0.07)
+    return pack(heat, cover, cover)
+
+
+def skull(n=128):
+    """Feared: a cartoon skull, round cranium, hollow eyes, a jaw of teeth."""
+    x, y = grid(n)
+    cranium = np.hypot(x, (y - 0.14) * 1.05) - 0.6
+    jaw_box = np.maximum(np.abs(x) - 0.34, np.abs(y + 0.42) - 0.24)
+    shape = np.minimum(cranium, jaw_box - 0.04)
+    eyes = np.minimum(np.hypot(x - 0.25, y - 0.04) - 0.17, np.hypot(x + 0.25, y - 0.04) - 0.17)
+    nose = np.maximum(np.abs(x) * 1.6 + (y + 0.16) * 0.9, -(y + 0.3)) - 0.06
+    teeth = (np.abs(((x + 0.34) % 0.17) - 0.085) < 0.018) & (y < -0.36) & (y > -0.6)
+    holes = np.minimum(eyes, nose)
+    aa = 2.0 / n
+    face = smooth(aa, -aa, shape)
+    hole = smooth(aa, -aa, holes) * face
+    rim = smooth(0.07 + aa, 0.07 - aa, shape) * (1 - face)
+    light = 0.8 + 0.2 * np.clip(y, -1, 1)
+    heat = face * (1 - hole) * (1 - teeth * 0.8) * light * 0.92
+    cover = np.clip(face + rim * 0.85, 0, 1)
+    return pack(heat, cover, cover)
+
+
+def chevron(n=128):
+    """Two chevrons pointing up (turned over, down), for a stat raised or lowered."""
+    x, y = grid(n)
+    d = np.full(np.shape(x), np.inf, np.float32)
+    for cy in (0.32, -0.28):
+        pts = [(-0.55, cy - 0.32), (0.0, cy + 0.2), (0.55, cy - 0.32)]
+        d = np.minimum(d, polyline_distance(x, y, pts) - 0.11)
+    heat, cover = _icon(d, n, 0.07)
+    return pack(heat, cover, cover)
+
+
+def vine(n=128, seed=101):
+    """Roots: three thorny tendrils curling up out of the ground."""
+    x, y = grid(n)
+    rng = np.random.default_rng(seed)
+    d = np.full(np.shape(x), np.inf, np.float32)
+    for k, (x0, lean, height) in enumerate(((-0.42, -0.6, 1.5), (0.0, 0.3, 1.8), (0.4, 0.8, 1.3))):
+        s = np.linspace(0, 1, 40)
+        px = x0 + lean * 0.25 * np.sin(s * 3.0 + k) + 0.35 * s ** 2 * np.sign(lean)
+        py = -0.95 + s * height
+        # Curl at the tip.
+        curl = np.clip((s - 0.75) / 0.25, 0, 1)
+        px = px + 0.18 * np.sign(lean) * (1 - np.cos(curl * 2.5))
+        py = py - 0.12 * np.sin(curl * 2.5)
+        pts = list(zip(px, py))
+        width = 0.07
+        for i, (a, b) in enumerate(zip(pts[:-1], pts[1:])):
+            w = width * (1 - i / len(pts)) + 0.015
+            d = np.minimum(d, segment_distance(x, y, a, b) - w)
+        for i in range(6, 34, 6):
+            ax, ay = pts[i]
+            side = 1 if i % 12 else -1
+            tip = (ax + side * 0.12, ay + 0.08)
+            d = np.minimum(d, segment_distance(x, y, (ax, ay), tip) - 0.025)
+    heat, cover = _icon(d, n, 0.05)
+    return pack(heat, cover, cover)
+
+
 
 def star(n=128):
     """A five-pointed cartoon star for a dazed head: a solid heart, a bright edge and a glow."""
@@ -449,18 +577,37 @@ def ripple(n=256, seed=37):
 
 
 def scorch(n=256, seed=41):
-    """A burn left where fire landed: charred ground (cover) split by cracks that still glow
-    (heat), its edge ragged with noise."""
+    """A burn left where fire landed: ground charred dark at the heart and browned at a ragged
+    edge, a few forked cracks still glowing through it and embers dotted about."""
     x, y = grid(n)
     r = np.hypot(x, y)
     theta = np.arctan2(y, x)
-    edge = 0.72 + 0.16 * (angular_noise(theta, 4, seed, 3) - 0.5) + 0.08 * (noise_field(n, 6, seed + 1) - 0.5)
-    body = smooth(edge, edge - 0.3, r)
-    _, gap, _, _ = tiles.voronoi(n, 40, seed + 2, warp=6.0)
-    cracks = np.exp(-(gap / 2.2) ** 2) * smooth(edge - 0.05, edge * 0.3, r)
-    soot = noise_field(n, 5, seed + 3)
-    heat = np.clip(cracks * (0.6 + 0.4 * soot) * smooth(edge, 0.0, r) ** 0.5, 0, 1)
-    cover = np.clip(body * (0.55 + 0.45 * soot), 0, 1)
+    aa = 1.5 / n
+    edge = 0.7 + 0.2 * (angular_noise(theta, 5, seed, 3) - 0.5) + 0.12 * (noise_field(n, 7, seed + 1) - 0.5)
+    body = smooth(edge, edge - 0.4, r)
+    soot = noise_field(n, 6, seed + 3)
+    rng = np.random.default_rng(seed + 4)
+    d = np.full(np.shape(x), np.inf, np.float32)
+    # Cracks wander from anywhere in the heart of the burn, every way, some forking.
+    for i in range(11):
+        r0, a0 = math.sqrt(rng.uniform(0, 1)) * 0.42, rng.uniform(0, math.tau)
+        a = a0 + rng.uniform(-1.2, 1.2) if r0 > 0.08 else rng.uniform(0, math.tau)
+        reach = rng.uniform(0.18, 0.42)
+        start = (r0 * math.cos(a0), r0 * math.sin(a0))
+        path = bolt_path(rng, start, (start[0] + reach * math.cos(a), start[1] + reach * math.sin(a)), 0.22, 4)
+        d = np.minimum(d, polyline_distance(x, y, path) * rng.uniform(1.0, 1.6))
+        if rng.random() < 0.5:
+            k = rng.integers(len(path) // 3, len(path) * 2 // 3)
+            b = a + rng.choice([-1, 1]) * rng.uniform(0.5, 1.0)
+            fork = bolt_path(rng, path[k], (path[k][0] + 0.15 * math.cos(b), path[k][1] + 0.15 * math.sin(b)), 0.25, 3)
+            d = np.minimum(d, polyline_distance(x, y, fork) * 1.6)
+    # Cracks glow hottest near the middle and cool to nothing towards the edge.
+    warm = smooth(edge * 0.95, 0.0, r)
+    cracks = stroke(d, 0.005, aa) * warm
+    halo = np.exp(-d / 0.02) * warm * 0.3
+    embers = (noise_field(n, 40, seed + 5, power=0.5) > 0.9) * smooth(edge, edge * 0.5, r)
+    heat = np.clip(cracks * 0.95 + halo * 0.5 + embers * 0.7, 0, 1)
+    cover = np.clip(body * (0.7 + 0.3 * soot) + cracks + halo * 0.5 + embers * 0.5, 0, 1)
     return pack(heat, cover, np.clip(body * 0.7 + soot * 0.3, 0, 1))
 
 
@@ -576,45 +723,41 @@ def fbm(x, y, z, seed, octaves=5, gain=0.5):
 
 
 def flame(n=192, frames=16, seed=59):
-    """One flame's life: it licks up from a rounded base, grows tall, tears into tongues at its
-    tip, lifts away and dies down. Three crisp zones of heat (a red body, an orange heart and a
-    yellow-white core near its base) give the ramp hard bands to paint, as hand-painted flames
-    have, and three scales of turbulence keep its edges busy. Fire everywhere is many of these,
-    each sized differently."""
+    """One flame's life, painted as stylised game fire is: a rounded base that licks up into
+    three tongues, blobs tearing off their tips, and three crisp bands of heat (an orange rim,
+    a yellow body, a white-hot heart low down) for the ramp to colour. It grows in the first
+    third of its life and thins away in the last. Fire everywhere is many of these."""
     x, y = grid(n)
-    base = -0.88
-    aa = 1.5 / n
+    aa = 10.0 / n
+    base = -0.86
     out = []
     for f in range(frames):
         t = (f + 0.5) / frames
-        grow = smooth(0.0, 0.28, t)
-        height = 0.6 + 1.15 * grow
-        lift = 0.6 * smooth(0.5, 1.0, t)
-        h = y - base - lift
-        v = np.clip(h / height, 0.0, 1.0)
-        coarse = fbm(x * 1.9, (y - t * 2.6) * 1.5, t * 1.3, seed, octaves=4)
-        mid = fbm(x * 4.2, (y - t * 4.0) * 3.2, t * 2.0 + 9.0, seed + 7, octaves=4)
-        fine = fbm(x * 9.0, (y - t * 6.5) * 7.0, t * 3.0 + 21.0, seed + 13, octaves=3)
-        sway = (coarse - 0.5) * 0.7 * v ** 0.9
-        xs = x + sway + (mid - 0.5) * 0.12 * v + (fine - 0.5) * 0.035
-        dying = smooth(0.62, 1.0, t)
-        width = 0.42 * (1 - v) ** 0.72 * (0.5 + 0.5 * smooth(0.0, 0.16, v)) * (1 - 0.3 * dying)
-        tongues = v + (mid - 0.5) * 0.95 + (coarse - 0.5) * 0.35 + (fine - 0.5) * 0.22 + dying * 0.75
-        outer = smooth(width + aa, width - aa, np.abs(xs)) * smooth(1.02, 0.98, tongues)
-        outer = outer * smooth(-0.04, 0.06, h) * smooth(1.05, 0.9, h / height)
-        # Dying down: it thins from the bottom up rather than squatting.
-        outer = outer * (1 - dying * smooth(0.55, -0.1, v + (fine - 0.5) * 0.5)) * (1 - 0.55 * dying)
-        heart = smooth(width * 0.6 + aa, width * 0.6 - aa, np.abs(xs)) * smooth(0.8, 0.76, tongues + 0.1)
-        core_width = width * 0.3 * (1 - 0.3 * v)
-        core = smooth(core_width + aa, core_width - aa, np.abs(xs - (fine - 0.5) * 0.03))
-        core = core * smooth(0.52, 0.48, tongues + 0.25 + v * 0.35)
-        # The body darkens towards its edge, so the ramp paints it a red rim round orange.
-        depth = smooth(0.0, 0.4, (width - np.abs(xs)) / np.maximum(width, 1e-3))
-        heat = (0.2 + 0.13 * depth + 0.33 * heart + 0.34 * core) * outer
-        heat = np.clip(heat * (0.86 + 0.28 * fine) * (1 - 0.35 * t), 0, 1)
-        cover = np.clip(outer * (0.88 + 0.12 * mid), 0, 1)
-        erode = np.clip(outer * (1 - v) * 0.55 + fine * 0.3 + mid * 0.15, 0, 1)
-        out.append(pack(heat, cover * smooth(1.0, 0.9, np.abs(x)) * smooth(1.0, 0.93, y), erode))
+        grow = smooth(0.0, 0.3, t)
+        dying = smooth(0.55, 1.0, t)
+        v = (y - base) / (0.75 + 0.95 * grow)
+        vc = np.clip(v, 0, 1.3)
+        # An S travelling up it as it licks.
+        xs = x - 0.12 * np.sin(math.tau * (0.7 * v - 1.5 * t) + 0.4) * vc ** 1.5
+        # Widest a quarter of the way up, a rounded base, narrowing above.
+        bottom = np.where(v > 0.14, 1.0, np.sqrt(np.clip(1 - ((0.14 - v) / 0.17) ** 2, 0, 1)))
+        width = 0.46 * (0.6 + 0.4 * grow) * np.clip(1.08 - v, 0, 1) ** 0.75 * bottom
+        u = xs / np.maximum(width, 1e-3)
+        # Three tongues near the top, the middle one tallest, swapping as it flickers.
+        comb = 0.5 + 0.5 * np.cos(math.pi * 3.0 * u + 0.9 * np.sin(math.tau * 1.3 * t + 1.0))
+        shape = 1 - np.abs(u) - (1 - comb) * smooth(0.25, 0.85, v) * 0.55
+        # Rising noise: big lumps tear blobs off the tongues, small ones break every edge.
+        big = fbm(x * 3.4, (y - t * 3.0) * 1.9, t * 0.8, seed, octaves=3) - 0.5
+        small = fbm(x * 8.0, (y - t * 5.0) * 5.5, t * 1.2 + 5.0, seed + 3, octaves=3) - 0.5
+        value = (shape + big * (0.5 + 2.2 * vc) + small * (0.2 + 0.9 * vc) - 0.18 * vc
+                 - 0.35 * smooth(0.7, 1.0, v) - 0.8 * dying)
+        value = np.where(v < -0.04, -1.0, value)
+        outer = smooth(-aa, aa, value)
+        body = smooth(0.36 - aa, 0.36 + aa, value - 0.1 * vc)
+        heart = smooth(0.66 - aa, 0.66 + aa, value + 0.12 * (1 - vc) ** 2 - 0.45 * vc)
+        heat = (0.3 * outer + 0.28 * body + 0.3 * heart) * (1 - 0.3 * dying)
+        cover = outer * smooth(1.0, 0.92, np.abs(x)) * smooth(1.0, 0.94, y)
+        out.append(pack(heat, cover, np.clip(0.45 + value * 0.9, 0, 1) * outer))
     return out
 
 

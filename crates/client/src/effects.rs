@@ -226,6 +226,11 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3. - 2. * t)
 }
 
+/// Progress through a life with an ease: 1 is even, higher pops out fast and settles.
+fn eased(t: f32, ease: f32) -> f32 {
+    1. - (1. - t.clamp(0., 1.)).powf(ease.max(0.05))
+}
+
 /// Fading in over the first `fade[0]` of a life and out over the last `fade[1]`.
 fn envelope(t: f32, fade: [f32; 2]) -> f32 {
     let rise = if fade[0] > 0. {
@@ -380,6 +385,12 @@ impl Effects {
         let look: Look = parts.into();
         self.looks.insert(name.into(), look.clone());
         Some(look)
+    }
+
+    /// Forgets every missile and burst (the review reel cutting to a new shot).
+    pub fn clear(&mut self) {
+        self.flights.clear();
+        self.bursts.clear();
     }
 
     fn seed(&mut self) -> u32 {
@@ -812,7 +823,7 @@ fn particle(l: &Layer, a: &Anchor, life: &Life) -> Particle {
     Particle {
         at,
         velocity,
-        size: lerp(l.size[0], l.size[1], life.t) * s * vary,
+        size: lerp(l.size[0], l.size[1], eased(life.t, l.ease)) * s * vary,
         angle,
         alpha: l.alpha * fade * a.strength * pulse.max(0.),
     }
@@ -896,15 +907,32 @@ fn sprite(part: &Part, p: &Particle, life: &Life, out: &mut fx::Frame) {
     let speed = p.velocity.length();
     out.quads.push(if l.stretch > 0. && speed > 0.05 {
         let tail = p.at - p.velocity * l.stretch;
-        fx::Quad {
-            position: [tail.x, tail.y, tail.z, fx::Quad::BEAM],
-            a: [p.at.x, p.at.y, p.at.z, p.size],
-            b: [p.size * 0.35, 0., 0., 0.],
-            material,
+        if l.flip {
+            // The sprite's base at the particle and its top streaming back: flames off a
+            // fireball.
+            fx::Quad {
+                position: [p.at.x, p.at.y, p.at.z, fx::Quad::BEAM],
+                a: [tail.x, tail.y, tail.z, p.size * 0.8],
+                b: [p.size, 0., 0., 0.],
+                material,
+            }
+        } else {
+            fx::Quad {
+                position: [tail.x, tail.y, tail.z, fx::Quad::BEAM],
+                a: [p.at.x, p.at.y, p.at.z, p.size],
+                b: [p.size * 0.35, 0., 0., 0.],
+                material,
+            }
         }
     } else {
+        // An upright sprite stands on its base (flames on the ground), not its middle.
+        let at = if l.upright {
+            p.at + Vec3::Y * p.size * l.aspect * 0.86
+        } else {
+            p.at
+        };
         fx::Quad {
-            position: [p.at.x, p.at.y, p.at.z, fx::Quad::SPRITE],
+            position: [at.x, at.y, at.z, fx::Quad::SPRITE],
             a: [p.size, p.size * l.aspect, p.angle, 0.],
             b: [0., 0., 0., l.towards],
             material,
@@ -1006,7 +1034,7 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
     // no deeper: anyone standing in the mark is left out of it.
     let tilt = Quat::from_rotation_arc(Vec3::Y, Vec3::new(-g.slope.x, 1., -g.slope.y).normalize());
     let half_y = g.stray + 0.35;
-    let size = lerp(l.size[0], l.size[1], life.t) * s;
+    let size = lerp(l.size[0], l.size[1], eased(life.t, l.ease)) * s;
     let (kind, half, centre, cone) = match (l.shape, a.shape) {
         (DecalShape::Area, Some(Shape::Circle { radius })) => (
             fx::Decal::CIRCLE,

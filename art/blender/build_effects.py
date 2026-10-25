@@ -65,6 +65,8 @@ def sprites():
     out.append(("puff", fx.sheet(fx.puff(), 4), 16, 4))
     out.append(("swirl", fx.sheet(fx.swirl(), 4), 16, 4))
     out.append(("starburst", fx.starburst(), 1, 1))
+    for name in ("zzz", "drop", "hush", "mark", "skull", "chevron", "vine"):
+        out.append((name, getattr(fx, name)(), 1, 1))
     return out
 
 

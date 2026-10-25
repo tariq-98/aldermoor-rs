@@ -99,7 +99,8 @@ pub enum LayerKind {
     /// Camera-facing sprites (`count` of them), or streaks when `stretch` is set.
     Sprite,
     /// One beam behind the anchor, from its position back along its flight (`size` is its
-    /// half width at the head and tail, `length` its length).
+    /// half width at the head and tail, `length` its length). Drawn with a tile it's a ribbon
+    /// that cools and thins away towards its tail.
     Beam,
     /// Sprites dropped along a missile's path, `rate` a metre, each then living on its own.
     Trail,
@@ -148,12 +149,18 @@ pub struct Layer {
     pub size: [f32; 2],
     /// Each particle's size differs from the layer's by up to this share either way.
     pub vary: f32,
+    /// How sizes move from birth to death: 1 evenly; above 1 fast at first and settling (a
+    /// burst pops out, then slows), as effects in fights move; below 1 slow at first.
+    pub ease: f32,
     /// Height over width (sprites, meshes).
     pub aspect: f32,
     /// Beams: length in metres. Meshes: length along z, as a share of their size.
     pub length: f32,
-    /// Sprites become streaks this many seconds of their flight long.
+    /// Sprites become streaks this many seconds of their flight long, the sprite's top at
+    /// the particle; `flip` puts its base there instead, its top streaming back (flames off a
+    /// fireball).
     pub stretch: f32,
+    pub flip: bool,
     /// Turn speed range (radians a second, either way round); and a fixed turn.
     pub spin: [f32; 2],
     pub angle: f32,
@@ -204,7 +211,7 @@ pub struct Layer {
     pub repeat: f32,
     pub scroll: [f32; 2],
     /// Meshes. `upright` stands one on end (its +z up) with a random heading, for crystals
-    /// growing out of the ground.
+    /// growing out of the ground; an upright sprite stands on its base, for flames.
     pub mesh: Option<String>,
     pub upright: bool,
     /// Meshes: rim (Fresnel) power and weight; the vertex mask's start and weight; twinkle
@@ -230,9 +237,11 @@ impl Default for Layer {
             rate: 0.,
             size: [0.5; 2],
             vary: 0.,
+            ease: 2.,
             aspect: 1.,
             length: 1.,
             stretch: 0.,
+            flip: false,
             spin: [0.; 2],
             angle: 0.,
             offset: [0.; 3],

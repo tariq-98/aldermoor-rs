@@ -104,8 +104,12 @@ vertex QuadVary quad_vertex(uint vid [[vertex_id]],uint iid [[instance_id]],cons
 }
 
 fragment float4 quad_fragment(QuadVary i [[stage_in]],constant Frame& f [[buffer(1)]],device const Quad* quads [[buffer(2)]],constant Globals& g [[buffer(3)]],texture2d<float> atlas [[texture(0)]],texture2d_array<float> tiles [[texture(1)]],texture2d<float> ramps [[texture(2)]],depth2d<float> scene [[texture(3)]]){
-    device const Material& m=quads[i.instance].m;
-    float4 c=shade(m,texel(m,i.uv,atlas,tiles),ramps);
+    device const Quad& q=quads[i.instance];
+    device const Material& m=q.m;
+    float4 t=texel(m,i.uv,atlas,tiles);
+    // A tile's beam is a ribbon off a missile: it cools and thins away towards its tail.
+    if(int(q.position.w+0.5)==1&&m.extra.x>0.5){t.r*=0.35+0.65*i.uv.x;t.g*=smoothstep(0.,0.7,i.uv.x);}
+    float4 c=shade(m,t,ramps);
     c.a*=in_front(i.depth,m.params.z,i.position.xy,g,scene);
     if(c.a<0.001)discard_fragment();
     return over_output(c,m.params.w,f);
@@ -219,20 +223,19 @@ fragment float4 decal_fragment(DecalVary i [[stage_in]],float4 motion [[color(1)
     }else{
         float shape=smoothstep(-aa,aa,inside);
         float edge=max(d.shape.w,0.01);
-        // A crisp line on the boundary, a glow running in from it and a faint one outside.
-        float line=exp(-abs(inside)/(edge*0.22+aa));
-        // A thinner second line just inside the first, as warnings in fights are drawn.
-        float inner=exp(-abs(inside-edge*1.6)/(edge*0.12+aa))*0.45*shape;
-        float rim=line*0.7+inner+shape*exp(-max(inside,0.)/edge)*0.45+(1.-shape)*exp(min(inside,0.)/(edge*0.5))*0.25;
+        // A crisp ring on the boundary with a soft glow either side, as fight indicators are
+        // drawn: the area itself stays nearly clear, so what lands in it is what's watched.
+        float line=exp(-abs(inside)/(edge*0.3+aa));
+        float glow=shape*exp(-max(inside,0.)/(edge*1.5))*0.2+(1.-shape)*exp(min(inside,0.)/(edge*0.8))*0.15;
+        // As a warning ripens a second ring sweeps out to its edge, a faint tint behind it.
         float filled=grown<0.?1.:smoothstep(aa,-aa,front);
-        float lead=grown<0.||grown>=1.?0.:exp(-abs(front)/(edge*0.6))*shape;
+        float lead=grown<0.||grown>=1.?0.:exp(-abs(front)/(edge*0.35+aa))*shape*0.8;
         float breakup=1.;
         if(m.extra.x>0.5)breakup=0.3+1.4*tiles.sample(tile_sampler,world.xz*m.frame.zw+m.frame.xy,uint(m.extra.x-0.5)).r;
-        // Bands running in from the edge, so a mark on the ground is plainly alive.
-        float bands=0.5+0.5*sin(max(inside,0.)/edge*1.7-f.clock.x*5.);
-        float body=shape*filled*d.fill.a*breakup*(0.9+0.18*bands*bands*exp(-max(inside,0.)/(edge*5.)));
-        float3 light=m.colour.rgb*m.colour.a*(rim+lead)+d.fill.rgb*body;
-        out=float4(light,body*m.params.w);
+        float body=shape*filled*d.fill.a*breakup;
+        float3 light=m.colour.rgb*m.colour.a*(line+glow+lead)+d.fill.rgb*body;
+        // A slight darkening over the whole area lifts the ring off bright ground.
+        out=float4(light,shape*m.params.w);
     }
     return out*(lie*sky*boxed);
 }
