@@ -413,3 +413,16 @@ fn every_node_and_station_can_be_reached() {
         assert!(ok, "nowhere to stand within reach of {what} at ({x}, {z})");
     }
 }
+
+#[test]
+fn skills_cross_a_region_border() {
+    let mut west = Sim::new(20);
+    let mut east = Sim::new(20);
+    let hero = west.spawn_player("Wanderer", Vec2::new(0.0, -20.0), 0.0);
+    west.get_mut::<Skills>(hero).unwrap().add(Skill::Mining, 600);
+    let before = west.get::<Skills>(hero).unwrap().clone();
+    let record = west.export(hero).unwrap();
+    east.import(vec![record]);
+    assert_eq!(east.get::<Skills>(hero), Some(&before));
+    assert!(before.level(Skill::Mining) > 1);
+}
