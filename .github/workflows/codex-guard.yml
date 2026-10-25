@@ -1,0 +1,32 @@
+# Codex never creates or edits assets or works in Blender (AGENTS.md, Ownership). Fails any PR from
+# a codex/ branch that touches the art pipeline, built assets, asset tools or asset files.
+name: Codex guard
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  no-assets:
+    if: startsWith(github.head_ref, 'codex/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+      - name: Check changed paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          blocked=$(git diff --name-only "$BASE"...HEAD | grep -E \
+            '^(art|assets|tools)/|^crates/assets/|\.(blend|blend1|glb|gltf|ktx2|png|jpe?g|tga|exr|hdr)$' || true)
+          if [ -n "$blocked" ]; then
+            echo "::error::Codex must not create or edit assets or Blender files (AGENTS.md, Ownership). Blocked paths:"
+            echo "$blocked"
+            exit 1
+          fi
+          echo "No asset or Blender paths touched."

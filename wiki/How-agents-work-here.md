@@ -28,6 +28,8 @@ Claude Code and Codex share step-by-step skills in
 - **Codex cloud** can't reach GitHub while it works: start it with "Work on #n", post
   `Claimed by codex (cloud)` on the issue, and its PR's `Closes #n` does the rest.
 - **Codex reviews** follow the Code Review Rules in AGENTS.md.
+- **Codex never makes assets or touches Blender.** No changes to `art/`, `assets/`,
+  `crates/assets/`, `tools/` or asset files; a guard check fails any `codex/` PR that tries.
 
 ## Labels at a glance
 

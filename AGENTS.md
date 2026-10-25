@@ -55,6 +55,13 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 From [docs/PLAN.md](docs/PLAN.md): `area:render` issues belong to Codex unless the issue says
 otherwise. Art, icons, look values and texture compression always come from Claude.
 
+**Codex never creates or edits assets, and never works in Blender.** That means no changes to
+`art/` (the Blender pipeline), `assets/`, `crates/assets/` or `tools/`, no `.blend`, `.glb`,
+`.gltf`, `.ktx2` or image files anywhere, and no `area:art` or `area:assets` issues. If renderer
+work needs an asset or a look value that doesn't exist, Codex files an issue for Claude
+(`area:art`, with what it needs and why) and works around it or waits. The Codex guard check fails
+any `codex/` branch PR that touches those paths.
+
 ## Labels
 
 - Status: `status:ready`, `status:claimed`, `status:blocked`, `status:in-review`,
@@ -82,7 +89,8 @@ Codex owns `area:render` issues (see Ownership) and can pick up others when the 
 
 - **Codex CLI** (on the Mac): needs `gh auth login` once, and network for `gh` (set
   `network_access = true` under `[sandbox_workspace_write]` in `~/.codex/config.toml`, or approve
-  the command). Then claim, branch and finish exactly as above, signing claims `codex`.
+  the command). Then claim and finish exactly as above, signing claims `codex`. Name branches
+  `codex/<issue number>-<short-slug>` so the Codex guard check applies.
 - **Codex cloud** has no GitHub access while it works. Start the task with the issue number
   ("Work on #12"), and whoever starts it posts `Claimed by codex (cloud)` on the issue. Codex
   writes `Closes #12` in the PR description; the Tracking workflow moves the labels from there. Mac-only
@@ -97,6 +105,9 @@ For Codex reviews and any other reviewer. Formatting and lint are CI's job; flag
 - **Missing performance numbers.** A PR for a `perf` issue, or one that adds GPU passes, draw calls
   or per-frame allocations, must report before and after timings against the 12 ms GPU and 2 ms
   sim budgets in docs/RENDERER.md.
+- **Codex touching assets.** A PR from Codex that changes `art/`, `assets/`, `crates/assets/`,
+  `tools/`, or any `.blend`, `.glb`, `.gltf`, `.ktx2` or image file is out of bounds, whatever the
+  change. Assets come from Claude.
 - **Look values in renderer code.** Colours, fog, exposure, material constants and similar belong
   in look settings or assets authored by Claude, not hard-coded in `crates/render`.
 - **Broken determinism.** `crates/sim` must not read wall-clock time, use unseeded randomness or
