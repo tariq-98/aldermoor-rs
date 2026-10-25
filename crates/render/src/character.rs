@@ -91,6 +91,12 @@ pub struct Character {
     /// The humanoid loops' gaits on this skeleton, slowest first. Without them (beasts) the walk
     /// or run plays at `stride_rate`.
     gaits: Option<[anim::Gait; 3]>,
+    /// The yaw the body is drawn at, which lags the sim's while turning on the spot (#211), and
+    /// the feet stepping round after it.
+    turn: anim::Turn,
+    steps: Option<anim::Steps>,
+    /// The left and right legs' hip, knee and ankle bones, which step round.
+    leg_bones: Option<[[usize; 3]; 2]>,
     drawn_now: bool,
     main_offset: f32,
     grab_offset: Option<f32>,
@@ -124,6 +130,9 @@ enum Bones {
 /// How far round from the hips an action on the move may turn the chest, beyond the clip's own
 /// twist, to face where the clip faced it.
 const MAX_TWIST: f32 = std::f32::consts::FRAC_PI_3;
+/// How much further round than the chest the neck and head turn, shared between them, when the
+/// chest can't turn as far as it should face (#211).
+const HEAD_TWIST: f32 = std::f32::consts::FRAC_PI_6;
 /// The humanoid locomotion loops, slowest first, which blend by speed (#110).
 const LOOPS: [&str; 3] = ["Walk_Loop", "Jog_Fwd_Loop", "Sprint_Loop"];
 /// The humanoid loop for walking or running at `speed`, which the clip stack's switches and
@@ -231,7 +240,7 @@ impl Character {
             .unwrap_or_else(|| &beast.unwrap().file);
         let model = cache.get_lod(&catalog.path(body_file), lod)?;
         let nodes = model.nodes.clone();
-        let names = nodes
+        let names: HashMap<String, usize> = nodes
             .iter()
             .enumerate()
             .map(|(i, n)| (n.name.clone(), i))
@@ -249,6 +258,16 @@ impl Character {
             .find(|n| n.name == "pelvis")
             .map_or(Vec3::ZERO, |n| n.rest.translation);
         let clip_set = cache.clip_set(&model, &clips, body.is_some());
+        let leg = |bones: [&str; 3]| {
+            let [hip, knee, ankle] = bones.map(|n| names.get(n).copied());
+            let [hip, knee, ankle] = [hip?, knee?, ankle?];
+            // The IK bends a chain: each bone the parent of the next.
+            (nodes[knee].parent == Some(hip) && nodes[ankle].parent == Some(knee))
+                .then_some([hip, knee, ankle])
+        };
+        let leg_bones = leg(["thigh_l", "calf_l", "foot_l"])
+            .zip(leg(["thigh_r", "calf_r", "foot_r"]))
+            .map(|(left, right)| [left, right]);
         let mut c = Self {
             lod,
             partial_updates: true,
@@ -303,6 +322,9 @@ impl Character {
             forced_switch: None,
             stride: anim::Stride::default(),
             gaits: None,
+            turn: anim::Turn::default(),
+            steps: None,
+            leg_bones,
             drawn_now: look.drawn,
             main_offset: 0.,
             grab_offset: None,
@@ -1027,11 +1049,12 @@ impl Character {
     /// Turns the hips `turn` round the vertical through the model's origin, so the legs and their
     /// planted feet turn with them toward where the body travels (orientation warping, #110). Then
     /// turns the upper body back toward `aim`: where the chest should face and its own twist from
-    /// the hips, or where it faced before the turn when `None`. The chest stops `MAX_TWIST` round
-    /// from the hips (or its own twist, if that is more), so swings that pivot the whole body keep
-    /// a believable spine while side-on stances (a bow, a wand) still aim forward. The turn back is
-    /// spread evenly up the spine.
-    fn turn_hips(&mut self, turn: f32, aim: Option<(f32, f32)>) {
+    /// the hips, or where it faced before the turn when `None`; turned on by `look`, how far round
+    /// from the body the sim faces it (#211). The chest stops `MAX_TWIST` round from the hips (or
+    /// its own twist, if that is more), so swings that pivot the whole body keep a believable spine
+    /// while side-on stances (a bow, a wand) still aim forward. The turn back is spread evenly up
+    /// the spine, and the neck and head share up to `HEAD_TWIST` of whatever the chest can't take.
+    fn turn_hips(&mut self, turn: f32, aim: Option<(f32, f32)>, look: f32) {
         let ids =
             ["pelvis", "spine_01", "spine_02", "spine_03"].map(|n| self.names.get(n).copied());
         let [Some(pelvis), Some(low), Some(mid), Some(chest)] = ids else {
@@ -1054,17 +1077,112 @@ impl Character {
             hips.translation = spin * hips.translation;
         }
         let hips = facing(self, pelvis, rest_hips);
-        let twist = wrap(aim - hips).clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
+        let wanted = wrap(aim + look - hips);
+        let twist = wanted.clamp(own.min(-MAX_TWIST), own.max(MAX_TWIST));
         // Turns about the vertical, applied above the hips, add straight onto the chest's heading.
         let back = wrap(hips + twist - facing(self, chest, rest_chest)) / 3.;
         for bone in [low, mid, chest] {
-            let above = self.nodes[bone]
-                .parent
-                .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
-            self.local[bone].rotation =
-                (above.inverse() * Quat::from_rotation_y(back) * above * self.local[bone].rotation)
-                    .normalize();
+            self.turn_upright(bone, back);
         }
+        let rest = (wanted - twist).clamp(-HEAD_TWIST, HEAD_TWIST) / 2.;
+        if rest != 0. {
+            for bone in ["neck_01", "Head"] {
+                if let Some(&i) = self.names.get(bone) {
+                    self.turn_upright(i, rest);
+                }
+            }
+        }
+    }
+    /// Turns bone `i` by `angle` round the model's vertical, taking its children with it.
+    fn turn_upright(&mut self, i: usize, angle: f32) {
+        let above = self.nodes[i]
+            .parent
+            .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+        self.local[i].rotation =
+            (above.inverse() * Quat::from_rotation_y(angle) * above * self.local[i].rotation)
+                .normalize();
+    }
+    /// While the body turns on the spot (#211), keeps the feet where they stand and steps them
+    /// one at a time to where the clip has them under the yaw the body turns to, the legs reaching
+    /// with two-bone IK. Once they stand where the clip has them, it takes them back. Returns
+    /// whether it let go of them anywhere else this frame (the body moved off), which the blender
+    /// has to smooth.
+    fn step_round(&mut self, standing: bool, position: Vec3, body: f32, dt: f32) -> bool {
+        if !standing {
+            return self.steps.take().is_some();
+        }
+        let active = self.turn.stepping() || self.steps.is_some();
+        let Some(legs) = self.leg_bones.filter(|_| active) else {
+            return false;
+        };
+        // Where the clip has each leg's joints in the model's frame, and so the ankles in the
+        // world under a yaw.
+        let joints = legs.map(|leg| self.chain(leg));
+        let place = |yaw: f32| {
+            joints.map(|[.., ankle]| anim::Plant {
+                at: position + Quat::from_rotation_y(yaw) * ankle,
+                yaw,
+            })
+        };
+        // Toward the yaw the body turns to, or once it has stopped, the yaw it stopped at, so that
+        // the clip takes back feet standing just where it has them.
+        let stepping = self.turn.stepping();
+        let rest = place(if stepping { self.turn.step_yaw() } else { body });
+        let steps = self
+            .steps
+            .get_or_insert_with(|| anim::Steps::new(place(body)));
+        if !stepping && steps.settled(rest) {
+            self.steps = None;
+            return false;
+        }
+        let feet = steps.update(rest, !stepping, dt);
+        let to_model = Quat::from_rotation_y(-body);
+        for ((leg, joints), foot) in legs.into_iter().zip(joints).zip(feet) {
+            let turn = Quat::from_rotation_y(foot.yaw - body);
+            self.reach(leg, joints, to_model * (foot.at - position), turn);
+        }
+        false
+    }
+    /// Bends a leg (hip, knee and ankle bones, its `joints` where `chain` has them) with two-bone
+    /// IK so that the ankle is at `target` in the model's frame, the knee and foot turned round
+    /// the vertical by `turn` from the way the clip has them.
+    fn reach(
+        &mut self,
+        [hip, knee, ankle]: [usize; 3],
+        joints: [Vec3; 3],
+        target: Vec3,
+        turn: Quat,
+    ) {
+        let [a, b, c] = joints;
+        // The knee points as the clip has it, out from the line from hip to ankle.
+        let line = (c - a).normalize_or(Vec3::NEG_Y);
+        let out = (b - a) - line * (b - a).dot(line);
+        let pole = turn * if out.length() > 0.01 { out } else { Vec3::Z };
+        let (upper, lower) = anim::ik::two_bone(a, b, c, target, pole);
+        let above = self.nodes[hip]
+            .parent
+            .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+        let hip_was = above * self.local[hip].rotation;
+        let knee_was = hip_was * self.local[knee].rotation;
+        let ankle_was = knee_was * self.local[ankle].rotation;
+        let [hip_now, knee_now] = [upper * hip_was, lower * knee_was];
+        self.local[hip].rotation = (above.inverse() * hip_now).normalize();
+        self.local[knee].rotation = (hip_now.inverse() * knee_now).normalize();
+        self.local[ankle].rotation = (knee_now.inverse() * turn * ankle_was).normalize();
+    }
+    /// Where the joints of `bones`, each the parent of the next, are in the model's frame, in the
+    /// live pose.
+    fn chain<const N: usize>(&self, bones: [usize; N]) -> [Vec3; N] {
+        let mut matrix = Mat4::IDENTITY;
+        let mut at = self.nodes[bones[0]].parent;
+        while let Some(p) = at {
+            matrix = self.local[p].matrix() * matrix;
+            at = self.nodes[p].parent;
+        }
+        bones.map(|i| {
+            matrix *= self.local[i].matrix();
+            matrix.w_axis.truncate()
+        })
     }
     /// Samples a step's two loops into the pose, blended by its weight, or one alone where the
     /// blend is nearly all one of them.
@@ -1169,6 +1287,11 @@ impl Character {
                 }
             }
         }
+    }
+    /// The yaw to draw the body at (#211): the sim's, except that turning on the spot the body
+    /// lags behind it while the upper body takes up the turn. 0 before the first update.
+    pub fn body_yaw(&self) -> f32 {
+        self.turn.yaw().unwrap_or(0.)
     }
     pub fn rallied(&mut self) {
         self.rally_time = Some(0.);
@@ -1282,12 +1405,23 @@ impl Character {
             Pose::Attack => self.clips.clips.get(&name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
         };
+        // The body turns on the spot behind the sim's yaw (#211): standing, the upper body takes
+        // up the turn until the feet step round; moving or acting, the body follows on a spring.
+        // LOD2 and below face the sim's yaw.
+        let stance = if self.lod >= 2 {
+            anim::Stance::Snap
+        } else if self.humanoid && u.pose == Pose::Idle && !busy {
+            anim::Stance::Standing
+        } else {
+            anim::Stance::Moving
+        };
+        let body = self.turn.update(u.yaw, stance, dt);
         // The humanoid loops follow the body (#110): blended by speed, the hips turned toward
         // where it travels. One stride phase runs through attacks on the move and every change of
         // speed or direction, so the feet never restart.
         let step = match self.gaits.as_ref().filter(|_| walking || moving.is_some()) {
             Some(gaits) => {
-                let travel = Quat::from_rotation_y(-u.yaw) * u.velocity;
+                let travel = Quat::from_rotation_y(-body) * u.velocity;
                 Some(self.stride.advance(gaits, travel.xz(), dt))
             }
             None => {
@@ -1388,8 +1522,13 @@ impl Character {
             switch = switch.or(Some(anim::Switch::Layer));
             self.last_upper = upper;
         }
-        if step.is_some() || aim.is_some() {
-            self.turn_hips(step.map_or(0., |s| s.turn), aim);
+        // The upper body faces the sim's yaw (closely followed), however far round the body is.
+        let look = wrap(self.turn.aim() - body);
+        if step.is_some() || aim.is_some() || look.abs() > 1e-4 {
+            self.turn_hips(step.map_or(0., |s| s.turn), aim, look);
+        }
+        if self.step_round(stance == anim::Stance::Standing, u.position, body, dt) {
+            switch = switch.or(Some(anim::Switch::Layer));
         }
         self.pose_world();
         self.drawn_now = u.look.drawn;
@@ -1404,7 +1543,7 @@ impl Character {
         if self.blender.blending() {
             self.pose_world();
         }
-        let root = Mat4::from_rotation_translation(Quat::from_rotation_y(u.yaw), u.position);
+        let root = Mat4::from_rotation_translation(Quat::from_rotation_y(body), u.position);
         let mut springs = std::mem::take(&mut self.springs);
         for s in &mut springs {
             s.update(self, root, dt);
@@ -2112,7 +2251,8 @@ mod combat_tests {
         for frame in 0..240 {
             c.update(&u, 1. / 60.);
             u.position += u.velocity / 60.;
-            let root = Mat4::from_rotation_translation(Quat::from_rotation_y(u.yaw), u.position);
+            let root =
+                Mat4::from_rotation_translation(Quat::from_rotation_y(c.body_yaw()), u.position);
             if frame >= 60 {
                 track.push(feet.map(|i| root.transform_point3(c.world[i].w_axis.truncate())));
             }
@@ -2235,6 +2375,138 @@ mod combat_tests {
                 "{travel}°: the twist is capped"
             );
         }
+    }
+    /// Turns a standing character on the spot for `frames` frames, the sim's yaw at `yaw(t)`.
+    /// Returns each frame's body yaw, the chest's heading in the world, and the ankles there.
+    fn turning(
+        c: &mut Character,
+        u: &mut UnitState,
+        frames: usize,
+        yaw: impl Fn(f32) -> f32,
+    ) -> Vec<(f32, f32, [Vec3; 2])> {
+        let [chest, left, right] = ["spine_03", "foot_l", "foot_r"].map(|n| c.names[n]);
+        let rest = c.rotation_to(chest, None, true);
+        (0..frames)
+            .map(|k| {
+                u.yaw = yaw(k as f32 / 60.);
+                u.pose_time += 1. / 60.;
+                c.update(u, 1. / 60.);
+                let body = c.body_yaw();
+                let root = Mat4::from_rotation_translation(Quat::from_rotation_y(body), u.position);
+                let heading = body + heading(c.rotation_to(chest, None, false), rest);
+                let ankles =
+                    [left, right].map(|i| root.transform_point3(c.world[i].w_axis.truncate()));
+                (body, heading, ankles)
+            })
+            .collect()
+    }
+    #[test]
+    fn turning_on_the_spot_the_feet_stay_put_while_the_chest_takes_the_turn() {
+        // A twin that stands still shows where the idle has the feet and chest each frame.
+        let [(mut c, mut u, _), (mut twin, mut v, _)] = [fighter(0.), fighter(0.)];
+        for w in [&mut u, &mut v] {
+            w.position = Vec3::new(3., 0., -2.);
+        }
+        turning(&mut c, &mut u, 30, |_| 0.3);
+        turning(&mut twin, &mut v, 30, |_| 0.3);
+        // The camera swings 50° left over a third of a second, and holds a moment.
+        let frames = turning(&mut c, &mut u, 36, |t| 0.3 + 0.87 * (t / 0.33).min(1.));
+        let still = turning(&mut twin, &mut v, 36, |_| 0.3);
+        for (k, (now, idle)) in frames.iter().zip(&still).enumerate() {
+            assert!(
+                (now.0 - 0.3).abs() < 1e-5,
+                "frame {k}: the body turned to {}",
+                now.0
+            );
+            for f in 0..2 {
+                let moved = now.2[f].distance(idle.2[f]);
+                assert!(
+                    moved < 1e-4,
+                    "frame {k}: a foot moved {:.1} mm",
+                    moved * 1000.
+                );
+            }
+        }
+        // The chest came round with the aim.
+        let turned = wrap(frames[35].1 - still[35].1);
+        assert!(
+            (turned - 0.87).abs() < 0.01,
+            "the chest turned {}°",
+            turned.to_degrees()
+        );
+    }
+    #[test]
+    fn past_the_limit_the_feet_step_round_and_land_where_the_clip_stands_them() {
+        let (mut c, mut u, _) = fighter(0.);
+        // The feet go back to the clip through the blender, as in the game.
+        c.blender.set_method(anim::Method::Inertialize);
+        turning(&mut c, &mut u, 30, |_| 0.3);
+        // 115° left at once, as when a target is picked behind.
+        let target = 0.3 + 2.;
+        let frames = turning(&mut c, &mut u, 150, |_| target);
+        let low = [0, 1].map(|f| frames.iter().map(|x| x.2[f].y).fold(f32::MAX, f32::min));
+        let mut steps = [0; 2];
+        for pair in frames.windows(2) {
+            let up = |x: &(f32, f32, [Vec3; 2]), f: usize| x.2[f].y > low[f] + 0.005;
+            assert!(
+                !(up(&pair[1], 0) && up(&pair[1], 1)),
+                "both feet in the air"
+            );
+            for (f, taken) in steps.iter_mut().enumerate() {
+                if !up(&pair[0], f) && !up(&pair[1], f) {
+                    let slid = (pair[1].2[f] - pair[0].2[f]).with_y(0.).length();
+                    assert!(slid < 0.002, "a planted foot slid {:.1} mm", slid * 1000.);
+                }
+                *taken += (!up(&pair[0], f) && up(&pair[1], f)) as usize;
+            }
+        }
+        assert!(steps[0] >= 1 && steps[1] >= 1, "steps {steps:?}");
+        // The body faces the sim's yaw, and the feet stand where the idle has them.
+        let (body, _, feet) = frames[149];
+        assert!(
+            wrap(body - target).abs() < 0.01,
+            "body at {}°",
+            body.to_degrees()
+        );
+        assert!(c.steps.is_none(), "the feet are back on the clip");
+        // A twin standing at that yaw from the start, on the same frame of the idle.
+        let (mut twin, mut v, _) = fighter(0.);
+        v.yaw = body;
+        v.pose_time = u.pose_time - 1. / 60.;
+        let clip = turning(&mut twin, &mut v, 1, |_| body)[0].2;
+        for f in 0..2 {
+            let off = feet[f].distance(clip[f]);
+            assert!(
+                off < 0.003,
+                "a foot ended {:.1} cm from the idle's",
+                off * 100.
+            );
+        }
+    }
+    #[test]
+    fn an_attack_turns_the_body_to_face_where_it_strikes() {
+        let (mut c, mut u, mut fight) = fighter(0.);
+        u.yaw = 0.3;
+        for _ in 0..30 {
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        // 50° left: the chest takes it, the feet stay.
+        u.yaw = 1.2;
+        for _ in 0..20 {
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        assert!((c.body_yaw() - 0.3).abs() < 1e-5);
+        assert!(c.turn.offset() > 0.8);
+        // A slash owns the upper body, so the body comes round to face it and the twist goes.
+        u.pose = Pose::Attack;
+        fight.action = Action::Slash;
+        for frame in 0..24 {
+            fight.action_time = frame as f32 / 60.;
+            u.pose_time = fight.action_time;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        assert!(wrap(c.body_yaw() - 1.2).abs() < 0.02, "{}", c.body_yaw());
+        assert!(c.turn.offset().abs() < 0.02);
     }
     /// How clips were applied before #204, looking each track's bone up by name.
     fn apply_by_name(c: &mut Character, name: &str, t: f32, looping: bool, bones: Bones) {

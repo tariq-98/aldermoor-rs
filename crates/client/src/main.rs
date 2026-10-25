@@ -1368,7 +1368,8 @@ impl Game {
                 },
                 if self.options.showcase { 1. / 60. } else { dt },
             );
-            draws.extend(c.draws(u.position, u.yaw).into_iter().map(|mut d| {
+            // Drawn at the body's yaw, which lags the sim's while turning on the spot (#211).
+            draws.extend(c.draws(u.position, c.body_yaw()).into_iter().map(|mut d| {
                 d.instance |= (u.id as u64) << 32;
                 d
             }));
