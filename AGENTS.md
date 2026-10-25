@@ -77,7 +77,7 @@ any `codex/` branch PR that touches those paths.
   `area:content`, `area:server`, `area:ai`, `area:assets`, `area:infra`, `area:docs`.
 - Type: `type:feature`, `type:bug`, `type:chore`, `type:spike`, `type:epic`.
 - Priority: `p0` now, `p1` this phase, `p2` later.
-- Phase: `phase:1` to `phase:6`, the roadmap phases. The Tracking workflow files each issue under
+- Phase: `phase:1` to `phase:8`, the roadmap phases. The Tracking workflow files each issue under
   the matching milestone.
 - `perf`, `needs-mac`.
 
