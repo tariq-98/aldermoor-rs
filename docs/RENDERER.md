@@ -10,7 +10,8 @@ by the asset crate's checks.
 
 ```sh
 scripts/run_client.sh
-scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65
+scripts/run_client.sh --fullscreen --size 2560x1600 --scale 0.75   # the reference setting
+scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65   # ultrawide, best effort
 ```
 
 Controls default to always-on action aiming (`controls::Scheme::Action`, like New World): the
