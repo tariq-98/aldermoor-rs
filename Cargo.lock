@@ -499,6 +499,8 @@ version = "0.1.0"
 dependencies = [
  "glam 0.34.1",
  "protocol",
+ "serde",
+ "serde_json",
  "world",
 ]
 
@@ -2135,6 +2137,7 @@ dependencies = [
  "assets",
  "bevy_ecs",
  "glam 0.34.1",
+ "postcard",
  "protocol",
  "world",
 ]

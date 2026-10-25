@@ -321,8 +321,8 @@ pub fn summon(world: &mut World, owner: Entity, mob: &'static str, count: u8, la
 /// Summons whose time is up, or whose owner is gone, crumble.
 pub fn expire_summons(world: &mut World) {
     let t = now(world);
-    let all: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in all {
+    let all = crate::take_units(world);
+    for &e in &all {
         let Some(s) = world.get::<Summoned>(e).copied() else { continue };
         if world.get::<Vitals>(e).is_none_or(|v| v.dead) {
             continue;
@@ -332,13 +332,14 @@ pub fn expire_summons(world: &mut World) {
             die(world, e, None);
         }
     }
+    crate::return_units(world, all);
 }
 
 /// Removes summons' remains a while after they fall.
 pub fn clear_remains(world: &mut World) {
     let t = now(world);
-    let all: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in all {
+    let all = crate::take_units(world);
+    for &e in &all {
         let gone = world.get::<Summoned>(e).is_some() && world.get::<Vitals>(e).is_some_and(|v| v.dead && t - v.died_at > 8.0);
         if gone {
             if let Some(id) = unit_id(world, e) {
@@ -347,4 +348,5 @@ pub fn clear_remains(world: &mut World) {
             world.despawn(e);
         }
     }
+    crate::return_units(world, all);
 }

@@ -10,7 +10,7 @@ use super::{auras, can_attack, chest, control, emit, entity, gap, is_ally, line_
 use crate::content::{catalog, downed_skills, AbilityDef, AbilityId, Grip, Targeting};
 use crate::movement::heading;
 use crate::stats::GCD;
-use crate::{Appearance, Cast, Fighter, ForcedKind, Land, Motion, PlayerControl, Queued, Transform, Units, Vitals};
+use crate::{Appearance, Cast, Fighter, ForcedKind, Land, Motion, PlayerControl, Queued, Transform, Vitals};
 
 /// Seconds between weapon swaps.
 pub const SWAP_COOLDOWN: f64 = 5.0;
@@ -346,8 +346,8 @@ pub fn cancel_standing_cast(world: &mut World, e: Entity) {
 pub fn update(world: &mut World) {
     let cat = catalog();
     let t = now(world);
-    let entities: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in entities {
+    let entities = crate::take_units(world);
+    for &e in &entities {
         let Some(v) = world.get::<Vitals>(e).copied() else { continue };
         if v.dead {
             continue;
@@ -403,6 +403,7 @@ pub fn update(world: &mut World) {
         }
         auto_attack(world, e);
     }
+    crate::return_units(world, entities);
 }
 
 fn finish_cast(world: &mut World, e: Entity, def: &AbilityDef, c: Cast) {

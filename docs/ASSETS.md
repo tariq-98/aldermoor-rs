@@ -319,7 +319,7 @@ writes the two files the renderer takes as `--surface-assets` and `--look-settin
   | `grass` | 4 | 0.9 | Lush turf for the valley floor: dense blades in clumps, the odd clover flower |
   | `meadow` | 5 | 0.92 | Drier straw-and-olive grass with buttercups, daisies and clover |
   | `earth` | 3.5 | 0.88 | Packed earth for roads, yards and banks: dusty and damp patches, gravel, pebbles |
-  | `limestone` | 6 | 0.82 | Bedded limestone: irregular blocks wider than tall, crossed by undulating bedding partings, with grime and moss in the partings, rain streaks, pits, lichen and iron staining |
+  | `limestone` | 6 | 0.82 | Bedded limestone: irregular blocks wider than tall, crossed by undulating bedding partings, each bed a shade warmer or cooler than the next, with grime and moss in the partings, rain streaks, pits, lichen and iron staining. Nothing in it stands out at the scale of the tile, so a long cliff doesn't show the repeat |
 
 - **Weights** (`terrain/brambleford_weights.png`, 2048 px, linear): the share of each layer
   in R, G, B and A, in the order above, over `bounds` [−280, −280, 280, 280]: row 0 is the
@@ -332,6 +332,9 @@ writes the two files the renderer takes as `--surface-assets` and `--look-settin
   - earth on the roads, the riverbanks, round the houses, under the trees and in bare patches;
   - meadow on high ground and slopes facing the sun, in patches, along the roads' verges and
     under the trees; lush grass by the river and everywhere else.
+  The river's banks, stones and lush grass go only where it flows in the open. Its line runs
+  on under the western ledge and the eastern hill, whose cliffs keep their rock there; where
+  it crosses gentler ground it leaves a grassy dip.
   The fourth channel is a weight, not transparency: the file is written byte for byte
   (`aldermoor_art/png.py`), never through an image library that premultiplies alpha.
 - **River:** `water/river_normal.png` (ripples, 6 m a tile), drifting with `flow` (metres a

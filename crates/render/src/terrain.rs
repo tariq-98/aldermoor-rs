@@ -4,7 +4,7 @@ use glam::{Mat4, Quat, Vec3};
 use std::{collections::HashMap, sync::Arc};
 pub fn valley() -> Arc<Model> {
     let mut primitives = Vec::new();
-    let step = 2.;
+    let step = world::TERRAIN_STEP;
     let n = (world::BOUNDS * 2. / step) as usize;
     let cells = 32;
     for cz in (0..n).step_by(cells) {

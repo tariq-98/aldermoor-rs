@@ -1,8 +1,8 @@
-# Performance numbers for every PR and push to main. Never blocks a merge: shared runners are noisy,
-# so over-budget results show as warnings and in the job summary, not as a failed check.
+# Performance numbers for every PR and push to main. Shared runners are noisy, so timing results
+# over budget show as warnings and in the job summary, not as a failed check.
 #
-# The sim gates planned in #31 (iai-callgrind instruction counts against base, protocol wire
-# size) go here as further steps when they land.
+# The exception is the instruction-count gate (#31): the sim is deterministic, so its counts don't
+# wobble, and a rise of more than 5% over the base branch fails that job.
 name: Perf
 
 on:
@@ -67,3 +67,83 @@ jobs:
           if [ "${{ steps.budget.outcome }}" = failure ]; then
             echo "::warning title=Sim step budget::The crowd fight test went over 2 ms a step on this runner. See the job summary."
           fi
+
+  instructions:
+    name: Sim instruction count
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install valgrind
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+
+      # Each scene in crates/sim/examples/perf_gate.rs, counting only its measured steps and
+      # snapshots. Prints "<scene> <instructions> <wire bytes a second>" per line.
+      - name: Measure this commit
+        run: |
+          cat > /tmp/measure.sh <<'SH'
+          set -euo pipefail
+          bin=$1
+          for scene in wander fight dense; do
+            log=$(valgrind --tool=callgrind --toggle-collect='*perf_gate::measured*' \
+              --callgrind-out-file=/dev/null "$bin" "$scene" 2>&1)
+            ir=$(echo "$log" | sed -n 's/.*I *refs: *//p' | tr -d ,)
+            wire=$(echo "$log" | sed -n 's/.*wire \([0-9]*\) B\/s.*/\1/p')
+            echo "$scene $ir $wire"
+          done
+          SH
+          cargo build -p sim --release --locked --example perf_gate
+          cp target/release/examples/perf_gate /tmp/perf_gate_head
+          bash /tmp/measure.sh /tmp/perf_gate_head | tee head.txt
+
+      - name: Measure the base branch
+        id: base
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add /tmp/base "${{ github.event.pull_request.base.sha }}"
+          if [ ! -f /tmp/base/crates/sim/examples/perf_gate.rs ]; then
+            echo "The base branch has no perf_gate example yet; nothing to compare."
+            exit 0
+          fi
+          (cd /tmp/base && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
+            cargo build -p sim --release --locked --example perf_gate)
+          cp target/release/examples/perf_gate /tmp/perf_gate_base
+          bash /tmp/measure.sh /tmp/perf_gate_base | tee base.txt
+
+      - name: Compare
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          read = lambda p: {l.split()[0]: (int(l.split()[1]), int(l.split()[2])) for l in pathlib.Path(p).read_text().split("\n") if l.strip()}
+          head = read("head.txt")
+          base = read("base.txt") if pathlib.Path("base.txt").exists() else {}
+          budget = 10 * 1024
+          rows, failed = [], []
+          for scene, (ir, wire) in head.items():
+              if scene in base:
+                  b_ir, b_wire = base[scene]
+                  d_ir, d_wire = (ir - b_ir) / b_ir * 100, (wire - b_wire) / b_wire * 100
+                  rows.append(f"| {scene} | {b_ir:,} | {ir:,} | {d_ir:+.1f}% | {b_wire/1024:,.0f} | {wire/1024:,.0f} | {d_wire:+.1f}% |")
+                  if d_ir > 5:
+                      failed.append(f"{scene} +{d_ir:.1f}% instructions")
+                  if d_wire > 5:
+                      print(f"::warning title=Wire size::{scene} snapshots grew {d_wire:+.1f}% ({wire/1024:,.0f} KB/s per player; budget {budget/1024:.0f} KB/s)")
+              else:
+                  rows.append(f"| {scene} | | {ir:,} | | | {wire/1024:,.0f} | |")
+          summary = ["## Sim instruction count", "",
+                     "Measured steps and snapshots only, under callgrind. Fails on more than +5% instructions against the base branch.",
+                     f"Wire size is snapshot plus combat view per player; the budget is {budget/1024:.0f} KB/s (docs/PERFORMANCE.md).", "",
+                     "| Scene | Base instructions | This PR | Change | Base wire KB/s | This PR | Change |",
+                     "| --- | ---: | ---: | ---: | ---: | ---: | ---: |", *rows]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("\n".join(summary) + "\n")
+          print("\n".join(rows))
+          if failed:
+              print("::error title=Sim instruction count::" + "; ".join(failed))
+              raise SystemExit(1)
+          PY

@@ -8,7 +8,7 @@ use protocol::{Avoid, Event};
 use super::{emit, entity, now, HitSource};
 use crate::content::{catalog, AuraDef, AuraId, Cc, Effect, Rank};
 use crate::stats::{diminish, scale, DEFIANCE_BACK, DEFIANCE_PER_SECOND, DR_WINDOW};
-use crate::{AuraInstance, Auras, Brain, Control, ForcedKind, Motion, Transform, Unit, Units, Vitals};
+use crate::{AuraInstance, Auras, Brain, Control, ForcedKind, Motion, Transform, Unit, Vitals};
 
 /// The sum of `f` over a unit's auras, each counted once per stack.
 pub fn sum(world: &World, e: Entity, f: impl Fn(&AuraDef) -> f32) -> f32 {
@@ -71,13 +71,14 @@ pub fn compute(world: &World, e: Entity) -> Control {
 
 /// Works out every unit's control state before anyone moves.
 pub fn refresh_control(world: &mut World) {
-    let entities: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in entities {
+    let entities = crate::take_units(world);
+    for &e in &entities {
         let c = compute(world, e);
         if let Some(mut slot) = world.get_mut::<Control>(e) {
             *slot = c;
         }
     }
+    crate::return_units(world, entities);
 }
 
 /// Applies an aura. Returns false if it didn't take (immunity, defiance, diminishing returns).
@@ -262,8 +263,8 @@ pub fn chip_defiance(world: &mut World, e: Entity, amount: f32, src: &HitSource)
 pub fn update(world: &mut World) {
     let t = now(world);
     let cat = catalog();
-    let entities: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in entities {
+    let entities = crate::take_units(world);
+    for &e in &entities {
         if world.get::<Vitals>(e).is_none_or(|v| v.dead) {
             continue;
         }
@@ -305,6 +306,7 @@ pub fn update(world: &mut World) {
             a.defiance = a.defiance_max;
         }
     }
+    crate::return_units(world, entities);
 }
 
 fn periodic(world: &mut World, effect: &Effect, stacks: u8, e: Entity, src: &HitSource) {

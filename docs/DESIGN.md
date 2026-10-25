@@ -128,8 +128,9 @@ until a coherent draft is reviewed.
 
 ## Scope and presentation
 
-- **The first version** is solo and offline; co-op comes later, with multiplayer in mind
-  throughout.
+- **An MMORPG** (Chippy, 25 October 2026): large worlds shared by many players. The first
+  version is still played solo against the built-in local server, with every system written to
+  be server-authoritative; the game goes online once the first area is fun.
 - **The first complete area:** one settlement, surrounding wilderness, one dungeon and one major
   boss.
 - **Dialogue:** written conversations, expressive poses and short vocal reactions; full voice

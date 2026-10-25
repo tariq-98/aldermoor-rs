@@ -12,7 +12,7 @@ use crate::combat::{abilities, auras, can_attack, chest, control, effects, entit
 use crate::content::{catalog, MobDef, Targeting};
 use crate::movement::heading;
 use crate::spatial::Spatial;
-use crate::{Body, Brain, Fighter, Land, Mode, Motion, MoveIntent, PlayerControl, Rng, Summoned, Threat, Transform, Units, Vitals};
+use crate::{Body, Brain, Fighter, Land, Mode, Motion, MoveIntent, PlayerControl, Rng, Summoned, Threat, Transform, Vitals};
 
 /// How far a monster follows before giving up and walking home.
 pub const LEASH: f32 = 45.0;
@@ -24,8 +24,8 @@ const BORED: f64 = 12.0;
 pub fn think(world: &mut World) {
     let t = now(world);
     let cat = catalog();
-    let entities: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in entities {
+    let entities = crate::take_units(world);
+    for &e in &entities {
         let Some(b) = world.get::<Brain>(e).copied() else { continue };
         if world.get::<PlayerControl>(e).is_some() || world.get::<Vitals>(e).is_none_or(|v| !v.alive()) {
             continue;
@@ -47,6 +47,7 @@ pub fn think(world: &mut World) {
             Mode::Idle => idle(world, e, deciding),
         }
     }
+    crate::return_units(world, entities);
 }
 
 /// When a monster first thinks: decisions are spread over the 15 steps of a quarter-second.

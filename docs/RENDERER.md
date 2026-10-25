@@ -13,12 +13,50 @@ scripts/run_client.sh
 scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65
 ```
 
-WASD moves relative to the camera; Shift walks, Space jumps, V rolls, right-drag rotates and
-fixes facing for strafing. Tab cycles enemies; click selects, right-click starts auto-attacks.
+Controls default to always-on action aiming (`controls::Scheme::Action`, like New World): the
+pointer is locked and hidden, the mouse always turns the character, and a crosshair marks the
+centre of the screen, where clicks target and aimed skills go. WASD runs and strafes relative to
+it, and S backpedals. Hold Ctrl to get the pointer back for the HUD. `--scheme classic` is
+WoW-style instead: W runs, S backpedals, A/D turn the character and camera, Q/E strafe (A/D strafe
+too while the right button is held), left-drag looks around without turning, right-drag steers and
+both buttons run forward. Drags there hide and hold the pointer; a press that moves under 4 px is a
+click. In both, T or Num Lock toggles autorun. Shift walks, Space jumps, and
+Alt (Option), V or mouse button 4 rolls the way the keys point. Action looks over the right shoulder. Tab cycles enemies; click selects, right-click starts auto-attacks.
 1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
 (screen centre while mouse-looking). Hovering/selecting a ground skill previews its actual radius.
-Hold Q to guard; ` swaps weapon sets; E revives a selected or nearby downed/defeated friend;
-R respawns; Esc exits. The stock-widget HUD shows all ten named slots, costs, cooldowns and GCD
+Hold F (or mouse button 5) to guard; ` swaps weapon sets; G revives a selected or nearby downed/defeated friend;
+R respawns; Esc opens the controls menu. The camera eases: the wheel zoom glides, the eye snaps in front of walls and slides back out at
+4 m/s, and the pivot follows slopes and jumps smoothly. Pitch goes from just below the horizon
+(looking up from near the ground) to nearly straight down. In Classic the camera swings back
+behind the character after a second of moving without the mouse.
+
+Control settings live in `~/Library/Application Support/Aldermoor/controls.json`, or the file
+given with `--controls FILE.json`. Every field is optional and a missing file means the defaults.
+`--scheme` overrides the file's scheme.
+
+```json
+{ "scheme": "action", "sensitivity": 1.0, "invert_y": false, "fov_degrees": 52,
+  "min_distance": 2, "max_distance": 24, "shoulder": 0.6, "swing_back": true }
+```
+
+Unknown fields are an error so typos show up; values outside sensible ranges are clamped.
+`shoulder` left out means 0.6 m in Action and centred in Classic.
+
+Every key is rebindable (`controls::Bindings`). The file's `bindings` maps a control to the inputs
+for it, by winit key name (`KeyW`, `ShiftLeft`, `Digit1`, `Space`) or `Mouse3`..`Mouse5` for the
+middle and thumb buttons. Controls left out keep their defaults:
+
+```json
+{ "bindings": { "jump": ["Space", "Mouse4"], "roll": ["AltLeft", "KeyV"] } }
+```
+
+The left and right mouse buttons stay fixed, because they click, look and steer. Esc opens the
+controls menu in game. It has the scheme switch, every control with its keys (click a key to
+unbind it, + then press a key or mouse button to add one), "Reset keys to defaults" and Quit.
+Binding a key that another control already uses moves it over and says so; conflicts written
+into the file by hand are listed in red. Every change saves the whole file straight away,
+including a scheme given with `--scheme`.
+The stock-widget HUD shows all ten named slots, costs, cooldowns and GCD
 sweeps, health/endurance/resource, casts, auras, weapon-set recharge and target cast/defiance bars.
 The HUD is composed after temporal AA at output resolution. Claude will supply its artwork,
 icons, fonts and style. `--hud-font FILE` can load the supplied font without changing code.
@@ -165,6 +203,9 @@ unchanged by this work.
 The final release smoke run completed 780 frames: 49.41 m of authoritative movement, jump,
 dodge and damage events, and a wolf kill. Local captures are
 `target/render-review/catalogue-instanced.png` and `target/render-review/combat-current.png`.
+
+Budgets and the reference setting (the Air's own panel at 75% render scale) are in
+[PERFORMANCE.md](PERFORMANCE.md); the measurements below predate that choice and use the ultrawide.
 
 Benchmark method:
 
