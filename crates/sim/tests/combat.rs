@@ -574,6 +574,154 @@ fn a_backstab_lands_twice_as_hard_from_behind() {
     assert!((ratio - 2.2).abs() < 0.08, "a backstab from behind: {ratio:.3} times as hard");
 }
 
+/// A point `d` metres from the road at `angle` from straight ahead (+z).
+fn ahead(d: f32, angle: f32) -> Vec2 {
+    ROAD + Vec2::new(angle.sin(), angle.cos()) * d
+}
+
+fn told(f: &Fight, text: &str) -> bool {
+    f.log.iter().any(|e| matches!(e, Event::Message { text: t } if t == text))
+}
+
+#[test]
+fn a_blow_lands_on_every_enemy_in_the_swing_and_no_others() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+    let front = f.dummy("skeleton", ahead(2.5, 0.0), PI);
+    let beside = f.dummy("skeleton", ahead(2.5, 0.5), PI);
+    let flank = f.dummy("skeleton", ahead(2.5, 1.75), PI);
+    let far = f.dummy("skeleton", ahead(6.0, 0.0), PI);
+    f.step(); // Everyone takes their place.
+    f.target(hero, front);
+    f.once(hero, 0); // Sword Chain.
+    f.run(0.2);
+    assert!(!f.blows_on(front).is_empty(), "the target wasn't hit");
+    assert!(!f.blows_on(beside).is_empty(), "an enemy inside the swing wasn't hit");
+    assert!(f.blows_on(flank).is_empty(), "an enemy off to the side was hit");
+    assert!(f.blows_on(far).is_empty(), "an enemy out of reach was hit");
+}
+
+#[test]
+fn only_the_main_victim_of_a_blow_is_controlled_by_it() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+    let front = f.dummy("skeleton", ahead(2.2, 0.0), PI);
+    let beside = f.dummy("skeleton", ahead(2.2, -0.5), PI);
+    f.step(); // Everyone takes their place.
+    f.target(hero, front);
+    f.once(hero, 3); // Shield Bash: interrupts and dazes.
+    f.run(0.2);
+    assert!(f.has(front, "dazed"), "the target wasn't dazed");
+    assert!(!f.blows_on(beside).is_empty(), "the other enemy in the swing wasn't hit");
+    assert!(!f.has(beside, "dazed"), "the other enemy in the swing was dazed too");
+}
+
+#[test]
+fn without_a_target_the_swing_pulls_toward_a_near_miss() {
+    let pull = abilities::AIM_PULL;
+    let swing = |angle: f32| {
+        let mut f = Fight::new();
+        let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+        let half = abilities::swing_arc(&f.sim.world, f.sim.entity(hero).unwrap()) * 0.5;
+        let skeleton = f.sim.spawn_mob("skeleton", ROAD).unwrap();
+        let r = f.sim.get::<sim::Body>(skeleton).unwrap().radius;
+        f.kill(skeleton);
+        let foe = f.dummy("skeleton", ahead(2.5, half + (r / 2.5).atan() + angle), PI);
+        f.step(); // Everyone takes their place.
+        f.once(hero, 0);
+        f.run(0.2);
+        // A basic attack with nothing in reach doesn't swing at the air.
+        (!f.blows_on(foe).is_empty(), f.used(hero, "sword_chain") > 0)
+    };
+    assert_eq!(swing(-0.3), (true, true), "an enemy inside the swing");
+    assert_eq!(swing(pull * 0.6), (true, true), "a near miss wasn't pulled in");
+    assert_eq!(swing(pull + 0.12), (false, false), "a clear miss was pulled in");
+}
+
+#[test]
+fn the_swing_goes_where_the_player_aims() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+    let right = f.dummy("skeleton", ahead(2.5, PI / 2.0), -PI / 2.0);
+    let ground = Vec3::new(ROAD.x + 6.0, 0.0, ROAD.y);
+    // Facing locked ahead, as action aiming holds it, with the aim off to the right.
+    f.step(); // Everyone takes their place.
+    f.cmd(hero, Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: Some(0.0) });
+    f.cmd(hero, Command::UseSlot { slot: 0, ground: Some(ground) });
+    f.cmd(hero, Command::SetAutoAttack(false));
+    f.run(0.2);
+    assert!(!f.blows_on(right).is_empty(), "the swing didn't follow the aim");
+}
+
+#[test]
+fn a_locked_target_in_reach_takes_the_blow_wherever_you_face() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, PI);
+    let behind = f.dummy("skeleton", ahead(2.5, 0.0), PI);
+    let facing = f.dummy("skeleton", ahead(2.5, PI), 0.0);
+    f.step(); // Everyone takes their place.
+    f.cmd(hero, Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: Some(PI) });
+    f.target(hero, behind);
+    f.once(hero, 0);
+    f.run(0.2);
+    assert!(!f.blows_on(behind).is_empty(), "the locked target wasn't hit");
+    assert!(f.blows_on(facing).is_empty(), "the swing didn't turn to the locked target");
+}
+
+#[test]
+fn spears_reach_further_and_sweep_narrower_than_daggers() {
+    let swing = |spear: bool, at: Vec2| {
+        let mut f = Fight::new();
+        let hero = f.hero(if spear { Specialty::Warrior } else { Specialty::Rogue }, 10, ROAD, 0.0);
+        if spear {
+            let mut fighter = f.sim.get_mut::<Fighter>(hero).unwrap();
+            fighter.sets = vec![(Some("spear.ash".into()), None)];
+            fighter.active_set = 0;
+            let e = f.sim.entity(hero).unwrap();
+            abilities::equip(&mut f.sim.world, e);
+        }
+        let foe = f.dummy("skeleton", at, PI);
+        f.step(); // Everyone takes their place.
+        f.once(hero, 0);
+        f.run(0.2);
+        !f.blows_on(foe).is_empty()
+    };
+    let far = ahead(4.5, 0.0);
+    let wide = ahead(2.5, 0.95);
+    assert!(swing(true, far), "a spear didn't reach 4.5 m");
+    assert!(!swing(false, far), "a dagger reached 4.5 m");
+    assert!(swing(false, wide), "a dagger missed a foe 54° off");
+    assert!(!swing(true, wide), "a spear hit a foe 54° off");
+}
+
+#[test]
+fn a_wound_up_blow_misses_a_foe_that_steps_out_of_it() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+    let foe = f.dummy("skeleton", ahead(2.5, 0.0), PI);
+    f.step(); // Everyone takes their place.
+    f.once(hero, 1); // Rending Blade, at no target: winds up for 0.4 s.
+    f.run(0.2);
+    let y = f.sim.land().ground(ROAD.x - 3.0, ROAD.y);
+    f.sim.get_mut::<Transform>(foe).unwrap().pos = Vec3::new(ROAD.x - 3.0, y, ROAD.y);
+    f.run(0.4);
+    assert!(f.blows_on(foe).is_empty(), "the blow followed the foe out of the swing");
+    assert!(told(&f, "Your blow misses."));
+}
+
+#[test]
+fn a_monsters_blow_lands_only_on_its_target() {
+    let mut f = Fight::new();
+    let golem = f.dummy("golem", ROAD, 0.0);
+    let a = f.hero(Specialty::Warrior, 10, ahead(2.0, 0.0), PI);
+    let b = f.hero(Specialty::Warrior, 10, ahead(2.2, 0.4), PI);
+    f.step(); // Everyone takes their place.
+    assert!(f.force(golem, "golem_pound", Some(a)));
+    f.run(0.2);
+    assert!(!f.blows_on(a).is_empty());
+    assert!(f.blows_on(b).is_empty(), "a monster's blow cleaved");
+}
+
 #[test]
 fn a_blow_too_heavy_to_block_has_to_be_dodged() {
     let mut f = Fight::new();

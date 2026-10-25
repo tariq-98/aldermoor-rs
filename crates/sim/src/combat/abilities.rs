@@ -7,13 +7,18 @@ use protocol::{Event, ResourceKind};
 
 use super::effects::{self, Delivery};
 use super::{auras, can_attack, chest, control, emit, entity, gap, is_ally, line_of_sight, missiles, now, source, tell, unit_id};
-use crate::content::{catalog, downed_skills, AbilityDef, AbilityId, Grip, Targeting};
-use crate::movement::heading;
+use crate::content::{catalog, downed_skills, AbilityDef, AbilityId, Effect, Grip, Targeting, UNARMED_SWING};
+use crate::movement::{heading, wrap_angle};
+use crate::spatial::Spatial;
 use crate::stats::GCD;
-use crate::{Appearance, Cast, Fighter, ForcedKind, Land, Motion, PlayerControl, Queued, Transform, Vitals};
+use crate::{Appearance, Body, Cast, Fighter, ForcedKind, Land, Motion, PlayerControl, Queued, Transform, Vitals};
 
 /// Seconds between weapon swaps.
 pub const SWAP_COOLDOWN: f64 = 5.0;
+
+/// How far (radians, about 12°) a player's blow turns toward the enemy nearest their aim, so a
+/// near miss still lands.
+pub const AIM_PULL: f32 = 0.21;
 
 /// The bar for a weapon set: skills 1–5 from the weapons in hand, then the kit (6–0).
 pub fn bar_for(set: &(Option<String>, Option<String>), kit: &[Option<AbilityId>; 5]) -> [Option<AbilityId>; 10] {
@@ -176,7 +181,25 @@ pub fn use_ability(world: &mut World, e: Entity, id: AbilityId, explicit: Option
     let me = world.get::<Transform>(e).copied().unwrap();
     let mut target: Option<Entity> = None;
     let mut point: Option<Vec3> = None;
+    // Which way a player's blow sweeps when it isn't at a target in reach.
+    let mut swing: Option<f32> = None;
     match def.targeting {
+        Targeting::Enemy if sweeps(world, e, def) => {
+            // A target in reach takes the blow (the swing faces it); otherwise it goes where the
+            // player aims, pulled toward the nearest enemy.
+            let chosen = explicit.or(f.target).and_then(|id| entity(world, id)).filter(|&te| can_attack(world, e, te));
+            let in_reach = chosen.filter(|&te| gap(world, e, te) <= def.range + 0.5 && line_of_sight(world, chest(world, e), chest(world, te)));
+            if let Some(te) = in_reach {
+                if auras::sum(world, te, |a| if a.invulnerable { 1.0 } else { 0.0 }) > 0.0 {
+                    return fail(world, "Your target can't be harmed right now.");
+                }
+                target = Some(te);
+            } else if let Some(y) = aim_swing(world, e, def, ground) {
+                swing = Some(y);
+            } else {
+                return fail(world, if chosen.is_some() { "Out of range." } else { "Nothing in reach." });
+            }
+        }
         Targeting::Enemy => {
             let t_e = explicit.or(f.target).and_then(|id| entity(world, id)).filter(|&te| can_attack(world, e, te));
             let Some(te) = t_e else { return fail(world, "You need an enemy target.") };
@@ -238,6 +261,9 @@ pub fn use_ability(world: &mut World, e: Entity, id: AbilityId, explicit: Option
             tr.yaw = heading(d);
         }
     }
+    if let Some(y) = swing && !locked && let Some(mut tr) = world.get_mut::<Transform>(e) {
+        tr.yaw = y;
+    }
     if def.breaks_stun {
         auras::remove_where(world, e, |a| a.cc.is_some_and(|c| c.hard() || c == crate::content::Cc::Root || c == crate::content::Cc::Daze));
     }
@@ -245,7 +271,7 @@ pub fn use_ability(world: &mut World, e: Entity, id: AbilityId, explicit: Option
     super::guard::lower(world, e);
 
     let haste = auras::haste(world, e);
-    let yaw = world.get::<Transform>(e).map_or(0.0, |t| t.yaw);
+    let yaw = swing.unwrap_or_else(|| world.get::<Transform>(e).map_or(0.0, |t| t.yaw));
     let target_id = target.and_then(|te| unit_id(world, te));
     if let Some(mut f) = world.get_mut::<Fighter>(e) {
         if def.gcd {
@@ -410,7 +436,8 @@ pub fn update(world: &mut World) {
 }
 
 fn finish_cast(world: &mut World, e: Entity, def: &AbilityDef, c: Cast) {
-    if def.targeting == Targeting::Enemy {
+    // A player's swing lands on whatever is in front when it comes down.
+    if def.targeting == Targeting::Enemy && !sweeps(world, e, def) {
         let ok = c.target.and_then(|id| entity(world, id)).is_some_and(|te| {
             can_attack(world, e, te) && gap(world, e, te) <= def.range + 2.5 && line_of_sight(world, chest(world, e), chest(world, te))
         });
@@ -495,6 +522,7 @@ pub fn resolve(world: &mut World, e: Entity, def: &AbilityDef, target: Option<pr
         return;
     }
     match def.targeting {
+        Targeting::Enemy if sweeps(world, e, def) => strike(world, e, def, &src, te, yaw),
         Targeting::Enemy | Targeting::Ally | Targeting::SelfOnly => {
             let Some(t) = te else { return };
             let center = world.get::<Transform>(t).map_or(Vec3::ZERO, |t| t.pos);
@@ -525,6 +553,101 @@ pub fn resolve(world: &mut World, e: Entity, def: &AbilityDef, target: Option<pr
                 effects::combo(world, fin, here, &src, None);
             }
         }
+    }
+}
+
+/// Whether `e`'s use of `def` sweeps the cone in front: a player's melee blow.
+pub fn sweeps(world: &World, e: Entity, def: &AbilityDef) -> bool {
+    def.is_strike() && world.get::<PlayerControl>(e).is_some()
+}
+
+/// The full angle a unit's blows sweep: its main-hand weapon's swing.
+pub fn swing_arc(world: &World, e: Entity) -> f32 {
+    let cat = catalog();
+    world
+        .get::<Fighter>(e)
+        .and_then(|f| f.sets.get(f.active_set))
+        .and_then(|set| set.0.as_deref())
+        .and_then(|item| cat.weapon(item))
+        .map_or(UNARMED_SWING, |w| w.swing)
+}
+
+/// How far a blow reaches from the user's centre to a body's edge: its range past both edges,
+/// as the range check for a target measures it.
+fn reach(world: &World, e: Entity, def: &AbilityDef) -> f32 {
+    def.range + 0.5 + world.get::<Body>(e).map_or(0.4, |b| b.radius)
+}
+
+/// Which way a player's blow sweeps when no target is in reach: along their aim (toward the
+/// point they sent, else the way they face), turned by up to `AIM_PULL` toward the enemy nearest
+/// that line. None when no enemy is in reach within the swing and the pull.
+fn aim_swing(world: &World, e: Entity, def: &AbilityDef, ground: Option<Vec3>) -> Option<f32> {
+    let me = world.get::<Transform>(e).copied()?;
+    let aim = ground.map(|g| Vec2::new(g.x - me.pos.x, g.z - me.pos.z)).filter(|d| d.length_squared() > 0.25).map_or(me.yaw, heading);
+    let half = swing_arc(world, e) * 0.5;
+    let reach = reach(world, e, def);
+    let eye = chest(world, e);
+    let mut best: Option<f32> = None;
+    for (id, _) in world.resource::<Spatial>().near(me.xz(), reach + 2.0) {
+        let Some(o) = entity(world, id).filter(|&o| can_attack(world, e, o)) else { continue };
+        let Some(t) = world.get::<Transform>(o) else { continue };
+        let r = world.get::<Body>(o).map_or(0.4, |b| b.radius);
+        let d = t.xz() - me.xz();
+        let dist = d.length();
+        if dist > reach + r {
+            continue;
+        }
+        // How far the swing must turn to touch its body (none for one pressed against you).
+        let off = if dist < r + 0.5 {
+            0.0
+        } else {
+            let a = wrap_angle(heading(d) - aim);
+            a.signum() * (a.abs() - (r / dist).atan()).max(0.0)
+        };
+        if off.abs() > half + AIM_PULL || best.is_some_and(|b| b.abs() <= off.abs()) || !line_of_sight(world, eye, chest(world, o)) {
+            continue;
+        }
+        best = Some(off);
+    }
+    best.map(|off| wrap_angle(aim + off.clamp(-AIM_PULL, AIM_PULL)))
+}
+
+/// Effects that only the blow's main victim takes: control, interrupts, taunts and defiance.
+/// Everyone else in the swing takes the harm.
+fn controls(effect: &Effect) -> bool {
+    match effect {
+        Effect::Interrupt { .. } | Effect::Taunt | Effect::Defiance(_) | Effect::Knockback { .. } | Effect::Pull { .. } => true,
+        Effect::Aura { key, .. } => catalog().aura_id(key).is_some_and(|a| catalog().aura(a).cc.is_some()),
+        _ => false,
+    }
+}
+
+/// A player's blow lands on every enemy in the swing in front: the locked target first (the
+/// swing faces it while it's still in reach), then the nearest, up to the ability's limit.
+fn strike(world: &mut World, e: Entity, def: &AbilityDef, src: &super::HitSource, target: Option<Entity>, yaw: f32) {
+    use crate::content::Finisher;
+    let here = src.from;
+    let locked = target.filter(|&t| can_attack(world, e, t) && gap(world, e, t) <= def.range + 2.5 && line_of_sight(world, chest(world, e), chest(world, t)));
+    let yaw = locked.and_then(|t| world.get::<Transform>(t)).map(|t| t.xz() - Vec2::new(here.x, here.z)).filter(|d| d.length_squared() > 1e-4).map_or(yaw, heading);
+    let shape = protocol::Shape::Cone { range: reach(world, e, def), angle: swing_arc(world, e) };
+    let mut hit = effects::victims(world, shape, here, yaw, src, false, def.max_targets);
+    if let Some(t) = locked {
+        hit.retain(|&o| o != t);
+        hit.insert(0, t);
+        hit.truncate(def.max_targets.max(1) as usize);
+    }
+    let Some(&first) = hit.first() else {
+        tell(world, e, "Your blow misses.");
+        return;
+    };
+    let center = world.get::<Transform>(first).map_or(here, |t| t.pos);
+    effects::apply_effects(world, &def.effects, src, Some(def), &[first], center, Delivery::Strike);
+    if hit.len() > 1 {
+        let harm: Vec<_> = def.effects.iter().filter(|x| !x.on_user() && !controls(x)).cloned().collect();
+        effects::apply_effects(world, &harm, src, Some(def), &hit[1..], center, Delivery::Strike);
+    }
+    if def.finisher == Some(Finisher::Blast) {
+        effects::combo(world, Finisher::Blast, center, src, Some(first));
     }
 }
 

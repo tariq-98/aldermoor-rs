@@ -17,7 +17,7 @@ use protocol::{Action, School};
 
 pub use mobs::{MobDef, MobSkill, Rank};
 pub use specialties::{Specialty, SpecialtyDef};
-pub use weapons::{Grip, Guard, WeaponDef, WINDUP};
+pub use weapons::{Grip, Guard, WeaponDef, UNARMED_SWING, WINDUP};
 
 pub type AbilityId = u16;
 pub type AuraId = u16;
@@ -267,6 +267,19 @@ impl AbilityDef {
     /// A blow that winds up briefly before it lands (the body is already swinging).
     pub fn is_swing(&self) -> bool {
         self.cast > 0.0 && self.cast <= 0.5 && self.missile.is_none() && !matches!(self.targeting, Targeting::Ground { .. }) && self.school == School::Physical
+    }
+
+    /// A single-target melee blow. A player's sweeps the cone in front of them (the weapon's
+    /// swing, out to the blow's range) and lands on every enemy in it; a monster's lands on its
+    /// target. Gap closers (charges, shadowsteps, hooks) and channels stay single-target.
+    pub fn is_strike(&self) -> bool {
+        self.targeting == Targeting::Enemy
+            && self.missile.is_none()
+            && !self.allies
+            && !self.is_channel()
+            && self.range <= 5.0
+            && self.effects.iter().any(|e| matches!(e, Effect::Damage { .. }))
+            && !self.effects.iter().any(|e| matches!(e, Effect::Charge | Effect::Shadowstep | Effect::Pull { .. }))
     }
 
     pub fn reviving(&self) -> bool {
