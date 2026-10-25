@@ -35,5 +35,11 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   costs 36%), which can down or kill you. The fall is measured from the highest point since you
   last stood on ground or water. Landing in deep water breaks the fall.
 
+- **Bodies don't overlap.** Two living bodies that overlap are eased apart, half the overlap each
+  step. The lighter one moves further: bigger bodies outweigh smaller ones, and players count four
+  times their size, so a pack spreads round a player instead of shoving them about. Nobody is
+  pushed up a wall or off a cliff. Rolls, leaps, lunges and climbs pass through bodies, and
+  whoever they land on is eased apart afterwards.
+
 Not yet: free climbing anywhere, mounts, and climbing or swimming animations (pose `Jump` for
 climbing; walk and idle in water).

@@ -3,7 +3,8 @@ use glam::{Vec2, Vec3};
 use protocol::{Event, Pose};
 
 use crate::combat::abilities::Arrivals;
-use crate::{Anim, Body, Clock, Control, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
+use crate::spatial::Spatial;
+use crate::{Anim, Body, Clock, Control, Fighter, Forced, ForcedKind, Land, Motion, Outbox, PlayerControl, Transform, Unit, Vitals, DT};
 
 pub const GRAVITY: f32 = 20.0;
 /// About a 1.1 m jump, landing after 0.66 s.
@@ -38,6 +39,12 @@ const WADE: f32 = 0.7;
 /// Falls up to this many metres don't hurt; past it each metre costs a share of max health.
 pub const SAFE_FALL: f32 = 4.0;
 pub const FALL_DAMAGE: f32 = 0.06;
+/// Overlapping bodies are pushed apart by this share of the overlap each step, so a crowd eases
+/// apart over a few steps rather than jumping.
+const SEPARATE: f32 = 0.5;
+/// Players stand their ground this many times more firmly than monsters, so a pack spreads round
+/// them instead of shoving them about.
+const PLAYER_WEIGHT: f32 = 4.0;
 
 /// Landings and splashes this step, for [`after_moving`] to deal with.
 #[derive(Resource, Default)]
@@ -299,6 +306,73 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.fall_from = t.pos.y;
         }
         m.observed = (t.pos - start) / DT;
+    }
+}
+
+/// Keeps bodies from overlapping: each pair that does is eased apart, the lighter body moving
+/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). Bodies in forced
+/// motion (rolls, leaps, charges, climbs) neither push nor are pushed, and nobody is pushed into
+/// a wall.
+pub fn separate(world: &mut World) {
+    let units = crate::take_units(world);
+    let mut moves: Vec<(Entity, Vec2)> = Vec::new();
+    let body = |world: &World, e: Entity| -> Option<(protocol::UnitId, Vec2, f32, f32)> {
+        let (u, t, v, m) = (world.get::<Unit>(e)?, world.get::<Transform>(e)?, world.get::<Vitals>(e)?, world.get::<Motion>(e)?);
+        if v.dead || m.forced.is_some() {
+            return None;
+        }
+        let r = world.get::<Body>(e).map_or(0.4, |b| b.radius);
+        let weight = r * r * if world.get::<PlayerControl>(e).is_some() { PLAYER_WEIGHT } else { 1.0 };
+        Some((u.id, t.xz(), r, weight))
+    };
+    for &a in &units {
+        let Some((ia, pa, ra, wa)) = body(world, a) else { continue };
+        let mut push = Vec2::ZERO;
+        for (ib, _) in world.resource::<Spatial>().near(pa, ra + 2.0) {
+            if ib == ia {
+                continue;
+            }
+            let Some(b) = crate::combat::entity(world, ib) else { continue };
+            let Some((_, pb, rb, wb)) = body(world, b) else { continue };
+            let d = pa - pb;
+            let dist = d.length();
+            let overlap = ra + rb - dist;
+            if overlap <= 0.0 {
+                continue;
+            }
+            // Stacked exactly: part along a direction both sides agree on.
+            let away = if dist > 1e-4 {
+                d / dist
+            } else {
+                let lo = ia.min(ib) as f32;
+                Vec2::new(lo.sin(), lo.cos()) * if ia < ib { 1.0 } else { -1.0 }
+            };
+            push += away * overlap * SEPARATE * wb / (wa + wb);
+        }
+        if push != Vec2::ZERO {
+            moves.push((a, push));
+        }
+    }
+    crate::return_units(world, units);
+    let land = &world.resource::<Land>().0;
+    let mut placed: Vec<(Entity, Vec3)> = Vec::with_capacity(moves.len());
+    for (e, push) in moves {
+        let (Some(r), Some(m), Some(t)) = (world.get::<Body>(e).map(|b| b.radius), world.get::<Motion>(e), world.get::<Transform>(e)) else { continue };
+        let grounded = m.grounded && !m.swimming;
+        let from = t.xz();
+        let to = land.slide(from, push, r);
+        // Never shoved up a wall or off a cliff.
+        let drop = t.pos.y - land.ground(to.x, to.y);
+        if steep(land, from, t.pos.y, to) || (grounded && drop > MAX_SLOPE * (to - from).length() + 0.01) {
+            continue;
+        }
+        let y = if grounded { land.ground(to.x, to.y) } else { t.pos.y };
+        placed.push((e, Vec3::new(to.x, y, to.y)));
+    }
+    for (e, p) in placed {
+        if let Some(mut t) = world.get_mut::<Transform>(e) {
+            t.pos = p;
+        }
     }
 }
 
