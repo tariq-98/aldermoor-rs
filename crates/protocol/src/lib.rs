@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -38,6 +38,8 @@ pub enum Command {
     SwapWeapons,
     /// Help a downed ally up (or a defeated one, out of combat). Hold still while it works.
     Revive { target: UnitId },
+    /// Give `amount` of your quest XP to a specialty ("warrior", "mage", …).
+    AssignXp { specialty: String, amount: u32 },
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -228,6 +230,13 @@ pub struct PlayerState {
     /// In deep water: no skills, guard or rolls.
     pub swimming: bool,
     pub sprinting: bool,
+    /// The equipped specialty ("warrior", …), its level (the one that fights), XP into that
+    /// level and what the next takes (0 at the cap), and quest XP not yet given to a specialty.
+    pub specialty: String,
+    pub level: u8,
+    pub xp: u32,
+    pub xp_next: u32,
+    pub unassigned_xp: u32,
 }
 
 /// One skill on the bar.
@@ -339,6 +348,8 @@ pub enum Event {
     /// A blow or effect that did no harm, and why.
     Avoided { target: UnitId, source: UnitId, how: Avoid },
     Died { unit: UnitId, killer: Option<UnitId> },
+    /// A player's specialty reached a new level.
+    LevelUp { unit: UnitId, specialty: String, level: u8 },
     Respawned { unit: UnitId },
     Jumped { unit: UnitId },
     Dodged { unit: UnitId },

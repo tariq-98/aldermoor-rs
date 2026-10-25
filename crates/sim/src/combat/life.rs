@@ -94,6 +94,7 @@ pub fn die(world: &mut World, e: Entity, killer: Option<UnitId>) {
         a.hold_until = 0.0;
     }
     emit(world, Event::Died { unit: id, killer });
+    crate::progress::pay_out(world, e);
 
     // Everyone fighting it lets it go; monsters stop swinging at a corpse.
     let all: Vec<Entity> = world.resource::<Units>().all().collect();

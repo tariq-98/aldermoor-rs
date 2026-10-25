@@ -381,6 +381,9 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
             emit(world, Event::Avoided { target, source: src.unit, how });
             continue;
         }
+        if hostile && def.is_some() && let Some(u) = user {
+            crate::progress::note_use(world, u, t);
+        }
         let crit = world.resource_mut::<Rng>().chance(src.crit);
         // Striking from behind: harder, and backstabs harder still.
         let mut mult = 1.0;

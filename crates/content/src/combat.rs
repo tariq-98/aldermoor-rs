@@ -537,6 +537,27 @@ impl Specialty {
         Specialty::Rogue,
         Specialty::Healer,
     ];
+
+    /// Its place in [`Specialty::ALL`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Its name on the wire, e.g. "warrior".
+    pub fn key(self) -> &'static str {
+        match self {
+            Specialty::Warrior => "warrior",
+            Specialty::Archer => "archer",
+            Specialty::Mage => "mage",
+            Specialty::Necromancer => "necromancer",
+            Specialty::Rogue => "rogue",
+            Specialty::Healer => "healer",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Specialty> {
+        Specialty::ALL.into_iter().find(|s| s.key() == key)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
