@@ -83,17 +83,20 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
 
       # Each scene in crates/sim/examples/perf_gate.rs, counting only its measured steps and
-      # snapshots. Prints "<scene> <instructions> <wire bytes a second>" per line.
+      # snapshots. Prints "<scene> <instructions> <wire bytes a second>" per line. The players
+      # scene (200 players' views a step, #74) takes about two minutes of this.
       - name: Measure this commit
         run: |
           cat > /tmp/measure.sh <<'SH'
           set -euo pipefail
           bin=$1
-          for scene in wander fight dense; do
+          for scene in wander fight dense players; do
             log=$(valgrind --tool=callgrind --toggle-collect='*perf_gate::measured*' \
               --callgrind-out-file=/dev/null "$bin" "$scene" 2>&1)
             ir=$(echo "$log" | sed -n 's/.*I *refs: *//p' | tr -d ,)
             wire=$(echo "$log" | sed -n 's/.*wire \([0-9]*\) B\/s.*/\1/p')
+            # A base branch older than a scene runs nothing for it: leave it out there.
+            if [ -z "$wire" ]; then echo "no $scene scene in $bin" >&2; continue; fi
             echo "$scene $ir $wire"
           done
           SH

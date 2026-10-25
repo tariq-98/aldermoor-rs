@@ -1,0 +1,285 @@
+{
+  "capture": null,
+  "output": "2560x1600",
+  "scale": 1.0,
+  "mode": "offscreen-synchronized",
+  "aa": "taa",
+  "in_flight": 1,
+  "paced_fps": 60,
+  "direct_drawable": true,
+  "legacy_cpu": false,
+  "live": false,
+  "look_churn": false,
+  "reset_on_look": false,
+  "frame_measure": "completed-work",
+  "shared_constants": false,
+  "gpu_median_ms": 15.942291666760866,
+  "gpu_p95_ms": 16.65291666677149,
+  "frame_median_ms": 20.677,
+  "frame_p95_ms": 21.561,
+  "samples": 359,
+  "warmup": 120,
+  "performance": {
+    "allocated_gpu_bytes": {
+      "median": 1230389248.0,
+      "p95": 1230389248.0,
+      "samples": 360
+    },
+    "counter_comparison": {
+      "method": "Balanced ABBA/BAAB when --counter-overhead is set; on minus off block means; buffers preallocated in both groups",
+      "off_gpu_ms": null,
+      "on_gpu_ms": {
+        "median": 15.942291666760866,
+        "p95": 16.65291666677149,
+        "samples": 360
+      },
+      "paired_block_deltas_ms": []
+    },
+    "counter_sampled_frames": 360,
+    "counters_enabled": true,
+    "draw_calls": {
+      "median": 724.0,
+      "p95": 724.0,
+      "samples": 360
+    },
+    "first_frame": 120,
+    "gpu_by_minute": [
+      {
+        "gpu_ms": {
+          "median": 15.942291666760866,
+          "p95": 16.65291666677149,
+          "samples": 360
+        },
+        "minute": 0
+      }
+    ],
+    "gpu_ms": {
+      "median": 15.942291666760866,
+      "p95": 16.65291666677149,
+      "samples": 360
+    },
+    "last_frame": 479,
+    "memory_measure": "MTLDevice.currentAllocatedSize; allocations, not physical residency",
+    "metalfx_measure": "opaque framework encoders are not instrumented; taa is null when MetalFX is active",
+    "overlay_visible": false,
+    "pass_measure": "stage timestamps; elapsed vertex-start to fragment-end; intervals may overlap",
+    "passes": {
+      "composite": {
+        "elapsed_ms": {
+          "median": 11.267584,
+          "p95": 11.633583,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.361417,
+          "p95": 0.4185,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.016375,
+          "p95": 0.018791,
+          "samples": 360
+        }
+      },
+      "hud": {
+        "elapsed_ms": {
+          "median": 11.272667,
+          "p95": 11.641499999999999,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.0225,
+          "p95": 0.024291999999999998,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.009791,
+          "p95": 0.012166999999999999,
+          "samples": 360
+        }
+      },
+      "opaque": {
+        "elapsed_ms": {
+          "median": 8.988875,
+          "p95": 9.353042,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 7.100916,
+          "p95": 7.33,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 1.826959,
+          "p95": 1.98925,
+          "samples": 360
+        }
+      },
+      "scene_sky_opaque_water_transparent": {
+        "elapsed_ms": null,
+        "fragment_ms": null,
+        "missing_samples": 360,
+        "vertex_ms": null
+      },
+      "shadow_0": {
+        "elapsed_ms": {
+          "median": 0.725541,
+          "p95": 0.8035,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.203125,
+          "p95": 0.23879199999999998,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.486375,
+          "p95": 0.537083,
+          "samples": 360
+        }
+      },
+      "shadow_1": {
+        "elapsed_ms": {
+          "median": 1.5002499999999999,
+          "p95": 2.310208,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.62625,
+          "p95": 0.6962499999999999,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.8206249999999999,
+          "p95": 0.91075,
+          "samples": 360
+        }
+      },
+      "shadow_2": {
+        "elapsed_ms": {
+          "median": 2.016958,
+          "p95": 2.8372919999999997,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.578458,
+          "p95": 0.791833,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 1.345,
+          "p95": 1.510333,
+          "samples": 360
+        }
+      },
+      "sky": {
+        "elapsed_ms": {
+          "median": 1.157708,
+          "p95": 1.262209,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.630417,
+          "p95": 0.926709,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.010917,
+          "p95": 0.012624999999999999,
+          "samples": 360
+        }
+      },
+      "taa": {
+        "elapsed_ms": {
+          "median": 10.921667,
+          "p95": 11.246915999999999,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 3.7719579999999997,
+          "p95": 3.891333,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.015958,
+          "p95": 0.020541999999999998,
+          "samples": 360
+        }
+      },
+      "water_transparent": {
+        "elapsed_ms": {
+          "median": 7.1825,
+          "p95": 7.411625,
+          "samples": 360
+        },
+        "fragment_ms": {
+          "median": 0.03675,
+          "p95": 0.046667,
+          "samples": 360
+        },
+        "missing_samples": 0,
+        "vertex_ms": {
+          "median": 0.012166,
+          "p95": 0.013333,
+          "samples": 360
+        }
+      }
+    },
+    "peak_allocated_gpu_bytes": 1230389248,
+    "samples": 360,
+    "scene_measure": "combined by default; --gpu-profile-scene splits sky/opaque/water-transparent encoders and changes tile load/store costs",
+    "visible_triangles": {
+      "median": 331831.0,
+      "p95": 331831.0,
+      "samples": 360
+    }
+  },
+  "gpu_samples": 360,
+  "binary": "/private/tmp/aldermoor-26-final-080-client",
+  "binary_sha256": "523e72563d61f51bbae23ba36caabb3dd153ad9f8fd795149f8ecb3770413463",
+  "command": [
+    "/private/tmp/aldermoor-26-final-080-client",
+    "--showcase",
+    "--benchmark",
+    "--fps",
+    "60",
+    "--in-flight",
+    "1",
+    "--aa",
+    "taa",
+    "--frames",
+    "480",
+    "--warmup",
+    "120",
+    "--size",
+    "2560x1600",
+    "--scale",
+    "1.0",
+    "--assets",
+    "/Users/tariqal-radhi/code/aldermoor-rs/assets",
+    "--gpu-profile-scene",
+    "--offscreen"
+  ],
+  "started_at": "2026-10-25T01:54:34.563420+00:00",
+  "frames": 480,
+  "counter_overhead": false,
+  "split_scene": true,
+  "overlay_visible": false,
+  "look_settings": "/Users/tariqal-radhi/code/aldermoor-rs/assets/catalog/look.json",
+  "surface_assets": "/Users/tariqal-radhi/code/aldermoor-rs/assets/catalog/surfaces.json",
+  "history_resets": 1,
+  "mean_fps": 48.159,
+  "interval_p95_ms": 21.597,
+  "internal": "2560x1600",
+  "work_budget_pass": false,
+  "presentation_pass": null,
+  "pass": false
+}

@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 7;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -18,8 +18,9 @@ pub type UnitId = u32;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     /// Desired movement in world space (length 0…1), and an optional fixed facing for
-    /// strafing (mouse-look). Sent whenever it changes.
-    Move { direction: Vec2, walk: bool, face_yaw: Option<f32> },
+    /// strafing (mouse-look). `sprint` asks to sprint, which only works out of combat. Sent
+    /// whenever it changes.
+    Move { direction: Vec2, walk: bool, sprint: bool, face_yaw: Option<f32> },
     Jump,
     /// A quick roll in a world-space direction (zero rolls backwards).
     Dodge { direction: Vec2 },
@@ -37,6 +38,14 @@ pub enum Command {
     SwapWeapons,
     /// Help a downed ally up (or a defeated one, out of combat). Hold still while it works.
     Revive { target: UnitId },
+    /// Give `amount` of your quest XP to a specialty ("warrior", "mage", …).
+    AssignXp { specialty: String, amount: u32 },
+    /// Pick up what fits from a loot pile within reach.
+    Loot { pile: u32 },
+    /// Buy `count` of an item from the shop you stand at.
+    Buy { shop: String, item: String, count: u16 },
+    /// Sell `count` from an inventory slot to the shop you stand at.
+    Sell { shop: String, slot: u8, count: u16 },
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -149,6 +158,7 @@ pub enum Pose {
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
 /// from `assets/catalog/`. Empty or `None` fields mean the body type's defaults.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Look {
     /// A `body_types` key in `humanoid.json` (e.g. "male", "elf_female", "goblin_male",
     /// "skeleton"), or a creature id in `creatures.json` (e.g. "wolf.grey").
@@ -223,6 +233,54 @@ pub struct PlayerState {
     /// 0 or 1: which weapon set is in hand, and seconds until you can swap again.
     pub weapon_set: u8,
     pub swap_ready: f32,
+    /// In deep water: no skills, guard or rolls.
+    pub swimming: bool,
+    pub sprinting: bool,
+    /// The equipped specialty ("warrior", …), its level (the one that fights), XP into that
+    /// level and what the next takes (0 at the cap), and quest XP not yet given to a specialty.
+    pub specialty: String,
+    pub level: u8,
+    pub xp: u32,
+    pub xp_next: u32,
+    pub unassigned_xp: u32,
+    pub coins: u32,
+    /// Every inventory slot in order; an empty one has an empty `item`. Each `price` is what
+    /// the shop you stand at pays for it (0 if none, or it doesn't buy that).
+    pub inventory: Vec<ItemView>,
+    /// Loot piles nearby that you may take.
+    pub loot: Vec<LootView>,
+    /// The shop whose counter you stand at.
+    pub shop: Option<ShopView>,
+}
+
+/// Some of one item: in a slot, a pile or a shop.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ItemView {
+    /// The item's key in the content tables (its icon name too).
+    pub item: String,
+    pub name: String,
+    pub count: u16,
+    /// The rare version with a small fixed bonus.
+    pub fine: bool,
+    /// Coins, each: what a shop sells it for, or pays for it.
+    pub price: u32,
+}
+
+/// What a dead monster left on the ground.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LootView {
+    pub id: u32,
+    pub position: Vec3,
+    pub coins: u32,
+    pub items: Vec<ItemView>,
+}
+
+/// A shop's wares, with their prices.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShopView {
+    pub shop: String,
+    pub name: String,
+    pub sells: Vec<ItemView>,
 }
 
 /// One skill on the bar.
@@ -334,6 +392,8 @@ pub enum Event {
     /// A blow or effect that did no harm, and why.
     Avoided { target: UnitId, source: UnitId, how: Avoid },
     Died { unit: UnitId, killer: Option<UnitId> },
+    /// A player's specialty reached a new level.
+    LevelUp { unit: UnitId, specialty: String, level: u8 },
     Respawned { unit: UnitId },
     Jumped { unit: UnitId },
     Dodged { unit: UnitId },
@@ -402,7 +462,7 @@ mod tests {
 
     #[test]
     fn commands_and_snapshots_round_trip() {
-        let c = Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, face_yaw: Some(1.5) };
+        let c = Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, sprint: false, face_yaw: Some(1.5) };
         assert_eq!(Command::from_bytes(&c.to_bytes()).unwrap(), c);
         let s = Snapshot {
             tick: 42,
@@ -415,7 +475,7 @@ mod tests {
                 level: 1,
                 position: Vec3::new(6.0, 9.5, 28.0),
                 velocity: Vec3::ZERO,
-                yaw: 3.14,
+                yaw: 3.0,
                 pose: Pose::Idle,
                 pose_time: 0.0,
                 health: 100.0,

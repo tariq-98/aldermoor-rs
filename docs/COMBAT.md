@@ -1,8 +1,9 @@
 # How fighting works
 
 The combat core (milestone 2), as built in `crates/sim`. The content tables (abilities, auras,
-weapons, specialties and monsters) are in `crates/sim/src/content/`; the rules are in
-`crates/sim/src/combat/`. What the client receives is in [CONTRACT.md](CONTRACT.md).
+weapons, specialties and monsters) are RON files in `crates/content/combat/`, loaded and checked
+by `crates/content/src/combat.rs` (a bad file names its line and column; the types there document
+every field and its default); the rules are in `crates/sim/src/combat/`. What the client receives is in [CONTRACT.md](CONTRACT.md).
 
 The feel: tab-targeting and a skill bar like Guild Wars 2 and World of Warcraft, with WASD
 movement and action-game defence (rolling, guarding, parrying, aiming). Levels carry most of the
@@ -48,6 +49,35 @@ Health, power and armour are multipliers on the level's base numbers (below).
 - **From behind** (more than 110° off where the target faces): 1.1 times, and nothing guards
   against it. Backstabs land harder still from behind (twice, for the dagger's).
 - **Executes** (the greatsword's Execution) hit 2.5 times as hard below a quarter health.
+
+## Melee blows
+
+- **A player's melee blow sweeps the cone in front of them** and lands on every enemy in it, up
+  to the skill's limit (five unless it says otherwise), so positioning matters. Each weapon in
+  the main hand sweeps its own width out to the blow's range:
+
+| Weapon | Reach (basic attack) | Sweep |
+|---|---|---|
+| Dagger | 2.6 m | 80° |
+| Sword, axe, shield bash | 3 m | 92° |
+| Mace | 3 m | 86° |
+| Greatsword (Execution) | 3.6 m | 103° |
+| Spear | 4.5 m | 52° |
+| Bare hands, bows, staves | as the skill | 80° |
+
+- **Where it sweeps:** at your target while it's in reach (it needn't be in front: with a Tab
+  lock the blow turns to it). Otherwise along your aim (the crosshair, or the pointer in Classic),
+  turned by up to 12° (`AIM_PULL`) toward the enemy nearest that line, so a near miss still lands.
+  With nothing in reach the skill isn't used ("Nothing in reach.").
+- **Only the main victim is controlled:** the target, or else the nearest enemy, takes the whole
+  blow. The others in the sweep take its harm (damage, bleeding and other conditions), but not its
+  stuns, dazes, knockdowns, interrupts, taunts or defiance damage.
+- **Wind-ups keep their aim:** a heavy blow at no target lands where it was aimed when it comes
+  down, so a foe that steps out of it is missed ("Your blow misses."). One at a target follows it
+  while it stays in reach.
+- Charges, Shadowstep and Skewer's hook stay single-target, as do cones, lines and circles,
+  which keep their own shapes and limits. **Monsters' blows** land on their target only; their
+  big blows are warned of on the ground instead.
 
 ## Casts, wind-ups and channels
 
@@ -154,7 +184,8 @@ and armour shifts with level); ten levels up is about four times.
 Checked by simulated duels between warriors (`crates/sim/tests/duels.rs`): a well-played fighter
 (timed parries with human error, ripostes, blocks while endurance lasts, heals and breaks free
 at the right moments) against a badly-played one (mashes whatever is ready, never guards or
-rolls). Skill wins, out of 40 duels each (24 October 2026):
+rolls). Skill wins, out of 40 duels each (24 October 2026; unchanged when melee sweeps came in on
+25 October, since a duel has one foe in the sweep):
 
 | Level gap | 0 | 2 | 4 | 5 | 6 | 7 | 8 | 10 |
 |---|---|---|---|---|---|---|---|---|
@@ -167,7 +198,8 @@ table again after tuning.
 
 ## Checks
 
-- `crates/sim/tests/combat.rs`: resources, casts, cooldowns, the queue, interrupts,
+- `crates/sim/tests/combat.rs`: resources, casts, cooldowns, the queue, interrupts, melee sweeps
+  (who's in them, aim pull, locked targets, reach and width, wind-ups missing),
   diminishing returns, defiance, warned blows, blocks, parries, guard breaks, blows from behind,
   backstabs, missiles (blocked, reflected, aimed, led, homing), downed and rallying, bleeding out,
   respawning, reviving, summons, combos, the combat view, determinism, every skill on every bar,

@@ -38,7 +38,7 @@ let fight: Arc<CombatView> = host.combat().unwrap(); // combat detail from the s
 let events = host.take_events(); // everything since you last asked
 ```
 
-Each `Snapshot` (protocol version 5) has:
+Each `Snapshot` (protocol version 6) has:
 
 - `units`: everyone within 160 m. For each one:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
@@ -193,7 +193,9 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
 - **Movement keys:** a world-space direction, sent as `Move` whenever it changes, always with the
   character's heading as `face_yaw`, so S backpedals and sideways keys strafe. In the default
   Action scheme the heading is the camera's yaw (the mouse always looks). In the Classic scheme
-  A/D turn it, and the right mouse button sets it to the camera's yaw.
+  A/D turn it, and the right mouse button sets it to the camera's yaw. `walk` is the walk
+  toggle (/), and `sprint` is Shift held. The sim only grants a sprint out of combat, on land, and
+  not while guarding or casting.
 - **Space:** `Jump`.
 - **Dodge key** (Alt, V or mouse button 4): `Dodge` the way the keys point (a zero direction rolls backwards).
 - **Tab or clicking a unit:** `SetTarget`. Right-clicking an enemy: `SetTarget` plus

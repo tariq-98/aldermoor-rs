@@ -62,7 +62,7 @@ impl Bot {
         let gap = to.length() - 0.8;
         let face = to.x.atan2(to.y);
         let direction = if gap > 1.0 { to.normalize() } else { Vec2::ZERO };
-        sim.command(self.id, Command::Move { direction, walk: false, face_yaw: Some(face) });
+        sim.command(self.id, Command::Move { direction, walk: false, sprint: false, face_yaw: Some(face) });
         if me.target != Some(self.foe) {
             sim.command(self.id, Command::SetTarget(Some(self.foe)));
             sim.command(self.id, Command::SetAutoAttack(true));

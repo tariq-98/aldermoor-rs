@@ -29,7 +29,8 @@ pub struct Held {
     /// Q and E: always strafe.
     pub strafe_left: bool,
     pub strafe_right: bool,
-    pub walk: bool,
+    /// Shift: sprint (the sim only allows it out of combat).
+    pub sprint: bool,
     /// Right mouse button: the character faces where the camera looks.
     pub mouse_look: bool,
     /// Left mouse button: the camera orbits and the character keeps its heading.
@@ -73,6 +74,8 @@ pub struct Pilot {
     /// Where the character faces, in the same unwrapped angle as [`Orbit::yaw`].
     pub heading: f32,
     pub autorun: bool,
+    /// Walking instead of running, toggled with its key.
+    pub walking: bool,
     /// Classic: swing the camera back behind the character after a second of moving.
     pub swing_back: bool,
     /// Seconds spent moving since the mouse last held the camera.
@@ -85,6 +88,7 @@ impl Pilot {
             scheme,
             heading,
             autorun: false,
+            walking: false,
             swing_back: true,
             moving_for: 0.,
         }
@@ -92,6 +96,10 @@ impl Pilot {
 
     pub fn toggle_autorun(&mut self) {
         self.autorun = !self.autorun;
+    }
+
+    pub fn toggle_walk(&mut self) {
+        self.walking = !self.walking;
     }
 
     /// Action is Classic with the right button always held. Its left button is for clicking,
@@ -133,7 +141,8 @@ impl Pilot {
         }
         Command::Move {
             direction,
-            walk: held.walk,
+            walk: self.walking,
+            sprint: held.sprint && !self.walking,
             face_yaw: Some(self.heading),
         }
     }
@@ -175,6 +184,7 @@ mod tests {
             direction,
             walk,
             face_yaw,
+            ..
         } = c
         else {
             unreachable!()
@@ -404,5 +414,22 @@ mod tests {
     fn wrap_takes_the_short_way() {
         assert!((wrap(std::f32::consts::TAU + 0.5) - 0.5).abs() < 1e-5);
         assert!((wrap(-std::f32::consts::PI - 0.5) - (std::f32::consts::PI - 0.5)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn shift_sprints_unless_walking() {
+        let (mut p, mut o) = action();
+        let sprinting = |c: Command| matches!(c, Command::Move { sprint: true, .. });
+        let shift = held(|h| {
+            h.forward = true;
+            h.sprint = true
+        });
+        assert!(sprinting(p.steer(&shift, &mut o, 0.016)));
+        p.toggle_walk();
+        let c = p.steer(&shift, &mut o, 0.016);
+        assert!(!sprinting(c.clone()));
+        assert!(moving(c).1);
+        p.toggle_walk();
+        assert!(!moving(p.steer(&shift, &mut o, 0.016)).1);
     }
 }

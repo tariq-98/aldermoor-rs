@@ -125,6 +125,35 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
     dealt
 }
 
+/// Hurts `te` for a hard landing: no attacker, armour or shields, and no threat. Can down or
+/// kill, as any blow can.
+pub fn fall_damage(world: &mut World, te: Entity, amount: f32) {
+    let t = now(world);
+    let Some(target) = unit_id(world, te) else { return };
+    if world.get::<Vitals>(te).is_none_or(|v| v.dead) {
+        return;
+    }
+    let amount = amount.round().max(1.0);
+    emit(world, Event::Damage { target, source: target, amount, crit: false, school: School::Physical, periodic: false });
+    let (lethal, finished) = {
+        let mut v = world.get_mut::<Vitals>(te).unwrap();
+        if v.downed {
+            v.downed_health -= amount;
+            (false, v.downed_health <= 0.0)
+        } else {
+            v.health -= amount;
+            (v.health <= 0.0, false)
+        }
+    };
+    if lethal {
+        super::life::lethal(world, te, None);
+    } else if finished {
+        super::life::die(world, te, None);
+    } else {
+        hold_pose(world, te, Pose::Hit, t, HIT_POSE);
+    }
+}
+
 /// Heals `te`; a downed unit's heals go to its downed pool. Healing someone in a fight draws a
 /// little of their attackers' attention.
 pub fn heal(world: &mut World, src: &HitSource, te: Entity, raw: f32, crit: bool) -> f32 {
@@ -345,12 +374,17 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
     if rest.is_empty() {
         return;
     }
+    // Everyone it fells is let go of together once it has landed on all of them.
+    super::life::hold_deaths(world);
     for &t in targets {
         let hostile = user.is_none_or(|u| can_attack(world, u, t)) || world.get::<Unit>(t).is_some_and(|tu| tu.faction.is_enemy(src.faction));
         if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
             let target = unit_id(world, t).unwrap_or(0);
             emit(world, Event::Avoided { target, source: src.unit, how });
             continue;
+        }
+        if hostile && def.is_some() && let Some(u) = user {
+            crate::progress::note_use(world, u, t);
         }
         let crit = world.resource_mut::<Rng>().chance(src.crit);
         // Striking from behind: harder, and backstabs harder still.
@@ -366,6 +400,7 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
             auras::remove_key(world, u, "riposte");
         }
     }
+    super::life::release_deaths(world);
 }
 
 /// One effect on one target. Returns whether it did damage.

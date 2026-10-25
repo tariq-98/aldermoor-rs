@@ -63,9 +63,9 @@ impl Scenery {
             !env.placements.houses.is_empty() && !env.placements.trees.is_empty(),
             "placement families cannot be empty"
         );
-        for (i, p) in v.houses.iter().enumerate() {
+        for p in &v.houses {
             place(
-                &env.placements.houses[i % env.placements.houses.len()],
+                &env.placements.houses[p.variant % env.placements.houses.len()],
                 Vec3::new(
                     p.position.x,
                     world::height(p.position.x, p.position.y),
@@ -75,9 +75,9 @@ impl Scenery {
                 p.scale,
             )?;
         }
-        for (i, p) in v.trees.iter().enumerate() {
+        for p in &v.trees {
             place(
-                &env.placements.trees[i % env.placements.trees.len()],
+                &env.placements.trees[p.variant % env.placements.trees.len()],
                 Vec3::new(
                     p.position.x,
                     world::height(p.position.x, p.position.y),

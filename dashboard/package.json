@@ -1,0 +1,20 @@
+{
+  "name": "aldermoor-dashboard",
+  "private": true,
+  "type": "module",
+  "description": "Live, phone-first dashboard of Aldermoor's GitHub work: PRs, CI, issues by phase, claims and visuals",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types --no-warnings=ExperimentalWarning 'test/*.test.ts'",
+    "dev": "node build.mjs && node dev.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

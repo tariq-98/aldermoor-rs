@@ -8,12 +8,12 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
 use objc2::{rc::Retained, runtime::ProtocolObject};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSRange, NSString};
 use objc2_metal::*;
 use objc2_metal_fx::{MTLFXTemporalScaler, MTLFXTemporalScalerBase, MTLFXTemporalScalerDescriptor};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     ffi::c_void,
     path::Path,
     ptr::NonNull,
@@ -66,16 +66,174 @@ struct GpuMesh {
     maps: [Obj<dyn MTLTexture>; 5],
     material: Material,
 }
+pub const GPU_PASS_NAMES: [&str; 10] = [
+    "shadow_0",
+    "shadow_1",
+    "shadow_2",
+    "scene_sky_opaque_water_transparent",
+    "taa",
+    "composite",
+    "hud",
+    "sky",
+    "opaque",
+    "water_transparent",
+];
+const PASS_COUNT: usize = GPU_PASS_NAMES.len();
+const SAMPLE_COUNT: usize = PASS_COUNT * 4;
+
+#[derive(Clone, Copy, Default, Debug, serde::Serialize)]
+pub struct PassTiming {
+    pub elapsed_ms: f64,
+    pub vertex_ms: f64,
+    pub fragment_ms: f64,
+}
+#[derive(Clone, Copy, Default, Debug, serde::Serialize)]
+pub struct GpuFrame {
+    pub frame: usize,
+    pub counters_sampled: bool,
+    /// Seconds since renderer creation, at command-buffer submission (not completion).
+    pub elapsed_seconds: f64,
+    pub gpu_ms: f64,
+    pub passes: [Option<PassTiming>; PASS_COUNT],
+    pub draw_calls: usize,
+    pub visible_triangles: usize,
+    /// Metal device allocations, not physical resident memory on a unified-memory GPU.
+    pub allocated_gpu_bytes: usize,
+}
+
+fn clock_pair(device: &ProtocolObject<dyn MTLDevice>) -> (u64, u64) {
+    let (mut cpu, mut gpu) = (0, 0);
+    unsafe {
+        device.sampleTimestamps_gpuTimestamp(NonNull::from(&mut cpu), NonNull::from(&mut gpu));
+    }
+    (cpu, gpu)
+}
+
+/// One reusable sample buffer per in-flight slot. Read only after its command buffer completes.
+pub(crate) struct PassCounters {
+    buffer: Obj<dyn MTLCounterSampleBuffer>,
+}
+impl PassCounters {
+    fn new(device: &ProtocolObject<dyn MTLDevice>) -> Result<Self> {
+        ensure!(
+            device.supportsCounterSampling(MTLCounterSamplingPoint::AtStageBoundary),
+            "GPU stage-boundary timestamp sampling is unavailable"
+        );
+        let sets = device
+            .counterSets()
+            .context("GPU counter sets unavailable")?;
+        let set = sets
+            .iter()
+            .find(|s| {
+                s.name()
+                    .isEqualToString(unsafe { MTLCommonCounterSetTimestamp })
+            })
+            .context("GPU timestamp counter set unavailable")?;
+        ensure!(
+            set.counters().iter().any(|c| c
+                .name()
+                .isEqualToString(unsafe { MTLCommonCounterTimestamp })),
+            "GPU timestamp counter unavailable"
+        );
+        let desc = MTLCounterSampleBufferDescriptor::new();
+        desc.setCounterSet(Some(&set));
+        desc.setStorageMode(MTLStorageMode::Shared);
+        unsafe {
+            desc.setSampleCount(SAMPLE_COUNT);
+        }
+        let buffer = device
+            .newCounterSampleBufferWithDescriptor_error(&desc)
+            .map_err(|e| anyhow::anyhow!("GPU counter allocation: {e}"))?;
+        Ok(Self { buffer })
+    }
+    pub(crate) fn attach(&self, pass: &MTLRenderPassDescriptor, index: usize) {
+        assert!(index < PASS_COUNT);
+        unsafe {
+            let a = pass.sampleBufferAttachments().objectAtIndexedSubscript(0);
+            a.setSampleBuffer(Some(&self.buffer));
+            a.setStartOfVertexSampleIndex(index * 4);
+            a.setEndOfVertexSampleIndex(index * 4 + 1);
+            a.setStartOfFragmentSampleIndex(index * 4 + 2);
+            a.setEndOfFragmentSampleIndex(index * 4 + 3);
+        }
+    }
+    fn resolve(
+        &self,
+        mask: u16,
+        start: (u64, u64),
+        end: (u64, u64),
+    ) -> [Option<PassTiming>; PASS_COUNT] {
+        let mut result = [None; PASS_COUNT];
+        let Some(cpu_ticks) = end.0.checked_sub(start.0).filter(|v| *v > 0) else {
+            return result;
+        };
+        let Some(gpu_ticks) = end.1.checked_sub(start.1).filter(|v| *v > 0) else {
+            return result;
+        };
+        // sampleTimestamps returns CPU nanoseconds, not raw mach_absolute_time ticks.
+        // https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time
+        let ms_per_tick = cpu_ticks as f64 / gpu_ticks as f64 / 1e6;
+        let Some(data) = (unsafe {
+            self.buffer
+                .resolveCounterRange(NSRange::new(0, SAMPLE_COUNT))
+        }) else {
+            return result;
+        };
+        let bytes = unsafe { data.as_bytes_unchecked() };
+        if bytes.len() != SAMPLE_COUNT * 8 {
+            return result;
+        }
+        for (i, timing) in result.iter_mut().enumerate() {
+            if mask & (1 << i) == 0 {
+                continue;
+            }
+            let t = std::array::from_fn(|j| {
+                let offset = (i * 4 + j) * 8;
+                u64::from_ne_bytes(bytes[offset..offset + 8].try_into().unwrap())
+            });
+            *timing = decode_pass(t, ms_per_tick);
+        }
+        result
+    }
+}
+fn decode_pass(t: [u64; 4], ms_per_tick: f64) -> Option<PassTiming> {
+    if !ms_per_tick.is_finite()
+        || ms_per_tick <= 0.
+        || t.contains(&0)
+        || t.contains(&u64::MAX)
+        || t[1] < t[0]
+        || t[3] < t[2]
+        || t[3] < t[0]
+    {
+        return None;
+    }
+    Some(PassTiming {
+        elapsed_ms: (t[3] - t[0]) as f64 * ms_per_tick,
+        vertex_ms: (t[1] - t[0]) as f64 * ms_per_tick,
+        fragment_ms: (t[3] - t[2]) as f64 * ms_per_tick,
+    })
+}
 struct Slot {
     draws: Obj<dyn MTLBuffer>,
     bones: Obj<dyn MTLBuffer>,
     pending: Option<Obj<dyn MTLCommandBuffer>>,
+    counters: Option<PassCounters>,
+    measured: GpuFrame,
+    pass_mask: u16,
+    clock_start: (u64, u64),
 }
 struct Previous {
     model_key: u64,
     transform: Mat4,
     palette: Arc<[Mat4]>,
     morph: [f32; 2],
+}
+#[derive(Clone, Copy)]
+enum DrawPass {
+    Shadow(usize),
+    Scene,
+    Opaque,
+    Transparent,
 }
 struct Prepared {
     uniform: usize,
@@ -89,6 +247,7 @@ struct Prepared {
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Stats {
     pub gpu_ms: f64,
+    pub completed: Option<GpuFrame>,
     pub draw_calls: usize,
     pub triangles: usize,
     pub culled: usize,
@@ -148,11 +307,17 @@ pub struct Renderer {
     pub scene_time: Option<f32>,
     pub inline_constants: bool,
     pub direct_drawable: bool,
+    /// Diagnostic only: separate scene encoders change tile load/store cost.
+    pub profile_scene: bool,
+    /// Diagnostic A/B sampling gate; buffers stay allocated and in-flight work stays intact.
+    pub sample_gpu_counters: bool,
     started: Instant,
     meshes: HashMap<(u64, usize), GpuMesh>,
     textures: HashMap<(String, bool), Obj<dyn MTLTexture>>,
     fallbacks: [Obj<dyn MTLTexture>; 5],
     slots: Vec<Slot>,
+    completed_frames: VecDeque<GpuFrame>,
+    counters_enabled: bool,
     frame: usize,
     pub stats: Stats,
     previous: HashMap<u64, Previous>,
@@ -511,6 +676,10 @@ impl Renderer {
                     )
                     .context("bone ring buffer")?,
                 pending: None,
+                counters: None,
+                measured: GpuFrame::default(),
+                pass_mask: 0,
+                clock_start: (0, 0),
             });
         }
         eprintln!(
@@ -567,11 +736,15 @@ impl Renderer {
             scene_time: None,
             inline_constants: true,
             direct_drawable: true,
+            profile_scene: false,
+            sample_gpu_counters: true,
             started: Instant::now(),
             meshes: HashMap::new(),
             textures: HashMap::new(),
             fallbacks: fallback.try_into().ok().unwrap(),
             slots,
+            completed_frames: VecDeque::with_capacity(64),
+            counters_enabled: false,
             frame: 0,
             stats: Stats::default(),
             previous: HashMap::new(),
@@ -769,6 +942,7 @@ impl Renderer {
     pub fn set_frames_in_flight(&mut self, n: usize) -> Result<()> {
         ensure!((1..=3).contains(&n), "frames in flight must be 1..3");
         self.wait()?;
+        let counters_enabled = self.counters_enabled;
         self.slots.clear();
         for _ in 0..n {
             self.slots.push(Slot {
@@ -787,8 +961,13 @@ impl Renderer {
                     )
                     .context("bone ring buffer")?,
                 pending: None,
+                counters: None,
+                measured: GpuFrame::default(),
+                pass_mask: 0,
+                clock_start: (0, 0),
             });
         }
+        self.set_gpu_counters(counters_enabled)?;
         Ok(())
     }
     pub fn attach(&mut self, view: &objc2_app_kit::NSView) {
@@ -970,13 +1149,7 @@ impl Renderer {
     ) -> Result<Stats> {
         self.look.validate()?;
         let slot = self.frame % self.slots.len();
-        if let Some(cb) = self.slots[slot].pending.take() {
-            cb.waitUntilCompleted();
-            if let Some(e) = cb.error() {
-                anyhow::bail!("GPU command failed: {e}")
-            }
-            self.stats.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
-        }
+        self.complete_slot(slot)?;
         let hud = self.hud.take();
         if let Some(hud) = &hud {
             if !hud.textures.set.is_empty() {
@@ -1236,8 +1409,21 @@ impl Renderer {
             }
         }
         let cb = self.queue.commandBuffer().context("frame command buffer")?;
+        let counters = self.slots[slot]
+            .counters
+            .as_ref()
+            .filter(|_| self.sample_gpu_counters);
+        let clock_start = counters
+            .map(|_| clock_pair(&self.device))
+            .unwrap_or_default();
+        let submitted_at = self.started.elapsed().as_secs_f64();
+        let mut pass_mask = 0u16;
         for cascade in 0..3 {
             let pass = MTLRenderPassDescriptor::new();
+            if let Some(c) = counters {
+                c.attach(&pass, cascade);
+                pass_mask |= 1 << cascade;
+            }
             let depth = pass.depthAttachment();
             depth.setTexture(Some(&self.shadow));
             depth.setSlice(cascade);
@@ -1256,78 +1442,111 @@ impl Renderer {
                 &prepared,
                 (&bones, &uniform_buffer, &mut uniform_used),
                 &f,
-                Some(cascade),
+                DrawPass::Shadow(cascade),
             )?;
             enc.endEncoding();
         }
-        let pass = MTLRenderPassDescriptor::new();
-        for i in 0..2 {
-            let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(i) };
-            let single = if i == 0 { &self.hdr } else { &self.motion };
-            let multi = if i == 0 {
-                &self.msaa
-            } else {
-                &self.motion_msaa
-            };
-            c.setTexture(Some(if self.samples == 1 { single } else { multi }));
-            if self.samples > 1 {
-                c.setResolveTexture(Some(single));
+        let split_scene = self.profile_scene && counters.is_some();
+        // MSAA depth cannot be stored/reloaded as a resolved depth texture here.
+        ensure!(
+            !split_scene || self.samples == 1,
+            "split scene profiling requires single-sample rendering"
+        );
+        for scene_part in 0..if split_scene { 3 } else { 1 } {
+            let first_scene_pass = scene_part == 0;
+            let pass_index = if split_scene { 7 + scene_part } else { 3 };
+            let pass = MTLRenderPassDescriptor::new();
+            if let Some(c) = counters {
+                c.attach(&pass, pass_index);
+                pass_mask |= 1 << pass_index;
             }
-            c.setLoadAction(MTLLoadAction::Clear);
-            c.setStoreAction(if self.samples > 1 {
-                MTLStoreAction::MultisampleResolve
-            } else {
-                MTLStoreAction::Store
-            });
-            c.setClearColor(if i == 0 {
-                MTLClearColor {
-                    red: self.look.sky[0] as f64,
-                    green: self.look.sky[1] as f64,
-                    blue: self.look.sky[2] as f64,
-                    alpha: 1.,
+            for i in 0..2 {
+                let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(i) };
+                let single = if i == 0 { &self.hdr } else { &self.motion };
+                let multi = if i == 0 {
+                    &self.msaa
+                } else {
+                    &self.motion_msaa
+                };
+                c.setTexture(Some(if self.samples == 1 { single } else { multi }));
+                if self.samples > 1 {
+                    c.setResolveTexture(Some(single));
                 }
-            } else {
-                MTLClearColor {
-                    red: 0.,
-                    green: 0.,
-                    blue: 800.,
-                    alpha: 0.,
-                }
-            });
-        }
-        pass.depthAttachment().setTexture(Some(&self.depth));
-        pass.depthAttachment().setClearDepth(1.);
-        pass.depthAttachment().setLoadAction(MTLLoadAction::Clear);
-        pass.depthAttachment().setStoreAction(MTLStoreAction::Store);
-        let enc = cb
-            .renderCommandEncoderWithDescriptor(&pass)
-            .context("scene encoder")?;
-        if self.surface_uniform.flags[2] > 0 {
-            enc.setRenderPipelineState(&self.sky_pipeline);
-            enc.setDepthStencilState(Some(&self.read_depth));
-            unsafe {
-                enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
-                enc.setFragmentBytes_length_atIndex(
-                    ptr(&self.surface_uniform),
-                    std::mem::size_of::<crate::surfaces::Uniform>(),
-                    3,
-                );
-                enc.setFragmentTexture_atIndex(Some(&self.surface_maps[4]), 11);
-                enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+                c.setLoadAction(if first_scene_pass {
+                    MTLLoadAction::Clear
+                } else {
+                    MTLLoadAction::Load
+                });
+                c.setStoreAction(if self.samples > 1 {
+                    MTLStoreAction::MultisampleResolve
+                } else {
+                    MTLStoreAction::Store
+                });
+                c.setClearColor(if i == 0 {
+                    MTLClearColor {
+                        red: self.look.sky[0] as f64,
+                        green: self.look.sky[1] as f64,
+                        blue: self.look.sky[2] as f64,
+                        alpha: 1.,
+                    }
+                } else {
+                    MTLClearColor {
+                        red: 0.,
+                        green: 0.,
+                        blue: 800.,
+                        alpha: 0.,
+                    }
+                });
             }
-            calls += 1;
-        }
+            pass.depthAttachment().setTexture(Some(&self.depth));
+            pass.depthAttachment().setClearDepth(1.);
+            pass.depthAttachment().setLoadAction(if first_scene_pass {
+                MTLLoadAction::Clear
+            } else {
+                MTLLoadAction::Load
+            });
+            pass.depthAttachment().setStoreAction(MTLStoreAction::Store);
+            let enc = cb
+                .renderCommandEncoderWithDescriptor(&pass)
+                .context("scene encoder")?;
+            if first_scene_pass && self.surface_uniform.flags[2] > 0 {
+                enc.setRenderPipelineState(&self.sky_pipeline);
+                enc.setDepthStencilState(Some(&self.read_depth));
+                unsafe {
+                    enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
+                    enc.setFragmentBytes_length_atIndex(
+                        ptr(&self.surface_uniform),
+                        std::mem::size_of::<crate::surfaces::Uniform>(),
+                        3,
+                    );
+                    enc.setFragmentTexture_atIndex(Some(&self.surface_maps[4]), 11);
+                    enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+                }
+                calls += 1;
+            }
 
-        calls += self.encode(
-            &enc,
-            draws,
-            &prepared,
-            (&bones, &uniform_buffer, &mut uniform_used),
-            &f,
-            None,
-        )?;
-        calls += self.fx_pass.decals(&enc, &fx, &f);
-        enc.endEncoding();
+            if !split_scene || scene_part != 0 {
+                calls += self.encode(
+                    &enc,
+                    draws,
+                    &prepared,
+                    (&bones, &uniform_buffer, &mut uniform_used),
+                    &f,
+                    if !split_scene {
+                        DrawPass::Scene
+                    } else if scene_part == 1 {
+                        DrawPass::Opaque
+                    } else {
+                        DrawPass::Transparent
+                    },
+                )?;
+            }
+            // Ground marks go last in the scene, over whatever they lie on.
+            if !split_scene || scene_part == 2 {
+                calls += self.fx_pass.decals(&enc, &fx, &f);
+            }
+            enc.endEncoding();
+        }
         let history_index = self.frame % 2;
         if let Some(scaler) = &self.metalfx {
             unsafe {
@@ -1345,6 +1564,10 @@ impl Renderer {
             }
         } else if self.temporal {
             let pass = MTLRenderPassDescriptor::new();
+            if let Some(c) = counters {
+                c.attach(&pass, 4);
+                pass_mask |= 1 << 4;
+            }
             let c = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
             c.setTexture(Some(&self.history[history_index]));
             c.setLoadAction(MTLLoadAction::DontCare);
@@ -1374,6 +1597,10 @@ impl Renderer {
             self.output.clone()
         };
         let output = MTLRenderPassDescriptor::new();
+        if let Some(c) = counters {
+            c.attach(&output, 5);
+            pass_mask |= 1 << 5;
+        }
         let c = unsafe { output.colorAttachments().objectAtIndexedSubscript(0) };
         c.setTexture(Some(&target));
         c.setLoadAction(MTLLoadAction::DontCare);
@@ -1408,7 +1635,11 @@ impl Renderer {
         );
         enc.endEncoding();
         if let Some(hud) = &hud {
-            calls += self.gui.paint(&cb, &target, hud, self.frame)?;
+            let hud_calls = self.gui.paint(&cb, &target, hud, self.frame, counters)?;
+            calls += hud_calls;
+            if counters.is_some() && hud_calls > 0 {
+                pass_mask |= 1 << 6;
+            }
         }
         if let Some(drawable) = &drawable {
             if !self.direct_drawable || capture.is_some() {
@@ -1484,6 +1715,17 @@ impl Renderer {
             self.stats.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
         }
         self.slots[slot].pending = Some(cb);
+        self.slots[slot].measured = GpuFrame {
+            frame: self.frame,
+            counters_sampled: pass_mask != 0,
+            elapsed_seconds: submitted_at,
+            draw_calls: calls,
+            visible_triangles: triangles,
+            allocated_gpu_bytes: self.device.currentAllocatedSize(),
+            ..Default::default()
+        };
+        self.slots[slot].pass_mask = pass_mask;
+        self.slots[slot].clock_start = clock_start;
         self.previous = new_previous;
         self.previous_vp = unjittered;
         self.previous_camera = Some(camera);
@@ -1508,8 +1750,12 @@ impl Renderer {
             &mut usize,
         ),
         f: &Frame,
-        cascade: Option<usize>,
+        selection: DrawPass,
     ) -> Result<usize> {
+        let cascade = match selection {
+            DrawPass::Shadow(i) => Some(i),
+            _ => None,
+        };
         let (bones, uniform_buffer, packed_used) = buffers;
         unsafe {
             enc.setVertexBytes_length_atIndex(ptr(f), std::mem::size_of::<Frame>(), 1);
@@ -1534,6 +1780,11 @@ impl Renderer {
         let mut visible: Vec<_> = prepared
             .iter()
             .filter(|p| cascade.map_or(p.scene, |c| p.shadows[c]))
+            .filter(|p| match selection {
+                DrawPass::Opaque => !self.blended(&draws[p.draw]),
+                DrawPass::Transparent => self.blended(&draws[p.draw]),
+                _ => true,
+            })
             .collect();
         // Repeated opaque rigid meshes share an instanced draw. Each instance keeps its
         // own current/previous transforms (including spinning scenery) in packed constants.
@@ -1708,15 +1959,69 @@ impl Renderer {
             .map(|(_, t)| t)
             .collect()
     }
+    /// Counters are optional; unsupported devices return a descriptive error without changing rendering.
+    pub fn set_gpu_counters(&mut self, enabled: bool) -> Result<()> {
+        if enabled == self.counters_enabled
+            && self.slots.iter().all(|s| s.counters.is_some() == enabled)
+        {
+            return Ok(());
+        }
+        self.wait()?;
+        let buffers = if enabled {
+            (0..self.slots.len())
+                .map(|_| PassCounters::new(&self.device))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        let mut buffers = buffers.into_iter();
+        for slot in &mut self.slots {
+            slot.counters = buffers.next();
+        }
+        self.counters_enabled = enabled;
+        Ok(())
+    }
+    pub fn gpu_counters_enabled(&self) -> bool {
+        self.counters_enabled
+    }
+    pub fn take_completed_frames(&mut self) -> impl Iterator<Item = GpuFrame> + '_ {
+        self.completed_frames.drain(..)
+    }
+    fn complete_slot(&mut self, index: usize) -> Result<()> {
+        let slot = &mut self.slots[index];
+        let Some(cb) = slot.pending.take() else {
+            return Ok(());
+        };
+        cb.waitUntilCompleted();
+        if let Some(e) = cb.error() {
+            anyhow::bail!("GPU command failed: {e}");
+        }
+        let mut measured = slot.measured;
+        measured.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
+        if slot.pass_mask != 0
+            && let Some(counters) = &slot.counters
+        {
+            measured.passes =
+                counters.resolve(slot.pass_mask, slot.clock_start, clock_pair(&self.device));
+        }
+        if self
+            .stats
+            .completed
+            .is_none_or(|previous| previous.frame <= measured.frame)
+        {
+            self.stats.gpu_ms = measured.gpu_ms;
+            self.stats.completed = Some(measured);
+        }
+        if self.completed_frames.len() == 64 {
+            self.completed_frames.pop_front();
+        }
+        self.completed_frames.push_back(measured);
+        Ok(())
+    }
     pub fn wait(&mut self) -> Result<()> {
-        for s in &mut self.slots {
-            if let Some(cb) = s.pending.take() {
-                cb.waitUntilCompleted();
-                self.stats.gpu_ms = (cb.GPUEndTime() - cb.GPUStartTime()) * 1000.;
-                if let Some(e) = cb.error() {
-                    anyhow::bail!("GPU command failed: {e}")
-                }
-            }
+        // Slots may wrap, so completion consumers identify samples by submitted frame number.
+        for i in 0..self.slots.len() {
+            self.complete_slot(i)?;
         }
         Ok(())
     }
@@ -1784,6 +2089,228 @@ fn texture_array(
 #[cfg(test)]
 mod temporal_tests {
     use super::*;
+    /// Hosted macOS uses a paravirtual GPU. Verify the real fallback there; never
+    /// swallow allocation/sampling failures on hardware that advertises support.
+    fn counter_device_or_verify_fallback(r: &mut Renderer) -> bool {
+        if r.device
+            .supportsCounterSampling(MTLCounterSamplingPoint::AtStageBoundary)
+        {
+            return true;
+        }
+        assert!(r.set_gpu_counters(true).is_err());
+        assert!(!r.gpu_counters_enabled());
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        let frame = r.take_completed_frames().next().unwrap();
+        assert!(!frame.counters_sampled);
+        assert!(frame.passes.iter().all(Option::is_none));
+        assert!(
+            frame.draw_calls > 0,
+            "rendering must continue without counters"
+        );
+        eprintln!(
+            "Verified unavailable-counter fallback on {}; timestamp and split-pass assertions require a physical counter-capable GPU",
+            r.device.name()
+        );
+        false
+    }
+
+    #[test]
+    fn timestamp_decode_rejects_errors_and_handles_overlapping_stages() {
+        assert!(decode_pass([1, 2, 3, u64::MAX], 1.).is_none());
+        assert!(decode_pass([0, 2, 3, 4], 1.).is_none());
+        assert!(decode_pass([4, 3, 2, 1], 1.).is_none());
+        assert!(decode_pass([1, 2, 3, 4], f64::NAN).is_none());
+        let timing = decode_pass([10, 30, 20, 50], 0.001).unwrap();
+        assert_eq!(timing.elapsed_ms, 0.04);
+        assert_eq!(timing.vertex_ms, 0.02);
+        assert_eq!(timing.fragment_ms, 0.03);
+    }
+    #[test]
+    fn gpu_counters_follow_completed_slots_and_never_reuse_missing_passes() {
+        let mut r = Renderer::new(64, 64, 1.).unwrap();
+        r.set_frames_in_flight(3).unwrap();
+        if !counter_device_or_verify_fallback(&mut r) {
+            return;
+        }
+        r.set_gpu_counters(true).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        let terrain = crate::terrain::valley();
+        let draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        for _ in 0..7 {
+            r.draw(camera, &draws, None).unwrap();
+        }
+        r.wait().unwrap();
+        let mut frames: Vec<_> = r.take_completed_frames().collect();
+        frames.sort_by_key(|f| f.frame);
+        assert_eq!(
+            frames.iter().map(|f| f.frame).collect::<Vec<_>>(),
+            (0..7).collect::<Vec<_>>()
+        );
+        for f in &frames {
+            assert!(f.gpu_ms > 0.);
+            assert!(f.allocated_gpu_bytes > 0);
+            for i in [3, 4, 5] {
+                let timing = f.passes[i].unwrap_or_else(|| {
+                    panic!(
+                        "frame {} pass {i} has no timestamps: {:?}",
+                        f.frame, f.passes
+                    )
+                });
+                assert!(timing.elapsed_ms >= timing.vertex_ms);
+                assert!(timing.elapsed_ms >= timing.fragment_ms);
+                assert!(
+                    timing.elapsed_ms <= f.gpu_ms + 1.,
+                    "pass {i} {timing:?}, frame GPU {}",
+                    f.gpu_ms
+                );
+            }
+            assert!(
+                f.passes[6].is_none(),
+                "absent HUD must not reuse old samples"
+            );
+        }
+        r.set_gpu_counters(false).unwrap();
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert!(
+            r.take_completed_frames()
+                .next()
+                .unwrap()
+                .passes
+                .iter()
+                .all(Option::is_none)
+        );
+        r.set_gpu_counters(true).unwrap();
+        r.set_frames_in_flight(1).unwrap();
+        r.resize(96, 64).unwrap();
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert!(r.take_completed_frames().next().unwrap().passes[4].is_some());
+        r.wait().unwrap();
+        assert_eq!(r.take_completed_frames().count(), 0);
+    }
+
+    fn output_bytes(r: &Renderer) -> Vec<u8> {
+        let row = r.width as usize * 4;
+        let size = row * r.height as usize;
+        let buffer = r
+            .device
+            .newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared)
+            .unwrap();
+        let cb = r.queue.commandBuffer().unwrap();
+        let enc = cb.blitCommandEncoder().unwrap();
+        unsafe {
+            enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                &r.output, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 },
+                MTLSize { width: r.width as usize, height: r.height as usize, depth: 1 },
+                &buffer, 0, row, size);
+        }
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        assert!(cb.error().is_none());
+        unsafe {
+            std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), size).to_vec()
+        }
+    }
+    #[test]
+    fn diagnostic_scene_split_preserves_supplied_surfaces_and_hud_samples_expire() {
+        let mut r = Renderer::with_samples(256, 256, 1., 1).unwrap();
+        if !counter_device_or_verify_fallback(&mut r) {
+            return;
+        }
+        r.scene_time = Some(0.);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        r.look = LookSettings::load(&root.join("catalog/look.json")).unwrap();
+        r.load_surface_assets(&root.join("catalog/surfaces.json"), &root)
+            .unwrap();
+        let terrain = crate::terrain::valley();
+        let draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let camera = Camera {
+            eye: Vec3::new(0., 30., 30.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        let normal = r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let before = output_bytes(&r);
+        r.set_gpu_counters(true).unwrap();
+        r.profile_scene = true;
+        let split = r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let after = output_bytes(&r);
+        assert_eq!(normal.draw_calls, split.draw_calls);
+        assert_eq!(normal.triangles, split.triangles);
+        assert_eq!(
+            before, after,
+            "profiling must not change the rendered pixels"
+        );
+        let frame = r.stats.completed.unwrap();
+        for i in [7, 8, 9] {
+            assert!(frame.passes[i].is_some(), "missing split pass {i}");
+        }
+        assert!(frame.passes[3].is_none());
+        assert!(frame.passes[4].is_none(), "AA disabled, no stale TAA data");
+        let ctx = egui::Context::default();
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.label("Performance test");
+            });
+        });
+        r.hud = Some(crate::gui::HudFrame {
+            primitives: ctx.tessellate(output.shapes, output.pixels_per_point),
+            textures: output.textures_delta,
+            pixels_per_point: output.pixels_per_point,
+        });
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert!(r.stats.completed.unwrap().passes[6].is_some());
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert!(r.stats.completed.unwrap().passes[6].is_none());
+    }
     #[test]
     fn static_scene_motion_excludes_halton_jitter() {
         let mut r = Renderer::new(64, 64, 1.).unwrap();

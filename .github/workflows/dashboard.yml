@@ -1,0 +1,48 @@
+# Checks the live dashboard (dashboard/) and the attach-visuals script whose posts it reads: types,
+# tests (including a round trip through scripts/attach_visuals.py) and the Vercel build. Vercel
+# builds and deploys the dashboard itself; this only makes sure a PR doesn't break it.
+name: Dashboard
+
+on:
+  pull_request:
+    paths:
+      - dashboard/**
+      - scripts/attach_visuals.py
+      - .github/workflows/dashboard.yml
+  push:
+    branches: [main]
+    paths:
+      - dashboard/**
+      - scripts/attach_visuals.py
+      - .github/workflows/dashboard.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Dashboard (types, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - name: Types
+        run: npm run check
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build

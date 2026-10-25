@@ -1,0 +1,26 @@
+// Towns, what their shops pay more for, and the shops. Shops sell at an item's value and pay
+// SELL_SHARE of it, times the town's demand for its tags. Counters are placeholders by the
+// village houses until the shopkeepers and their buildings exist (#125, #128).
+(
+    towns: [
+        // A farming village by the woods: hides for the tanner.
+        (key: "brambleford", name: "Brambleford", demand: [("hide", 1.5)]),
+    ],
+    shops: [
+        (
+            key: "brambleford_store",
+            name: "Brambleford General Store",
+            town: "brambleford",
+            at: (17.0, -18.0),
+            sells: ["bread", "healing_draught", "padded_coat", "leather_jerkin", "dagger.hunting", "bow.hunting", "wand.yew"],
+        ),
+        (
+            key: "brambleford_smith",
+            name: "Brambleford Smithy",
+            town: "brambleford",
+            at: (-12.0, -7.5),
+            sells: ["sword.arming", "axe.bearded", "mace.flanged", "shield.round", "copper_ore"],
+            buys: ["metal", "ore"],
+        ),
+    ],
+)

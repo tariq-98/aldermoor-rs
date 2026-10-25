@@ -34,12 +34,31 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
 - If you are blocked, add `status:blocked` and comment why.
 - CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests on Linux for the portable crates and
   on macOS for `render` and `client`. Keep it green; run the same commands locally before pushing.
-  `perf.yml` reports sim step times and never blocks a merge.
+  `perf.yml` reports sim step times and never blocks a merge. `dashboard.yml` checks the dashboard
+  when a PR touches it.
 - Issues labelled `perf` need before and after numbers against the budgets in
   [docs/PERFORMANCE.md](docs/PERFORMANCE.md) (12 ms GPU on the M1 Air's own screen at 75% render
   scale, 2 ms sim step).
 - Issues labelled `needs-mac` must be checked on the Mac. A cloud agent can do the code but must
   say in the PR that it was not run.
+
+## Sharing the Mac
+
+Several agents run on Chippy's Mac at once, and two timed runs on its GPU at the same time give
+void numbers (one overlapping run read 25 fps). Before any benchmark, fps comparison, `--benchmark`
+or timed smoke run, take the shared GPU lock, and release it as soon as the run ends:
+
+```sh
+until mkdir /tmp/aldermoor-gpu.lock 2>/dev/null; do sleep 30; done
+echo "<agent> <issue> $(date -u +%FT%TZ)" > /tmp/aldermoor-gpu.lock/owner
+# ... the timed run ...
+rm -f /tmp/aldermoor-gpu.lock/owner && rmdir /tmp/aldermoor-gpu.lock
+```
+
+`mkdir` either creates the folder or fails, so only one agent holds it. Release it even when the
+run fails. Builds, tests and captures that aren't timed don't need it. If the lock has been held
+for more than 30 minutes, read `owner` and say so on your issue (or to the coordinator) instead of
+removing someone else's lock.
 
 ## Finish or hand back
 
@@ -56,6 +75,24 @@ Every agent posts as the same GitHub user, so the assignee field cannot tell age
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are
   taking it, then claim it as above.
+
+## Visuals
+
+Chippy reviews most work from a phone, in the dashboard ([dashboard/](dashboard/README.md)). Its
+Visuals tab collects every capture posted in the standard format, so anything you can see needs
+captures there:
+
+- A PR that changes something visible (looks, terrain, materials, effects, HUD, animation, camera)
+  gets screenshots or a short video of its latest commit, posted on the PR with the
+  `attach-visuals` skill. When it changes how something looks, put main and the branch side by
+  side from the same camera. Cloud sessions can't upload files, so they ask for a Mac check
+  through the coordinator instead.
+- Every Mac check posts its captures the same way, with `--verdict pass` or `fail` and `--head`
+  set to the commit it built.
+- After a push that changes how it looks, post again. The dashboard flags captures of an older
+  commit than the PR's latest.
+- Codex doesn't post captures (no image files, see Ownership). It says in the PR what to look at,
+  and the Mac check captures it.
 
 ## Ownership
 
@@ -86,9 +123,10 @@ Edit that file, not the GitHub UI, and the Tracking workflow applies it on merge
 
 ## Step by step
 
-Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue` and
-`finish-issue`. Claude Code loads them from there and Codex from `.agents/skills`, which links to
-the same folder. They cover both the `gh` CLI and the GitHub MCP tools.
+Skills for each step live in [.claude/skills](.claude/skills): `claim-issue`, `file-issue`,
+`finish-issue` and `attach-visuals`. Claude Code loads them from there and Codex from
+`.agents/skills`, which links to the same folder. They cover both the `gh` CLI and the GitHub MCP
+tools.
 
 ## Codex
 
@@ -98,6 +136,8 @@ Codex owns `area:render` issues (see Ownership) and can pick up others when the 
   `network_access = true` under `[sandbox_workspace_write]` in `~/.codex/config.toml`, or approve
   the command). Then claim and finish exactly as above, signing claims `codex`. Name branches
   `codex/<issue number>-<short-slug>` so the Codex guard check applies.
+- Take the shared GPU lock (see [Sharing the Mac](#sharing-the-mac)) around every benchmark or
+  timed run on the Mac.
 - **Codex cloud** has no GitHub access while it works. Start the task with the issue number
   ("Work on #12"), and whoever starts it posts `Claimed by codex (cloud)` on the issue. Codex
   writes `Closes #12` in the PR description; the Tracking workflow moves the labels from there. Mac-only

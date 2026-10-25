@@ -38,7 +38,7 @@ fn you_can_kill_a_wolf_and_it_comes_back() {
         let (h, w) = (sim.get::<Transform>(hero).unwrap().pos, sim.get::<Transform>(wolf).unwrap().pos);
         let to = Vec2::new(w.x - h.x, w.z - h.z);
         let dir = if to.length() > 1.8 { to.normalize() } else { Vec2::ZERO };
-        sim.command(hero, Command::Move { direction: dir, walk: false, face_yaw: None });
+        sim.command(hero, Command::Move { direction: dir, walk: false, sprint: false, face_yaw: None });
         sim.command(hero, Command::UseSlot { slot: 0, ground: None });
         sim.step();
         events.extend(sim.snapshot(Some(hero)).events);
@@ -50,7 +50,7 @@ fn you_can_kill_a_wolf_and_it_comes_back() {
     assert!(died, "the wolf survived");
     assert!(events.iter().any(|e| matches!(e, Event::Died { unit, killer: Some(k) } if *unit == wolf && *k == hero)));
     assert!(sim.get::<Vitals>(hero).unwrap().health > 0.0, "the hero fell");
-    sim.command(hero, Command::Move { direction: Vec2::new(0.0, 1.0), walk: false, face_yaw: None });
+    sim.command(hero, Command::Move { direction: Vec2::new(0.0, 1.0), walk: false, sprint: false, face_yaw: None });
     sim.run_for(21.0);
     assert!(!sim.get::<Vitals>(wolf).unwrap().dead, "the wolf didn't come back");
 }
@@ -65,7 +65,7 @@ fn monsters_give_up_far_from_home_and_heal() {
     sim.command(hero, Command::UseSlot { slot: 0, ground: None });
     sim.run_for(0.2);
     // Run east, far past the leash.
-    sim.command(hero, Command::Move { direction: Vec2::new(1.0, 0.0), walk: false, face_yaw: None });
+    sim.command(hero, Command::Move { direction: Vec2::new(1.0, 0.0), walk: false, sprint: false, face_yaw: None });
     let mut gave_up = false;
     for _ in 0..(15 * 60) {
         sim.step();
@@ -87,7 +87,7 @@ fn the_same_seed_and_commands_give_the_same_world() {
         let mut frames = Vec::new();
         for step in 0..900u32 {
             match step {
-                10 => sim.command(hero, Command::Move { direction: Vec2::new(0.3, 1.0), walk: false, face_yaw: None }),
+                10 => sim.command(hero, Command::Move { direction: Vec2::new(0.3, 1.0), walk: false, sprint: false, face_yaw: None }),
                 120 => sim.command(hero, Command::Jump),
                 200 => sim.command(hero, Command::Dodge { direction: Vec2::new(1.0, 0.0) }),
                 300 => sim.command(hero, Command::SetAutoAttack(true)),

@@ -1,10 +1,12 @@
 # Aldermoor: the agreed game design
 
 Settled with Tariq in the design interview with Codex on 23 October 2026: 54 questions, every
-recommendation accepted, plus the no-spiders rule. The direction is **Breath of the Wild-inspired
-visuals, RuneScape-like freedom and progression, and a modular character system where equipment
-fits and behaves correctly.** Names, numbers, recipes, quests and item counts stay provisional
-until a coherent draft is reviewed.
+recommendation accepted, plus the no-spiders rule. The direction is **RuneScape-like freedom and
+progression, a modular character system where equipment fits and behaves correctly, and a look
+drawn from RuneScape, Guild Wars, Breath of the Wild and League of Legends, with Hogwarts Legacy's
+buildings and roads** (Chippy, 25 October 2026, in place of "Breath of the Wild-inspired visuals";
+the rules are in [ART.md](ART.md)). Names, numbers, recipes, quests and item counts stay
+provisional until a coherent draft is reviewed.
 
 ## Characters
 
@@ -135,8 +137,10 @@ until a coherent draft is reviewed.
   boss.
 - **Dialogue:** written conversations, expressive poses and short vocal reactions; full voice
   acting is a later decision.
-- **Performance:** a smooth 60 fps during gameplay. Shadows, foliage density and distant detail
-  adjust as needed, while nearby characters and gear keep their quality.
+- **Performance:** a smooth 60 fps during gameplay on the MacBook Air M1's own screen
+  (2560×1600 at 75% render scale, 12 ms GPU); a 5120×1440 ultrawide is best effort. Shadows,
+  foliage density and distant detail adjust as needed, while nearby characters and gear keep their
+  quality. Budgets are in [PERFORMANCE.md](PERFORMANCE.md).
 - **Assets:** free and paid licensed assets are acceptable starting points, adapted to one visual
   direction. Paid ones are presented with cost and licence before any purchase.
 - **Quality first:** before the full catalogue is made, Tariq reviews an interactive character

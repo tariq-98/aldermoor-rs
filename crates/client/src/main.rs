@@ -4,6 +4,7 @@ mod effects;
 mod hud;
 mod interpolate;
 mod menu;
+mod perf_overlay;
 mod stage;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
@@ -30,6 +31,7 @@ use winit::{
 };
 
 struct Options {
+    perf: perf_overlay::Options,
     assets: PathBuf,
     width: u32,
     height: u32,
@@ -62,7 +64,6 @@ struct Options {
     look_settings: Option<PathBuf>,
     surface_assets: Option<PathBuf>,
     hud_font: Option<PathBuf>,
-    specialty: server::Specialty,
     metalfx: bool,
     direct_drawable: bool,
     legacy_cpu: bool,
@@ -75,6 +76,7 @@ struct Options {
 impl Options {
     fn read() -> Result<Self> {
         let mut o = Self {
+            perf: perf_overlay::Options::default(),
             assets: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
             width: 1600,
             height: 1000,
@@ -101,7 +103,6 @@ impl Options {
             look_settings: None,
             surface_assets: None,
             hud_font: None,
-            specialty: server::Specialty::Warrior,
             metalfx: false,
             direct_drawable: true,
             legacy_cpu: false,
@@ -168,6 +169,10 @@ impl Options {
                 "--reset-on-look" => o.reset_on_look = true,
                 "--output-blit" => o.direct_drawable = false,
                 "--benchmark" => o.benchmark = true,
+                "--no-gpu-counters" => o.perf.disabled = true,
+                "--gpu-profile-scene" => o.perf.split_scene = true,
+                "--counter-overhead" => o.perf.overhead_check = true,
+                "--perf-overlay" => o.perf.visible = true,
                 "--shared-constants" => o.inline_constants = false,
                 "--fullscreen" => o.fullscreen = true,
                 "--look-settings" => {
@@ -180,18 +185,6 @@ impl Options {
                 }
                 "--hud-font" => {
                     o.hud_font = Some(args.next().context("--hud-font needs a file")?.into())
-                }
-                "--specialty" => {
-                    let name = args
-                        .next()
-                        .context("--specialty needs a name")?
-                        .to_lowercase();
-                    o.specialty = server::Specialty::ALL
-                        .into_iter()
-                        .find(|s| format!("{s:?}").to_lowercase() == name)
-                        .context(
-                            "--specialty is warrior, archer, mage, necromancer, rogue or healer",
-                        )?;
                 }
                 "--offscreen" => o.offscreen = true,
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
@@ -225,7 +218,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N --specialty NAME\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -249,6 +242,7 @@ impl Options {
                 .is_none_or(|fps| fps.is_finite() && (1.0..=240.).contains(&fps)),
             "--fps must be 1..240"
         );
+        o.perf.validate(o.samples)?;
         o.look_settings = catalog_file(&o.assets, "look.json", o.look_settings);
         o.surface_assets = catalog_file(&o.assets, "surfaces.json", o.surface_assets);
         Ok(o)
@@ -297,14 +291,19 @@ struct Game {
     intervals: Vec<f64>,
     finished_at: Instant,
     smoke_stage: usize,
+    /// Sim tick the last smoke stage went out on.
+    smoke_tick: Option<u64>,
     events: usize,
     smoke_start: Vec3,
     smoke_checks: [bool; 4],
+    perf: perf_overlay::Overlay,
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
     platform_output: Option<egui::PlatformOutput>,
     fight: Arc<protocol::CombatView>,
     feedback: combat::Feedback,
+    /// Messages from the sim ("You can't fight while swimming."), with seconds left on screen.
+    messages: Vec<(String, f32)>,
     cursor: Vec2,
     viewport: Vec2,
     aim_slot: Option<u8>,
@@ -320,7 +319,7 @@ struct Game {
 impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
-        let host = server::Host::start_as(0xa1de, "Traveller", options.specialty);
+        let host = server::Host::start(0xa1de, "Traveller");
         let settings_path = options.controls.clone().unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
                 .join("Library/Application Support/Aldermoor/controls.json")
@@ -342,6 +341,7 @@ impl Game {
         let first = host.snapshot().unwrap();
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
+            perf: perf_overlay::Overlay::new(&options.perf),
             options,
             host,
             snaps: interpolate::Snapshots::new(first),
@@ -372,6 +372,7 @@ impl Game {
             intervals: Vec::new(),
             finished_at: Instant::now(),
             smoke_stage: 0,
+            smoke_tick: None,
             events: 0,
             smoke_start,
             smoke_checks: [false; 4],
@@ -380,6 +381,7 @@ impl Game {
             platform_output: None,
             fight: Arc::new(protocol::CombatView::default()),
             feedback: combat::Feedback::default(),
+            messages: Vec::new(),
             cursor: Vec2::ZERO,
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
@@ -459,7 +461,7 @@ impl Game {
             right: self.down(C::Right),
             strafe_left: self.down(C::StrafeLeft),
             strafe_right: self.down(C::StrafeRight),
-            walk: self.down(C::Walk),
+            sprint: self.down(C::Sprint),
             mouse_look: self.mouse_look,
             orbiting: self.orbiting,
         }
@@ -475,6 +477,10 @@ impl Game {
             C::Guard => Some(Command::Guard(true)),
             C::Autorun => {
                 self.pilot.toggle_autorun();
+                None
+            }
+            C::Walk => {
+                self.pilot.toggle_walk();
                 None
             }
             C::FreePointer => {
@@ -589,12 +595,12 @@ impl Game {
         let l = |c| self.settings.bindings.label(c);
         let hint = match self.pilot.scheme {
             controls::Scheme::Action => format!(
-                "{}{}{}{} · {} walk · {} jump · {} roll · Hold {} guard · {} revive · Hold {} for the pointer · Esc controls",
+                "{}{}{}{} · {} sprint · {} jump · {} roll · Hold {} guard · {} revive · Hold {} for the pointer · Esc controls",
                 l(C::Forward),
                 l(C::Left),
                 l(C::Back),
                 l(C::Right),
-                l(C::Walk),
+                l(C::Sprint),
                 l(C::Jump),
                 l(C::Roll),
                 l(C::Guard),
@@ -789,23 +795,24 @@ impl Game {
             })
             .map(|u| u.id)
     }
+    /// Seconds of sim time since the last smoke stage went out.
+    fn smoke_wait(&self) -> f32 {
+        let tick = self.snaps.current.tick;
+        self.smoke_tick
+            .map_or(f32::INFINITY, |t| tick.saturating_sub(t) as f32 / 60.)
+    }
     fn smoke(&mut self) {
-        let elapsed = self.start.elapsed().as_secs_f32();
-        let schedule = [
-            (0., 0),
-            (0.8, 1),
-            (2.0, 2),
-            (3.0, 3),
-            (6.0, 4),
-            (7.0, 5),
-            (8.0, 6),
-            (9.0, 7),
-        ];
-        while self.smoke_stage < schedule.len() && elapsed >= schedule[self.smoke_stage].0 {
-            match schedule[self.smoke_stage].1 {
+        // Seconds of sim time each stage waits after the one before. Waiting from the previous
+        // stage, one stage a frame, means a slow frame (the first can take seconds under GPU
+        // load) delays the rest instead of sending several stages on the same tick.
+        let schedule = [0., 0.8, 1.2, 1.0, 3.0, 1.0, 1.0, 1.0];
+        if self.smoke_stage < schedule.len() && self.smoke_wait() >= schedule[self.smoke_stage] {
+            self.smoke_tick = Some(self.snaps.current.tick);
+            match self.smoke_stage {
                 0 => self.host.send(Command::Move {
                     direction: Vec2::new(-1., 0.),
                     walk: false,
+                    sprint: false,
                     face_yaw: None,
                 }),
                 1 => self.host.send(Command::Jump),
@@ -824,13 +831,23 @@ impl Game {
                 _ => self.host.send(Command::Move {
                     direction: Vec2::ZERO,
                     walk: false,
+                    sprint: false,
                     face_yaw: None,
                 }),
             }
             self.smoke_stage += 1;
         }
+        // The sim drops a jump on a tick the player isn't grounded and a swap it refuses, so keep
+        // asking until the event arrives (jump until the dodge, swap until the run ends).
+        if (2..=3).contains(&self.smoke_stage) && !self.smoke_checks[0] {
+            self.host.send(Command::Jump);
+        }
+        if self.smoke_stage == schedule.len() && !self.smoke_checks[3] {
+            self.host.send(Command::SwapWeapons);
+        }
     }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
+        perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -847,6 +864,10 @@ impl Game {
             }
         }
         self.feedback.update(dt);
+        for m in &mut self.messages {
+            m.1 -= dt;
+        }
+        self.messages.retain(|m| m.1 > 0.);
         if self.options.smoke {
             self.smoke()
         } else {
@@ -863,6 +884,14 @@ impl Game {
                 && self.stage.is_none()
             {
                 fx.event(&e, event_time);
+            }
+            if let protocol::Event::Message { text } = &e {
+                // The same refusal repeated just refreshes its timer.
+                self.messages.retain(|m| m.0 != *text);
+                self.messages.push((text.clone(), 3.));
+                if self.messages.len() > 3 {
+                    self.messages.remove(0);
+                }
             }
             if let protocol::Event::Rallied { unit } | protocol::Event::Revived { unit } = &e
                 && let Some(c) = self.characters.get_mut(unit)
@@ -1020,7 +1049,10 @@ impl Game {
             .find(|u| u.id == self.host.player)
             .context("no local player in snapshot")?;
         self.frame += 1;
-        let done = self.options.frames.is_some_and(|n| self.frame >= n);
+        // A smoke run also lasts until its schedule has played out, plus a second for the last
+        // events, so a short --frames or slow frames can't end it early.
+        let done = self.options.frames.is_some_and(|n| self.frame >= n)
+            && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.);
         let frame_file = self
             .options
             .sequence
@@ -1120,10 +1152,13 @@ impl Game {
                 paint_caption(ctx, stage::shot(self.reel_time).caption);
             } else {
                 actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
+                hud::messages(ctx, &self.messages);
             }
             if crosshair {
                 paint_crosshair(ctx);
             }
+            self.perf
+                .draw(ctx, self.host.stats().step_ms, r.gpu_counters_enabled());
             if let Some(m) = &self.menu {
                 changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
             }
@@ -1156,6 +1191,12 @@ impl Game {
             stats = r.stats;
         }
         let finished = Instant::now();
+        self.perf.collect(
+            r,
+            (finished - now).as_secs_f64() * 1000.,
+            self.options.warmup,
+            self.options.benchmark,
+        );
         if self.frame > self.options.warmup && !done {
             self.gpu.push(stats.gpu_ms);
             self.intervals
@@ -1180,6 +1221,15 @@ impl Game {
         }
         if done {
             r.wait()?;
+            self.perf.collect(
+                r,
+                (finished - now).as_secs_f64() * 1000.,
+                self.options.warmup,
+                self.options.benchmark,
+            );
+            if self.options.benchmark {
+                self.perf.report(r.gpu_counters_enabled());
+            }
             eprintln!("HISTORY resets={}", r.stats.history_resets);
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
@@ -1236,11 +1286,16 @@ impl Game {
             }
             if self.options.smoke {
                 let moved = player.position.distance(self.smoke_start);
+                let missing: Vec<_> = ["jump", "dodge", "damage", "swap"]
+                    .into_iter()
+                    .zip(self.smoke_checks)
+                    .filter(|(_, seen)| !seen)
+                    .map(|(name, _)| name)
+                    .collect();
                 ensure!(
-                    moved > 2. && self.smoke_checks.iter().all(|x| *x),
-                    "smoke did not exercise simulation: moved={moved}, events={}, jump/dodge/damage/swap={:?}",
-                    self.events,
-                    self.smoke_checks
+                    moved > 2. && missing.is_empty(),
+                    "smoke did not exercise simulation: moved={moved:.2}m (needs 2), events={}, no event for {missing:?}",
+                    self.events
                 );
                 eprintln!("SMOKE PASS moved={moved:.2}m events={}", self.events);
             }
@@ -1572,6 +1627,7 @@ impl ApplicationHandler for App {
                 anyhow::bail!("Aldermoor requires macOS")
             };
             r.set_frames_in_flight(self.game.options.in_flight)?;
+            perf_overlay::Overlay::configure(&mut r, &self.game.options.perf);
             r.enable_metalfx(self.game.options.metalfx)?;
             if let Some(path) = &self.game.options.look_settings {
                 r.look = render::settings::LookSettings::load(path)?;
@@ -1630,6 +1686,9 @@ impl ApplicationHandler for App {
                 self.game.bind_captured(input);
                 return;
             }
+        }
+        if self.game.perf.event(&event) {
+            return;
         }
         if let (Some(state), Some(window)) = (&mut self.egui_state, &self.window) {
             let response = state.on_window_event(window, &event);
@@ -1794,6 +1853,7 @@ fn main() -> Result<()> {
             game.options.samples,
         )?;
         renderer.set_frames_in_flight(game.options.in_flight)?;
+        perf_overlay::Overlay::configure(&mut renderer, &game.options.perf);
         renderer.enable_metalfx(game.options.metalfx)?;
         if let Some(path) = &game.options.look_settings {
             renderer.look = render::settings::LookSettings::load(path)?;
