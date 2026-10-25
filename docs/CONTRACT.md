@@ -190,17 +190,16 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
 
 ## Input the client sends
 
-- **Movement keys:** a world-space direction, sent as `Move` whenever it changes. In the default
-  Classic scheme the client keeps the character's heading (A/D turn it, the right mouse button
-  sets it to the camera's yaw) and always sends it as `face_yaw`, so S backpedals and Q/E strafe.
-  In the Action scheme WASD points from the camera's yaw, and `face_yaw` goes only while the
-  right mouse button is held (mouse-look strafing).
+- **Movement keys:** a world-space direction, sent as `Move` whenever it changes, always with the
+  character's heading as `face_yaw`, so S backpedals and sideways keys strafe. In the default
+  Action scheme the heading is the camera's yaw (the mouse always looks). In the Classic scheme
+  A/D turn it, and the right mouse button sets it to the camera's yaw.
 - **Space:** `Jump`.
-- **Dodge key:** `Dodge` (a zero direction rolls backwards).
+- **Dodge key** (Alt, V or mouse button 4): `Dodge` the way the keys point (a zero direction rolls backwards).
 - **Tab or clicking a unit:** `SetTarget`. Right-clicking an enemy: `SetTarget` plus
   `SetAutoAttack(true)`.
-- **1–9 and 0:** `UseSlot` 0–9. Send `ground` with the point under the cursor (or the centre of
-  the screen with mouse-look): ground skills land there, and straight-flying shots fly at it, so
+- **1–9 and 0:** `UseSlot` 0–9. Send `ground` with the point under the crosshair (the centre of
+  the screen) while the mouse is looking, otherwise under the cursor: ground skills land there, and straight-flying shots fly at it, so
   a player can lead a moving target. Show slots with `ground` as a circle of the skill's radius
   following the cursor.
 - **Guard:** hold a key (`F`, or mouse button 5; Q and E strafe): `Guard(true)` on press,

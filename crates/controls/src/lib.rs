@@ -1,20 +1,27 @@
 //! What the player is holding, turned into the `Move` the server wants, plus the orbit camera.
 //! The client maps its window's keys and buttons onto [`Held`]; everything here is plain data.
 pub mod camera;
-pub use camera::Orbit;
+pub mod settings;
+pub use camera::{Follow, Orbit};
+pub use settings::Settings;
 
 use glam::Vec2;
 use protocol::Command;
 
 /// Keyboard turning speed in radians a second: half a turn a second, as in WoW.
 pub const TURN_RATE: f32 = std::f32::consts::PI;
+/// Classic: seconds of moving without touching the mouse before the camera swings back
+/// behind the character.
+const SWING_DELAY: f32 = 1.;
+/// How quickly it swings back, per second (the gap shrinks by e every 1/rate seconds).
+const SWING_RATE: f32 = 3.;
 
 /// The movement keys and mouse buttons down right now.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Held {
     pub forward: bool,
     pub back: bool,
-    /// A and D: turn in Classic, strafe in Action or while mouse-looking.
+    /// A and D: strafe in Action or while mouse-looking, turn otherwise.
     pub left: bool,
     pub right: bool,
     /// Q and E: always strafe.
@@ -25,6 +32,12 @@ pub struct Held {
     pub mouse_look: bool,
     /// Left mouse button: the camera orbits and the character keeps its heading.
     pub orbiting: bool,
+}
+
+/// An angle brought into -π..π.
+fn wrap(angle: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    (angle + PI).rem_euclid(TAU) - PI
 }
 
 fn axis(positive: bool, negative: bool) -> f32 {
@@ -39,45 +52,29 @@ fn basis(yaw: f32) -> (Vec2, Vec2) {
     )
 }
 
-impl Held {
-    /// A world-space direction on the ground, relative to the camera's yaw: A/D and Q/E
-    /// all strafe. This is the Action scheme.
-    pub fn direction(&self, yaw: f32) -> Vec2 {
-        let (forward, right) = basis(yaw);
-        let strafe = axis(
-            self.right || self.strafe_right,
-            self.left || self.strafe_left,
-        );
-        (forward * axis(self.forward, self.back) + right * strafe).normalize_or_zero()
-    }
-
-    /// The `Move` to send for these keys with the camera at `yaw`, in the Action scheme.
-    pub fn movement(&self, yaw: f32) -> Command {
-        Command::Move {
-            direction: self.direction(yaw),
-            walk: self.walk,
-            face_yaw: self.mouse_look.then_some(yaw),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Scheme {
-    /// WoW and Guild Wars: A/D turn, S backpedals, left-drag looks around, right-drag steers.
+    /// New World: the mouse always looks and the character always faces the crosshair.
+    /// WASD runs and strafes relative to it.
     #[default]
-    Classic,
-    /// Camera-relative: the character runs whichever way the keys point from the camera.
     Action,
+    /// WoW and Guild Wars: A/D turn, S backpedals, left-drag looks around, right-drag steers.
+    Classic,
 }
 
-/// Steers the local character: keeps its heading, which the Classic scheme always sends as
-/// `face_yaw`, and turns the camera along with it.
+/// Steers the local character: keeps its heading, which is always sent as `face_yaw`, and
+/// turns the camera along with it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pilot {
     pub scheme: Scheme,
     /// Where the character faces, in the same unwrapped angle as [`Orbit::yaw`].
     pub heading: f32,
     pub autorun: bool,
+    /// Classic: swing the camera back behind the character after a second of moving.
+    pub swing_back: bool,
+    /// Seconds spent moving since the mouse last held the camera.
+    moving_for: f32,
 }
 
 impl Pilot {
@@ -86,6 +83,8 @@ impl Pilot {
             scheme,
             heading,
             autorun: false,
+            swing_back: true,
+            moving_for: 0.,
         }
     }
 
@@ -93,14 +92,23 @@ impl Pilot {
         self.autorun = !self.autorun;
     }
 
+    /// Action is Classic with the right button always held. Its left button is for clicking,
+    /// not orbiting, so it never adds up to both-buttons run.
+    fn effective(&self, held: &Held) -> Held {
+        let action = self.scheme == Scheme::Action;
+        Held {
+            mouse_look: held.mouse_look || action,
+            orbiting: held.orbiting && !action,
+            ..*held
+        }
+    }
+
     /// Advances one frame of `dt` seconds: turns the character (and the camera with it)
     /// and returns the `Move` to send.
     pub fn steer(&mut self, held: &Held, orbit: &mut Orbit, dt: f32) -> Command {
+        let held = self.effective(held);
         if held.forward || held.back {
             self.autorun = false;
-        }
-        if self.scheme == Scheme::Action {
-            return held.movement(orbit.yaw);
         }
         if held.mouse_look {
             self.heading = orbit.yaw;
@@ -112,8 +120,17 @@ impl Pilot {
                 orbit.yaw += turn;
             }
         }
+        let direction = self.direction(&held, orbit.yaw);
+        if self.swing_back && !held.mouse_look && !held.orbiting && direction != Vec2::ZERO {
+            self.moving_for += dt;
+            if self.moving_for > SWING_DELAY {
+                orbit.yaw += wrap(self.heading - orbit.yaw) * (1. - (-SWING_RATE * dt).exp());
+            }
+        } else {
+            self.moving_for = 0.;
+        }
         Command::Move {
-            direction: self.direction(held, orbit.yaw),
+            direction,
             walk: held.walk,
             face_yaw: Some(self.heading),
         }
@@ -121,10 +138,13 @@ impl Pilot {
 
     /// Where the keys point on the ground right now (for a dodge), without turning.
     pub fn direction(&self, held: &Held, camera_yaw: f32) -> Vec2 {
-        if self.scheme == Scheme::Action {
-            return held.direction(camera_yaw);
-        }
-        let (forward, right) = basis(self.heading);
+        let held = self.effective(held);
+        let heading = if held.mouse_look {
+            camera_yaw
+        } else {
+            self.heading
+        };
+        let (forward, right) = basis(heading);
         let run = held.forward || self.autorun || (held.mouse_look && held.orbiting);
         let mut strafe = axis(held.strafe_right, held.strafe_left);
         if held.mouse_look {
@@ -137,7 +157,6 @@ impl Pilot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f32::consts::PI;
 
     fn close(a: Vec2, b: Vec2) -> bool {
         a.distance(b) < 1e-5
@@ -159,61 +178,6 @@ mod tests {
             unreachable!()
         };
         (direction, walk, face_yaw)
-    }
-
-    #[test]
-    fn forward_follows_the_camera() {
-        let w = held(|h| h.forward = true);
-        assert!(close(w.direction(0.), Vec2::Y));
-        assert!(close(w.direction(PI), -Vec2::Y));
-        assert!(close(w.direction(PI / 2.), Vec2::X));
-    }
-
-    #[test]
-    fn strafing_is_square_to_forward() {
-        let d = held(|h| h.right = true);
-        let a = held(|h| h.left = true);
-        for yaw in [0., 1., PI, -2.5] {
-            let forward = held(|h| h.forward = true).direction(yaw);
-            assert!(d.direction(yaw).dot(forward).abs() < 1e-5);
-            assert!(close(a.direction(yaw), -d.direction(yaw)));
-        }
-    }
-
-    #[test]
-    fn diagonals_are_not_faster() {
-        let wd = held(|h| {
-            h.forward = true;
-            h.right = true
-        });
-        assert!((wd.direction(0.7).length() - 1.).abs() < 1e-5);
-    }
-
-    #[test]
-    fn opposite_keys_cancel() {
-        let ws = held(|h| {
-            h.forward = true;
-            h.back = true
-        });
-        assert_eq!(ws.direction(1.), Vec2::ZERO);
-    }
-
-    #[test]
-    fn action_faces_the_camera_only_with_mouse_look() {
-        let mut h = held(|h| {
-            h.forward = true;
-            h.walk = true
-        });
-        let (_, walk, face) = moving(h.movement(0.5));
-        assert!(walk);
-        assert_eq!(face, None);
-        h.mouse_look = true;
-        assert_eq!(moving(h.movement(0.5)).2, Some(0.5));
-    }
-
-    fn classic() -> (Pilot, Orbit) {
-        let orbit = Orbit::default();
-        (Pilot::new(Scheme::Classic, orbit.yaw), orbit)
     }
 
     #[test]
@@ -328,13 +292,115 @@ mod tests {
         assert_eq!(dir, Vec2::ZERO);
     }
 
+    fn classic() -> (Pilot, Orbit) {
+        let orbit = Orbit::default();
+        (Pilot::new(Scheme::Classic, orbit.yaw), orbit)
+    }
+
+    fn action() -> (Pilot, Orbit) {
+        let orbit = Orbit::default();
+        (Pilot::new(Scheme::Action, orbit.yaw), orbit)
+    }
+
     #[test]
-    fn action_ignores_the_heading() {
-        let mut p = Pilot::new(Scheme::Action, 0.);
-        let mut o = Orbit::default();
-        let (dir, _, face) = moving(p.steer(&held(|h| h.left = true), &mut o, 1.));
-        assert_eq!(p.heading, 0.);
-        assert_eq!(face, None);
-        assert!(close(dir, -basis(o.yaw).1));
+    fn action_is_the_default() {
+        assert_eq!(Scheme::default(), Scheme::Action);
+    }
+
+    #[test]
+    fn action_faces_wherever_the_mouse_looks() {
+        let (mut p, mut o) = action();
+        o.look(-200., 0.);
+        let (_, _, face) = moving(p.steer(&Held::default(), &mut o, 0.016));
+        assert_eq!(p.heading, o.yaw);
+        assert_eq!(face, Some(o.yaw));
+    }
+
+    #[test]
+    fn action_runs_and_strafes_from_the_camera() {
+        let (mut p, mut o) = action();
+        o.yaw = 0.7;
+        let w = held(|h| h.forward = true);
+        let (dir, ..) = moving(p.steer(&w, &mut o, 0.016));
+        assert!(close(dir, basis(0.7).0));
+        // A and D strafe instead of turning, and don't move the camera.
+        let (dir, ..) = moving(p.steer(&held(|h| h.left = true), &mut o, 1.));
+        assert_eq!(o.yaw, 0.7);
+        assert!(close(dir, -basis(0.7).1));
+        // Diagonals are not faster, and opposite keys cancel.
+        let wd = held(|h| {
+            h.forward = true;
+            h.right = true
+        });
+        assert!((p.direction(&wd, o.yaw).length() - 1.).abs() < 1e-5);
+        let ws = held(|h| {
+            h.forward = true;
+            h.back = true
+        });
+        assert_eq!(p.direction(&ws, o.yaw), Vec2::ZERO);
+    }
+
+    #[test]
+    fn action_backpedals_facing_the_crosshair() {
+        let (mut p, mut o) = action();
+        let (dir, _, face) = moving(p.steer(&held(|h| h.back = true), &mut o, 0.016));
+        assert_eq!(face, Some(o.yaw));
+        assert!(close(dir, -basis(o.yaw).0));
+    }
+
+    #[test]
+    fn action_autoruns_toward_the_crosshair() {
+        let (mut p, mut o) = action();
+        p.toggle_autorun();
+        o.look(150., 0.);
+        let (dir, ..) = moving(p.steer(&Held::default(), &mut o, 0.016));
+        assert!(close(dir, basis(o.yaw).0));
+    }
+
+    #[test]
+    fn action_left_click_does_not_run() {
+        let (mut p, mut o) = action();
+        let (dir, ..) = moving(p.steer(&held(|h| h.orbiting = true), &mut o, 0.016));
+        assert_eq!(dir, Vec2::ZERO);
+    }
+
+    #[test]
+    fn classic_camera_swings_back_after_a_second() {
+        let (mut p, mut o) = classic();
+        o.yaw = p.heading + 1.;
+        let run = held(|h| h.forward = true);
+        for _ in 0..50 {
+            p.steer(&run, &mut o, 1. / 60.);
+        }
+        assert_eq!(o.yaw, p.heading + 1.);
+        for _ in 0..180 {
+            p.steer(&run, &mut o, 1. / 60.);
+        }
+        assert!(wrap(o.yaw - p.heading).abs() < 0.01);
+    }
+
+    #[test]
+    fn swing_back_waits_while_orbiting_or_switched_off() {
+        let (mut p, mut o) = classic();
+        o.yaw = p.heading + 1.;
+        let look = held(|h| {
+            h.forward = true;
+            h.orbiting = true
+        });
+        for _ in 0..180 {
+            p.steer(&look, &mut o, 1. / 60.);
+        }
+        assert_eq!(o.yaw, p.heading + 1.);
+        p.swing_back = false;
+        for _ in 0..180 {
+            p.steer(&held(|h| h.forward = true), &mut o, 1. / 60.);
+        }
+        assert_eq!(o.yaw, p.heading + 1.);
+    }
+
+    #[test]
+    fn wrap_takes_the_short_way() {
+        assert!((wrap(std::f32::consts::TAU + 0.5) - 0.5).abs() < 1e-5);
+        assert!((wrap(-std::f32::consts::PI - 0.5) - (std::f32::consts::PI - 0.5)).abs() < 1e-5);
     }
 }
