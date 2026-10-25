@@ -97,26 +97,13 @@ pub fn die(world: &mut World, e: Entity, killer: Option<UnitId>) {
     crate::loot::drop_loot(world, e);
     crate::progress::pay_out(world, e);
 
-    // Everyone fighting it lets it go; monsters stop swinging at a corpse. Each unit only
-    // changes itself here, so one pass over the components does it in any order.
-    crate::queries::with(world, |q| &mut q.let_go, |world, q| {
-    for (mut f, th, player) in q.iter_mut(world) {
-        if f.target == Some(id) {
-            f.target = None;
-            if !player {
-                f.auto_attack = false;
-            }
-        }
-        if f.reviving.is_some_and(|(r, _)| r == id) {
-            f.reviving = None;
-        }
-        if let Some(mut th) = th
-            && (th.contains(id) || th.taunted_by == Some(id))
-        {
-            th.remove(id);
-        }
+    // Everyone fighting it lets it go, now or when the blow that felled it has landed on
+    // everyone else it hit.
+    let mut fallen = world.resource_mut::<Fallen>();
+    fallen.ids.push(id);
+    if fallen.open == 0 {
+        let_go(world);
     }
-    });
     // Downed players who hurt it lately get up (only players go down).
     let mut rallying: Vec<(UnitId, Entity)> = crate::queries::with(world, |q| &mut q.rally, |world, q| {
         q.iter(world)
@@ -129,9 +116,59 @@ pub fn die(world: &mut World, e: Entity, killer: Option<UnitId>) {
         rally(world, other, RALLY_HEALTH);
     }
     // Its summons go with it.
+    hold_deaths(world);
     for other in summons(world, |s, v| s.owner == id && !v.dead) {
         die(world, other, None);
     }
+    release_deaths(world);
+}
+
+/// Who died while a blow was still landing, so that everyone lets them all go in one pass
+/// after it rather than one pass over every fighter per death.
+#[derive(Resource, Default)]
+pub(crate) struct Fallen {
+    open: u32,
+    ids: Vec<UnitId>,
+}
+
+/// Holds back letting go of the fallen until [`release_deaths`].
+pub(crate) fn hold_deaths(world: &mut World) {
+    world.resource_mut::<Fallen>().open += 1;
+}
+
+pub(crate) fn release_deaths(world: &mut World) {
+    let mut fallen = world.resource_mut::<Fallen>();
+    fallen.open -= 1;
+    if fallen.open == 0 && !fallen.ids.is_empty() {
+        let_go(world);
+    }
+}
+
+/// Monsters stop swinging at the fallen, and nobody keeps them on a threat list or keeps
+/// reviving them. Each unit only changes itself here, so one pass does it in any order.
+fn let_go(world: &mut World) {
+    let ids = std::mem::take(&mut world.resource_mut::<Fallen>().ids);
+    let gone = |id: UnitId| ids.contains(&id);
+    crate::queries::with(world, |q| &mut q.let_go, |world, q| {
+        for (mut f, th, player) in q.iter_mut(world) {
+            if f.target.is_some_and(gone) {
+                f.target = None;
+                if !player {
+                    f.auto_attack = false;
+                }
+            }
+            if f.reviving.is_some_and(|(r, _)| gone(r)) {
+                f.reviving = None;
+            }
+            if let Some(mut th) = th
+                && (th.taunted_by.is_some_and(gone) || ids.iter().any(|&id| th.contains(id)))
+            {
+                for &id in &ids {
+                    th.remove(id);
+                }
+            }
+        }
+    });
 }
 
 /// Back up from downed with `fraction` of health.

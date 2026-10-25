@@ -21,50 +21,51 @@ pub fn update(world: &mut World) {
     // Upkeep only touches each unit's own numbers, so one pass does it in any order. Units that
     // bleed out or are due back are handled after, in ID order.
     let mut due: Vec<(protocol::UnitId, Entity, bool)> = crate::queries::with(world, |q| &mut q.upkeep, |world, q| {
-    let mut due = Vec::new();
-    for (e, u, mut v, f, m, b) in q.iter_mut(world) {
-        if v.dead {
-            if v.respawn_at.is_some_and(|at| t >= at) {
-                due.push((u.id, e, true));
+        let mut due = Vec::new();
+        for (e, u, mut v, f, m, b) in q.iter_mut(world) {
+            if v.dead {
+                if v.respawn_at.is_some_and(|at| t >= at) {
+                    due.push((u.id, e, true));
+                }
+                continue;
             }
-            continue;
-        }
-        if v.downed {
-            v.downed_health -= v.downed_max / DOWNED_TIME as f32 * DT;
-            if v.downed_health <= 0.0 {
-                due.push((u.id, e, false));
+            if v.downed {
+                v.downed_health -= v.downed_max / DOWNED_TIME as f32 * DT;
+                if v.downed_health <= 0.0 {
+                    due.push((u.id, e, false));
+                }
+                continue;
             }
-            continue;
-        }
-        let guarding = f.as_ref().is_some_and(|f| f.guard_since.is_some());
-        let rolling = m.is_some_and(|m| m.forced.is_some());
-        let returning = b.is_some_and(|b| b.mode == Mode::Return);
-        let in_combat = t - v.last_combat < COMBAT_TIMEOUT;
-        // Endurance waits while you roll or hold up your guard.
-        if !rolling && !guarding {
-            v.endurance = (v.endurance + ENDURANCE_REGEN * DT).min(ENDURANCE_MAX);
-        }
-        if returning {
-            // Giving up a fight heals a monster as it walks home, so pulling and dropping it
-            // can't wear it down.
-            v.health = (v.health + v.max_health * 0.25 * DT).min(v.max_health);
-        } else if !in_combat {
-            v.health = (v.health + v.max_health * 0.04 * DT).min(v.max_health);
-        }
-        if let Some(mut f) = f {
-            if let Some(s) = f.specialty {
-                let d = cat.specialty(s);
-                let rate = if in_combat { d.regen_in } else { d.regen_out };
-                f.resource = (f.resource + rate * DT).clamp(0.0, f.max_resource);
+            let guarding = f.as_ref().is_some_and(|f| f.guard_since.is_some());
+            let rolling = m.is_some_and(|m| m.forced.is_some());
+            let returning = b.is_some_and(|b| b.mode == Mode::Return);
+            let in_combat = t - v.last_combat < COMBAT_TIMEOUT;
+            // Endurance waits while you roll or hold up your guard.
+            if !rolling && !guarding {
+                v.endurance = (v.endurance + ENDURANCE_REGEN * DT).min(ENDURANCE_MAX);
             }
-            if !f.recent_victims.is_empty() {
-                f.recent_victims.retain(|&(_, at)| t - at <= life::RALLY_WINDOW);
+            if returning {
+                // Giving up a fight heals a monster as it walks home, so pulling and dropping it
+                // can't wear it down.
+                v.health = (v.health + v.max_health * 0.25 * DT).min(v.max_health);
+            } else if !in_combat {
+                v.health = (v.health + v.max_health * 0.04 * DT).min(v.max_health);
+            }
+            if let Some(mut f) = f {
+                if let Some(s) = f.specialty {
+                    let d = cat.specialty(s);
+                    let rate = if in_combat { d.regen_in } else { d.regen_out };
+                    f.resource = (f.resource + rate * DT).clamp(0.0, f.max_resource);
+                }
+                if !f.recent_victims.is_empty() {
+                    f.recent_victims.retain(|&(_, at)| t - at <= life::RALLY_WINDOW);
+                }
             }
         }
-    }
-    due
+        due
     });
     due.sort_unstable_by_key(|d| d.0);
+    life::hold_deaths(world);
     for (_, e, back) in due {
         if back {
             respawn_mob(world, e);
@@ -72,6 +73,7 @@ pub fn update(world: &mut World) {
             life::die(world, e, None);
         }
     }
+    life::release_deaths(world);
     life::update_revives(world);
     life::expire_summons(world);
     life::clear_remains(world);
