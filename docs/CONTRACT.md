@@ -38,6 +38,12 @@ let fight: Arc<CombatView> = host.combat().unwrap(); // combat detail from the s
 let events = host.take_events(); // everything since you last asked
 ```
 
+Once the client interpolates remote bodies behind the newest snapshot (#87, #198), it sends
+`Command::Viewing { tick }` with each batch of commands: the snapshot tick its view is showing. A
+player's shots and blows at other players are then tested where the client showed them, up to
+250 ms back (docs/SERVER.md, "PvP hit checks and lag compensation"). Without it nothing is
+rewound.
+
 Each `Snapshot` (protocol version 6) has:
 
 - `units`: everyone within 160 m. For each one:

@@ -149,9 +149,12 @@ short-lived sims in the same server process as the world.
 A player sees others where they were about 100 ms ago: the view is interpolated between snapshots
 (#87), on top of their ping. Without help, a well-aimed shot misses on the server.
 
-- **History:** each region keeps the last second (60 steps) of every unit's position and facing
-  in a ring buffer. Measured: 0.015 ms a step and 2.9 MB at 2,200 units.
-- **Rewind:** each command carries the tick its sender was looking at. When a player's aimed shot,
+- **History:** each player keeps the last second (60 steps) of where they stood in a ring buffer
+  (`sim::Trail`, #169). Only players are ever rewound, so monsters keep none, and the record costs
+  about 0.3% of the players scene's instructions. (Measured for every unit in #73: 0.015 ms a step
+  and 2.9 MB at 2,200 units.) Facing isn't rewound: guards and blocks face where they face now.
+- **Rewind:** the client sends `Command::Viewing { tick }` with each batch of commands, the tick
+  its view is showing; the server keeps how many steps behind that was when it arrived. When a player's aimed shot,
   cone or ground attack is checked **against another player**, the target is checked where it
   stood at that tick, up to **250 ms** back; older than that (a bad connection) uses 250 ms. The
   rewind is only for the hit test; the target never moves back.

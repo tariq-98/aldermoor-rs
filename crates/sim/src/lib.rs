@@ -20,6 +20,7 @@ mod movement;
 mod progress;
 mod queries;
 pub mod region;
+mod rewind;
 mod rng;
 mod spatial;
 pub mod stats;
@@ -38,6 +39,7 @@ pub use consumables::PotionCooldown;
 pub use content::Specialty;
 pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
+pub use rewind::{Trail, HISTORY, MAX_REWIND};
 pub use progress::{Credit, Progress, SHARE_FLOOR};
 pub use rng::Rng;
 pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
@@ -207,6 +209,7 @@ impl Sim {
                 combat::auras::refresh_control,
                 movement::move_units,
                 movement::after_moving,
+                rewind::record,
                 combat::abilities::land_charges,
                 combat::abilities::update,
                 combat::missiles::update,
@@ -316,7 +319,7 @@ impl Sim {
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
-        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default()));
+        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default(), rewind::Trail::default()));
         self.world.entity_mut(e).insert(Unit {
             id,
             kind: UnitKind::Player,

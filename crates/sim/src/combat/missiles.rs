@@ -232,6 +232,11 @@ fn struck(world: &World, p: &Projectile, from: Vec3, to: Vec3) -> Vec<(Entity, f
             continue;
         }
         let body = world.get::<Body>(e).copied().unwrap_or(Body { radius: 0.4, height: 1.8 });
+        // Against another player, where the shooter saw them (#169).
+        let (c, ground) = match crate::rewind::seen_at(world, &p.src, e) {
+            Some(seen) => (Vec2::new(seen.x, seen.z), seen.y),
+            None => (c, t.pos.y),
+        };
         let s = if len2 > 1e-8 { ((c - a).dot(seg) / len2).clamp(0.0, 1.0) } else { 0.0 };
         let margin = match (p.homing, u.kind) {
             (true, _) => THICKNESS,
@@ -242,7 +247,7 @@ fn struck(world: &World, p: &Projectile, from: Vec3, to: Vec3) -> Vec<(Entity, f
             continue;
         }
         let y = from.y + (to.y - from.y) * s;
-        if y < t.pos.y - 0.2 || y > t.pos.y + body.height + 0.2 {
+        if y < ground - 0.2 || y > ground + body.height + 0.2 {
             continue;
         }
         out.push((e, s, id));
