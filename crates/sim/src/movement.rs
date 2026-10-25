@@ -28,6 +28,12 @@ const BACKPEDAL: f32 = 0.6;
 const STEP_DOWN: f32 = 0.6;
 /// Sprinting (out of combat, on land) runs this much faster.
 pub const SPRINT: f32 = 1.5;
+/// On foot, from standing to full speed takes this long (s), and from run to sprint `SPRINT_UP`.
+/// Short enough to keep dodging sharp, long enough that a body has some weight.
+pub const START_UP: f32 = 0.08;
+pub const SPRINT_UP: f32 = 0.3;
+/// Coming to a stop from a run takes this long (s).
+pub const STOP_TIME: f32 = 0.06;
 /// Steeper than this (rise over run, about 63°) the ground is a wall you can't walk up.
 pub const MAX_SLOPE: f32 = 2.0;
 /// Walls up to about chest height are climbed over; taller ones stop you.
@@ -220,9 +226,18 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             speed *= BACKPEDAL;
         }
         let desired = dir * speed;
-        if m.grounded {
+        if m.grounded && !ctl.can_move() {
+            // Rooted or stunned: stopped dead.
+            m.vel.x = 0.0;
+            m.vel.z = 0.0;
+        } else if m.grounded && m.swimming {
             m.vel.x = desired.x;
             m.vel.z = desired.y;
+        } else if m.grounded {
+            let cruise = if m.sprinting { speed / SPRINT } else { speed };
+            let v = ramp(Vec2::new(m.vel.x, m.vel.z), desired, cruise, m.run_speed * ctl.speed / STOP_TIME);
+            m.vel.x = v.x;
+            m.vel.z = v.y;
         } else {
             // Limited air control.
             let k = (DT * 3.0).min(1.0);
@@ -321,6 +336,32 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         }
         m.observed = (t.pos - start) / DT;
     }
+}
+
+/// One step of on-foot speed toward `desired`: the part of the velocity along the wished
+/// direction builds to `cruise` over `START_UP` and on to a sprint over `SPRINT_UP`, while the
+/// part across it (and all of it when stopping) bleeds off at `brake` (m/s²). Turning round
+/// drops the backward part at once, so reversing is as quick as starting.
+fn ramp(vel: Vec2, desired: Vec2, cruise: f32, brake: f32) -> Vec2 {
+    // Standing still or already at speed, the common case.
+    if vel == desired {
+        return desired;
+    }
+    let target = desired.length();
+    let shed = |v: Vec2| v * (1.0 - brake * DT / v.length().max(1e-6)).max(0.0);
+    if target < 1e-4 {
+        return shed(vel);
+    }
+    let wish = desired / target;
+    let mut along = vel.dot(wish).max(0.0);
+    let across = shed(vel - wish * vel.dot(wish));
+    if along < target {
+        let rate = if along < cruise { cruise / START_UP } else { (target - cruise) / SPRINT_UP };
+        along = (along + rate * DT).min(target);
+    } else {
+        along = (along - brake * DT).max(target);
+    }
+    wish * along + across
 }
 
 /// A unit in the crowd: who, where, its radius and weight (0 for one that neither pushes nor is

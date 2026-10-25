@@ -9,6 +9,13 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 - **Sprint** (Shift) at 1.5× the run speed. It works out of combat only (6 s after the last
   blow given or taken), on land, and not while guarding, casting, downed or feared. It costs
   nothing.
+- **Getting going** takes a moment, so bodies have some weight without losing the quick starts
+  and stops dodging needs (WoW and Guild Wars 2 are near instant; action games take 50 to
+  150 ms). On foot, standing to a run takes 0.08 s (`START_UP`), a run to a stop 0.06 s
+  (`STOP_TIME`), and a run into a sprint 0.3 s (`SPRINT_UP`). Turning round drops the backward
+  part of your speed at once, so reversing is as quick as starting, and turning keeps your speed.
+  Monsters ramp the same way. Rolls, leaps and climbs, swimming and the air are unchanged, and a
+  root or stun still stops you dead.
 - **Jumps** forgive a little: a jump pressed up to 0.15 s before landing goes off as you land,
   and one pressed up to 0.1 s after running off an edge still jumps (coyote time). The windows are
   `JUMP_BUFFER` and `COYOTE_TIME`; rolls have their own (`DODGE_BUFFER`, in COMBAT.md).

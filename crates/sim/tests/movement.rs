@@ -194,9 +194,11 @@ fn sprints_half_again_as_fast_out_of_combat_only() {
     let (mut sim, id) = on_the_road();
     let start = xz(&sim, id);
     go(&mut sim, id, Vec2::new(0.0, -1.0), true);
+    // Up to a run in a moment, then on to a sprint over a third of a second: about 0.7 m short
+    // of a second at full sprint.
     sim.run_for(1.0);
     let d = (xz(&sim, id) - start).length();
-    assert!((d - 9.0).abs() < 0.4, "sprinted {d} m");
+    assert!((d - 8.3).abs() < 0.3, "sprinted {d} m");
     assert!(sim.get::<Motion>(id).unwrap().sprinting);
     // Just hit: back to running.
     let now = sim.time();
@@ -206,6 +208,44 @@ fn sprints_half_again_as_fast_out_of_combat_only() {
     let d = (xz(&sim, id) - start).length();
     assert!((d - 6.0).abs() < 0.3, "ran {d} m in combat");
     assert!(!sim.get::<Motion>(id).unwrap().sprinting);
+}
+
+/// Steps until the player's ground speed gets within 2% of `speed`; how long that took (s).
+fn time_to(sim: &mut Sim, id: u32, speed: f32) -> f64 {
+    let start = sim.time();
+    for _ in 0..120 {
+        sim.step();
+        let o = sim.get::<Motion>(id).unwrap().observed;
+        if (Vec2::new(o.x, o.z).length() - speed).abs() <= speed.max(1.0) * 0.02 {
+            break;
+        }
+    }
+    sim.time() - start
+}
+
+#[test]
+fn bodies_take_a_moment_to_get_going_and_stop() {
+    let (mut sim, id) = on_the_road();
+    let run = sim.get::<Motion>(id).unwrap().run_speed;
+    go(&mut sim, id, Vec2::new(0.0, -1.0), false);
+    let up = time_to(&mut sim, id, run);
+    assert!((0.06..=0.1).contains(&up), "took {up} s to reach a run");
+    sim.run_for(0.2);
+    // Turning round is as quick as starting.
+    go(&mut sim, id, Vec2::new(0.0, 1.0), false);
+    let back = time_to(&mut sim, id, run);
+    assert!((0.06..=0.1).contains(&back), "took {back} s to run the other way");
+    let v = sim.get::<Motion>(id).unwrap().observed;
+    assert!(v.z > 0.0 && v.x.abs() < 0.01, "running {v:?}");
+    go(&mut sim, id, Vec2::ZERO, false);
+    let stop = time_to(&mut sim, id, 0.0);
+    assert!((0.04..=0.08).contains(&stop), "took {stop} s to stop");
+    // From a run into a sprint over about a third of a second.
+    go(&mut sim, id, Vec2::new(0.0, -1.0), false);
+    sim.run_for(0.3);
+    go(&mut sim, id, Vec2::new(0.0, -1.0), true);
+    let sprint = time_to(&mut sim, id, run * 1.5);
+    assert!((0.25..=0.35).contains(&sprint), "took {sprint} s to reach a sprint");
 }
 
 /// Runs until a climb starts and finishes (or `steps` pass); whether it climbed.
@@ -245,7 +285,7 @@ fn try_climb(at: Vec2, dir: Vec2, jump: bool) -> (Option<f32>, Sim, u32) {
 #[test]
 fn climbs_a_low_ledge_by_walking_into_it() {
     // A step in the terraces north-west of the village, going south-west.
-    let (climbed, mut sim, id) = try_climb(Vec2::new(-50.0, 26.0), Vec2::new(-1.0, -1.0).normalize(), false);
+    let (climbed, mut sim, id) = try_climb(Vec2::new(-51.0, 26.2), Vec2::new(-1.0, -1.0).normalize(), false);
     let rise = climbed.expect("never climbed");
     assert!(rise > 0.3 && rise <= 1.5, "climbed {rise} m");
     sim.run_for(0.5);
