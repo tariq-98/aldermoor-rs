@@ -72,10 +72,13 @@ pub struct Decal {
     /// without a leading edge). w: the glowing edge's width in metres.
     pub shape: [f32; 4],
     /// The box's half size in metres (x, y, z), so edges keep their width however it's
-    /// stretched. A circle's radius is x; a cone's reach is z (it opens along +z from the
-    /// centre); a line runs along z from −z to +z and is x either side.
+    /// stretched. A circle's radius is x. A cone opens along +z from its apex, `w` metres
+    /// behind the box's centre, and reaches twice z. A line runs along z from −z to +z and is
+    /// x either side.
     pub size: [f32; 4],
     /// Shapes: the fill's colour (rgb) and opacity (a); the edge takes the material's colour.
+    /// Textured marks: a pool of light under the mark in its ramp's colour, tinted by rgb and
+    /// as strong as a.
     pub fill: [f32; 4],
     /// Textured marks: the sprite, ramp and erosion. Shapes: a tile (`extra.x`) breaks up the
     /// fill, at `frame.zw` repeats a metre, drifting by `frame.xy`.

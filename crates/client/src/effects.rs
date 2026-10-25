@@ -971,10 +971,15 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
             Vec3::ZERO,
             0.,
         ),
+        // The box hugs the cone (it opens along +z from the area's centre), not its circle.
         (DecalShape::Area, Some(Shape::Cone { range, angle })) => (
             fx::Decal::CONE,
-            Vec3::new(range, half_y, range),
-            Vec3::ZERO,
+            Vec3::new(
+                range * (angle * 0.5).sin().clamp(0.05, 1.),
+                half_y,
+                range * 0.5,
+            ),
+            Vec3::Z * range * 0.5,
             angle * 0.5,
         ),
         (DecalShape::Area, Some(Shape::Line { length, width })) => (
@@ -1004,7 +1009,13 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
         to_decal: to_world.inverse().to_cols_array_2d(),
         to_world: to_world.to_cols_array_2d(),
         shape: [kind, cone, a.progress, l.edge],
-        size: [half.x, half.y, half.z, 0.],
+        // A cone's apex is half its box behind the box's centre.
+        size: [
+            half.x,
+            half.y,
+            half.z,
+            if kind == fx::Decal::CONE { half.z } else { 0. },
+        ],
         fill,
         material,
     });

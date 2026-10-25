@@ -33,19 +33,21 @@ float4 texel(device const Material& m,float2 uv,texture2d<float> atlas,texture2d
     return tiles.sample(tile_sampler,uv*m.frame.zw+m.frame.xy,uint(m.extra.x-0.5));
 }
 
+// A material's colour at a heat: its ramp's, or the heat as a grey.
+float3 ramp_colour(device const Material& m,float heat,texture2d<float> ramps){
+    if(m.next.w<0.)return float3(heat);
+    // Ramps are 32-bit float, read and blended by hand (not every GPU filters them).
+    uint last=ramps.get_width()-1,row=uint(m.next.w+0.5);
+    float x=saturate(heat)*float(last);
+    uint i=min(uint(x),last);
+    return mix(ramps.read(uint2(i,row)).rgb,ramps.read(uint2(min(i+1,last),row)).rgb,x-float(i));
+}
+
 // Colour (linear, unpremultiplied) and opacity: heat through the ramp, cover eroded.
 float4 shade(device const Material& m,float4 t,texture2d<float> ramps){
     float cover=t.g;
     if(m.params.y>0.)cover*=smoothstep(m.params.x,m.params.x+m.params.y,t.b);
-    float heat=saturate(t.r*m.extra.w);
-    float3 c=float3(heat);
-    if(m.next.w>=0.){
-        // Ramps are 32-bit float, read and blended by hand (not every GPU filters them).
-        uint last=ramps.get_width()-1,row=uint(m.next.w+0.5);
-        float x=heat*float(last);
-        uint i=min(uint(x),last);
-        c=mix(ramps.read(uint2(i,row)).rgb,ramps.read(uint2(min(i+1,last),row)).rgb,x-float(i));
-    }
+    float3 c=ramp_colour(m,saturate(t.r*m.extra.w),ramps);
     return float4(c*m.colour.rgb,cover*m.colour.a);
 }
 
@@ -175,9 +177,11 @@ fragment float4 decal_fragment(DecalVary i [[stage_in]],float4 motion [[color(1)
     float grown=d.shape.z;
     float inside,front;
     if(kind==2){
-        float r=length(p),angle=atan2(p.x,p.y);
-        inside=min(d.size.z-r,(d.shape.y-abs(angle))*max(r,0.001));
-        front=r-d.size.z*grown;
+        // From the apex, which sits size.w behind the box's centre; the reach is twice size.z.
+        p.y+=d.size.w;
+        float reach=d.size.z*2.,r=length(p),angle=atan2(p.x,p.y);
+        inside=min(reach-r,(d.shape.y-abs(angle))*max(r,0.001));
+        front=r-reach*grown;
     }else if(kind==3){
         inside=min(d.size.x-abs(p.x),d.size.z-abs(p.y));
         front=p.y+d.size.z-2.*d.size.z*grown;
@@ -190,7 +194,11 @@ fragment float4 decal_fragment(DecalVary i [[stage_in]],float4 motion [[color(1)
     float4 out=0.;
     if(kind==0){
         float4 c=shade(m,texel(m,float2(local.x*0.5+0.5,0.5-local.z*0.5),atlas,tiles),ramps);
-        out=float4(c.rgb*c.a,c.a*m.params.w);
+        // A pool of light under the mark in its ramp's colour, tinted and weighted by the fill.
+        float r2=dot(local.xz,local.xz);
+        float pool=r2<1.?(1.-r2)*(1.-r2):0.;
+        float3 under=ramp_colour(m,0.5*pool,ramps)*d.fill.rgb*d.fill.a*pool;
+        out=float4(c.rgb*c.a+under,c.a*m.params.w);
     }else{
         float shape=smoothstep(-aa,aa,inside);
         float edge=max(d.shape.w,0.01);

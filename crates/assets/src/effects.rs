@@ -193,7 +193,9 @@ pub struct Layer {
     pub world: bool,
     /// Decals.
     pub shape: DecalShape,
-    /// Decals: the glowing edge's width (metres) and the fill's colour and opacity.
+    /// Decals: the glowing edge's width (metres) and the fill's colour and opacity. A textured
+    /// mark's fill is a pool of light under it in its ramp's colour (rgb tints it, a is its
+    /// strength).
     pub edge: f32,
     pub fill: [f32; 4],
     /// Decals and beams: tile repeats a metre, and drift (UV a second).
