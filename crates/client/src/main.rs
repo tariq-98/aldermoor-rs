@@ -1448,18 +1448,26 @@ impl Game {
                 pixels,
                 self.characters.get(&u.id).map(|c| c.lod),
             );
-            let rebuild = self.characters.get(&u.id).is_none_or(|c| {
+            let changed = self.characters.get(&u.id).map(|c| {
                 let mut old = c.look.clone();
                 old.drawn = false;
                 old != look
             });
-            if rebuild {
-                if self.options.reset_on_look && self.characters.contains_key(&u.id) {
-                    r.reset_temporal_history();
+            match changed {
+                None => {
+                    let mut c = Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?;
+                    c.set_ground(Arc::clone(&self.ground));
+                    self.characters.insert(u.id, c);
                 }
-                let mut c = Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?;
-                c.set_ground(Arc::clone(&self.ground));
-                self.characters.insert(u.id, c);
+                // New gear or clothes go on in place, so the motion carries on (#239).
+                Some(true) => {
+                    if self.options.reset_on_look {
+                        r.reset_temporal_history();
+                    }
+                    let c = self.characters.get_mut(&u.id).unwrap();
+                    c.set_look(&self.catalog, &mut self.cache, &u.look)?;
+                }
+                Some(false) => {}
             }
             let c = self.characters.get_mut(&u.id).unwrap();
             c.partial_updates = !self.options.legacy_cpu;

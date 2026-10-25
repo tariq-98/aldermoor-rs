@@ -873,6 +873,86 @@ impl Character {
         self.forced_switch = Some(anim::Switch::Detail);
         Ok(())
     }
+    /// Puts on `look` in place (#239), as when a character in view changes gear or clothes. The
+    /// clip clocks, the stride, the blender, the feet, the turn, the gaze and the cape springs
+    /// carry on, where building the character again would start them all over: the cape snapping
+    /// back to rest and whatever the new gear plays differently cutting in. Bones carry over by
+    /// name, so gear that brings bones of its own or takes them away leaves the rest moving, and a
+    /// cape's springs keep their swing on every bone the new look still has. The change counts as
+    /// a switch, so the new gear's clips and grips blend in. Another body (another art id) has
+    /// nothing to carry on and starts afresh.
+    pub fn set_look(
+        &mut self,
+        catalog: &assets::Catalog,
+        cache: &mut ModelCache,
+        look: &Look,
+    ) -> Result<()> {
+        let mut next = Self::load_lod(catalog, cache, look, self.lod)?;
+        if look.art != self.look.art {
+            (next.partial_updates, next.foot_placement) =
+                (self.partial_updates, self.foot_placement);
+            (next.leaning, next.tier) = (self.leaning, self.tier);
+            next.ground = self.ground.take();
+            next.blender.set_method(self.blender.method());
+            *self = next;
+            return Ok(());
+        }
+        // Where each of the new skeleton's bones was in the old one, if it was there.
+        let was: Vec<_> = next
+            .nodes
+            .iter()
+            .map(|n| self.names.get(&n.name).copied())
+            .collect();
+        // The bones that carry on as they were. One that rests elsewhere now belongs to other
+        // geometry (another cape on bones of the same names) and starts from its rest, as a new
+        // bone does.
+        let kept: Vec<_> = (0..was.len())
+            .map(|i| {
+                was[i].filter(|&j| {
+                    let (old, new) = (self.nodes[j].rest, next.nodes[i].rest);
+                    (old.translation, old.rotation, old.scale)
+                        == (new.translation, new.rotation, new.scale)
+                })
+            })
+            .collect();
+        let same = kept.len() == self.nodes.len() && (0..kept.len()).all(|i| kept[i] == Some(i));
+        for (i, &kept) in kept.iter().enumerate() {
+            if let Some(j) = kept {
+                next.local[i] = self.local[j];
+            }
+        }
+        if !same {
+            self.blender.remap(&next.local, |i| kept[i]);
+            // At half rate, the blend between rebuilds starts again from the next.
+            self.between = None;
+        }
+        // Springs take up the swing on every bone of the same name, even another cape's.
+        for springs in &mut next.springs {
+            springs.carry_on(&self.springs, |bone| was[bone]);
+        }
+        // The new look's skeleton, geometry, gear and the clips that go with them.
+        (self.parts, self.nodes, self.names, self.local) =
+            (next.parts, next.nodes, next.names, next.local);
+        (self.order, self.children, self.dropped) = (next.order, next.children, next.dropped);
+        (self.clips, self.clip_set, self.skeleton) = (next.clips, next.clip_set, next.skeleton);
+        (self.clip_meta, self.gaits, self.idle) = (next.clip_meta, next.gaits, next.idle);
+        (self.main, self.main_clips) = (next.main, next.main_clips);
+        (self.off_hand_clips, self.main_sockets) = (next.off_hand_clips, next.main_sockets);
+        (self.leg_bones, self.ball_bones) = (next.leg_bones, next.ball_bones);
+        (self.spine_bones, self.head_bones, self.arm_bones) =
+            (next.spine_bones, next.head_bones, next.arm_bones);
+        (self.springs, self.look) = (next.springs, next.look);
+        // Other levels of detail kept the old look's geometry.
+        self.lod_parts.clear();
+        self.grab_offset = None;
+        if !same {
+            // Drawn as it stands until the next rebuild, which at a lower tier may be frames away.
+            self.world.resize(self.nodes.len(), Mat4::IDENTITY);
+            self.pose_world();
+        }
+        self.forced_switch = Some(anim::Switch::Gear);
+        Ok(())
+    }
     /// Rebuilds every world matrix from the local pose.
     fn pose_world(&mut self) {
         for &i in &self.order {
@@ -2718,6 +2798,160 @@ mod combat_tests {
                 jolt(&dead, at)
             );
         }
+    }
+    /// A look with `gear`, a weapon drawn.
+    fn geared(gear: &[(&str, &str)]) -> Look {
+        Look {
+            art: "male".into(),
+            drawn: true,
+            gear: gear.iter().map(|&(s, i)| (s.into(), i.into())).collect(),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn gear_changes_carry_the_motion_on_instead_of_popping() {
+        // Jogging with sword, shield and cape, a greatsword takes their place at frame 30 (the
+        // same cape), another cape on bones of the same names goes on at 60, it comes off at 90
+        // and the first goes back on at 120. A twin keeps the first look throughout, and a third
+        // is built again at each change, as the client used to.
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let (sword, shield) = (("main_hand", "sword.arming"), ("off_hand", "shield.round"));
+        let great = ("main_hand", "sword.great");
+        let looks = [
+            geared(&[sword, shield, ("back", "cape.traveller")]),
+            geared(&[great, ("back", "cape.traveller")]),
+            geared(&[great, ("back", "cape.ranger")]),
+            geared(&[great]),
+            geared(&[sword, shield, ("back", "cape.traveller")]),
+        ];
+        // Each frame's local rotations by bone name, and the stride's phase.
+        type Shown = Vec<(HashMap<String, Quat>, f32)>;
+        let mut play = |how: Option<bool>| -> Shown {
+            let mut c = Character::load(&cat, &mut cache, &looks[0]).unwrap();
+            // The blender's and the springs' own smoothness: the feet go on the ground after them
+            // (#214), and carry on through a change untouched.
+            c.foot_placement = false;
+            let mut u = traveller(4.5, 0.).1;
+            let mut shown = Vec::new();
+            for frame in 0..150 {
+                if frame % 30 == 0 && frame > 0 {
+                    let look = &looks[frame / 30];
+                    match how {
+                        Some(true) => c.set_look(&cat, &mut cache, look).unwrap(),
+                        Some(false) => {
+                            c = Character::load(&cat, &mut cache, look).unwrap();
+                            c.foot_placement = false;
+                        }
+                        None => {}
+                    }
+                }
+                c.update(&u, 1. / 60.);
+                if how == Some(true) && frame % 30 == 0 && frame > 0 {
+                    assert!(
+                        c.blender.blending(),
+                        "frame {frame}: the change is a switch"
+                    );
+                }
+                assert!(c.world.iter().all(|m| m.is_finite()));
+                // Every part's bones are in the skeleton.
+                assert!(!c.draws(u.position, c.body_yaw()).is_empty());
+                u.position += u.velocity / 60.;
+                let pose = c
+                    .names
+                    .iter()
+                    .map(|(n, &i)| (n.clone(), c.local[i].rotation));
+                shown.push((pose.collect(), c.stride.phase));
+            }
+            shown
+        };
+        let [swapped, twin, rebuilt] = [Some(true), None, Some(false)].map(&mut play);
+        // How much more or less each bone in both poses turned on frame `at` than on the frame
+        // before, at worst, over the bones `which` picks.
+        let jolt = |shown: &Shown, at: usize, which: &dyn Fn(&str) -> bool| {
+            let turn = |a: &Quat, b: &Quat| {
+                let d = *b * a.inverse();
+                2. * d.xyz().length().atan2(d.w.abs())
+            };
+            let (before, last, now) = (&shown[at - 2].0, &shown[at - 1].0, &shown[at].0);
+            let common = before
+                .keys()
+                .filter(|n| last.contains_key(*n) && now.contains_key(*n));
+            common
+                .filter(|n| which(n))
+                .map(|n| (turn(&last[n], &now[n]) - turn(&before[n], &last[n])).abs())
+                .fold(0., f32::max)
+        };
+        let body = |n: &str| !n.starts_with("cape_");
+        for at in [30, 60, 90, 120] {
+            assert!(
+                jolt(&swapped, at, &body) < 1e-4,
+                "frame {at}: the body jolts {}",
+                jolt(&swapped, at, &body)
+            );
+            let stride = |s: &Shown| (s[at].1 - s[at - 1].1).rem_euclid(1.);
+            assert!(
+                (stride(&swapped) - stride(&twin)).abs() < 1e-4,
+                "frame {at}: the stride runs on"
+            );
+        }
+        assert!(
+            [30, 60, 90, 120]
+                .iter()
+                .any(|&at| jolt(&rebuilt, at, &body) > 0.5),
+            "building it again pops"
+        );
+        // How far apart two capes hang on frame `at`, at worst.
+        let apart = |a: &Shown, b: &Shown, at: usize| {
+            a[at]
+                .0
+                .iter()
+                .filter(|(n, _)| n.starts_with("cape_"))
+                .map(|(n, q)| q.angle_between(b[at].0[n]))
+                .fold(0., f32::max)
+        };
+        // Kept through the change, the cape swings on as the twin's does, where built again it
+        // starts over from the pose.
+        let kept = apart(&swapped, &twin, 30);
+        assert!(kept < 0.02, "the cape strays {kept}");
+        let built = apart(&rebuilt, &twin, 30);
+        assert!(built > 0.1, "a new cape starts over {built}");
+        // Another cape on the same bones takes up the swing rather than starting over.
+        let other = apart(&swapped, &rebuilt, 60);
+        assert!(other > 0.1, "another cape starts over {other}");
+    }
+    #[test]
+    fn a_new_look_survives_detail_swaps_and_a_new_body_starts_afresh() {
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut cache = ModelCache::default();
+        let caped = geared(&[("main_hand", "sword.arming"), ("back", "cape.traveller")]);
+        let bare = geared(&[("main_hand", "sword.arming")]);
+        let mut c = Character::load(&cat, &mut cache, &caped).unwrap();
+        // Both levels of detail of the caped look get kept for swapping back.
+        c.set_lod(&cat, &mut cache, 1).unwrap();
+        c.set_lod(&cat, &mut cache, 0).unwrap();
+        c.set_look(&cat, &mut cache, &bare).unwrap();
+        c.set_lod(&cat, &mut cache, 1).unwrap();
+        let fresh = Character::load_lod(&cat, &mut cache, &bare, 1).unwrap();
+        assert_eq!(c.parts.len(), fresh.parts.len(), "no cape comes back");
+        assert!(c.springs.is_empty());
+        c.foot_placement = false;
+        let female = Look {
+            art: "female".into(),
+            ..bare.clone()
+        };
+        c.set_look(&cat, &mut cache, &female).unwrap();
+        assert_eq!(c.look.art, "female");
+        assert!(!c.foot_placement, "settings carry over to the new body");
+        let fresh = Character::load_lod(&cat, &mut cache, &female, 1).unwrap();
+        assert_eq!(c.parts.len(), fresh.parts.len());
+        assert_eq!(c.nodes.len(), fresh.nodes.len());
     }
     #[test]
     fn moving_swings_face_where_the_clip_does_within_reach_of_the_hips() {
