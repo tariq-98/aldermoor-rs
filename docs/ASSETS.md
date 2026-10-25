@@ -284,7 +284,7 @@ always meets the hand, whatever the archer's size. The drawing hand is the one n
 `build_environment.py` builds the valley's buildings, trees, rocks, plants and props, the
 same kit the Swift village used, remade at the characters' quality.
 - **Props** (`props[]`): `id`, `label`, `kind` (house, landmark, bridge, tree, plant, rock,
-  grass, flower, prop or part), `file`, `height`, `triangles`, and, for obstacles, `footprint`
+  grass, flower, prop, part or masonry), `file`, `height`, `triangles`, and, for obstacles, `footprint`
   (width and depth in metres at scale 1). Each is centred on its footprint at ground level,
   facing +Z, with levels of detail beside it like everything else.
 - **Placements** (`placements`) say which prop stands where `world::Valley` puts things:
@@ -298,10 +298,23 @@ same kit the Swift village used, remade at the characters' quality.
   - `scatter` lists, by kind, the props for scattering: rocks, grass, flowers, bushes, riverbank
     reeds and forest pines. Where each one goes comes from Claude with the valley's dressing
     data (still to do); the renderer draws what it's given and doesn't place things itself.
+- **Masonry** (`kind` "masonry": the dry-stone field walls `wall.field.<n>` and the ruined hall
+  `ruin.hall`) stands where `world::Valley::masonry` puts it, at its `origin` turned by its
+  `yaw`, and adds that list's solids to the valley: boxes you climb onto (a `top`, which may rise
+  along the box so a wall follows a slope) and masonry too tall to climb, which blocks. The
+  `world` crate owns the list (`crates/world/src/masonry.rs`); `ground_fields` writes it out
+  with the drawn ground under each piece, and `aldermoor_art/masonry.py` builds each prop to
+  fill its blocks exactly, so the stone you see is the stone you stand on. Each prop records
+  its `blocks` (as `world` gave them, in its own frame), and `cargo test -p assets` fails if
+  `world` has moved them since: rebuild the environment art. A climbable top carries a lip of
+  worn, pale dressed stone (ART.md, "Reading the world"); masonry too tall to climb ends in
+  broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
+  metre-high wall is seen at LOD 2 from about 11 m.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
 - **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
-  thatch, clay tiles, cobbles, bark, foliage, needles), each a colour map and a normal map,
+  thatch, clay tiles, cobbles, bark, foliage, needles, and for masonry dry-stone walling, coursed
+  rubble and worn dressed stone), each a colour map and a normal map,
   with UVs in metres, so samplers repeat. `COLOR_0` multiplies the base colour, as glTF says:
   grime at the foot of walls, shade under the eaves, canopies darker inside. Oak and bush
   canopies are fields of leafy clumps under the foliage tile (drawn leaves with midribs). Rocks are the
@@ -511,8 +524,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | `build_armour.py` | The plate set, fitted per body type | `humanoid/<body type>/armour/` |
 | `build_garments.py` | Robes (mage, necromancer, healer), belted tunic, traveller's coat, smith's apron, wizard's and straw hats, with dye masks and normal maps (the weave, and folds hanging from the waist; capes' from the shoulders) | `humanoid/<body type>/clothes/` |
 | `build_beasts.py` | Wolves on their own four-legged rig: anatomy as a signed distance field with sculpted locks of fur (`aldermoor_art/wolf.py`, `sdf.py`), painted coats and generated gaits | `creatures/`, `catalog/creatures.json` |
-| `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props | `environment/`, `catalog/environment.json` |
-| `build_world.py` | The valley's ground layers and the weights that blend them (from `world`'s own fields, sampled first by `cargo run -p world --release --example ground_fields`), the river's ripples, the sky, and the light | `terrain/`, `water/`, `sky/`, `catalog/surfaces.json`, `catalog/look.json` |
+| `build_environment.py` | Cottages (thatched, tiled, stone), the shed, the windmill and its sails, the stone bridge, oaks, pines, bushes, rocks, grass, flowers, reeds and village props; the field walls and the ruined hall, from `world`'s masonry (sampled first by `cargo run -p world --release --example ground_fields`) | `environment/`, `catalog/environment.json` |
+| `build_world.py` | The valley's ground layers and the weights that blend them (from `world`'s own fields, sampled by the same example), the river's ripples, the sky, and the light | `terrain/`, `water/`, `sky/`, `catalog/surfaces.json`, `catalog/look.json` |
 
 - **Output format:** `.gltf` + `.bin` with a shared `textures/` folder, so the parts of an outfit
   share their texture files. Colour maps are JPEG and data maps PNG, 2048 px at most. Beasts are
@@ -530,6 +543,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - that no piece costs more than four draws beyond its materials: parts that share a
     material are joined into one mesh at export (`export.joined`), so the renderer draws plate
     a material at a time, not a plate at a time;
+  - that every masonry prop was built for the blocks `world` stands it on;
   - that the ground, river and sky files exist, the terrain's layers match in size (they stack
     into texture arrays), the weights are square, the sky is twice as wide as tall, and the
     light's numbers make sense;
@@ -548,7 +562,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
-| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile |
+| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile; nine pieces of dry-stone field wall along the north road and a ruined hall on the hill (#160) |
 | Ground, water, sky | Lush grass, meadow, packed earth and limestone, blended across the valley by its roads, slopes, river, trees and houses; river ripples; a fair-weather sky; the valley's light (25 October 2026) |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 

@@ -416,6 +416,7 @@ fn scenery_uses_only_supplied_placements_and_models() {
             + 1
             + env.placements.landmarks.len()
             + env.placements.dressing.len()
+            + v.masonry.len()
     );
     let camera = render::Camera {
         eye: glam::Vec3::new(6., 15., 28.),
