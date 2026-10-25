@@ -88,8 +88,11 @@ removing someone else's lock.
   review comments or requested changes; no `status:needs-decision` issue blocking it; and the PR is
   mergeable without conflicts. Then mark it ready for review and squash-merge. If any of those
   isn't true, leave the PR open and say in it exactly what's missing.
-- Once your PR merges, run `cargo clean` in your checkout (or delete its `target/`). Build folders
-  fill the Mac's disk quickly when several agents keep old ones around.
+- Once your PR merges, clean up everything the issue made: delete the checkout's `target/` (or run
+  `cargo clean`), remove any worktree or clone you made for the issue (`git worktree remove`), and
+  delete its captures. Keep captures in a temp folder (your scratchpad or `$TMPDIR`), never in the
+  repo or `~/code`. Build folders fill the Mac's disk quickly when several agents keep old ones
+  around; a job on the Mac also deletes idle `target/` folders when the disk runs low.
 - If you stop before finishing, comment `Released: <what is done, what is left>` and set the
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are
