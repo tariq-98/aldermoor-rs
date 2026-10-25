@@ -468,6 +468,9 @@ impl Effects {
             let turn = Quat::from_rotation_arc(Vec3::Z, dir);
             let mut anchor = Anchor::at(at, turn, s.time - born, fseed);
             anchor.velocity = p.velocity;
+            // A missile's marks are the light it throws on the ground under it.
+            let under = (s.ground)(at.x, at.z);
+            anchor.ground = (under, under);
             if let Some(f) = self.look(&look.flight) {
                 for part in f.iter() {
                     emit(part, &anchor, false, &mut out, s);
@@ -954,13 +957,15 @@ fn decal(part: &Part, a: &Anchor, life: &Life, out: &mut fx::Frame, _s: &Scene) 
         envelope(life.t, l.fade)
     };
     let pulse = 1. + l.pulse[0] * (TAU * l.pulse[1] * a.age).sin();
-    let alpha = l.alpha * fade * a.strength * pulse;
+    // A mark cast from above (a missile's light) weakens the higher its source is.
+    let (low, high) = a.ground;
+    let lift = (a.origin.y - high).max(0.);
+    let alpha = l.alpha * fade * a.strength * pulse / (1. + 0.5 * lift * lift);
     if alpha <= 0.002 {
         return;
     }
     let spin = Quat::from_rotation_y(l.angle + l.spin[0] * a.age);
     // The box reaches from just under the lowest ground to just over the highest.
-    let (low, high) = a.ground;
     let centre_y = (low + high) * 0.5;
     let half_y = (high - low) * 0.5 + 0.35;
     let size = lerp(l.size[0], l.size[1], life.t) * s;
