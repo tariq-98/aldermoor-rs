@@ -366,6 +366,72 @@ rain streaks run down them). Tangent frames built from screen derivatives, for m
 tangents such as the terrain and the river, have their bitangent along −∂P/∂v, as glTF's normal
 maps expect.
 
+## Combat effects: `catalog/effects.json`
+
+How a fight looks, as data (checked by `Catalog::check`, and against the combat content by
+`crates/sim/tests/looks.rs`). Effects are made of authored art in `assets/effects/`, built by
+`art/blender.sh -P art/blender/build_effects.py` (add `-- --review` for a contact sheet in
+`art/out/effects/review.png`):
+
+- `atlas.png` and its index `atlas.json`: every sprite and flipbook. Each texel is three data
+  channels, not a colour: heat (R) picks a colour from a ramp, cover (G) is opacity, and erosion
+  order (B) says where a sprite dissolves first as it ages. Sprites: glow, flare, spark, shock,
+  ring, seal, runes and sigil (casting circles), star, snowflake, shard, bubble, ripple, scorch,
+  frost, starburst, four lightning strips and status icons (zzz, drop, hush, mark, skull,
+  chevron, vine: bold shapes with a dark outline, for over a head or at the feet). Flipbooks,
+  one life from first frame to last: flame (stylised fire in three crisp bands, tongues tearing
+  into blobs), puff, swirl and wisp (painted in numpy), and fire, smoke and burst (Cycles volume
+  renders, cached in `art/out/effects/`; `--only=volumes` renders them again).
+- `tile.*.png`: tiling strips (trail streaks, three noises, a honeycomb) that trails, marks and
+  shells scroll through.
+- `shell.glb` (a Goldberg sphere of hexagonal cells for wards), `column.glb` (light rising from
+  the ground), `crystal.glb` (a frost lance's ice) and `arrow.glb` (a solid, lit arrow).
+
+The catalogue names the art and builds effects from it:
+
+- `ramps`: colour ramps as stops of `[position, r, g, b]`, linear and any brightness. Colours
+  hotter than 1 go white through the tone mapper, which is what makes a core burn.
+- `effects`: named lists of layers. A layer is `sprite` (camera-facing particles, or streaks
+  with `stretch`; `upright` ones stand on their base, like flames), `beam` (a ribbon behind a
+  missile: with a `tile` it cools and thins away to its tail), `trail` (sprites dropped along a missile's
+  path, `rate` a metre), `decal` (a mark projected onto the ground: a sprite, or the area's own
+  shape with a glowing edge and a fill that grows as a warning ripens) or `mesh`. Layers give
+  their art (`frame`, `tile`, `mesh`), `ramp`, `colour`, `alpha` and `blend` (0 adds light, 1
+  covers like paint), and how their particles live: `count`, `life` (0 for one steady thing),
+  `size` at birth and death, `offset`, `spread`, `ring`, `orbit`, `speed`, `velocity`,
+  `gravity`, `drag`, `spin`, `vary`, `fade`, `erode`, `cool`, `delay`, `fps`, `pulse`, `soft`.
+  `scaled` layers scale with what they play on: a unit's height, an area's reach. Steady layers
+  on a cast or a warning go from their first size and erosion to their second as it ripens (a
+  casting circle draws itself in). An effect can instead be `{"like": other, "ramps": {...}}`,
+  the same layers in other colours.
+- `projectiles` (by `ProjectileView.visual`): the effect it plays in `flight`, the `trail` it
+  leaves, its `impact`, and a solid `mesh` it carries (with `spin` and `pivot` for a thrown
+  axe). `casts`, `auras`, `fields` (with optional `<name>.hostile` variants), `schools` (each
+  school's fallback field and the burst where its warned-of blows land), `warnings` (hostile and
+  friendly), `combo` and `aim` name the effect each plays.
+
+Every missile in the content needs a projectile entry, and every spell (a cast or channel
+outside the physical school) a cast. Unlisted auras show only on the HUD.
+
+The renderer draws effects in its own pass (docs/RENDERER.md): marks inside the scene pass,
+everything else after tone mapping, so they never blur under temporal AA.
+
+To review them, `scripts/run_client.sh --effects-review` stages a fight in the showcase scene
+(`crates/client/src/stage.rs`): every missile look crosses in front of the lineup, which wears a
+shell, buffs, conditions and a stun and casts three spells, while warnings of each shape, two
+fields, the aiming circle and bursts lie on the ground. It runs on frame time alone, so
+`--capture` with a given `--frames` always shows the same moment. `--view 1`, `2` and `3` come
+in close (the lineup's left and right, and the missiles' lanes), and `--sequence DIR` writes
+every frame after `--warmup` for a review video (`--sequence-step N` keeps every Nth, for
+contact sheets). `--showcase` is the same scene without the effects, so
+`scripts/benchmark_renderer.py --effects-review` against a plain run gives their GPU cost.
+
+`--effects-reel` shows the same effects one at a time instead, each close up and captioned:
+every missile at full speed and again in slow motion, then casts, auras (those that differ only
+in colour three at a time), fields, every school's blow landing from a warning, the cone and
+line warnings and the combo. It starts as the warmup ends and prints its length;
+`--reel-from SECONDS` starts it partway in, to look at one shot.
+
 ## Materials and file details
 
 - **Materials:** standard glTF PBR (metallic-roughness). Colour textures are sRGB; normal, ORM

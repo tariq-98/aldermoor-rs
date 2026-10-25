@@ -393,6 +393,31 @@ they cannot isolate triplanar cost against the earlier neutral scene. Sequential
 have system-load noise. Raw reports are `supplied-surfaces-before-skip.json` and
 `supplied-surfaces-final.json` under [benchmarks/2026-10-25](benchmarks/2026-10-25/README.md).
 
+## Combat effects pass (25 October 2026)
+
+`crate::fx` is what the client hands over each frame (`Renderer::effects`): quads (camera-facing
+sprites, beams between two points, planes), decals and effect-mesh instances, all unlit with
+premultiplied alpha. The art is uploaded once with `Renderer::load_effects`: the sprite atlas,
+the tiles as an array texture, colour ramps (32-bit float, read and blended by hand) and the
+effect meshes. Shaders are `crates/render/src/fx.metal`, compiled as their own library; the
+Metal side is `crates/render/src/metal/fx_pass.rs`. Neither part adds a render pass:
+
+- **Decals** are drawn at the end of the scene pass as back faces of their boxes with depth
+  testing off. Each pixel reads the scene's linear depth from the motion target's w by
+  programmable blending, rebuilds its world position, and keeps only surfaces facing up the
+  box, so marks lie on slopes and steps but not on the legs of whoever stands in them. They are
+  jittered like the scene and resolved by temporal AA with it, and leave motion vectors alone.
+- **Quads and meshes** are drawn at the end of the composite pass, straight onto the output
+  after exposure, grade and ACES (each tone-mapped as it's drawn), with soft-particle fades
+  against the scene depth. They never enter TAA history, so fast sparks and trails aren't
+  smeared or dimmed. Meshes go first, then quads farthest first, in one instanced draw. A beam
+  drawn with a tile is a missile's ribbon: its heat and cover fall away towards its tail.
+
+The MSAA comparison mode draws no effects (they need single-sample depth). In the staged fight
+(`--effects-review`), at 2560×1600 output / 1920×1200 internal on the M1, effects added
+1.29 ms GPU median (11.21 → 12.50 ms) and 1.13 ms p95, against about 25 ms for #49's lit
+effects; two ABAB runs of 480 frames, one in flight, offscreen.
+
 ## Asset requests
 
 All art and look decisions belong to Claude. The renderer will consume supplied data; it will
@@ -412,9 +437,6 @@ not generate substitute scenery, textures, scatter, effects, icons or visual pre
   catalogue currently names candidates in `scatter`; the renderer will not choose locations.
 - **HUD:** frame/bar art, ability icons, fonts and layout/style values. Functional controls
   use plain temporary styling until supplied.
-- **Protocol v4 effects:** projectile/trail/particle/decal meshes, textures and visual/timing
-  parameters keyed by `ProjectileView.visual` and area school/field. The protocol now drives
-  functional projected diagnostics; replace those with supplied depth-aware world effects.
 - **Shout:** a dedicated roar/shout clip, as already listed in CONTRACT.md.
 
 ## Per-pass counters and F3 diagnostics (#26)
