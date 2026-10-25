@@ -141,7 +141,7 @@ pub fn specialties(ctx: &egui::Context, snapshot: &Snapshot, amount: &mut u32) -
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
+        .anchor(egui::Align2::RIGHT_CENTER, [-24., 0.])
         .default_width(360.)
         .show(ctx, |ui| {
             ui.label("Each specialty levels on its own. The equipped one fights at its level.");
@@ -246,7 +246,10 @@ pub fn draw(
                     xp_bar(ui, player);
                 }
                 if player.unassigned_xp > 0 {
-                    ui.small(format!("{} quest XP to give · {}", player.unassigned_xp, keys.specialties));
+                    ui.colored_label(
+                        egui::Color32::from_rgb(230, 190, 90),
+                        format!("{} quest XP to give · {} Specialties", player.unassigned_xp, keys.specialties),
+                    );
                 }
                 ui.add(
                     egui::ProgressBar::new(me.health / me.max_health.max(1.)).text(format!(
