@@ -1,5 +1,6 @@
 use bevy_ecs::prelude::*;
 use glam::{Vec2, Vec3};
+use std::sync::Arc;
 use protocol::{Action, Pose, ResourceKind, UnitId, UnitKind};
 
 use crate::content::{AbilityId, AuraId, Specialty};
@@ -502,8 +503,48 @@ impl Brain {
 
 /// How a unit looks (see protocol::Look). The snapshot works `drawn` out from the fight, and
 /// swapping weapons changes the gear.
-#[derive(Component, Clone, Debug, Default)]
-pub struct Appearance(pub protocol::Look);
+///
+/// It keeps the look twice, weapons put away and drawn, each shared with every snapshot rather
+/// than copied into it (#189).
+#[derive(Component, Clone, Debug)]
+pub struct Appearance {
+    put_away: Arc<protocol::Look>,
+    drawn: Arc<protocol::Look>,
+}
+
+impl Appearance {
+    pub fn new(look: protocol::Look) -> Appearance {
+        let drawn = Arc::new(protocol::Look { drawn: true, ..look.clone() });
+        Appearance { put_away: Arc::new(protocol::Look { drawn: false, ..look }), drawn }
+    }
+
+    pub fn look(&self) -> &protocol::Look {
+        &self.put_away
+    }
+
+    pub fn edit(&mut self, f: impl FnOnce(&mut protocol::Look)) {
+        let mut look = (*self.put_away).clone();
+        f(&mut look);
+        *self = Appearance::new(look);
+    }
+
+    /// The look to send, weapons drawn or not.
+    pub fn shared(&self, drawn: bool) -> Arc<protocol::Look> {
+        Arc::clone(if drawn { &self.drawn } else { &self.put_away })
+    }
+
+    /// What a unit with no look of its own is sent: the body type's defaults.
+    pub fn bare() -> &'static Appearance {
+        static BARE: std::sync::LazyLock<Appearance> = std::sync::LazyLock::new(|| Appearance::new(protocol::Look::default()));
+        &BARE
+    }
+}
+
+impl Default for Appearance {
+    fn default() -> Appearance {
+        Appearance::bare().clone()
+    }
+}
 
 /// The monsters in the content tables that the valley spawns by name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

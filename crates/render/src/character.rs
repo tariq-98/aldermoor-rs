@@ -1464,7 +1464,7 @@ mod combat_tests {
             max_health: 100.,
             hostile: false,
             target: None,
-            look,
+            look: look.into(),
         };
         assert_eq!(
             c.clip_for(&u),
@@ -1578,7 +1578,7 @@ mod combat_tests {
             max_health: 100.,
             hostile: false,
             target: None,
-            look,
+            look: look.into(),
         };
         let mut fight = UnitCombat {
             id: 1,
@@ -1647,7 +1647,7 @@ mod combat_tests {
             max_health: 100.,
             hostile: false,
             target: None,
-            look,
+            look: look.into(),
         };
         let fight = UnitCombat {
             id: 1,

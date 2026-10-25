@@ -303,7 +303,7 @@ impl Sim {
                 Anim::default(),
                 PlayerControl,
                 Home { pos, yaw },
-                Appearance(components::player_look()),
+                Appearance::new(components::player_look()),
                 Progress::new(specialty, level),
             ))
             .id();
@@ -463,12 +463,10 @@ impl Sim {
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
                 target: f.target,
-                look: {
-                    let mut l = look.map(|a| a.0.clone()).unwrap_or_default();
-                    // Weapons come out for a fight and go away once it's over.
-                    l.drawn = f.target.is_some() || f.guard_since.is_some() || time - v.last_combat < COMBAT_TIMEOUT;
-                    l
-                },
+                // Weapons come out for a fight and go away once it's over.
+                look: look
+                    .unwrap_or(Appearance::bare())
+                    .shared(f.target.is_some() || f.guard_since.is_some() || time - v.last_combat < COMBAT_TIMEOUT),
             });
         }
         // Neighbours' units near the border, as their regions published them.
@@ -495,7 +493,7 @@ impl Sim {
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
                 target: g.target,
-                look: protocol::Look { drawn: g.drawn, ..look.map(|a| a.0.clone()).unwrap_or_default() },
+                look: look.unwrap_or(Appearance::bare()).shared(g.drawn),
             });
         }
         units.sort_by_key(|u| u.id);
@@ -550,7 +548,7 @@ pub(crate) fn spawn_mob(world: &mut World, key: &str, at: Vec2, level: Option<u8
         Anim::default(),
         Brain::new(def.key, at, def.aggro, def.wander),
         Home { pos, yaw },
-        Appearance(def.look.clone()),
+        Appearance::new(def.look.clone()),
         Credit::default(),
     ));
     let id = world.resource_mut::<Units>().issue(e);

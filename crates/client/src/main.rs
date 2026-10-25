@@ -942,14 +942,15 @@ impl Game {
             }
         }
         if self.options.look_churn && self.options.showcase {
-            units[0].look.gear = if (self.frame / 60).is_multiple_of(2) {
-                vec![
-                    ("main_hand".into(), "sword.arming".into()),
-                    ("off_hand".into(), "shield.round".into()),
-                ]
-            } else {
-                vec![("main_hand".into(), "sword.great".into())]
-            };
+            std::sync::Arc::make_mut(&mut units[0].look).gear =
+                if (self.frame / 60).is_multiple_of(2) {
+                    vec![
+                        ("main_hand".into(), "sword.arming".into()),
+                        ("off_hand".into(), "shield.round".into()),
+                    ]
+                } else {
+                    vec![("main_hand".into(), "sword.great".into())]
+                };
         }
         let me = units
             .iter()
@@ -1004,7 +1005,7 @@ impl Game {
         });
         let combat_index: HashMap<_, _> = self.fight.units.iter().map(|c| (c.id, c)).collect();
         for u in &units {
-            let mut look = u.look.clone();
+            let mut look = (*u.look).clone();
             look.drawn = false;
             let height = self
                 .characters
@@ -1371,7 +1372,7 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
         base.position = Vec3::new(-4. + i as f32 * 2.8, 0., 22.);
         base.position.y = world::height(base.position.x, base.position.z);
         base.yaw = 0.25;
-        base.look = Look {
+        let mut look = Look {
             art: art.into(),
             pieces: pieces.iter().map(|s| s.to_string()).collect(),
             gear: vec![("main_hand".into(), weapon.into())],
@@ -1379,22 +1380,21 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
             ..Default::default()
         };
         if let Some(s) = shield {
-            base.look.gear.push(("off_hand".into(), s.into()));
+            look.gear.push(("off_hand".into(), s.into()));
         }
         if art == "male" {
-            base.look.hair = Some("hair.simple_parted".into());
-            base.look.brows = Some("brows.strong".into());
-            base.look.beard = Some("beard.full".into());
+            look.hair = Some("hair.simple_parted".into());
+            look.brows = Some("brows.strong".into());
+            look.beard = Some("beard.full".into());
         }
         if art == "elf_female" {
-            base.look.hair = Some("hair.long".into());
+            look.hair = Some("hair.long".into());
         }
         if art == "dwarf_male" {
-            base.look
-                .gear
-                .push(("back".into(), "cape.traveller".into()));
-            base.look.beard = Some("beard.dwarven".into());
+            look.gear.push(("back".into(), "cape.traveller".into()));
+            look.beard = Some("beard.dwarven".into());
         }
+        base.look = look.into();
         base.pose = Pose::Idle;
         units.push(base.clone());
     }
@@ -1402,7 +1402,8 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     base.look = Look {
         art: "wolf.grey".into(),
         ..Default::default()
-    };
+    }
+    .into();
     base.position = Vec3::new(8., world::height(8., 24.), 24.);
     units.push(base);
     units

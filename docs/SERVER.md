@@ -199,6 +199,9 @@ a 4-core cloud Linux box, with the bots' own reader threads competing for the sa
 | 200 | 3.3 | 1.45 / 2.81 | 166.57 / 215.97 | 121.22 / 142.96 | 291.75 / 360.73 | 699 KB/s | 139.7 MB/s |
 | 500 | 1.2 | 1.59 / 5.46 | 482.86 / 591.31 | 381.46 / 429.91 | 869.01 / 1026.68 | 340 KB/s | 170.1 MB/s |
 
+Since #189 a snapshot shares each unit's look instead of copying it, which took building views at
+200 players to 91.58 / 111.34 ms (5.4 ticks a second), with the same bytes on the wire.
+
 The step itself stays under 2 ms even at 500 players; the ticks are slow because of the views.
 A full snapshot and combat view for every player, every tick, is nearly all of it. Out per player
 falls only because the server manages fewer ticks a second. #34 (views from the interest grid,
