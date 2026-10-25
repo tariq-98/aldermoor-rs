@@ -325,6 +325,59 @@ fn a_skill_pressed_just_before_the_global_cooldown_ends_goes_off_when_it_does() 
 }
 
 #[test]
+fn the_newest_press_takes_the_queue_and_a_roll_clears_it() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let golem = f.dummy("golem", ROAD + Vec2::new(0.0, 2.5), PI);
+    f.target(hero, golem);
+    let second = catalog().ability(f.fighter(hero).bar[2].unwrap()).key;
+    f.once(hero, 1);
+    f.run(0.7);
+    f.press(hero, 3); // Shield Bash, then the main hand's third skill in its place.
+    f.press(hero, 2);
+    f.run(0.4);
+    assert_eq!(f.used(hero, "shield_bash"), 0, "the older press went off");
+    assert_eq!(f.used(hero, second), 1, "the newer press never went off");
+    // Pressed early again, then a roll: the roll takes the skill's place.
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let golem = f.dummy("golem", ROAD + Vec2::new(0.0, 2.5), PI);
+    f.target(hero, golem);
+    f.once(hero, 1);
+    f.run(0.7);
+    f.press(hero, 3);
+    f.cmd(hero, Command::Dodge { direction: Vec2::new(1.0, 0.0) });
+    f.run(0.6);
+    assert_eq!(f.used(hero, "shield_bash"), 0, "the skill went off after the roll");
+}
+
+#[test]
+fn a_skill_pressed_near_the_end_of_a_climb_goes_off_after_it() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
+    let golem = f.dummy("golem", ROAD + Vec2::new(0.0, 2.5), PI);
+    f.target(hero, golem);
+    // Mid-climb (on the spot, for the test), 0.2 s from the top.
+    let t = f.sim.time();
+    let at = f.sim.get::<Transform>(hero).unwrap().pos;
+    f.sim.get_mut::<Motion>(hero).unwrap().forced =
+        Some(sim::Forced { kind: sim::ForcedKind::Climb, from: at, to: at, start: t - 0.4, duration: 0.6, arc: 0.0 });
+    f.press(hero, 3);
+    f.run(0.1);
+    assert_eq!(f.used(hero, "shield_bash"), 0, "a skill went off mid-climb");
+    f.run(0.3);
+    assert_eq!(f.used(hero, "shield_bash"), 1, "the skill pressed mid-climb never went off");
+    // Pressed early in a climb, it's dropped (once Shield Bash's 15 s cooldown is over).
+    f.run(16.0);
+    let t = f.sim.time();
+    f.sim.get_mut::<Motion>(hero).unwrap().forced =
+        Some(sim::Forced { kind: sim::ForcedKind::Climb, from: at, to: at, start: t, duration: 0.6, arc: 0.0 });
+    f.press(hero, 3);
+    f.run(1.0);
+    assert_eq!(f.used(hero, "shield_bash"), 1, "a skill pressed at the start of a climb went off");
+}
+
+#[test]
 fn a_shield_bash_interrupts_a_cast_and_locks_the_caster_out() {
     let mut f = Fight::new();
     let hero = f.hero(Specialty::Warrior, 1, ROAD, 0.0);
@@ -599,6 +652,28 @@ fn a_blow_lands_on_every_enemy_in_the_swing_and_no_others() {
     assert!(!f.blows_on(beside).is_empty(), "an enemy inside the swing wasn't hit");
     assert!(f.blows_on(flank).is_empty(), "an enemy off to the side was hit");
     assert!(f.blows_on(far).is_empty(), "an enemy out of reach was hit");
+}
+
+#[test]
+fn a_blow_that_fells_several_has_everyone_let_go_of_all_of_them() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+    let front = f.dummy("skeleton", ahead(2.5, 0.0), PI);
+    let beside = f.dummy("skeleton", ahead(2.5, 0.5), PI);
+    let (a, b) = (f.hero(Specialty::Mage, 10, ROAD - Vec2::X * 4.0, 0.0), f.hero(Specialty::Mage, 10, ROAD + Vec2::X * 4.0, 0.0));
+    for id in [front, beside] {
+        f.sim.get_mut::<Vitals>(id).unwrap().health = 1.0;
+    }
+    f.step();
+    f.target(a, front);
+    f.target(b, beside);
+    f.target(hero, front);
+    f.once(hero, 0); // Sword Chain fells both.
+    f.run(0.2);
+    assert!(f.vitals(front).dead && f.vitals(beside).dead, "the swing didn't fell both");
+    assert_eq!(f.fighter(a).target, None, "still aiming at the first to fall");
+    assert_eq!(f.fighter(b).target, None, "still aiming at the second to fall");
+    assert_eq!(f.fighter(hero).target, None);
 }
 
 #[test]

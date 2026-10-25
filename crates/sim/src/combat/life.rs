@@ -51,7 +51,8 @@ pub fn lethal(world: &mut World, e: Entity, killer: Option<UnitId>) {
     }
     effects::act(world, e, Action::Downed);
     if let Some(mut m) = world.get_mut::<Motion>(e) {
-        m.jump_queued = false;
+        m.jump_until = f64::NEG_INFINITY;
+        m.dodge_queued = None;
     }
     let unit = unit_id(world, e).unwrap_or(0);
     emit(world, Event::Downed { unit });
@@ -97,39 +98,78 @@ pub fn die(world: &mut World, e: Entity, killer: Option<UnitId>) {
     crate::loot::drop_loot(world, e);
     crate::progress::pay_out(world, e);
 
-    // Everyone fighting it lets it go; monsters stop swinging at a corpse.
-    let all: Vec<Entity> = world.resource::<Units>().all().collect();
-    for other in &all {
-        let monster = world.get::<PlayerControl>(*other).is_none();
-        if let Some(mut f) = world.get_mut::<Fighter>(*other) {
-            if f.target == Some(id) {
+    // Everyone fighting it lets it go, now or when the blow that felled it has landed on
+    // everyone else it hit.
+    let mut fallen = world.resource_mut::<Fallen>();
+    fallen.ids.push(id);
+    if fallen.open == 0 {
+        let_go(world);
+    }
+    // Downed players who hurt it lately get up (only players go down).
+    let mut rallying: Vec<(UnitId, Entity)> = crate::queries::with(world, |q| &mut q.rally, |world, q| {
+        q.iter(world)
+            .filter(|(_, _, v, f)| v.downed && f.recent_victims.iter().any(|&(v, at)| v == id && t - at <= RALLY_WINDOW))
+            .map(|(e, u, _, _)| (u.id, e))
+            .collect()
+    });
+    rallying.sort_unstable_by_key(|r| r.0);
+    for (_, other) in rallying {
+        rally(world, other, RALLY_HEALTH);
+    }
+    // Its summons go with it.
+    hold_deaths(world);
+    for other in summons(world, |s, v| s.owner == id && !v.dead) {
+        die(world, other, None);
+    }
+    release_deaths(world);
+}
+
+/// Who died while a blow was still landing, so that everyone lets them all go in one pass
+/// after it rather than one pass over every fighter per death.
+#[derive(Resource, Default)]
+pub(crate) struct Fallen {
+    open: u32,
+    ids: Vec<UnitId>,
+}
+
+/// Holds back letting go of the fallen until [`release_deaths`].
+pub(crate) fn hold_deaths(world: &mut World) {
+    world.resource_mut::<Fallen>().open += 1;
+}
+
+pub(crate) fn release_deaths(world: &mut World) {
+    let mut fallen = world.resource_mut::<Fallen>();
+    fallen.open -= 1;
+    if fallen.open == 0 && !fallen.ids.is_empty() {
+        let_go(world);
+    }
+}
+
+/// Monsters stop swinging at the fallen, and nobody keeps them on a threat list or keeps
+/// reviving them. Each unit only changes itself here, so one pass does it in any order.
+fn let_go(world: &mut World) {
+    let ids = std::mem::take(&mut world.resource_mut::<Fallen>().ids);
+    let gone = |id: UnitId| ids.contains(&id);
+    crate::queries::with(world, |q| &mut q.let_go, |world, q| {
+        for (mut f, th, player) in q.iter_mut(world) {
+            if f.target.is_some_and(gone) {
                 f.target = None;
-                if monster {
+                if !player {
                     f.auto_attack = false;
                 }
             }
-            if f.reviving.is_some_and(|(r, _)| r == id) {
+            if f.reviving.is_some_and(|(r, _)| gone(r)) {
                 f.reviving = None;
             }
+            if let Some(mut th) = th
+                && (th.taunted_by.is_some_and(gone) || ids.iter().any(|&id| th.contains(id)))
+            {
+                for &id in &ids {
+                    th.remove(id);
+                }
+            }
         }
-        if let Some(mut th) = world.get_mut::<Threat>(*other) {
-            th.remove(id);
-        }
-    }
-    // Downed players who hurt it lately get up.
-    for other in &all {
-        let rallies = world.get::<Vitals>(*other).is_some_and(|v| v.downed)
-            && world.get::<Fighter>(*other).is_some_and(|f| f.recent_victims.iter().any(|&(v, at)| v == id && t - at <= RALLY_WINDOW));
-        if rallies {
-            rally(world, *other, RALLY_HEALTH);
-        }
-    }
-    // Its summons go with it.
-    for other in &all {
-        if world.get::<Summoned>(*other).is_some_and(|s| s.owner == id) && world.get::<Vitals>(*other).is_some_and(|v| !v.dead) {
-            die(world, *other, None);
-        }
-    }
+    });
 }
 
 /// Back up from downed with `fraction` of health.
@@ -250,8 +290,11 @@ pub fn start_revive(world: &mut World, e: Entity, target: UnitId) {
 /// friend is gone.
 pub fn update_revives(world: &mut World) {
     let t = now(world);
-    let helpers: Vec<Entity> = world.resource::<Units>().all().filter(|&e| world.get::<Fighter>(e).is_some_and(|f| f.reviving.is_some())).collect();
-    for e in helpers {
+    let mut helpers: Vec<(UnitId, Entity)> = crate::queries::with(world, |q| &mut q.revivers, |world, q| {
+        q.iter(world).filter(|(_, _, f)| f.reviving.is_some()).map(|(e, u, _)| (u.id, e)).collect()
+    });
+    helpers.sort_unstable_by_key(|h| h.0);
+    for (_, e) in helpers {
         let Some((target, since)) = world.get::<Fighter>(e).and_then(|f| f.reviving) else { continue };
         let te = entity(world, target);
         let helper_ok = world.get::<Vitals>(e).is_some_and(|v| v.alive())
@@ -291,10 +334,8 @@ pub fn summon(world: &mut World, owner: Entity, mob: &'static str, count: u8, la
     let Some(ou) = world.get::<Unit>(owner).cloned() else { return };
     let Some(ot) = world.get::<Transform>(owner).copied() else { return };
     // Old summons of the same kind make way.
-    let all: Vec<Entity> = world.resource::<Units>().all().collect();
-    for e in all {
-        let same = world.get::<Summoned>(e).is_some_and(|s| s.owner == ou.id) && world.get::<Brain>(e).is_some_and(|b| b.mob == mob);
-        if same && world.get::<Vitals>(e).is_some_and(|v| !v.dead) {
+    for e in summons(world, |s, v| s.owner == ou.id && !v.dead) {
+        if world.get::<Brain>(e).is_some_and(|b| b.mob == mob) {
             die(world, e, None);
         }
     }
@@ -323,8 +364,7 @@ pub fn summon(world: &mut World, owner: Entity, mob: &'static str, count: u8, la
 /// Summons whose time is up, or whose owner is gone, crumble.
 pub fn expire_summons(world: &mut World) {
     let t = now(world);
-    let all = crate::take_units(world);
-    for &e in &all {
+    for e in summons(world, |_, v| !v.dead) {
         let Some(s) = world.get::<Summoned>(e).copied() else { continue };
         if world.get::<Vitals>(e).is_none_or(|v| v.dead) {
             continue;
@@ -334,21 +374,25 @@ pub fn expire_summons(world: &mut World) {
             die(world, e, None);
         }
     }
-    crate::return_units(world, all);
+}
+
+/// Summoned units that pass `keep`, in ID order: only summons are visited, however many other
+/// units there are.
+fn summons(world: &mut World, keep: impl Fn(&Summoned, &Vitals) -> bool) -> Vec<Entity> {
+    let mut list: Vec<(UnitId, Entity)> = crate::queries::with(world, |q| &mut q.summons, |world, q| {
+        q.iter(world).filter(|(_, _, s, v)| keep(s, v)).map(|(e, u, _, _)| (u.id, e)).collect()
+    });
+    list.sort_unstable_by_key(|s| s.0);
+    list.into_iter().map(|s| s.1).collect()
 }
 
 /// Removes summons' remains a while after they fall.
 pub fn clear_remains(world: &mut World) {
     let t = now(world);
-    let all = crate::take_units(world);
-    for &e in &all {
-        let gone = world.get::<Summoned>(e).is_some() && world.get::<Vitals>(e).is_some_and(|v| v.dead && t - v.died_at > 8.0);
-        if gone {
-            if let Some(id) = unit_id(world, e) {
-                world.resource_mut::<Units>().forget(id);
-            }
-            world.despawn(e);
+    for e in summons(world, |_, v| v.dead && t - v.died_at > 8.0) {
+        if let Some(id) = unit_id(world, e) {
+            world.resource_mut::<Units>().forget(id);
         }
+        world.despawn(e);
     }
-    crate::return_units(world, all);
 }

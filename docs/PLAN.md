@@ -12,7 +12,7 @@ branch `v2`, and `~/code/aldermoor-wild`). Both stay frozen as reference.
 - **A portable server.** The same simulation runs as a server on Mac or cheap Linux machines when
   multiplayer arrives.
 
-**What Rust won't do on its own:** at 5120×1440 on the M1 Air, the GPU is the main limit, so
+**What Rust won't do on its own:** on the M1 Air, even at its own 2560×1600 panel, the GPU is the main limit, so
 rendering technique still decides the frame rate. That's why the engine talks to Metal directly
 (decision 2).
 
@@ -82,8 +82,9 @@ rendering technique still decides the frame rate. That's why the engine talks to
 
 1. **Performance slice.** The Rust simulation at 60 Hz, and the Metal renderer drawing the
    Brambleford valley with the rebuilt player. WASD movement, the camera and one fight.
-   - **Targets:** a steady 60 fps at 5120×1440 on the M1 Air, GPU under 12 ms, simulation under
-     2 ms per step with 2,000 active units.
+   - **Targets:** a steady 60 fps on the M1 Air's built-in 2560×1600 panel at 75% render scale,
+     GPU under 12 ms, simulation under 2 ms per step with 2,000 active units. The 5120×1440
+     ultrawide is best effort, not a gate (#36). Every budget is in [PERFORMANCE.md](PERFORMANCE.md).
    - **Comparison:** recorded against the Swift build.
 2. **Combat core.** Abilities, auras, projectiles, area attacks, threat, crowd control with
    diminishing returns, defiance bars, downed state and revives. The Swift checks are the bar to

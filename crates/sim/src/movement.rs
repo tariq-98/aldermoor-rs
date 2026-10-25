@@ -13,6 +13,13 @@ pub const DODGE_DISTANCE: f32 = 5.0;
 pub const DODGE_DURATION: f64 = 0.45;
 pub const DODGE_INVULNERABLE: f64 = 0.4;
 pub const DODGE_COST: f32 = 50.0;
+/// A roll pressed this long before a roll, climb or other forced move ends goes off when it
+/// ends, instead of being lost.
+pub const DODGE_BUFFER: f64 = 0.2;
+/// A jump pressed this long before the feet touch down goes off as they land.
+pub const JUMP_BUFFER: f64 = 0.15;
+/// Running off an edge, a jump still works for this long (coyote time).
+pub const COYOTE_TIME: f64 = 0.1;
 /// Downed: a crawl.
 pub const CRAWL_SPEED: f32 = 1.0;
 /// Backpedalling while strafing runs at this fraction of full speed.
@@ -125,7 +132,8 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         if v.dead {
             m.vel = Vec3::ZERO;
             m.observed = Vec3::ZERO;
-            m.jump_queued = false;
+            m.jump_until = f64::NEG_INFINITY;
+            m.dodge_queued = None;
             m.forced = None;
             m.swimming = false;
             m.sprinting = false;
@@ -155,7 +163,6 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 }
             }
             m.observed = (t.pos - start) / DT;
-            m.jump_queued = false;
             continue;
         }
 
@@ -222,12 +229,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.vel.x += (desired.x - m.vel.x) * k;
             m.vel.z += (desired.y - m.vel.z) * k;
         }
-        if m.jump_queued && m.grounded && !m.swimming && ctl.can_move() && !v.downed {
+        // A jump pressed a moment before landing, or a moment after running off an edge, still
+        // goes off.
+        let footing = m.grounded || clock.time <= m.coyote_until;
+        if clock.time <= m.jump_until && footing && !m.swimming && ctl.can_move() && !v.downed {
             m.vel.y = JUMP_SPEED;
             m.grounded = false;
+            m.jump_until = f64::NEG_INFINITY;
+            m.coyote_until = f64::NEG_INFINITY;
             out.0.push(Event::Jumped { unit: u.id });
         }
-        m.jump_queued = false;
 
         let from = Vec2::new(t.pos.x, t.pos.z);
         let mut xz = land.slide(from, Vec2::new(m.vel.x, m.vel.z) * DT, body.radius);
@@ -268,7 +279,9 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                     t.pos.y = ground;
                     m.vel.y = 0.0;
                 } else {
+                    // Off the edge: a jump still works for a moment.
                     m.grounded = false;
+                    m.coyote_until = clock.time + COYOTE_TIME;
                 }
             }
             if !m.grounded {

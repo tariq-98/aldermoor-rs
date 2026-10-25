@@ -138,8 +138,10 @@ provisional until a coherent draft is reviewed.
   boss.
 - **Dialogue:** written conversations, expressive poses and short vocal reactions; full voice
   acting is a later decision.
-- **Performance:** a smooth 60 fps during gameplay. Shadows, foliage density and distant detail
-  adjust as needed, while nearby characters and gear keep their quality.
+- **Performance:** a smooth 60 fps during gameplay on the MacBook Air M1's own screen
+  (2560×1600 at 75% render scale, 12 ms GPU); a 5120×1440 ultrawide is best effort. Shadows,
+  foliage density and distant detail adjust as needed, while nearby characters and gear keep their
+  quality. Budgets are in [PERFORMANCE.md](PERFORMANCE.md).
 - **Assets:** free and paid licensed assets are acceptable starting points, adapted to one visual
   direction. Paid ones are presented with cost and licence before any purchase.
 - **Quality first:** before the full catalogue is made, Tariq reviews an interactive character

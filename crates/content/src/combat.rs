@@ -717,6 +717,8 @@ pub struct Catalog {
     pub combos: Vec<ComboRule>,
     ability_ids: HashMap<&'static str, AbilityId>,
     aura_ids: HashMap<&'static str, AuraId>,
+    /// Monsters by key: every monster looks its own up every step.
+    mob_ids: HashMap<&'static str, usize>,
 }
 
 impl Catalog {
@@ -763,6 +765,11 @@ impl Catalog {
             .enumerate()
             .map(|(i, a)| (a.key, i as AuraId))
             .collect();
+        // The first of a duplicated key wins, as a search would find it (`problems` reports it).
+        let mut mob_ids = HashMap::new();
+        for (i, m) in t.mobs.iter().enumerate() {
+            mob_ids.entry(m.key).or_insert(i);
+        }
         Catalog {
             abilities: t.abilities,
             auras: t.auras,
@@ -772,6 +779,7 @@ impl Catalog {
             combos: t.combos,
             ability_ids,
             aura_ids,
+            mob_ids,
         }
     }
 
@@ -803,7 +811,7 @@ impl Catalog {
     }
 
     pub fn mob(&self, key: &str) -> Option<&MobDef> {
-        self.mobs.iter().find(|m| m.key == key)
+        self.mob_ids.get(key).map(|&i| &self.mobs[i])
     }
 
     /// Everything that doesn't add up: unknown keys, duplicates, impossible numbers.

@@ -96,7 +96,14 @@ pub struct Motion {
     pub grounded: bool,
     pub run_speed: f32,
     pub intent: MoveIntent,
-    pub jump_queued: bool,
+    /// A jump was pressed: it goes off if the feet are on the ground (or just off an edge)
+    /// before this time.
+    pub jump_until: f64,
+    /// Just walked off an edge: a jump still works until this time.
+    pub coyote_until: f64,
+    /// A roll pressed near the end of another forced move: which way, and until when it waits
+    /// for that move to end.
+    pub dodge_queued: Option<(Vec2, f64)>,
     pub forced: Option<Forced>,
     /// In deep water: floating at the surface, slow, and unable to fight.
     pub swimming: bool,
@@ -115,7 +122,9 @@ impl Motion {
             grounded: true,
             run_speed,
             intent: MoveIntent::default(),
-            jump_queued: false,
+            jump_until: f64::NEG_INFINITY,
+            coyote_until: f64::NEG_INFINITY,
+            dodge_queued: None,
             forced: None,
             swimming: false,
             sprinting: false,
@@ -468,6 +477,9 @@ pub struct Brain {
     /// target's centre, so a pack spreads round its prey instead of queueing on the side it came
     /// from.
     pub slot: Option<(f32, f32)>,
+    /// Idle with nobody on the players' side in sight: it stands still and only looks around
+    /// once a second.
+    pub asleep: bool,
 }
 
 impl Brain {
@@ -483,6 +495,7 @@ impl Brain {
             next_wander: 0.0,
             engaged_at: 0.0,
             slot: None,
+            asleep: false,
         }
     }
 }
