@@ -468,6 +468,9 @@ pub struct Brain {
     /// target's centre, so a pack spreads round its prey instead of queueing on the side it came
     /// from.
     pub slot: Option<(f32, f32)>,
+    /// Idle with nobody on the players' side in sight: it stands still and only looks around
+    /// once a second.
+    pub asleep: bool,
 }
 
 impl Brain {
@@ -483,6 +486,7 @@ impl Brain {
             next_wander: 0.0,
             engaged_at: 0.0,
             slot: None,
+            asleep: false,
         }
     }
 }

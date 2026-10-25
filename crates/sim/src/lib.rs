@@ -16,6 +16,7 @@ pub mod content;
 mod loot;
 mod movement;
 mod progress;
+mod queries;
 mod rng;
 mod spatial;
 pub mod stats;
@@ -137,6 +138,8 @@ impl Sim {
         world.insert_resource(Land(land));
         world.insert_resource(Rng::new(seed));
         world.insert_resource(loot::Loot::new(seed));
+        world.insert_resource(queries::Queries::default());
+        world.insert_resource(combat::life::Fallen::default());
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
         world.insert_resource(Units::default());

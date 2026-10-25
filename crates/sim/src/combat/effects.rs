@@ -374,6 +374,8 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
     if rest.is_empty() {
         return;
     }
+    // Everyone it fells is let go of together once it has landed on all of them.
+    super::life::hold_deaths(world);
     for &t in targets {
         let hostile = user.is_none_or(|u| can_attack(world, u, t)) || world.get::<Unit>(t).is_some_and(|tu| tu.faction.is_enemy(src.faction));
         if hostile && let Some(how) = guard::avoid(world, src, t, def, delivery) {
@@ -398,6 +400,7 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
             auras::remove_key(world, u, "riposte");
         }
     }
+    super::life::release_deaths(world);
 }
 
 /// One effect on one target. Returns whether it did damage.

@@ -602,6 +602,28 @@ fn a_blow_lands_on_every_enemy_in_the_swing_and_no_others() {
 }
 
 #[test]
+fn a_blow_that_fells_several_has_everyone_let_go_of_all_of_them() {
+    let mut f = Fight::new();
+    let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);
+    let front = f.dummy("skeleton", ahead(2.5, 0.0), PI);
+    let beside = f.dummy("skeleton", ahead(2.5, 0.5), PI);
+    let (a, b) = (f.hero(Specialty::Mage, 10, ROAD - Vec2::X * 4.0, 0.0), f.hero(Specialty::Mage, 10, ROAD + Vec2::X * 4.0, 0.0));
+    for id in [front, beside] {
+        f.sim.get_mut::<Vitals>(id).unwrap().health = 1.0;
+    }
+    f.step();
+    f.target(a, front);
+    f.target(b, beside);
+    f.target(hero, front);
+    f.once(hero, 0); // Sword Chain fells both.
+    f.run(0.2);
+    assert!(f.vitals(front).dead && f.vitals(beside).dead, "the swing didn't fell both");
+    assert_eq!(f.fighter(a).target, None, "still aiming at the first to fall");
+    assert_eq!(f.fighter(b).target, None, "still aiming at the second to fall");
+    assert_eq!(f.fighter(hero).target, None);
+}
+
+#[test]
 fn only_the_main_victim_of_a_blow_is_controlled_by_it() {
     let mut f = Fight::new();
     let hero = f.hero(Specialty::Warrior, 10, ROAD, 0.0);

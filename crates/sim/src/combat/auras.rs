@@ -34,51 +34,72 @@ pub fn threat_multiplier(world: &World, e: Entity) -> f32 {
 
 /// What the unit's auras and situation allow right now.
 pub fn compute(world: &World, e: Entity) -> Control {
-    let mut c = Control { speed: 1.0, ..Default::default() };
-    let t = now(world);
-    if world.get::<Vitals>(e).is_some_and(|v| t < v.invulnerable_until) {
-        c.invulnerable = true;
+    let (mut c, fear) = control_from(now(world), world.get::<Vitals>(e), world.get::<Motion>(e), world.get::<Auras>(e));
+    if let Some(src) = fear {
+        c.fleeing = Some(fear_from(world, src));
     }
-    if world.get::<Motion>(e).and_then(|m| m.forced).is_some_and(|f| f.kind == ForcedKind::Knockback) {
-        c.stunned = true;
-    }
-    let cat = catalog();
-    let mut speed = 0.0;
-    if let Some(a) = world.get::<Auras>(e) {
-        for i in &a.list {
-            let d = cat.aura(i.aura);
-            speed += d.move_speed * i.stacks as f32;
-            c.invulnerable |= d.invulnerable;
-            c.cc_immune |= d.cc_immune;
-            c.blocking |= d.blocks;
-            c.reflecting |= d.reflects;
-            match d.cc {
-                Some(Cc::Stun | Cc::Knockdown | Cc::Sleep) => c.stunned = true,
-                Some(Cc::Root) => c.rooted = true,
-                Some(Cc::Fear) => {
-                    let from = entity(world, i.source).and_then(|s| world.get::<Transform>(s)).map(|t| t.xz());
-                    c.fleeing = Some(from.unwrap_or(Vec2::ZERO));
-                }
-                Some(Cc::Daze) => c.dazed = true,
-                Some(Cc::Silence) => c.silenced = true,
-                Some(Cc::Slow) | None => {}
-            }
-        }
-    }
-    c.speed = (1.0 + speed).max(0.1);
     c
 }
 
-/// Works out every unit's control state before anyone moves.
-pub fn refresh_control(world: &mut World) {
-    let entities = crate::take_units(world);
-    for &e in &entities {
-        let c = compute(world, e);
-        if let Some(mut slot) = world.get_mut::<Control>(e) {
-            *slot = c;
+/// [`compute`] from the unit's own parts, plus the unit its last fear came from (whose
+/// position the caller looks up).
+fn control_from(t: f64, v: Option<&Vitals>, m: Option<&Motion>, a: Option<&Auras>) -> (Control, Option<protocol::UnitId>) {
+    let mut c = Control { speed: 1.0, ..Default::default() };
+    if v.is_some_and(|v| t < v.invulnerable_until) {
+        c.invulnerable = true;
+    }
+    if m.and_then(|m| m.forced).is_some_and(|f| f.kind == ForcedKind::Knockback) {
+        c.stunned = true;
+    }
+    let Some(a) = a.filter(|a| !a.list.is_empty()) else { return (c, None) };
+    let cat = catalog();
+    let mut speed = 0.0;
+    let mut fear = None;
+    for i in &a.list {
+        let d = cat.aura(i.aura);
+        speed += d.move_speed * i.stacks as f32;
+        c.invulnerable |= d.invulnerable;
+        c.cc_immune |= d.cc_immune;
+        c.blocking |= d.blocks;
+        c.reflecting |= d.reflects;
+        match d.cc {
+            Some(Cc::Stun | Cc::Knockdown | Cc::Sleep) => c.stunned = true,
+            Some(Cc::Root) => c.rooted = true,
+            Some(Cc::Fear) => fear = Some(i.source),
+            Some(Cc::Daze) => c.dazed = true,
+            Some(Cc::Silence) => c.silenced = true,
+            Some(Cc::Slow) | None => {}
         }
     }
-    crate::return_units(world, entities);
+    c.speed = (1.0 + speed).max(0.1);
+    (c, fear)
+}
+
+fn fear_from(world: &World, src: protocol::UnitId) -> Vec2 {
+    entity(world, src).and_then(|s| world.get::<Transform>(s)).map_or(Vec2::ZERO, |t| t.xz())
+}
+
+/// Works out every unit's control state before anyone moves. Each unit's state depends only on
+/// its own parts (and where whoever feared it stands), so the order doesn't matter.
+pub fn refresh_control(world: &mut World) {
+    let t = now(world);
+    let fears = crate::queries::with(world, |q| &mut q.control, |world, q| {
+        let mut fears = Vec::new();
+        for (e, v, m, a, mut slot) in q.iter_mut(world) {
+            let (c, fear) = control_from(t, v, m, a);
+            *slot = c;
+            if let Some(src) = fear {
+                fears.push((e, src));
+            }
+        }
+        fears
+    });
+    for (e, src) in fears {
+        let from = fear_from(world, src);
+        if let Some(mut c) = world.get_mut::<Control>(e) {
+            c.fleeing = Some(from);
+        }
+    }
 }
 
 /// Applies an aura. Returns false if it didn't take (immunity, defiance, diminishing returns).

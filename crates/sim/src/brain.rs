@@ -21,6 +21,9 @@ pub const LEASH: f32 = 45.0;
 const SUMMON_LEASH: f32 = 25.0;
 /// Monsters give up on a fight nobody has touched for this long.
 const BORED: f64 = 12.0;
+/// An idle monster with nobody on the players' side this close falls asleep: it stands still
+/// and looks around once a second instead of four times. Nobody further away can see it.
+pub const SLEEP_RANGE: f32 = crate::combat::view::VIEW_RANGE;
 
 pub fn think(world: &mut World) {
     let t = now(world);
@@ -32,8 +35,19 @@ pub fn think(world: &mut World) {
             continue;
         }
         let deciding = t >= b.next_think;
+        if b.asleep && b.mode == Mode::Idle && !deciding {
+            continue;
+        }
         if deciding {
-            world.get_mut::<Brain>(e).unwrap().next_think = t + 0.25;
+            let idle = b.mode == Mode::Idle && world.get::<Summoned>(e).is_none();
+            let asleep = idle && !world.resource::<Spatial>().player_side_near(here(world, e), SLEEP_RANGE);
+            let mut brain = world.get_mut::<Brain>(e).unwrap();
+            brain.next_think = t + if asleep { 1.0 } else { 0.25 };
+            brain.asleep = asleep;
+            if asleep {
+                steer(world, e, MoveIntent::default());
+                continue;
+            }
         }
         let Some(mob) = cat.mob(b.mob) else { continue };
         // A summon's home is wherever its owner stands.
@@ -268,7 +282,8 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
             }
         }
         // Notice the nearest enemy inside the aggro circle, if it's in sight.
-        let near = world.resource::<Spatial>().near(pos, b.aggro_radius);
+        let side = world.get::<crate::Unit>(e).map_or(crate::Faction::Hostile, |u| u.faction);
+        let near = world.resource::<Spatial>().near_foes(pos, b.aggro_radius, side);
         let eyes = chest(world, e);
         let seen = near
             .into_iter()

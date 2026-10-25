@@ -26,7 +26,7 @@ this table, or the table changes in the same PR with the reason written down. Is
 | GPU: HUD | 0.5 ms | #26 |
 | GPU: spare | 1.5 ms | |
 | Client CPU, main thread | 6 ms a frame | frame median 22.7 ms vs GPU 14.5 ms with one frame in flight (#6) |
-| Sim step | 2 ms p99 at 2,000 active units | 0.52 ms mean, 0.77 ms p99 on the M1 (#58) |
+| Sim step | 2 ms p99 at 2,000 active units | 0.52 ms mean, 0.77 ms p99 on the M1 (#58); in the cloud 0.55 ms mean, 1.05 ms p99, and 1.3 ms mean, 2.5–3.3 ms p99 with 5,000 packed within 100 m (#33) |
 | Server, each extra player | 0.1 ms a tick for their snapshot | 0.16 ms at 2,000 units on the M1 (#58) |
 | Network, down | 10 KB/s per player typical, 64 KB/s in a big fight | about 3 MB/s at 300 units in view (#34) |
 | GPU and client memory | 2 GB footprint | 1.34 GB steady, 1.9 GB peak while loading (#6) |
@@ -44,7 +44,7 @@ instances and fit inside these numbers.
 
 | Area | Budget | Last measured |
 | --- | --- | --- |
-| Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.41 ms step plus 161 ms of snapshots (#73) |
+| Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.14 ms step (#33) plus 161 ms of snapshots (#73) |
 | Server, each player's view | 0.02 ms at a 20–30 Hz send rate | about 0.8 ms, a full snapshot every tick (#34); finding its neighbours from a grid is 0.005 ms (#73) |
 | Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | about 3 MB/s at 300 units in view (#34) |
 | Server out, one region | 4 MB/s at 200 players | 2.8 GB/s at 200 players (#73) |

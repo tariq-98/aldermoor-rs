@@ -5,14 +5,19 @@ use glam::Vec2;
 use protocol::UnitId;
 
 use crate::movement::{self, Crowd};
-use crate::{Body, Clock, Land, Motion, PlayerControl, Transform, Unit, Vitals};
+use crate::{Body, Clock, Faction, Land, Motion, PlayerControl, Transform, Unit, Vitals};
 
 const CELL: f32 = 8.0;
 
-/// Who is near what: living units bucketed into 8 m cells, rebuilt every step.
+type Cells = std::collections::HashMap<(i32, i32), Vec<(UnitId, Vec2)>, BuildHasherDefault<CellHash>>;
+
+/// Who is near what: living units bucketed into 8 m cells, rebuilt every step. Units on the
+/// players' side are also bucketed on their own, since that's all a monster looks for: a crowd
+/// of idle monsters never has to sift through each other.
 #[derive(Resource, Default)]
 pub struct Spatial {
-    cells: std::collections::HashMap<(i32, i32), Vec<(UnitId, Vec2)>, BuildHasherDefault<CellHash>>,
+    cells: Cells,
+    players: Cells,
 }
 
 /// A quick hash for cell keys (the multiply-and-rotate one rustc uses). Cell keys aren't chosen
@@ -48,13 +53,40 @@ impl Spatial {
 
     /// Units whose centres lie within `radius` of `p`, in ID order.
     pub fn near(&self, p: Vec2, radius: f32) -> Vec<(UnitId, Vec2)> {
+        Self::near_in(&self.cells, p, radius)
+    }
+
+    /// Like [`Spatial::near`], but only units that could be enemies of `side`: for monsters,
+    /// just the players' side. Everything it leaves out is on `side`'s own.
+    pub fn near_foes(&self, p: Vec2, radius: f32, side: Faction) -> Vec<(UnitId, Vec2)> {
+        match side {
+            Faction::Hostile => Self::near_in(&self.players, p, radius),
+            Faction::Player => self.near(p, radius),
+        }
+    }
+
+    /// Whether any unit on the players' side stands within `radius` of `p`.
+    pub fn player_side_near(&self, p: Vec2, radius: f32) -> bool {
+        let (x0, z0) = Self::key(p - Vec2::splat(radius));
+        let (x1, z1) = Self::key(p + Vec2::splat(radius));
+        let r2 = radius * radius;
+        let close = |c: &Vec<(UnitId, Vec2)>| c.iter().any(|(_, q)| (*q - p).length_squared() <= r2);
+        // The players' cells are few; walking them all beats looking up every cell in a wide
+        // radius until there are as many of them as there are cells to look up.
+        if self.players.len() < ((x1 - x0 + 1) * (z1 - z0 + 1)) as usize {
+            return self.players.values().any(close);
+        }
+        (z0..=z1).any(|z| (x0..=x1).any(|x| self.players.get(&(x, z)).is_some_and(close)))
+    }
+
+    fn near_in(cells: &Cells, p: Vec2, radius: f32) -> Vec<(UnitId, Vec2)> {
         let (x0, z0) = Self::key(p - Vec2::splat(radius));
         let (x1, z1) = Self::key(p + Vec2::splat(radius));
         let r2 = radius * radius;
         let mut out = Vec::new();
         for z in z0..=z1 {
             for x in x0..=x1 {
-                if let Some(cell) = self.cells.get(&(x, z)) {
+                if let Some(cell) = cells.get(&(x, z)) {
                     out.extend(cell.iter().filter(|(_, q)| (*q - p).length_squared() <= r2).copied());
                 }
             }
@@ -76,6 +108,9 @@ pub fn rebuild(
     for cell in spatial.cells.values_mut() {
         cell.clear();
     }
+    for cell in spatial.players.values_mut() {
+        cell.clear();
+    }
     let separating = Crowd::due(clock.tick);
     if separating {
         crowd.clear();
@@ -89,6 +124,9 @@ pub fn rebuild(
             continue;
         }
         spatial.cells.entry(Spatial::key(p)).or_default().push((u.id, p));
+        if u.faction == Faction::Player {
+            spatial.players.entry(Spatial::key(p)).or_default().push((u.id, p));
+        }
     }
     if separating {
         movement::separate(&mut crowd);
