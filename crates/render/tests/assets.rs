@@ -21,6 +21,7 @@ fn unit(look: Look) -> UnitState {
         yaw: 0.,
         pose: Pose::Idle,
         pose_time: 0.25,
+        traversal: Default::default(),
         health: 100.,
         max_health: 100.,
         hostile: false,

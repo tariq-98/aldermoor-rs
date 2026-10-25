@@ -77,6 +77,7 @@ impl Region {
 pub struct Ghost {
     pub region: u32,
     pub velocity: Vec3,
+    pub traversal: protocol::Traversal,
     pub target: Option<UnitId>,
     pub drawn: bool,
 }
@@ -91,6 +92,7 @@ pub struct GhostState {
     pub vitals: Vitals,
     pub anim: Anim,
     pub velocity: Vec3,
+    pub traversal: protocol::Traversal,
     pub target: Option<UnitId>,
     pub drawn: bool,
     /// Who it is and what it looks like, sent only when the neighbour doesn't have it yet.
@@ -222,6 +224,7 @@ impl UnitRecord {
             vitals,
             anim: self.anim.unwrap_or_default(),
             velocity: self.motion.map_or(Vec3::ZERO, |m| m.observed),
+            traversal: self.motion.map_or_else(Default::default, |m| crate::movement::traversal(&m)),
             target,
             drawn: target.is_some() || guarding || now - vitals.last_combat < crate::COMBAT_TIMEOUT,
             first: Some(Box::new(GhostFirst {
@@ -322,6 +325,7 @@ impl Sim {
                         vitals,
                         anim: anim.copied().unwrap_or_default(),
                         velocity: motion.map_or(Vec3::ZERO, |m| m.observed),
+                        traversal: motion.map_or_else(Default::default, crate::movement::traversal),
                         target,
                         drawn: target.is_some() || guarding || t - vitals.last_combat < crate::COMBAT_TIMEOUT,
                         first,
@@ -352,7 +356,7 @@ impl Sim {
             if kept.contains_key(&id) || (existing.is_none() && self.world.resource::<Units>().entity(id).is_some()) {
                 continue;
             }
-            let ghost = Ghost { region: g.region, velocity: g.velocity, target: g.target, drawn: g.drawn };
+            let ghost = Ghost { region: g.region, velocity: g.velocity, traversal: g.traversal, target: g.target, drawn: g.drawn };
             let e = match (existing, g.first) {
                 (Some(e), first) => {
                     // In place, so nothing moves between archetypes.

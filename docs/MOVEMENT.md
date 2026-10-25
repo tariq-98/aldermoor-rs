@@ -72,5 +72,9 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   at least a body's width once a crowd is too big for that. Three wolves end up about 100°
   apart. Places are rechecked four times a second.
 
+Every unit's `traversal` in the snapshot says whether it's wading, swimming or in a forced move
+(roll, leap, charge, climb, knockback, with where and when it starts and ends), so animation can
+show it on other players and monsters too (CONTRACT.md).
+
 Not yet: free climbing anywhere, mounts, and climbing or swimming animations (pose `Jump` for
 climbing; walk and idle in water).

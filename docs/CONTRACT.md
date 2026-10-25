@@ -50,6 +50,11 @@ Each `Snapshot` (protocol version 6) has:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
   - `look`, which says exactly what to draw (see "Art for each unit" below);
   - position, velocity, yaw, `pose` with `pose_time`;
+  - `traversal`, how the body is getting about: `Ground`, `Wading` (feet in water deeper than
+    0.2 m), `Swimming`, or `Forced` for a move that ignores the controls, with its `kind` (roll,
+    leap, charge, climb or knockback), `from` and `to` points, `start` (sim time, as
+    `Snapshot::time`) and `duration`, so a clip can be fitted to it. Every unit has it, so
+    remote swimmers swim and remote climbers climb. One byte when not forced;
   - health, name, level, `hostile` and target.
 - `player`, the viewer's own numbers:
   - endurance (rolls and blocks spend it), the specialty's resource (`resource_kind`: rage,

@@ -75,6 +75,7 @@ fn unit(id: u32, look: Look, pose: Pose, speed: f32) -> UnitState {
         hostile: false,
         target: None,
         look: look.into(),
+        traversal: Default::default(),
     }
 }
 

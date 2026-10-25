@@ -95,6 +95,7 @@ mod tests {
                 yaw,
                 pose: Pose::Run,
                 pose_time: tick as f32 / 60.,
+                traversal: Default::default(),
                 health: 100.,
                 max_health: 100.,
                 hostile: false,
