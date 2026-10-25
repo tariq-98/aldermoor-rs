@@ -114,7 +114,8 @@ impl DynamicResolution {
     }
 
     /// Returns a new scale at most once per second. Frame IDs reject stale or repeated
-    /// completion records; elapsed seconds make the response independent of frame rate.
+    /// completion records; current wall-clock seconds (not a submission timestamp) make
+    /// the response independent of frame rate. Call `resize_completed` after applying a change.
     /// Invalid timings do not consume a frame ID or advance the controller's clock.
     pub fn observe(&mut self, frame: usize, seconds: f64, gpu_ms: f64) -> Option<f32> {
         if !seconds.is_finite()
@@ -133,7 +134,9 @@ impl DynamicResolution {
                 previous + alpha * (gpu_ms - previous)
             }
             _ => {
-                self.next_change_seconds = seconds + 1.;
+                if self.last_seconds.is_none() {
+                    self.next_change_seconds = seconds + 1.;
+                }
                 gpu_ms
             }
         };
@@ -165,6 +168,25 @@ impl DynamicResolution {
         self.scale = next;
         Some(next)
     }
+
+    /// Start the cooldown after allocation/draining finishes, and discard measurements
+    /// from submissions made at the old scale. A backend only supplies an ID and a clock.
+    pub fn resize_completed(&mut self, last_completed_frame: usize, seconds: f64) {
+        if !seconds.is_finite()
+            || seconds < 0.
+            || self.last_seconds.is_some_and(|last| seconds < last)
+        {
+            return;
+        }
+        self.last_frame = Some(
+            self.last_frame
+                .map_or(last_completed_frame, |last| last.max(last_completed_frame)),
+        );
+        self.last_seconds = Some(seconds);
+        self.filtered_ms = None;
+        self.headroom_since = None;
+        self.next_change_seconds = seconds + 1.;
+    }
 }
 
 #[cfg(test)]
@@ -184,6 +206,7 @@ mod resolution_tests {
                     assert!((0.55..=0.75).contains(&scale));
                     last_change = seconds;
                     changes += 1;
+                    controller.resize_completed(frame, seconds);
                 }
             }
             assert_eq!(changes, 8);
@@ -195,7 +218,9 @@ mod resolution_tests {
     fn recovery_requires_sustained_headroom_and_does_not_hunt_in_the_dead_band() {
         let mut controller = DynamicResolution::default();
         for frame in 0..600 {
-            controller.observe(frame, frame as f64 / 60., 20.);
+            if controller.observe(frame, frame as f64 / 60., 20.).is_some() {
+                controller.resize_completed(frame, frame as f64 / 60.);
+            }
         }
         assert_eq!(controller.scale(), DynamicResolution::MIN_SCALE);
         for frame in 600..1200 {
@@ -205,10 +230,27 @@ mod resolution_tests {
         for frame in 1200..1320 {
             assert!(controller.observe(frame, frame as f64 / 60., 8.).is_none());
         }
-        for frame in 1320..3000 {
-            controller.observe(frame, frame as f64 / 60., 8.);
+        // Allow fresh headroom after each of the eight recovery steps.
+        for frame in 1320..3600 {
+            if controller.observe(frame, frame as f64 / 60., 8.).is_some() {
+                controller.resize_completed(frame, frame as f64 / 60.);
+            }
         }
         assert_eq!(controller.scale(), DynamicResolution::MAX_SCALE);
+    }
+
+    #[test]
+    fn slow_resize_restarts_cooldown_and_discards_old_scale_completions() {
+        let mut controller = DynamicResolution::default();
+        assert_eq!(controller.observe(1, 0., 20.), None);
+        assert!(controller.observe(2, 1., 20.).is_some());
+        // Draining/allocation took five seconds and completed three older submissions.
+        controller.resize_completed(5, 6.);
+        assert_eq!(controller.observe(3, 6.1, 100.), None);
+        assert_eq!(controller.observe(5, 6.2, 100.), None);
+        assert_eq!(controller.observe(6, 6.3, 20.), None);
+        assert_eq!(controller.observe(7, 6.99, 20.), None);
+        assert!((controller.observe(8, 7., 20.).unwrap() - 0.7).abs() < 1e-6);
     }
 
     #[test]

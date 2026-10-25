@@ -1220,10 +1220,19 @@ impl Game {
         if let Some(controller) = &mut self.resolution
             && let Some(sample) = stats.completed
             && sample.frame >= self.options.warmup as usize
-            && let Some(scale) =
-                controller.observe(sample.frame, sample.elapsed_seconds, sample.gpu_ms)
+            && let Some(scale) = controller.observe(
+                sample.frame,
+                self.start.elapsed().as_secs_f64(),
+                sample.gpu_ms,
+            )
         {
             r.set_render_scale(scale)?;
+            controller.resize_completed(
+                r.stats
+                    .completed
+                    .map_or(sample.frame, |completed| completed.frame),
+                self.start.elapsed().as_secs_f64(),
+            );
             eprintln!(
                 "RESOLUTION frame={} scale={scale:.3} gpu_ms={:.3}",
                 sample.frame, sample.gpu_ms
