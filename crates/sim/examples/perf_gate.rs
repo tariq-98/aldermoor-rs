@@ -105,8 +105,48 @@ fn measured(sim: &mut Sim, viewer: UnitId, steps: u32) -> Vec<(Snapshot, CombatV
 /// 200 players of every specialty among 2,000 monsters, each needing their own view every step:
 /// the MMO load (#74). Few steps, because a step here costs about a hundred times the others.
 fn players() {
-    const PLAYERS: usize = 200;
     const STEPS: u32 = 10;
+    let (mut sim, ids) = players_scene();
+    // One measured call a step, so 2,000 views aren't held at once.
+    for step in 0..STEPS {
+        move_players(&mut sim, &ids, 20 + step);
+        drop(measured_players(&mut sim, &ids));
+    }
+    drop(sim);
+    // The wire size from a second run of the same scene, so the encoders' memory doesn't change
+    // what the measured part costs. A view every third step for the first 20 players, each on
+    // its own third of the steps, as the server sends them.
+    const WIRED: usize = 20;
+    let (mut sim, ids) = players_scene();
+    let mut encoders: Vec<Encoder> = ids[..WIRED]
+        .iter()
+        .map(|&id| {
+            let mut e = Encoder::new();
+            wire(&mut e, &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), Vec::new());
+            e
+        })
+        .collect();
+    let (mut bytes, mut recent) = (0, std::collections::VecDeque::new());
+    for step in 0..STEPS {
+        move_players(&mut sim, &ids, 20 + step);
+        sim.step();
+        recent.push_back(sim.take_events());
+        if recent.len() > SEND_EVERY {
+            recent.pop_front();
+        }
+        for (i, &id) in ids[..WIRED].iter().enumerate() {
+            if (step as usize + i) % SEND_EVERY == 0 {
+                bytes += wire(&mut encoders[i], &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), recent.iter().flatten().cloned().collect());
+            }
+        }
+    }
+    let per_second = bytes as f64 / (STEPS as usize * WIRED) as f64 * sim::TICK_RATE as f64;
+    println!("players: {STEPS} steps, wire {per_second:.0} B/s per player");
+}
+
+/// 200 heroes in a block among 2,000 monsters, settled for 20 steps.
+fn players_scene() -> (Sim, Vec<UnitId>) {
+    const PLAYERS: usize = 200;
     let mut sim = Sim::brambleford(42);
     sim.spawn_crowd(2000);
     let ids: Vec<UnitId> = (0..PLAYERS)
@@ -122,32 +162,7 @@ fn players() {
         sim.step();
         let _ = sim.take_events();
     }
-    let mut encoders: Vec<Encoder> = ids
-        .iter()
-        .map(|&id| {
-            let mut e = Encoder::new();
-            wire(&mut e, &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), Vec::new());
-            e
-        })
-        .collect();
-    // One measured call a step, encoding outside it, so 2,000 views aren't held at once. Each
-    // player gets a view on its own third of the steps, as the server sends them.
-    let (mut bytes, mut recent) = (0, std::collections::VecDeque::new());
-    for step in 0..STEPS {
-        move_players(&mut sim, &ids, 20 + step);
-        let views = measured_players(&mut sim, &ids);
-        recent.push_back(views.first().map(|(s, _)| s.events.clone()).unwrap_or_default());
-        if recent.len() > SEND_EVERY {
-            recent.pop_front();
-        }
-        for (i, (s, c)) in views.iter().enumerate() {
-            if (step as usize + i) % SEND_EVERY == 0 {
-                bytes += wire(&mut encoders[i], s, c, recent.iter().flatten().cloned().collect());
-            }
-        }
-    }
-    let per_second = bytes as f64 / (STEPS as usize * PLAYERS) as f64 * sim::TICK_RATE as f64;
-    println!("players: {STEPS} steps, wire {per_second:.0} B/s per player");
+    (sim, ids)
 }
 
 /// Every player walks its own circle, so they spread, meet monsters and fight.
