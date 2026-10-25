@@ -20,12 +20,16 @@ Never leave a claimed issue silent. Pick the case that fits.
    (`issue_write` update with the full label list / `gh issue edit <n> --remove-label
    status:claimed --add-label status:in-review`).
 5. Comment on the issue with the PR link.
+6. If the PR changes anything you can see, post captures of its latest commit on the PR with the
+   `attach-visuals` skill. Without the Mac, ask for a Mac check through the coordinator, or say in
+   the PR what needs capturing.
 
-6. **Merge it when it's tested and working.** Chippy doesn't want to be asked. Check every item:
+7. **Merge it when it's tested and working.** Chippy doesn't want to be asked. Check every item:
    - CI is green on the PR's latest commit (wait for it; don't merge while checks run).
    - The checks you ran for what you changed passed, and the PR says what you ran.
-   - `needs-mac`, renderer or visual changes were actually run on the Mac and looked right. A
-     cloud session that couldn't run them does **not** merge; it says so in the PR and stops.
+   - `needs-mac`, renderer or visual changes were actually run on the Mac and looked right, and
+     their captures are on the PR. A cloud session that couldn't run them does **not** merge; it
+     says so in the PR and stops.
    - No unresolved review comments or requested changes, and no open `status:needs-decision`
      issue that this PR depends on.
    - No merge conflicts (if there are, merge `main` in, re-test, and start this list again).
