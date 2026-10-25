@@ -156,7 +156,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nW/S run and backpedal · A/D turn · Q/E strafe · Shift walk · Space jump · V dodge · Tab target\nLeft-drag look around · Right-drag steer · both buttons run · T, Num Lock or mouse 4 autorun\nClick target · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme action: WASD moves relative to the camera instead\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift walk · Space jump · V dodge · Tab target · T, Num Lock or mouse 4 autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc quit\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -206,6 +206,8 @@ struct Game {
     keys: HashSet<KeyCode>,
     mouse_look: bool,
     orbiting: bool,
+    /// Ctrl held in the Action scheme: the pointer is out for the HUD and the mouse doesn't look.
+    pointer_free: bool,
     last_move: Option<Command>,
     last: Instant,
     start: Instant,
@@ -251,6 +253,7 @@ impl Game {
             keys: HashSet::new(),
             mouse_look: false,
             orbiting: false,
+            pointer_free: false,
             last_move: None,
             last: Instant::now(),
             start: Instant::now(),
@@ -413,12 +416,16 @@ impl Game {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|v| v.1)
     }
+    /// Aiming at the crosshair in the middle of the screen, rather than at the pointer.
+    fn aiming(&self) -> bool {
+        self.mouse_look || (self.pilot.scheme == controls::Scheme::Action && !self.pointer_free)
+    }
     fn aim_point(&self) -> Option<Vec3> {
         let me = self.snaps.current.unit(self.host.player)?;
         combat::ground_point(
             self.camera(me.position)
                 .matrix(self.viewport.x / self.viewport.y),
-            if self.mouse_look {
+            if self.aiming() {
                 self.viewport * 0.5
             } else {
                 self.cursor
@@ -709,6 +716,7 @@ impl Game {
                     .and_then(|v| v.native_pixels_per_point)
                     .unwrap_or(1.),
         };
+        let crosshair = self.aiming() && !self.options.showcase;
         let output = ctx.run(raw, |ctx| {
             if !self.options.showcase {
                 combat::paint(
@@ -722,6 +730,9 @@ impl Game {
                 );
             }
             actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim);
+            if crosshair {
+                paint_crosshair(ctx);
+            }
         });
         for action in actions {
             match action {
@@ -932,6 +943,27 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     units.push(base);
     units
 }
+/// A small ring with four ticks at the centre of the screen, where aimed skills go.
+fn paint_crosshair(ctx: &egui::Context) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("crosshair"),
+    ));
+    let c = ctx.content_rect().center();
+    let shadow = egui::Stroke::new(3f32, egui::Color32::from_black_alpha(110));
+    let line = egui::Stroke::new(1.5f32, egui::Color32::from_white_alpha(220));
+    for stroke in [shadow, line] {
+        painter.circle_stroke(c, 3., stroke);
+        for d in [
+            egui::vec2(1., 0.),
+            egui::vec2(-1., 0.),
+            egui::vec2(0., 1.),
+            egui::vec2(0., -1.),
+        ] {
+            painter.line_segment([c + d * 7., c + d * 13.], stroke);
+        }
+    }
+}
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
 /// A press of the left or right button, until both are up again.
@@ -946,6 +978,8 @@ struct App {
     window: Option<Window>,
     cursor: (f64, f64),
     drag: Option<Drag>,
+    /// Whether the pointer is locked and hidden for the Action scheme's mouse-look.
+    pointer_held: bool,
     error: Option<anyhow::Error>,
     next_redraw: Instant,
     egui_state: Option<egui_winit::State>,
@@ -962,6 +996,20 @@ impl App {
             _ => return,
         }
         if !matches!(button, MouseButton::Left | MouseButton::Right) {
+            return;
+        }
+        if self.pointer_held {
+            // Action: every press is a click on whatever is under the crosshair.
+            if pressed && let Some(w) = &self.window {
+                let s = w.inner_size();
+                let (x, y) = (s.width as f64 / 2., s.height as f64 / 2.);
+                if let Some(id) = self.game.pick(x, y, s.width, s.height) {
+                    self.game.host.send(Command::SetTarget(Some(id)));
+                    if button == MouseButton::Right {
+                        self.game.host.send(Command::SetAutoAttack(true));
+                    }
+                }
+            }
             return;
         }
         if pressed {
@@ -992,6 +1040,29 @@ impl App {
         if !self.game.orbiting && !self.game.mouse_look {
             self.end_drag();
         }
+    }
+    /// Locks and hides the pointer while the Action scheme is looking with the mouse, and
+    /// gives it back when the window loses focus or Ctrl is held.
+    fn sync_pointer(&mut self, focused: bool) {
+        let want = focused
+            && self.game.pilot.scheme == controls::Scheme::Action
+            && !self.game.pointer_free
+            && !self.game.options.showcase;
+        if want == self.pointer_held {
+            return;
+        }
+        self.end_drag();
+        if let Some(w) = &self.window {
+            if want {
+                let _ = w
+                    .set_cursor_grab(CursorGrabMode::Locked)
+                    .or_else(|_| w.set_cursor_grab(CursorGrabMode::Confined));
+            } else {
+                let _ = w.set_cursor_grab(CursorGrabMode::None);
+            }
+            w.set_cursor_visible(!want);
+        }
+        self.pointer_held = want;
     }
     /// Gives the pointer back where the drag began.
     fn end_drag(&mut self) {
@@ -1066,6 +1137,7 @@ impl ApplicationHandler for App {
             w.focus_window();
             self.renderer = Some(r);
             self.window = Some(w);
+            self.sync_pointer(true);
             Ok(())
         })();
         if let Err(e) = result {
@@ -1091,6 +1163,10 @@ impl ApplicationHandler for App {
                     self.game.keys.remove(&key);
                     if key == KeyCode::KeyF {
                         self.game.host.send(Command::Guard(false));
+                    }
+                    if matches!(key, KeyCode::ControlLeft | KeyCode::ControlRight) {
+                        self.game.pointer_free = false;
+                        self.sync_pointer(true);
                     }
                 }
                 // A drag that ends over the HUD must still let go.
@@ -1120,8 +1196,15 @@ impl ApplicationHandler for App {
                 self.game.host.send(Command::Guard(false));
                 self.game.mouse_look = false;
                 self.game.orbiting = false;
+                self.game.pointer_free = false;
                 self.end_drag();
+                self.sync_pointer(false);
                 self.game.controls(0.);
+            }
+            WindowEvent::Focused(true) => {
+                // Grab again: a grab made before the window had focus may not have held.
+                self.pointer_held = false;
+                self.sync_pointer(true)
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
@@ -1139,6 +1222,10 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
+                    if matches!(key, KeyCode::ControlLeft | KeyCode::ControlRight) {
+                        self.game.pointer_free = event.state == ElementState::Pressed;
+                        self.sync_pointer(true);
+                    }
                     if event.state == ElementState::Pressed {
                         self.game.keys.insert(key);
                         if !event.repeat {
@@ -1208,7 +1295,7 @@ impl ApplicationHandler for App {
                             self.game.snaps.current.unit(self.game.host.player),
                         )
                     {
-                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · WASD · Space jump · V roll · Tab target · 1–9 skills",p.health,p.max_health,r.stats.gpu_ms));
+                        w.set_title(&format!("Aldermoor · HP {:.0}/{:.0} · GPU {:.1} ms · mouse aims · Ctrl pointer · WASD · Space jump · V roll · Tab target · 1–9 skills",p.health,p.max_health,r.stats.gpu_ms));
                     }
                 }
             }
@@ -1216,7 +1303,7 @@ impl ApplicationHandler for App {
         }
     }
     fn device_event(&mut self, _: &ActiveEventLoop, _: winit::event::DeviceId, event: DeviceEvent) {
-        if (self.game.mouse_look || self.game.orbiting)
+        if (self.game.mouse_look || self.game.orbiting || self.pointer_held)
             && let DeviceEvent::MouseMotion { delta } = event
         {
             self.game.orbit.look(delta.0, delta.1);
@@ -1299,6 +1386,7 @@ fn main() -> Result<()> {
             window: None,
             cursor: (0., 0.),
             drag: None,
+            pointer_held: false,
             error: None,
             next_redraw: Instant::now(),
             egui_state: None,
