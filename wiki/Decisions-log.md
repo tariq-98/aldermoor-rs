@@ -6,6 +6,13 @@ When one is answered, add it here and close the issue.
 
 | Date | Decision | Why | Issue |
 |---|---|---|---|
+| 2026-10-25 | Specialty XP: an enemy's death pays XP split between the specialties whose skills were used on it; quests give XP the player assigns to any specialty | Feels like levelling through use without training-dummy farming | #66 |
+| 2026-10-25 | Specialties cap at level 50, and the equipped specialty's level is the one that counts in combat (no overall character level) | Power compounds 6% a level, so 99 would be ~300x a level-1 fighter; 50 is ~17x | #66 |
+| 2026-10-25 | Action controls are the default: crosshair always on, mouse always steers, shots go to the crosshair, Tab locks a target optionally. Classic (WoW-style) stays as a setting | Chippy wants aiming to matter; Classic already built in PR #52 | #62, #22 |
+| 2026-10-25 | Space jumps, Shift sprints, roll has its own key (Alt and mouse thumb) in the movement direction; double-tap roll is an off-by-default setting | Double-tap misfires while strafing | #62 |
+| 2026-10-25 | Melee hits a cone in front with a gentle pull toward the crosshair | Positioning matters without whiffing by a few degrees | #64 |
+| 2026-10-25 | Movement adds out-of-combat sprint, climbing ledges to chest height, swimming (no fighting in deep water) and light fall damage; free climbing and mounts later | Makes the valley's cliffs, ruins and river part of play | #65 |
+| 2026-10-25 | All keys can be remapped in game | Chippy's request | #63 |
 | 2026-10-25 | Agents merge their own PRs once tested and working, without asking | Chippy doesn't want to be the bottleneck; AGENTS.md lists what "tested and working" means | |
 | 2026-10-25 | Codex never creates or edits assets or works in Blender | Assets and look come from Claude; Codex sticks to renderer code. Enforced by the Codex guard check on `codex/` branches | |
 | 2026-10-25 | 60 fps / 12 ms GPU is measured on the M1 Air's built-in display at native resolution; 5120×1440 is best effort | Chippy set the ultrawide aside; effects and scatter stay in scope, priced against this target. Render scale for the budget is still open | #36 |
