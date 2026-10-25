@@ -341,7 +341,8 @@ def weights(fields, places, sun, seed=61):
 
     # Rock: steep ground, the odd outcrop on the high tops, and stones in the riverbed.
     rock = _smooth(0.1, 0.22, slope + 0.05 * (fine - 0.5) + 0.03 * (grain - 0.5))
-    rock *= _smooth(10.0, 16.0, np.abs(river) + 2.0 * (fine - 0.5))
+    # Low riverbanks stay soft, but where the river cuts through the hills the gorge walls are rock.
+    rock *= np.maximum(_smooth(10.0, 16.0, np.abs(river) + 2.0 * (fine - 0.5)), _smooth(9.0, 15.0, h))
     rock += _smooth(0.74, 0.84, fine) * _smooth(30.0, 45.0, h) * slope_ok(slope) * 0.6
     rock += (np.abs(river) < 6.0) * _smooth(0.62, 0.74, fine) * 0.35
     rock = np.clip(rock, 0, 1)

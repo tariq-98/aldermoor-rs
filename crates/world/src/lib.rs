@@ -186,14 +186,21 @@ pub fn height(x: f32, z: f32) -> f32 {
     h = mix(h, -1.55, 1.0 - smooth(4.0, 13.0, rd));
     let hills = smooth(80.0, 175.0, Vec2::new(x * 0.85, z + 30.0).length());
     let ridge = fbm(x * 0.009, z * 0.009, 15) * 28.0 + 8.0 + (x * 0.014).sin() * 7.0;
-    h += hills * ridge;
+    let mut rise = hills * ridge;
     // Eroded limestone terraces frame the settlement.
     let ledge = (-(((x + 66.0) / 25.0).powf(2.0) + ((z + 30.0) / 65.0).powf(2.0))).exp();
-    h += smooth(0.23, 0.42, ledge) * 17.0 + smooth(0.67, 0.84, ledge) * 5.0;
+    rise += smooth(0.23, 0.42, ledge) * 17.0 + smooth(0.67, 0.84, ledge) * 5.0;
     let east = (-(((x - 76.0) / 30.0).powf(2.0) + ((z + 85.0) / 50.0).powf(2.0))).exp();
-    h += smooth(0.26, 0.45, east) * 26.0;
-    h
+    rise += smooth(0.26, 0.45, east) * 26.0;
+    // The river has cut a gorge through the high ground: its bed and banks stay as they are in the
+    // valley, and the walls flare wider the more rock there is to cut, so they stay climbable-steep
+    // rather than sheer.
+    h + rise * smooth(GORGE_FLOOR, GORGE_FLOOR + 4.0 + 0.8 * rise, rd)
 }
+
+/// Half-width of the river's bed and banks where it cuts through the hills: everything nearer
+/// the centre line than this is valley floor, never hilltop.
+const GORGE_FLOOR: f32 = 9.0;
 
 /// The terrain's surface normal at (x, z).
 pub fn normal(x: f32, z: f32) -> Vec3 {
@@ -251,11 +258,12 @@ impl Grid {
 mod tests {
     use super::*;
 
-    // Values from the Swift original (aldermoor-wild), computed on 2026-10-23.
+    // Values from the Swift original (aldermoor-wild), computed on 2026-10-23, except where the
+    // river now cuts through the west ledge (#41): (-40, -60) sat 0.76 m up on the buried river.
     const SPOTS: [(f32, f32, f32, f32, f32, bool); 9] = [
         (0.0, 0.0, 4.9790773, -58.0, 4.0, false),
         (6.0, 28.0, 9.586473, -57.12033, 2.7604523, false),
-        (-40.0, -60.0, 0.76306224, -63.2125, 34.453495, true),
+        (-40.0, -60.0, -1.55, -63.2125, 34.453495, true),
         (120.0, -20.0, 9.364937, -53.923687, 115.06778, false),
         (-70.0, -30.0, 23.01629, -64.96447, 69.12138, false),
         (76.0, -85.0, 31.035648, -51.002224, 68.842804, false),
@@ -273,6 +281,24 @@ mod tests {
             assert!((path_distance(x, z) - p).abs() < 1e-3, "path at ({x}, {z})");
             assert_eq!(v.blocked(Vec2::new(x, z), 0.3), b, "blocked at ({x}, {z})");
         }
+    }
+
+    #[test]
+    fn the_river_runs_open_across_the_whole_valley() {
+        // Through the hills too (#41): the bed is under water everywhere, and nothing the river
+        // blocks rises above the water's edge, so there is no invisible wall on a hilltop.
+        let mut x = -BOUNDS;
+        while x <= BOUNDS {
+            let r = river_z(x);
+            assert!(height(x, r) < -1.5, "bed at x = {x} is {}", height(x, r));
+            for d in [-6.5, -4.0, 4.0, 6.5] {
+                assert!(height(x, r + d) < 0.0, "bank at ({x}, {}) is {}", r + d, height(x, r + d));
+            }
+            x += 0.5;
+        }
+        // The hills still stand either side of the gorge.
+        assert!(height(-66.0, river_z(-66.0) + 40.0) > 20.0);
+        assert!(height(76.0, river_z(76.0) - 40.0) > 30.0);
     }
 
     #[test]
