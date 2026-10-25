@@ -6,6 +6,7 @@ disabled and the F3 overlay off. All use the existing supplied catalogue and unc
 values. Commands, executable SHA-256 hashes and run start times are in the JSON files.
 
 The baseline executable was built from `08011c1`; the implementation is `4fbc9ad`.
+These reports predate the subsequent rebase onto `d3a1e07` (#58/#60/#61); they are retained as measurements of the recorded revisions, not timings of the new head.
 Both include the merged controls from #52 and supplied limestone textures from #54. The baseline used a sparse source checkout and
 read the existing main-checkout assets. No assets or look settings were authored or edited.
 
@@ -72,16 +73,18 @@ entry remains unavailable when that mode is selected.
   counters and partial coverage during the overhead check.
 - The release client was built and the overlay was exercised separately with Metal validation.
 
-**Native on-display acceptance is not verified.** The session reports that the Mac is locked,
-so there are no native presentation samples or physical F3/visual acceptance. Fullscreen under
+**Native on-display acceptance is not verified.** The Mac was locked during the recorded
+attempts, so there are no native presentation samples or physical F3/visual acceptance. Fullscreen under
 the existing scaled desktop renders 2880×1800; a windowed request was clamped to 2560×1378.
 Both were correctly rejected by the dimension guard. The rejected logs are retained as
 `fullscreen-rejected.txt` and `windowed-rejected.txt` (earlier display-mode attempts);
 neither is included in the native-size comparisons.
 
-Remaining: unlock the Mac, use a native-mode built-in display so the actual drawable is
-2560×1600, rerun the native on-screen comparison and F3 interaction, and verify the sub-0.1 ms
-counter overhead there. GitHub's macOS runner exposes an Apple paravirtual GPU without stage-boundary counters.
+The session now reports unlocked. Changing the built-in display from 1440×900 logical to
+1280×800 logical (2560×1600 Retina backing) is awaiting user confirmation under the computer
+control rules. Then rerun the native on-screen comparison and F3 interaction, verify the
+sub-0.1 ms counter overhead, and restore the display setting. The newer performance budget
+in `docs/PERFORMANCE.md` uses 75% internal scale; the retained reports above use 100%. GitHub's macOS runner exposes an Apple paravirtual GPU without stage-boundary counters.
 The GPU tests verify continued rendering and unavailable data on that device; full timestamp
 and split-pass assertions still require the physical M1 and ran locally. This PR remains
 draft with the native-display limits stated.
