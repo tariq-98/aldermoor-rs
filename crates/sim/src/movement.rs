@@ -3,7 +3,7 @@ use glam::{Vec2, Vec3};
 use protocol::{Event, Pose};
 
 use crate::combat::abilities::Arrivals;
-use crate::{Anim, Body, Clock, Control, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
+use crate::{Anim, Body, Clock, Control, Faction, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
 
 pub const GRAVITY: f32 = 20.0;
 /// About a 1.1 m jump, landing after 0.66 s.
@@ -323,13 +323,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
     }
 }
 
+/// A unit in the crowd: who, where, its radius and weight (0 for one that neither pushes nor is
+/// pushed), the push so far, and a player's side (players on the same side pass through each
+/// other).
+type Member = (Entity, Vec2, f32, f32, Vec2, Option<Faction>);
+
 /// Scratch space for `separate`, kept between steps (by `spatial::rebuild`) so it doesn't
 /// allocate.
 #[derive(Default)]
 pub struct Crowd {
-    /// Every unit: who, where, its radius and weight (0 for one that neither pushes nor is
-    /// pushed), and the push so far.
-    bodies: Vec<(Entity, Vec2, f32, f32, Vec2)>,
+    bodies: Vec<Member>,
     widest: f32,
     /// Indices into `bodies` by band (north-south) then west to east, with the band and the
     /// east-west position. Units barely move between steps, so last step's order is nearly
@@ -349,20 +352,22 @@ impl Crowd {
     }
 
     /// Adds a unit as `spatial::rebuild` passes it (one pass over the units does both).
-    pub fn add(&mut self, e: Entity, at: Vec2, radius: f32, free: bool, player: bool) {
-        let weight = if !free { 0.0 } else if player { radius * radius * PLAYER_WEIGHT } else { radius * radius };
+    pub fn add(&mut self, e: Entity, at: Vec2, radius: f32, free: bool, player: Option<Faction>) {
+        let weight = if !free { 0.0 } else if player.is_some() { radius * radius * PLAYER_WEIGHT } else { radius * radius };
         self.widest = self.widest.max(radius);
-        self.bodies.push((e, at, radius, weight, Vec2::ZERO));
+        self.bodies.push((e, at, radius, weight, Vec2::ZERO, player));
     }
 
     /// The bodies `separate` pushed: who, from where, their radius, and the push.
     pub fn pushes(&self) -> impl Iterator<Item = (Entity, Vec2, f32, Vec2)> + '_ {
-        self.bodies.iter().filter(|b| b.4 != Vec2::ZERO).map(|&(e, from, r, _, push)| (e, from, r, push))
+        self.bodies.iter().filter(|b| b.4 != Vec2::ZERO).map(|&(e, from, r, _, push, _)| (e, from, r, push))
     }
 }
 
 /// Keeps bodies from overlapping: each pair that does is eased apart, the lighter body moving
-/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). The push turns a
+/// further (bigger bodies outweigh smaller ones, and players outweigh monsters). Players who
+/// can't harm each other pass through each other, so nobody can block a doorway or a bridge;
+/// monsters, and players on opposing sides, still collide. The push turns a
 /// little to one side, so a body caught behind another slides round it rather than queueing.
 /// Bodies in forced motion (rolls, leaps, charges, climbs) neither push nor are pushed. Works out
 /// the pushes for the bodies `spatial::rebuild` gathered, every other step; `shift` applies them.
@@ -389,10 +394,13 @@ pub fn separate(crowd: &mut Crowd) {
         }
     }
     let (turn_cos, turn_sin) = (SIDESTEP.cos(), SIDESTEP.sin());
-    let shove = |bodies: &mut [(Entity, Vec2, f32, f32, Vec2)], i: usize, j: usize| {
-        let (_, pa, ra, wa, _) = bodies[i];
-        let (_, pb, rb, wb, _) = bodies[j];
+    let shove = |bodies: &mut [Member], i: usize, j: usize| {
+        let (_, pa, ra, wa, _, sa) = bodies[i];
+        let (_, pb, rb, wb, _, sb) = bodies[j];
         if wb == 0.0 {
+            return;
+        }
+        if let (Some(fa), Some(fb)) = (sa, sb) && !fa.is_enemy(fb) {
             return;
         }
         let d = pa - pb;

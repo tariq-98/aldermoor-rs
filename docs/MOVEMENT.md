@@ -55,6 +55,10 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   a pack spreads round a player instead of shoving them about. Nobody is
   pushed up a wall or off a cliff. Rolls, leaps, lunges and climbs pass through bodies, and
   whoever they land on is eased apart afterwards.
+- **Friendly players pass through each other.** Two players who can't harm each other overlap
+  freely, so nobody can block a doorway, a bridge or a vendor (as in WoW and Guild Wars 2).
+  Players on opposing sides still collide, and so do players and monsters, so body-blocking stays
+  part of a fight.
 - **Packs surround their prey.** Once a melee monster is close to its target, it makes for its own
   place on a ring just inside its reach. It starts from the side it came in on and moves round
   until it has its share of the circle: evenly split between everyone fighting that target, or

@@ -525,10 +525,37 @@ fn a_pack_from_one_side_fans_out_round_its_prey() {
 
 #[test]
 fn bodies_stacked_on_one_spot_ease_apart() {
+    // A player and a monster, and two players on opposing sides (Wilderness, team modes).
+    let mut sim = Sim::new(7);
+    let road = Vec2::new(5.0, 10.0);
+    let a = sim.spawn_player("A", road, 0.0);
+    let wolf = sim.spawn_mob("wolf", road).unwrap();
+    let e = sim.entity(wolf).unwrap();
+    sim.world.entity_mut(e).remove::<sim::Brain>();
+    sim.run_for(0.5);
+    assert!(worst_overlap(&sim, &[a, wolf]) < 0.05, "still stacked {:.2} m apart", (xz(&sim, a) - xz(&sim, wolf)).length());
+
+    let mut sim = Sim::new(7);
+    let a = sim.spawn_player("A", road, 0.0);
+    let b = sim.spawn_player("B", road, 0.0);
+    sim.get_mut::<sim::Unit>(b).unwrap().faction = sim::Faction::Hostile;
+    sim.run_for(0.5);
+    assert!(worst_overlap(&sim, &[a, b]) < 0.05, "still stacked {:.2} m apart", (xz(&sim, a) - xz(&sim, b)).length());
+}
+
+#[test]
+fn players_on_the_same_side_pass_through_each_other() {
     let mut sim = Sim::new(7);
     let road = Vec2::new(5.0, 10.0);
     let a = sim.spawn_player("A", road, 0.0);
     let b = sim.spawn_player("B", road, 0.0);
     sim.run_for(0.5);
-    assert!(worst_overlap(&sim, &[a, b]) < 0.05, "still stacked {:.2} m apart", (xz(&sim, a) - xz(&sim, b)).length());
+    assert!((xz(&sim, a) - xz(&sim, b)).length() < 0.01, "two friends were pushed apart");
+    // One walks straight through the other, without being turned aside.
+    let start = xz(&sim, b);
+    go(&mut sim, b, Vec2::new(1.0, 0.0), false);
+    sim.run_for(0.5);
+    let moved = xz(&sim, b) - start;
+    assert!(moved.y.abs() < 0.01 && (moved.x - 3.0).abs() < 0.2, "walked {moved}");
+    assert!((xz(&sim, a) - road).length() < 0.01, "the one standing still was shoved");
 }
