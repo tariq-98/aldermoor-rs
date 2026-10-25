@@ -2,7 +2,7 @@
 use crate::model::*;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec3Swizzles};
-use protocol::{Action, ForcedKind, Look, Pose, Traversal, UnitCombat, UnitState};
+use protocol::{Action, ForcedKind, HitWeight, Look, Pose, Traversal, UnitCombat, UnitState};
 use std::{collections::HashMap, sync::Arc};
 
 pub struct Part {
@@ -44,6 +44,9 @@ pub struct Character {
     pub foot_placement: bool,
     /// Whether the body leans with its acceleration (#217); off to compare.
     pub leaning: bool,
+    /// Whether blows tip the body and hitstops hold its poses (#218); off to compare with the
+    /// hit clip playing in full.
+    pub flinching: bool,
     pub parts: Vec<Part>,
     pub nodes: Vec<Node>,
     pub local: Vec<Transform>,
@@ -126,6 +129,11 @@ pub struct Character {
     air: Option<f32>,
     /// Seconds into `Jump_Land` after a fall that hurt, played in full while standing (#217).
     hard_landing: Option<f32>,
+    /// Flinches away from blows, and the hitstop that holds the pose clocks as they land (#218).
+    flinch: anim::Flinch,
+    /// Whether the blow the sim's `Hit` pose is for caught it in the air, where it plays its hit
+    /// in full as before rather than flinching.
+    hit_in_air: bool,
     /// Each arm's upper arm, forearm, hand and hand socket, by `Side`, which reach for the
     /// weapon.
     arm_bones: [Option<[usize; 4]>; 2],
@@ -291,6 +299,10 @@ fn heading(rotation: Quat, rest: Quat) -> f32 {
 fn wrap(angle: f32) -> f32 {
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
+/// Whether `u` is being thrown by a blow (#192's traversal state): a knockback plays its clip.
+fn thrown(u: &UnitState) -> bool {
+    matches!(u.traversal, Traversal::Forced(m) if m.kind == ForcedKind::Knockback)
+}
 /// Node indices with every parent before its children.
 fn parent_first(nodes: &[Node]) -> Vec<usize> {
     fn place(i: usize, nodes: &[Node], placed: &mut [bool], order: &mut Vec<usize>) {
@@ -430,6 +442,7 @@ impl Character {
             partial_updates: true,
             foot_placement: true,
             leaning: true,
+            flinching: true,
             parts: Vec::new(),
             world: world_matrices(&nodes, &local),
             nodes,
@@ -500,6 +513,8 @@ impl Character {
             landing: anim::Landing::default(),
             air: None,
             hard_landing: None,
+            flinch: anim::Flinch::default(),
+            hit_in_air: false,
             arm_bones,
             main_sockets: None,
             drawn_now: look.drawn,
@@ -891,7 +906,7 @@ impl Character {
         if look.art != self.look.art {
             (next.partial_updates, next.foot_placement) =
                 (self.partial_updates, self.foot_placement);
-            (next.leaning, next.tier) = (self.leaning, self.tier);
+            (next.leaning, next.flinching, next.tier) = (self.leaning, self.flinching, self.tier);
             next.ground = self.ground.take();
             next.blender.set_method(self.blender.method());
             *self = next;
@@ -1030,15 +1045,16 @@ impl Character {
         if c.guarding || c.action == Action::Block {
             return None;
         } // upper-body layer, keep the legs moving
+        let pose = self.shown_pose(u);
         if !matches!(
-            u.pose,
+            pose,
             Pose::Attack | Pose::Cast | Pose::Hit | Pose::Jump | Pose::Run
         ) {
             return None;
         }
-        if u.pose == Pose::Run && c.action != Action::Charge
-            || u.pose == Pose::Jump && c.action != Action::Leap
-            || u.pose == Pose::Hit && c.action != Action::Stagger
+        if pose == Pose::Run && c.action != Action::Charge
+            || pose == Pose::Jump && c.action != Action::Leap
+            || pose == Pose::Hit && c.action != Action::Stagger
         {
             return None;
         }
@@ -1119,8 +1135,9 @@ impl Character {
         if let Some(clip) = self.action_clip(u) {
             return clip;
         }
+        let pose = self.shown_pose(u);
         if !self.humanoid {
-            let role = match u.pose {
+            let role = match pose {
                 Pose::Idle => "idle",
                 Pose::Walk => "walk",
                 Pose::Run | Pose::Dodge => "run",
@@ -1131,11 +1148,11 @@ impl Character {
             };
             return self.role_clips.get(role).copied().unwrap_or_default();
         }
-        match u.pose {
+        match pose {
             Pose::Idle if self.hard_landing.is_some() => "Jump_Land",
             Pose::Idle if u.look.drawn => self.main_clips.get("idle").unwrap_or(self.idle),
             Pose::Idle => self.idle,
-            Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()),
+            Pose::Walk | Pose::Run => locomotion_clip(pose, u.velocity.xz().length()),
             // One timeline through the air (#217): the take-off, then the loop.
             Pose::Jump | Pose::Fall => match self.air {
                 Some(t) if t < self.clip_duration("Jump_Start") => "Jump_Start",
@@ -1148,10 +1165,11 @@ impl Character {
                 let attacks = self.main_clips.list("attacks");
                 match attacks.get(self.attack % attacks.len().max(1)) {
                     Some(&attack) => attack,
-                    None if u.pose == Pose::Cast => "Spell_Simple_Shoot",
+                    None if pose == Pose::Cast => "Spell_Simple_Shoot",
                     None => "Sword_Regular_A",
                 }
             }
+            Pose::Hit if thrown(u) => "Hit_Knockback",
             Pose::Hit => "Hit_Chest",
             Pose::Dead => "Death01",
         }
@@ -1238,6 +1256,56 @@ impl Character {
             }
         }
     }
+    /// The pose the body shows for the sim's (#218). A blow it flinches from leaves it doing what
+    /// it was: walking or running by the sim's own speeds, carried on through a move, or hanging
+    /// on a wall (#247). A stagger or a knockback, a blow that caught it in the air, or one on a
+    /// body that can't flinch still plays its hit in full.
+    fn shown_pose(&self, u: &UnitState) -> Pose {
+        if u.pose != Pose::Hit
+            || !self.flinches()
+            || self.hit_in_air
+            || thrown(u)
+            || self
+                .combat
+                .as_ref()
+                .is_some_and(|c| c.action == Action::Stagger)
+        {
+            return u.pose;
+        }
+        // The sim's pose for what the body was doing (`update_poses`), but for the blow.
+        match u.traversal {
+            Traversal::Hanging => return Pose::Hang,
+            Traversal::Forced(m) => {
+                return match m.kind {
+                    ForcedKind::Roll => Pose::Dodge,
+                    ForcedKind::Charge => Pose::Run,
+                    ForcedKind::Hold | ForcedKind::Corner => Pose::Hang,
+                    ForcedKind::Knockback => Pose::Hit,
+                    ForcedKind::Leap
+                    | ForcedKind::Climb
+                    | ForcedKind::Mantle
+                    | ForcedKind::Vault
+                    | ForcedKind::WallRun => Pose::Jump,
+                };
+            }
+            _ => {}
+        }
+        let speed = u.velocity.xz().length();
+        if speed > 3.2 {
+            Pose::Run
+        } else if speed > 0.3 {
+            Pose::Walk
+        } else {
+            Pose::Idle
+        }
+    }
+    /// Whether blows tip this body (#218): a humanoid, its spine, neck and head found.
+    fn flinches(&self) -> bool {
+        self.flinching
+            && self.humanoid
+            && self.spine_bones.is_some()
+            && self.head_bones.iter().all(Option::is_some)
+    }
     /// The locomotion pose the legs keep while a humanoid attacks or casts on the move, by the
     /// sim's own speed thresholds (`update_poses`). `None` plays the action on the whole body.
     fn moving_legs(&self, u: &UnitState) -> Option<Pose> {
@@ -1248,7 +1316,7 @@ impl Character {
         if !self.humanoid
             || kneeling
             || self.rally_time.is_some()
-            || !matches!(u.pose, Pose::Attack | Pose::Cast)
+            || !matches!(self.shown_pose(u), Pose::Attack | Pose::Cast)
         {
             return None;
         }
@@ -1405,37 +1473,71 @@ impl Character {
     /// pelvis tips about the ground beneath it, taking the whole body with it, and the spine bends
     /// the rest of the way, a third at each bone.
     fn lean_body(&mut self, tilt: Vec2) {
-        let Some(bones) = self.spine_bones else {
+        let Some([pelvis, low, mid, chest]) = self.spine_bones else {
             return;
         };
-        let angle = tilt.length();
-        if angle < 1e-6 {
+        if tilt.length() < 1e-6 {
             return;
         }
-        let axis = Vec3::new(tilt.y, 0., -tilt.x) / angle;
+        let spine = tilt * ((1. - LEAN_BODY) / 3.);
+        self.tip(&[
+            (pelvis, tilt * LEAN_BODY),
+            (low, spine),
+            (mid, spine),
+            (chest, spine),
+        ]);
+    }
+    /// Bends the body as a flinch has it (#218): the pelvis, the spine, the neck and the head.
+    fn flinch_body(&mut self, bend: &anim::Bend) {
+        let (Some([pelvis, low, mid, chest]), [Some(neck), Some(head)]) =
+            (self.spine_bones, self.head_bones)
+        else {
+            return;
+        };
+        self.tip(&[
+            (pelvis, bend.pelvis),
+            (low, bend.spine[0]),
+            (mid, bend.spine[1]),
+            (chest, bend.spine[2]),
+            (neck, bend.neck),
+            (head, bend.head),
+        ]);
+    }
+    /// Tips each of `bones`, a chain from the pelvis up, on top of its parent by its tilt: toward
+    /// +x and +z in the model's frame, in radians. The pelvis tips about the ground beneath it,
+    /// taking the whole body with it.
+    fn tip(&mut self, bones: &[(usize, Vec2)]) {
         let mut above = Quat::IDENTITY;
-        for (i, b) in bones.into_iter().enumerate() {
-            if i == 0 || self.nodes[b].parent != Some(bones[i - 1]) {
+        // The lean tips the spine's bones alike, and one turn does for them all.
+        let mut last = (Vec2::ZERO, Quat::IDENTITY);
+        for (i, &(b, tilt)) in bones.iter().enumerate() {
+            if i == 0 || self.nodes[b].parent != Some(bones[i - 1].0) {
                 above = self.nodes[b]
                     .parent
                     .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
             }
-            let share = if i == 0 {
-                LEAN_BODY
-            } else {
-                (1. - LEAN_BODY) / 3.
-            };
-            let turn = Quat::from_axis_angle(axis, share * angle);
-            if i == 0 {
-                // Round the point on the ground beneath the pelvis, so the feet stay about where
-                // they were.
-                let [at] = self.chain([b]);
-                let moved = turn * Vec3::Y * at.y - Vec3::Y * at.y;
-                self.local[b].translation += above.inverse() * moved;
+            if tilt != last.0 {
+                let angle = tilt.length();
+                let turn = if angle > 1e-6 {
+                    Quat::from_axis_angle(Vec3::new(tilt.y, 0., -tilt.x) / angle, angle)
+                } else {
+                    Quat::IDENTITY
+                };
+                last = (tilt, turn);
             }
-            let local = &mut self.local[b];
-            local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
-            above *= local.rotation;
+            let turn = last.1;
+            if turn != Quat::IDENTITY {
+                if i == 0 {
+                    // Round the point on the ground beneath the pelvis, so the feet stay about
+                    // where they were.
+                    let [at] = self.chain([b]);
+                    let moved = turn * Vec3::Y * at.y - Vec3::Y * at.y;
+                    self.local[b].translation += above.inverse() * moved;
+                }
+                let local = &mut self.local[b];
+                local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
+            }
+            above *= self.local[b].rotation;
         }
     }
     /// Turns bone `i` by `angle` round the model's vertical, taking its children with it.
@@ -1731,6 +1833,41 @@ impl Character {
     pub fn rallied(&mut self) {
         self.rally_time = Some(0.);
     }
+    /// A blow landed on this character (#218), travelling over the ground along yaw `way` (0
+    /// toward +z, a quarter turn toward +x, as `Event::Hit` sends it), as hard as `weight`: the
+    /// body tips away from it, if it can, and its pose holds for `hitstop` seconds.
+    pub fn hit(&mut self, way: f32, weight: HitWeight, hitstop: f32) {
+        if !self.flinching {
+            return;
+        }
+        if !self.flinches() {
+            self.flinch.hold(hitstop);
+            return;
+        }
+        use anim::flinch::{BIG, BLOCKED, CRITICAL, HEAVY, LIGHT, PARRIED};
+        let (size, heavy) = match weight {
+            HitWeight::Light => (LIGHT, false),
+            HitWeight::Heavy => (HEAVY, true),
+            HitWeight::Critical => (CRITICAL, true),
+            HitWeight::Big => (BIG, true),
+            HitWeight::Blocked => (BLOCKED, false),
+            HitWeight::Parried => (PARRIED, false),
+        };
+        // Into the frame of the body as it is drawn.
+        let way = way - self.turn.yaw().unwrap_or(0.);
+        let blow = anim::Blow {
+            way: Vec2::new(way.sin(), way.cos()),
+            size,
+            heavy,
+        };
+        self.flinch.hit(blow, hitstop);
+    }
+    /// This character's own blow landed (#218): its pose holds for `hitstop` seconds.
+    pub fn landed(&mut self, hitstop: f32) {
+        if self.flinching {
+            self.flinch.hold(hitstop);
+        }
+    }
     pub fn update_combat(&mut self, u: &UnitState, combat: Option<&UnitCombat>, dt: f32) {
         if let Some(c) = combat {
             let new_action = self
@@ -1756,8 +1893,17 @@ impl Character {
         self.update(u, dt);
     }
     pub fn update(&mut self, u: &UnitState, dt: f32) {
+        // Blows (#218): the hitstop holds the pose clocks, so they move on by `pose_dt`, and the
+        // flinch bends the body over everything else. The sim never pauses, so whatever follows
+        // the body through the world (the stride over the ground covered, the turn, the lean, the
+        // feet, the capes, the blender) keeps to `dt`.
+        let (pose_dt, bend) = self.flinch.update(dt);
+        if u.pose == Pose::Hit && self.last_pose != Pose::Hit {
+            self.hit_in_air = self.air.is_some();
+        }
+        let pose = self.shown_pose(u);
         if let Some(t) = &mut self.rally_time {
-            *t += dt;
+            *t += pose_dt;
             if *t
                 >= self
                     .clips
@@ -1780,22 +1926,22 @@ impl Character {
             self.last_drawn = u.look.drawn;
         }
         if matches!(
-            u.pose,
+            pose,
             Pose::Attack | Pose::Cast | Pose::Dodge | Pose::Hit | Pose::Dead
         ) {
             self.transition = None;
         }
         if let Some((name, time)) = &mut self.transition {
-            *time += dt;
+            *time += pose_dt;
             if *time >= self.clips.clips.get(*name).map_or(0., |a| a.duration) {
                 self.transition = None;
             }
         }
         // Weight (#217). A landing that hurt plays through standing still, and ends on moving.
         if let Some(t) = &mut self.hard_landing {
-            *t += dt;
+            *t += pose_dt;
             if *t >= self.clips.clips.get("Jump_Land").map_or(0., |a| a.duration)
-                || u.pose != Pose::Idle
+                || pose != Pose::Idle
             {
                 self.hard_landing = None;
             }
@@ -1810,8 +1956,8 @@ impl Character {
         // In the air, one timeline runs from take-off through `Jump_Start` and on into
         // `Jump_Loop`: the push-off's crouch left out, and the legs tucked highest at the top of
         // the jump. Off an edge, it falls straight into the loop.
-        let airborne = matches!(u.pose, Pose::Jump | Pose::Fall) && climbing.is_none();
-        let took_off = airborne && u.pose == Pose::Jump && self.last_pose != Pose::Jump;
+        let airborne = matches!(pose, Pose::Jump | Pose::Fall) && climbing.is_none();
+        let took_off = airborne && pose == Pose::Jump && self.last_pose != Pose::Jump;
         self.air = match self.air.filter(|_| airborne && !took_off) {
             Some(t) => {
                 let rate = if u.velocity.y > 0. && t < TUCK {
@@ -1819,7 +1965,7 @@ impl Character {
                 } else {
                     1.
                 };
-                Some(t + dt * rate)
+                Some(t + pose_dt * rate)
             }
             None if took_off => Some(TAKEOFF),
             None if airborne => Some(self.clip_duration("Jump_Start")),
@@ -1834,7 +1980,7 @@ impl Character {
         {
             if self.humanoid
                 && down.fell > anim::land::SAFE_FALL
-                && u.pose == Pose::Idle
+                && pose == Pose::Idle
                 && self.clips.clips.contains_key("Jump_Land")
             {
                 self.hard_landing = Some(0.);
@@ -1852,24 +1998,33 @@ impl Character {
         let acting = self.action_clip(u).is_some();
         let busy = acting
             || matches!(
-                u.pose,
+                pose,
                 Pose::Attack | Pose::Cast | Pose::Dodge | Pose::Hit | Pose::Dead
             );
-        // Any change in what plays is a switch for the blender, even one that looks continuous.
+        // Any change in what plays is a switch for the blender, even one that looks continuous:
+        // the sim's pose changing under a flinch restarts its clock, which the blender smooths.
         let mut switch = self.forced_switch.take();
         if name != self.last_clip || legs != self.last_legs || u.pose != self.last_pose {
-            switch = Some(switch_kind(self.last_pose, self.last_busy, u.pose, busy));
+            switch = Some(switch_kind(self.last_pose, self.last_busy, pose, busy));
             self.last_clip = name;
             self.last_legs = legs;
         }
         self.last_pose = u.pose;
         self.last_busy = busy;
+        // Clips timed by the sim's clocks run behind them by however long hitstops held them,
+        // until a switch lets them catch up.
+        if switch.is_some() {
+            self.flinch.switched();
+        }
+        let behind = self.flinch.behind();
+        let pose_time = (u.pose_time - behind).max(0.);
+        let action_time = |c: &Fight| (c.action_time - behind).max(0.);
         for (n, l) in self.nodes.iter().zip(&mut self.local) {
             *l = n.rest;
         }
-        let locomotion = matches!(u.pose, Pose::Walk | Pose::Run);
+        let locomotion = matches!(pose, Pose::Walk | Pose::Run);
         let walking = locomotion && !acting;
-        let looping = match u.pose {
+        let looping = match pose {
             Pose::Idle => name != "Jump_Land",
             Pose::Walk | Pose::Run => true,
             Pose::Fall => name != "Jump_Start",
@@ -1878,8 +2033,8 @@ impl Character {
             matches!(c.action, Action::Channel | Action::Revive)
                 || c.action == Action::Spin && c.cast.is_some_and(|(_, channel)| channel)
         });
-        let rate = match u.pose {
-            Pose::Walk | Pose::Run => self.stride_rate(u.pose, speed),
+        let rate = match pose {
+            Pose::Walk | Pose::Run => self.stride_rate(pose, speed),
             Pose::Dodge => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.45),
             Pose::Attack => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
@@ -1888,7 +2043,7 @@ impl Character {
         // up the turn until the feet step round; moving or acting, the body follows on a spring.
         // Below full detail (#215) the feet don't step: the body follows on the spring.
         let full = self.tier == anim::Tier::Full;
-        let stance = if full && self.humanoid && u.pose == Pose::Idle && !busy {
+        let stance = if full && self.humanoid && pose == Pose::Idle && !busy {
             anim::Stance::Standing
         } else {
             anim::Stance::Moving
@@ -1933,18 +2088,18 @@ impl Character {
             }
         } else if let (Some(t), "Jump_Land") = (self.hard_landing, name) {
             t
-        } else if u.pose == Pose::Idle && !acting {
+        } else if pose == Pose::Idle && !acting {
             // Crowds out of step (#217): each unit's idle starts at its own phase and pace.
-            anim::idle::time(u.id, u.pose_time, self.clip_duration(name))
+            anim::idle::time(u.id, pose_time, self.clip_duration(name))
         } else {
-            u.pose_time * rate
+            pose_time * rate
         };
         if let Some(c) = &self.combat {
             if c.downed {
                 clip_time = self.clips.clips.get(name).map_or(0., |a| a.duration);
             } else if let Some(t) = self.rally_time {
                 clip_time = t;
-            } else if let Some(windup) = self.windup.filter(|_| u.pose == Pose::Attack) {
+            } else if let Some(windup) = self.windup.filter(|_| pose == Pose::Attack) {
                 // The blow lands on the clip's `hit` marker just as the wind-up ends.
                 let duration = self.clips.clips.get(name).map_or(1., |a| a.duration);
                 let hit = self
@@ -1952,14 +2107,14 @@ impl Character {
                     .get(name)
                     .and_then(|m| m.event("hit"))
                     .unwrap_or(duration * 0.5);
-                clip_time = swing_time(c.action_time, windup, hit, duration);
+                clip_time = swing_time(action_time(c), windup, hit, duration);
             } else if acting {
                 clip_time = if c.action == Action::Parry {
-                    c.action_time * 2.
-                } else if u.pose == Pose::Attack {
-                    c.action_time * rate
+                    action_time(c) * 2.
+                } else if pose == Pose::Attack {
+                    action_time(c) * rate
                 } else {
-                    c.action_time
+                    action_time(c)
                 };
             }
         }
@@ -1989,17 +2144,17 @@ impl Character {
             && self.humanoid
             && let Some(idle) = self.main_clips.get("idle")
         {
-            let t = anim::idle::time(u.id, u.pose_time, self.clip_duration(idle));
+            let t = anim::idle::time(u.id, pose_time, self.clip_duration(idle));
             self.apply_clip(idle, t, true, Bones::Upper);
             upper = Some(idle);
         }
         if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
             let c = self.combat.as_ref().unwrap();
-            let parrying = c.action == Action::Parry && c.action_time < 0.25;
+            let parrying = c.action == Action::Parry && action_time(c) < 0.25;
             let time = if parrying {
-                c.action_time * 2.
+                action_time(c) * 2.
             } else {
-                c.action_time
+                action_time(c)
             };
             let guard = if parrying {
                 "Sword_Block"
@@ -2033,7 +2188,7 @@ impl Character {
         let down = self.combat.as_ref().is_some_and(|c| c.downed);
         let upright = airborne
             || climbing.is_some()
-            || matches!(u.pose, Pose::Dodge | Pose::Dead)
+            || matches!(pose, Pose::Dodge | Pose::Dead)
             || down
             || self.rally_time.is_some()
             || self.tier == anim::Tier::Quarter;
@@ -2042,7 +2197,7 @@ impl Character {
         self.lean_body(self.leaned);
         // The spine, neck and head follow where it looks (#212). A swing's clip keeps the head,
         // but a shot or a bolt is aimed, and below half detail nobody looks about.
-        let shooting = matches!(u.pose, Pose::Attack | Pose::Cast)
+        let shooting = matches!(pose, Pose::Attack | Pose::Cast)
             && self.combat.as_ref().is_some_and(|c| {
                 !c.downed && matches!(c.action, Action::Shoot | Action::CastBolt | Action::Channel)
             });
@@ -2056,7 +2211,13 @@ impl Character {
         self.perform(active, t);
         // Last, so a switch also smooths the hand reaching and gripping that `perform` adds.
         self.blender.update(&mut self.local, switch, dt);
-        if self.blender.blending() {
+        // Then the flinch, over everything, so the blender never takes it for a switch to smooth.
+        // Below half detail, it doesn't show.
+        let flinched = bend != anim::Bend::default() && self.tier != anim::Tier::Quarter;
+        if flinched {
+            self.flinch_body(&bend);
+        }
+        if self.blender.blending() || flinched {
             self.pose_world();
         }
         // Then the feet go on the ground (#214), so that nothing smooths them off it: at full
@@ -2072,7 +2233,7 @@ impl Character {
             && self.rally_time.is_none()
             && climbing.is_none()
             && matches!(
-                u.pose,
+                pose,
                 Pose::Idle | Pose::Walk | Pose::Run | Pose::Attack | Pose::Cast | Pose::Hit
             );
         let contact = grounded.then(|| match step {
@@ -3482,6 +3643,274 @@ mod combat_tests {
             banked > 0.12 && banked < 1.3 * anim::lean::MAX_BANK,
             "leaned {banked} m into the turn"
         );
+    }
+    /// Which way a blow travelling along yaw `way` goes over the ground (x, z).
+    fn along(way: f32) -> Vec2 {
+        Vec2::new(way.sin(), way.cos())
+    }
+    #[test]
+    fn a_blow_on_a_wall_or_mid_roll_flinches_over_what_the_body_was_doing() {
+        // Struck hanging on a wall (#247) or rolling, the sim's `Hit` pose leaves the climbing
+        // clip or the roll playing, not a walk or run by the body's speed, and the head still
+        // goes the way the blow went.
+        use std::f32::consts::PI;
+        let (mut c, mut u, _) = fighter(0.);
+        let (mut twin, mut still, _) = fighter(0.);
+        for v in [&mut u, &mut still] {
+            (v.position.y, v.pose, v.traversal) = (2., Pose::Hang, Traversal::Hanging);
+        }
+        let head = c.names["Head"];
+        let mut most = 0f32;
+        for frame in 0..40 {
+            if frame == 10 {
+                c.hit(PI, HitWeight::Light, 0.);
+            }
+            u.pose = if (10..25).contains(&frame) {
+                Pose::Hit
+            } else {
+                Pose::Hang
+            };
+            c.update(&u, 1. / 60.);
+            twin.update(&still, 1. / 60.);
+            assert_eq!(c.last_clip, "Hang_Idle_Loop", "frame {frame}");
+            let off = (c.world[head].w_axis - twin.world[head].w_axis).truncate();
+            most = most.max(off.length());
+        }
+        assert!(most > 0.02, "on the wall, the head only went {most} m");
+        let (mut c, mut u, _) = fighter(0.);
+        let roll = protocol::ForcedMove {
+            kind: ForcedKind::Roll,
+            from: Vec3::ZERO,
+            to: Vec3::Z * 5.,
+            start: 1.,
+            duration: 0.45,
+        };
+        u.traversal = Traversal::Forced(roll);
+        for frame in 0..27 {
+            if frame == 10 {
+                c.hit(PI, HitWeight::Light, 0.);
+            }
+            let k = frame as f32 / 27.;
+            (u.position, u.velocity) = (Vec3::Z * 5. * (1. - (1. - k) * (1. - k)), Vec3::Z * 11.);
+            (u.pose, u.pose_time) = (
+                if (10..25).contains(&frame) {
+                    Pose::Hit
+                } else {
+                    Pose::Dodge
+                },
+                frame as f32 / 60.,
+            );
+            c.update(&u, 1. / 60.);
+            assert_eq!(c.last_clip, "Roll", "frame {frame}");
+        }
+    }
+    #[test]
+    fn blows_tip_the_body_away_while_the_legs_jog_on() {
+        // A jogger takes a light blow from behind, in front and either side in turn, beside a twin
+        // who takes none. The sim's `Hit` pose lasts a quarter of a second, and used to stop the
+        // legs for `Hit_Chest`: now the legs and the stride jog on as the twin's do, while the
+        // head goes the way the blow went and comes back.
+        use std::f32::consts::{FRAC_PI_2, PI};
+        for way in [0., PI, FRAC_PI_2, -FRAC_PI_2] {
+            let (mut c, mut u, _) = fighter(4.5);
+            let (mut twin, mut jog, _) = fighter(4.5);
+            let head = c.names["Head"];
+            let mut offsets = vec![];
+            for frame in 0..60 {
+                if frame == 20 {
+                    c.hit(way, HitWeight::Light, 0.);
+                }
+                u.pose = if (20..35).contains(&frame) {
+                    Pose::Hit
+                } else {
+                    Pose::Run
+                };
+                c.update(&u, 1. / 60.);
+                twin.update(&jog, 1. / 60.);
+                for leg in ["thigh_l", "calf_l", "foot_r", "thigh_r"] {
+                    let [a, b] = [&c, &twin].map(|c| c.local[c.names[leg]].rotation);
+                    assert!(same(a, b), "frame {frame}: {leg} stopped jogging");
+                }
+                assert!((c.stride.phase - twin.stride.phase).abs() < 1e-6);
+                offsets.push(
+                    (c.world[head].w_axis - twin.world[head].w_axis)
+                        .truncate()
+                        .xz(),
+                );
+                for v in [&mut u, &mut jog] {
+                    v.pose_time += 1. / 60.;
+                    v.position += v.velocity / 60.;
+                }
+            }
+            assert!(offsets[..20].iter().all(|o| *o == Vec2::ZERO));
+            let peak = offsets.iter().copied().fold(Vec2::ZERO, |a, b| {
+                if b.length() > a.length() { b } else { a }
+            });
+            assert!(
+                peak.normalize().dot(along(way)) > 0.95,
+                "from {way}: the head went {peak}"
+            );
+            assert!(
+                peak.length() > 0.02 && peak.length() < 0.12,
+                "from {way}: the head went {} m",
+                peak.length()
+            );
+            assert!(
+                offsets[50..].iter().all(|o| o.length() < 0.005),
+                "from {way}: the head didn't come back"
+            );
+        }
+        // A heavy blow from in front takes the hips back too, the body tipping about its feet.
+        let (mut c, mut u, _) = fighter(0.);
+        let (mut twin, mut still, _) = fighter(0.);
+        let pelvis = c.spine_bones.unwrap()[0];
+        let mut back = 0f32;
+        for frame in 0..40 {
+            if frame == 10 {
+                c.hit(PI, HitWeight::Heavy, 0.);
+            }
+            u.pose = if (10..25).contains(&frame) {
+                Pose::Hit
+            } else {
+                Pose::Idle
+            };
+            c.update(&u, 1. / 60.);
+            twin.update(&still, 1. / 60.);
+            back = back.min(c.world[pelvis].w_axis.z - twin.world[pelvis].w_axis.z);
+            u.pose_time += 1. / 60.;
+            still.pose_time += 1. / 60.;
+        }
+        assert!(back < -0.03, "the hips went {back} m back");
+        // A hitstop as a blow lands on the jogger holds the upper body, but the legs keep up with
+        // the ground it covers.
+        let (mut c, mut u, _) = fighter(4.5);
+        let (mut twin, mut jog, _) = fighter(4.5);
+        for frame in 0..40 {
+            if frame == 10 {
+                c.hit(0., HitWeight::Big, 0.12);
+            }
+            u.pose = if (10..25).contains(&frame) {
+                Pose::Hit
+            } else {
+                Pose::Run
+            };
+            c.update(&u, 1. / 60.);
+            twin.update(&jog, 1. / 60.);
+            assert!((c.stride.phase - twin.stride.phase).abs() < 1e-6);
+            for v in [&mut u, &mut jog] {
+                v.pose_time += 1. / 60.;
+                v.position += v.velocity / 60.;
+            }
+        }
+    }
+    #[test]
+    fn staggers_knockbacks_and_blows_in_the_air_still_play_their_clips() {
+        let (mut c, mut u, mut fight) = fighter(0.);
+        let mut standing = u.clone();
+        standing.pose = Pose::Idle;
+        u.pose = Pose::Hit;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(
+            c.last_clip,
+            c.clip_for(&standing),
+            "a blow it flinches from"
+        );
+        // Flinching off, to compare: the blow plays the hit clip in full and holds nothing.
+        let (mut off, ..) = fighter(0.);
+        off.flinching = false;
+        off.hit(0., HitWeight::Heavy, 0.08);
+        off.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(off.last_clip, "Hit_Chest");
+        assert!(!off.flinch.holding());
+        fight.action = Action::Stagger;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Knockback", "a stagger");
+        fight.action = Action::None;
+        u.traversal = Traversal::Forced(protocol::ForcedMove {
+            kind: ForcedKind::Knockback,
+            from: Vec3::ZERO,
+            to: Vec3::Z * 3.,
+            start: 0.,
+            duration: 0.4,
+        });
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Knockback", "a knockback");
+        // Caught in the air, it plays its hit in full as before.
+        let (mut c, mut u, fight) = fighter(0.);
+        u.pose = Pose::Jump;
+        u.velocity.y = 6.;
+        for _ in 0..5 {
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        u.pose = Pose::Hit;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Chest");
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Chest");
+        // A beast can't flinch: it plays its own hit, and a blow on it only holds its pose.
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let wolf = Look {
+            art: "wolf.grey".into(),
+            ..Default::default()
+        };
+        let mut c = Character::load(&cat, &mut ModelCache::default(), &wolf).unwrap();
+        u.look = wolf.into();
+        u.velocity.y = 0.;
+        u.pose = Pose::Hit;
+        c.hit(0., HitWeight::Heavy, 0.05);
+        c.update(&u, 1. / 60.);
+        assert_eq!(Some(c.last_clip), c.role_clips.get("hit").copied());
+        assert!(c.flinch.holding() && c.flinch.update(0.).1 == anim::Bend::default());
+    }
+    #[test]
+    fn the_hitstop_holds_a_swing_then_lets_it_go_on_without_a_jump() {
+        // A standing slash lands on frame 10 and holds for 80 ms; a twin's lands with none. The
+        // sword arm holds still through the hitstop, swings on from where it held at its own
+        // pace, behind the twin's, and when the swing ends both stand alike again.
+        let (mut c, mut u, mut fight) = fighter(0.);
+        let (mut twin, ..) = fighter(0.);
+        u.pose = Pose::Attack;
+        fight.action = Action::Slash;
+        let arm = c.names["upperarm_r"];
+        let (mut shown, mut twins) = (vec![], vec![]);
+        for frame in 0..40 {
+            if frame == 10 {
+                c.landed(0.08);
+            }
+            if frame == 30 {
+                u.pose = Pose::Idle;
+                u.pose_time = 0.;
+                fight.action = Action::None;
+                fight.action_time = 0.;
+            }
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            twin.update_combat(&u, Some(&fight), 1. / 60.);
+            shown.push(c.local[arm].rotation);
+            twins.push(twin.local[arm].rotation);
+            fight.action_time += 1. / 60.;
+            u.pose_time += 1. / 60.;
+        }
+        let turned = |a: Quat, b: Quat| a.angle_between(b);
+        assert!(turned(twins[9], twins[14]) > 0.05, "the swing hardly moved");
+        // Held where it was as the blow landed, until 80 ms had gone by...
+        for f in 10..14 {
+            assert!(same(shown[f], shown[9]), "frame {f} moved");
+        }
+        // ...then on, never faster than the swing itself goes.
+        let fastest = (9..29)
+            .map(|f| turned(twins[f], twins[f + 1]))
+            .fold(0., f32::max);
+        for f in 13..29 {
+            let step = turned(shown[f], shown[f + 1]);
+            assert!(step <= fastest + 1e-4, "frame {f}: jumped {step}");
+        }
+        assert!(!same(shown[20], twins[20]), "it caught up during the swing");
+        for f in 30..40 {
+            assert!(same(shown[f], twins[f]), "frame {f}: still behind");
+        }
     }
     #[test]
     fn on_a_wall_the_body_neither_lands_nor_leans_nor_jumps() {

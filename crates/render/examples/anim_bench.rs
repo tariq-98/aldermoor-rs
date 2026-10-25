@@ -10,7 +10,7 @@
 //! it (#212), as if following someone about.
 use anim::Tier;
 use glam::Vec3;
-use protocol::{Action, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
+use protocol::{Action, HitWeight, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
 use render::character::{Character, Ground};
 use render::model::ModelCache;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -140,7 +140,8 @@ fn main() -> anyhow::Result<()> {
     // runs and stops every half second, so those three are blending clips most of the time, and
     // the body leans setting off and stopping (#217). "circle" runs round, leaning into the turn,
     // and "jump" runs and jumps every second, the legs reaching for the ground on the way down
-    // and the pelvis dipping on landing.
+    // and the pelvis dipping on landing. "run + hits" runs taking a blow every half second (#218),
+    // from all round and light, heavy and big in turn, so the body is flinching most of the time.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
         ("turn", Pose::Idle, 0., Action::None),
@@ -152,6 +153,7 @@ fn main() -> anyhow::Result<()> {
         ("start-stop", Pose::Run, 6., Action::None),
         ("circle", Pose::Run, 6., Action::None),
         ("jump", Pose::Run, 6., Action::None),
+        ("run + hits", Pose::Run, 6., Action::None),
     ] {
         if only.as_ref().is_some_and(|o| o != label) {
             continue;
@@ -215,6 +217,20 @@ fn main() -> anyhow::Result<()> {
                         u.velocity = Vec3::new(u.yaw.sin(), 0., u.yaw.cos()) * speed;
                     }
                     let cycle = t % 0.5;
+                    if label == "run + hits" {
+                        // The sim holds `Pose::Hit` for a quarter of a second after a blow, and
+                        // the hitstops are `content::combat::HITSTOP`'s.
+                        let blow = frame / 30;
+                        if frame % 30 == 0 {
+                            let (weight, hitstop) = [
+                                (HitWeight::Light, 0.04),
+                                (HitWeight::Heavy, 0.08),
+                                (HitWeight::Big, 0.12),
+                            ][(blow + u.id as usize) % 3];
+                            c.hit(u.yaw + 2.4 * blow as f32 + u.id as f32, weight, hitstop);
+                        }
+                        u.pose = if cycle < 0.25 { Pose::Hit } else { Pose::Run };
+                    }
                     u.pose_time = if matches!(label, "idle" | "turn" | "walk" | "run" | "strafe") {
                         t
                     } else {

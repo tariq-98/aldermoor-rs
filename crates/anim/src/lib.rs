@@ -2,6 +2,7 @@
 //! `render` crate needs Metal). `render::character` builds each frame's pose from clips and hands
 //! it to these for blending. How the pieces fit together: docs/ANIMATION.md.
 pub mod feet;
+pub mod flinch;
 pub mod idle;
 pub mod ik;
 pub mod inertial;
@@ -13,6 +14,7 @@ pub mod look;
 pub mod turn;
 
 pub use feet::{Contact, Feet, Leg, Placement};
+pub use flinch::{Bend, Blow, Flinch};
 pub use inertial::{Blender, Bone, Method, Switch};
 pub use land::{Landing, Touchdown};
 pub use lean::Lean;
