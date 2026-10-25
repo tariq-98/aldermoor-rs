@@ -1,34 +1,36 @@
 {
-  "base_revision": "08011c1",
-  "implementation_revision": "4fbc9ad9e94648cf8693e7fa6b06ce2319bc1850",
-  "hardware": "Apple M1, 7 GPU cores, 16 GB; built-in panel 2560x1600",
+  "base_revision": "feb05ef",
+  "implementation_revision": "a1352e984eed40f12f118d076af5ad48896d6415",
+  "hardware": "Apple M1, 7 GPU cores, 16 GB, AC power",
   "output": "2560x1600",
-  "internal": "2560x1600",
-  "scale": 1,
+  "internal": "1920x1200",
+  "scale": 0.75,
   "in_flight": 1,
   "overlay_visible": false,
   "api_validation_for_cost_runs": false,
   "counter_overhead": {
     "paired_blocks": 900,
-    "frames_per_block": 4,
     "on_samples": 1800,
     "off_samples": 1800,
-    "mean_delta_ms": -0.007119560187271015,
-    "median_delta_ms": 0.005635416755467304,
+    "mean_delta_ms": -0.0018650694477805269,
+    "median_delta_ms": -0.017104167454817798,
     "batch_count": 30,
     "blocks_per_batch": 30,
     "batch_mean_95pct_t_interval_ms": [
-      -0.0723400004726357,
-      0.058100880098093666
+      -0.3049700133925966,
+      0.30123987449703554
     ],
-    "interval_method": "Descriptive batch-means t interval, df=29; 2.045 critical value. This is not a hardware guarantee.",
-    "observed_gpu_overhead_below_0_1ms": true
+    "interval_method": "Descriptive batch-means t interval, df=29; 2.045 critical value. Not a hardware guarantee.",
+    "observed_gpu_overhead_below_0_1ms": false,
+    "verdict": "inconclusive; upper confidence bound exceeds 0.1 ms"
   },
   "native_display_acceptance_verified": false,
-  "display_blocker": "Session now unlocked; temporary native-backing display setting awaits user confirmation. Earlier locked-session attempts were rejected at 2880x1800 fullscreen and 2560x1378 windowed; no native presentation samples.",
+  "display_blocker": "Approved switch to 1280x800 logical succeeded, but Mac locked during UI operation. Computer-control service paused automatic unlocking due to physical input and requires manual unlock. Restoration to 1440x900 logical remains pending.",
+  "display_setting_restored": false,
   "physical_F3_verified": false,
+  "automated_F3_visual_check": "Passed on prior 5aaff69 at 1600x1000, not rechecked after latest rebase",
   "full_scene_12ms_budget_pass": false,
+  "ten_minute_thermal_acceptance_verified": false,
   "resident_memory_verified": false,
-  "memory_measure": "MTLDevice.currentAllocatedSize is allocation bytes, not physical residency.",
-  "revision_note": "Recorded before subsequent rebase onto d3a1e07. These are measurements of base_revision and implementation_revision, not the latest head."
+  "memory_measure": "MTLDevice.currentAllocatedSize is allocation bytes, not physical residency."
 }

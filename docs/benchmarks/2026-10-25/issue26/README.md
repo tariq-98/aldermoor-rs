@@ -1,90 +1,81 @@
 # Issue #26: per-pass counter validation
 
-Measured on the Apple M1 Air (7 GPU cores, 16 GB). Output and internal scene are
-2560×1600, scale 1, custom TAA, one frame in flight. Cost runs have Metal API validation
-disabled and the F3 overlay off. All use the existing supplied catalogue and unchanged look
-values. Commands, executable SHA-256 hashes and run start times are in the JSON files.
+## Latest reference-setting measurements
 
-The baseline executable was built from `08011c1`; the implementation is `4fbc9ad`.
-These reports predate the subsequent rebase onto `d3a1e07` (#58/#60/#61); they are retained as measurements of the recorded revisions, not timings of the new head.
-Both include the merged controls from #52 and supplied limestone textures from #54. The baseline used a sparse source checkout and
-read the existing main-checkout assets. No assets or look settings were authored or edited.
+M1 Air (7 GPU cores, 16 GB), AC power, 2560×1600 output, 1920×1200 internal,
+75% render scale, custom TAA, one frame in flight. All four runs are **offscreen**;
+API validation and the F3 overlay are off. Existing supplied assets and look values
+are unchanged. Commands, executable hashes and start times are recorded in each JSON.
 
-## Before and after
+The baseline is `feb05ef`; the profiler implementation is `a1352e9` (before this
+report-only commit). Both use the committed catalogue from the isolated validation
+checkout. A missing terrain texture stopped an earlier attempt in the shared checkout;
+that failed attempt is not a measurement and no missing asset was authored or replaced.
 
-| Run | GPU median / p95 | Frame work median / p95 | Measured GPU frames |
+| Run | GPU median / p95 | Completed work median / p95 | GPU samples |
 |---|---:|---:|---:|
-| Before instrumentation (`baseline-080-native.json`) | 15.349 / 15.666 ms | 20.370 / 20.889 ms | 599 |
-| After, counters enabled (`after-080-native.json`) | 17.502 / 22.043 ms | 22.495 / 27.500 ms | 600 |
-| Split-scene diagnostic (`split-080-native.json`) | 15.942 / 16.653 ms | 20.677 / 21.561 ms | 360 |
+| Before (`baseline-feb-offscreen.json`) | 23.139 / 34.307 ms | 29.418 / 41.237 ms | 599 |
+| After (`after-feb-offscreen.json`) | 22.782 / 34.952 ms | 28.717 / 42.348 ms | 600 |
+| Split diagnostic (`split-feb-offscreen.json`) | 12.756 / 13.634 ms | 16.972 / 18.399 ms | 360 |
 
-The before/after runs use 720 frames and discard 120 warmup frames. The old logger omits
-the last frame; the new collector drains all completions and filters by submitted frame ID.
-The diagnostic run uses 480/120 frames. The full scene **fails** the 12 ms GPU budget.
-Background load varied, with other development sessions active. The slower sequential after
-run is not an isolated measurement of counter cost. Use the interleaved comparison below for
-counter overhead, not the difference between these sequential run medians.
+Before/after use 720 total frames with 120 warmup; the legacy logger omits the final
+frame while the new collector drains it. The diagnostic run uses 480/120 frames.
+System load varied substantially. The split run's lower time is not evidence of a
+speedup: it occurred later and uses different encoder boundaries. All runs exceed
+the 12 ms GPU p95 budget. These short runs do not establish the ten-minute thermal
+acceptance required for steady-state budgets in `docs/PERFORMANCE.md`.
 
-## Counter-only overhead
+## Counter overhead: inconclusive
 
-`overhead-080-native.json` contains 3,600 measured frames (3,720 total, 120 warmup)
-and 900 four-frame blocks. OFF/ON/ON/OFF and ON/OFF/OFF/ON blocks are balanced across TAA
-jitter phases; no extra queue drain, buffer allocation or scene split occurs at the switches.
-One frame in flight prevents neighbouring frames from overlapping on the GPU. Both groups
-use the same binary and preallocated counter buffers. The overlay stays off.
+`overhead-feb-offscreen.json` contains 3,600 measured frames (3,720 total), 1,800 ON
+and 1,800 OFF, with the overlay off. Sampling alternates in 900 ABBA/BAAB four-frame
+blocks, balanced across TAA jitter phases. Buffers remain allocated in both groups,
+with no extra queue drain or scene split at the switches.
 
-- Sampling ON: median **15.5785 ms**, p95 **21.3316 ms**, 1,800 samples.
-- Sampling OFF: median **15.5681 ms**, p95 **21.3672 ms**, 1,800 samples.
-- Mean of paired block differences, ON minus OFF: **−0.00712 ms** (noise, not evidence of a speedup).
-- Median paired difference: **+0.00564 ms**.
-- Grouping consecutive blocks into 30 batches of 30 blocks gives a descriptive 95% t
-  interval of **−0.07234 to +0.05810 ms** for the mean difference (29 degrees of freedom).
-  Both the point estimate and upper bound are below **0.1 ms GPU** in this offscreen run.
-  This is not a guarantee for every frame or other hardware, and does not measure CPU
-  sampling cost independently. Raw signed block differences are retained in the report.
+- ON median / p95: **19.907 / 33.373 ms**.
+- OFF median / p95: **19.524 / 33.928 ms**.
+- Mean paired ON-minus-OFF block delta: **−0.00187 ms** (noise, not a speedup).
+- Descriptive 95% interval using 30 batches of 30 blocks: **−0.30497 to +0.30124 ms**.
 
-The run spans two elapsed-minute buckets after warmup: minute 0 has 2,770 samples and
-minute 1 has 830. Buckets use elapsed submission time, not an assumed 60 fps.
+The interval is too wide to establish the **under 0.1 ms** requirement at this setting.
+Retain the signed differences rather than selecting a favourable subset. CPU sampling
+cost is not measured independently. Reports include elapsed-minute buckets, complete
+coverage for expected passes, draw calls, visible triangles and allocation bytes.
 
-## Pass details
+## Validation and remaining work
 
-Every expected pass had timestamp coverage for every sampled frame. The diagnostic split
-reports median fragment-stage intervals of 0.630 ms sky, 7.101 ms opaque, and 0.037 ms
-water/transparency. These are diagnostic intervals with extra tile load/store boundaries,
-not the unperturbed costs of the default combined scene. Raw reports also contain each
-stage's p95, vertex intervals, and vertex-start-to-fragment-end elapsed intervals. Stages
-can overlap: adding pass elapsed intervals does not give whole-frame GPU time.
+- 36 Rust tests pass (11 client, 13 render unit, 12 render integration), including
+  counter slot reuse, resize, final drain, disable/re-enable, absent samples, supplied
+  surface pixel equality with split profiling, and the 60-character GPU case.
+- Release build, scoped fmt, macOS CI-equivalent clippy and four Python harness tests pass.
+- The prior head `5aaff69` was visually checked on the unlocked Mac at a 1600×1000 window:
+  F3 displayed readable live counters and a second F3 hid them. Scene and HUD remained
+  intact. The latest rebase preserves the newer menu/controls and reserves F3 before
+  key-binding capture; its on-screen check has not yet been repeated.
+- Hosted macOS CI has a paravirtual GPU without stage counters. Tests explicitly verify
+  unavailable timestamps and continued rendering there; physical-M1 tests exercise counters.
 
-The reports include draw calls, visible scene triangles and Metal allocation bytes. Peak
-allocation in the overhead run is 1,230,127,104 bytes. This is **not measured physical GPU
-residency**. MetalFX's private encoders are not individually instrumented; its separate TAA
-entry remains unavailable when that mode is selected.
+**Native-display checks and display restoration are pending.** The user approved a temporary
+switch from 1440×900 logical to 1280×800 logical. The change succeeded: macOS reports
+2560×1600 physical pixels and 1280×800 logical at 60 Hz. The Mac then locked, and the
+computer-control service paused automatic unlocking after detecting physical input.
+It requires a manual unlock before on-screen validation or restoration to 1440×900.
+No native presentation measurements were obtained. The user has been asked to unlock.
 
-## Validation and outstanding checks
+After unlock: repeat F3 on the current build, measure on-display overhead at the native
+panel setting, and restore the original display mode. Keep the PR draft until the required
+checks pass. Codex creates no capture files; a Claude Mac check can capture the visible
+F3 panel and its hidden state for the PR.
 
-- `MTL_DEBUG_LAYER=1 cargo test -p render -p client --locked`: **36 passed** (11 client,
-  13 renderer unit, 12 renderer integration), including the 60-character GPU stress case.
-- New GPU tests cover slot reuse, final draining, resize, counter disable/re-enable, absent
-  HUD/TAA samples, and pixel-for-pixel equality of the supplied surfaces with split profiling.
-  Pixel comparison is in memory; it creates no image files.
-- Scoped rustfmt and clippy pass. The CI-equivalent clippy invocation also completes;
-  existing dependency warnings remain outside this change.
-- Four Python harness tests cover completed-frame reporting, absent timestamps, unavailable
-  counters and partial coverage during the overhead check.
-- The release client was built and the overlay was exercised separately with Metal validation.
+## Interpretation and earlier evidence
 
-**Native on-display acceptance is not verified.** The Mac was locked during the recorded
-attempts, so there are no native presentation samples or physical F3/visual acceptance. Fullscreen under
-the existing scaled desktop renders 2880×1800; a windowed request was clamped to 2560×1378.
-Both were correctly rejected by the dimension guard. The rejected logs are retained as
-`fullscreen-rejected.txt` and `windowed-rejected.txt` (earlier display-mode attempts);
-neither is included in the native-size comparisons.
+Default scene encoders remain combined. `--gpu-profile-scene` splits sky, opaque and
+water/transparency for diagnosis and changes tile load/store costs. Pass intervals can
+overlap and must not be summed. MetalFX internal encoders are not instrumented. Memory
+is `MTLDevice.currentAllocatedSize` (allocations), not measured physical residency.
 
-The session now reports unlocked. Changing the built-in display from 1440×900 logical to
-1280×800 logical (2560×1600 Retina backing) is awaiting user confirmation under the computer
-control rules. Then rerun the native on-screen comparison and F3 interaction, verify the
-sub-0.1 ms counter overhead, and restore the display setting. The newer performance budget
-in `docs/PERFORMANCE.md` uses 75% internal scale; the retained reports above use 100%. GitHub's macOS runner exposes an Apple paravirtual GPU without stage-boundary counters.
-The GPU tests verify continued rendering and unavailable data on that device; full timestamp
-and split-pass assertions still require the physical M1 and ran locally. This PR remains
-draft with the native-display limits stated.
+The `*-080-native.json` files are earlier **offscreen** results at 100% internal scale,
+against base `08011c1`; their filename means native-sized output, not on-display capture.
+They do not prove performance of the latest revision or the 75% reference setting.
+Earlier rejected fullscreen/windowed attempts and the Metal-validation overlay log
+are retained as historical diagnostics, not successful native-display acceptance.
