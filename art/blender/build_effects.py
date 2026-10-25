@@ -47,6 +47,7 @@ def sprites():
         ("spark", fx.spark(), 1, 1),
         ("shock", fx.shock(), 1, 1),
         ("ring", fx.ring(), 1, 1),
+        ("seal", fx.ornate_ring(), 1, 1),
         ("runes", fx.runes(), 1, 1),
         ("sigil", fx.sigil(), 1, 1),
         ("star", fx.star(), 1, 1),
@@ -62,6 +63,8 @@ def sprites():
     out.append(("wisp", fx.sheet(fx.wisp(), 4), 16, 4))
     out.append(("flame", fx.sheet(fx.flame(), 4), 16, 4))
     out.append(("puff", fx.sheet(fx.puff(), 4), 16, 4))
+    out.append(("swirl", fx.sheet(fx.swirl(), 4), 16, 4))
+    out.append(("starburst", fx.starburst(), 1, 1))
     return out
 
 
@@ -110,7 +113,7 @@ def pack(items):
 
 
 def tiles():
-    return {"trail": fx.tile_trail(), "noise": fx.tile_noise(), "hex": fx.tile_hex()}
+    return {"trail": fx.tile_trail(), "noise": fx.tile_noise(), "hex": fx.tile_hex(), "energy": fx.tile_energy()}
 
 
 def _ramps():

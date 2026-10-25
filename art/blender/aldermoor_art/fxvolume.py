@@ -126,16 +126,16 @@ def _domain(scene, kind):
     shape = g.math("SUBTRACT", 1.0, falloff)
     noise = g.nodes.new("ShaderNodeTexNoise")
     noise.noise_dimensions = "4D"
-    noise.inputs["Scale"].default_value = {"fire": 2.4, "smoke": 1.9, "burst": 2.2}[kind]
-    noise.inputs["Detail"].default_value = 6.0
-    noise.inputs["Roughness"].default_value = 0.58
+    noise.inputs["Scale"].default_value = {"fire": 2.4, "smoke": 2.4, "burst": 2.6}[kind]
+    noise.inputs["Detail"].default_value = {"fire": 6.0, "smoke": 10.0, "burst": 10.0}[kind]
+    noise.inputs["Roughness"].default_value = {"fire": 0.58, "smoke": 0.66, "burst": 0.64}[kind]
     noise.inputs["Distortion"].default_value = {"fire": 0.6, "smoke": 0.25, "burst": 0.4}[kind]
     g.links.new(offset.outputs[0], noise.inputs["Vector"])
     centred = g.math("SUBTRACT", noise.outputs["Fac"], 0.5)
     wobble = g.math("MULTIPLY", centred, {"fire": 1.9, "smoke": 1.5, "burst": 1.6}[kind])
     field = g.math("ADD", shape, wobble)
     eroded = g.math("SUBTRACT", field, erosion.outputs[0])
-    soft = g.math("MULTIPLY", eroded, {"fire": 2.6, "smoke": 2.2, "burst": 2.4}[kind], clamp=True)
+    soft = g.math("MULTIPLY", eroded, {"fire": 2.6, "smoke": 3.6, "burst": 3.6}[kind], clamp=True)
     amount = g.math("MULTIPLY", soft, density.outputs[0])
     out = g.node("ShaderNodeOutputMaterial")
     if kind == "smoke":

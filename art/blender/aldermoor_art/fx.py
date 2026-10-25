@@ -170,6 +170,36 @@ def ring(n=256, seed=17):
 
 # --- Rune circles ------------------------------------------------------------------------------
 
+def ornate_ring(n=256, seed=97):
+    """A ring for auras at the feet, drawn like a seal: a bold outer band, a thin inner line,
+    dashes between them and small diamonds at the quarters, with a glow either side."""
+    x, y = grid(n)
+    r = np.hypot(x, y)
+    theta = np.arctan2(y, x)
+    aa = 1.5 / n
+    lines = _circle_coverage(r, 0.86, 0.03, aa)
+    lines = np.maximum(lines, _circle_coverage(r, 0.7, 0.008, aa))
+    dashes = 36
+    nearest = np.round(theta / (math.tau / dashes)) * (math.tau / dashes)
+    across = np.abs(np.sin(theta - nearest)) * r
+    dash = stroke(across, 0.012, aa) * smooth(0.735, 0.745, r) * smooth(0.805, 0.795, r)
+    lines = np.maximum(lines, dash * 0.8)
+    for k in range(8):
+        a = k * math.tau / 8
+        cx, cy = 0.78 * math.cos(a), 0.78 * math.sin(a)
+        ca, sa = math.cos(a), math.sin(a)
+        u = (x - cx) * ca + (y - cy) * sa
+        v = -(x - cx) * sa + (y - cy) * ca
+        diamond = np.abs(u) / 0.07 + np.abs(v) / 0.045
+        lines = np.maximum(lines, smooth(1.0 + aa * 20, 1.0 - aa * 20, diamond) * (1.0 if k % 2 == 0 else 0.7))
+    glow = np.exp(-np.minimum(np.abs(r - 0.86), np.abs(r - 0.7)) / 0.05) * smooth(1.0, 0.94, r)
+    sparkle = angular_noise(theta, 4, seed, 24) ** 4
+    heat = np.clip(lines * (0.8 + 0.2 * sparkle) + 0.3 * glow, 0, 1)
+    cover = np.clip(lines + 0.45 * glow, 0, 1)
+    sweep = (math.pi / 2 - theta) % math.tau / math.tau
+    return pack(heat, cover, 1 - sweep * 0.97)
+
+
 # Elder Futhark, drawn as strokes in a box 0.6 wide and 1 tall, base at y = 0.
 RUNES = {
     "fehu": [[(0, 0), (0, 1)], [(0, 0.55), (0.45, 0.85)], [(0, 0.8), (0.38, 1.0)]],
@@ -545,60 +575,130 @@ def fbm(x, y, z, seed, octaves=5, gain=0.5):
     return total / norm
 
 
-def flame(n=128, frames=16, seed=59):
-    """One flame's life: it licks up from a rounded base, grows tall, its tip tears into tongues
-    and lifts away, and it dies down. Hottest low in its heart. Fire everywhere is many of these
-    at once, each turned and sized differently."""
+def flame(n=192, frames=16, seed=59):
+    """One flame's life: it licks up from a rounded base, grows tall, tears into tongues at its
+    tip, lifts away and dies down. Three crisp zones of heat (a red body, an orange heart and a
+    yellow-white core near its base) give the ramp hard bands to paint, as hand-painted flames
+    have, and three scales of turbulence keep its edges busy. Fire everywhere is many of these,
+    each sized differently."""
     x, y = grid(n)
-    base = -0.86
+    base = -0.88
+    aa = 1.5 / n
     out = []
     for f in range(frames):
         t = (f + 0.5) / frames
-        grow = smooth(0.0, 0.3, t)
-        height = 0.55 + 1.15 * grow
-        lift = 0.55 * smooth(0.5, 1.0, t)
+        grow = smooth(0.0, 0.28, t)
+        height = 0.6 + 1.15 * grow
+        lift = 0.6 * smooth(0.5, 1.0, t)
         h = y - base - lift
         v = np.clip(h / height, 0.0, 1.0)
-        coarse = fbm(x * 2.1, (y - t * 2.4) * 1.7, t * 1.3, seed, octaves=4)
-        fine = fbm(x * 4.6, (y - t * 3.8) * 3.6, t * 2.2 + 9.0, seed + 7, octaves=4)
-        sway = (coarse - 0.5) * 0.62 * v ** 0.9
-        xs = x + sway + (fine - 0.5) * 0.08
-        width = 0.4 * (1 - v) ** 0.75 * (0.55 + 0.45 * smooth(0.0, 0.18, v)) * (1 - 0.35 * smooth(0.7, 1.0, t))
-        body = smooth(width + 0.02, width * 0.45, np.abs(xs))
-        # The tip tears into tongues; late in life the whole flame frays away.
-        fray = v + (fine - 0.5) * 0.85 + (coarse - 0.5) * 0.35 + smooth(0.55, 1.0, t) * 0.75
-        body = body * smooth(1.02, 0.62, fray) * smooth(-0.06, 0.1, h) * smooth(1.05, 0.85, h / height)
-        heart = np.exp(-(xs / (0.16 + 0.1 * (1 - v))) ** 2) * (1 - v) ** 1.4
-        # Dying down: the flame thins from the bottom up and fades, rather than squatting.
+        coarse = fbm(x * 1.9, (y - t * 2.6) * 1.5, t * 1.3, seed, octaves=4)
+        mid = fbm(x * 4.2, (y - t * 4.0) * 3.2, t * 2.0 + 9.0, seed + 7, octaves=4)
+        fine = fbm(x * 9.0, (y - t * 6.5) * 7.0, t * 3.0 + 21.0, seed + 13, octaves=3)
+        sway = (coarse - 0.5) * 0.7 * v ** 0.9
+        xs = x + sway + (mid - 0.5) * 0.12 * v + (fine - 0.5) * 0.035
         dying = smooth(0.62, 1.0, t)
-        body = body * (1 - dying * smooth(0.55, -0.1, v + (fine - 0.5) * 0.5)) * (1 - 0.6 * dying)
-        heat = np.clip(body * (0.35 + 0.65 * heart) * (0.8 + 0.4 * fine) * (1 - 0.45 * t), 0, 1)
-        cover = np.clip(body * (0.75 + 0.25 * fine), 0, 1)
-        erode = np.clip(body * (1 - v) * 0.7 + fine * 0.3, 0, 1)
-        out.append(pack(heat, cover * smooth(1.0, 0.9, np.abs(x)) * smooth(1.0, 0.92, y), erode))
+        width = 0.42 * (1 - v) ** 0.72 * (0.5 + 0.5 * smooth(0.0, 0.16, v)) * (1 - 0.3 * dying)
+        tongues = v + (mid - 0.5) * 0.95 + (coarse - 0.5) * 0.35 + (fine - 0.5) * 0.22 + dying * 0.75
+        outer = smooth(width + aa, width - aa, np.abs(xs)) * smooth(1.02, 0.98, tongues)
+        outer = outer * smooth(-0.04, 0.06, h) * smooth(1.05, 0.9, h / height)
+        # Dying down: it thins from the bottom up rather than squatting.
+        outer = outer * (1 - dying * smooth(0.55, -0.1, v + (fine - 0.5) * 0.5)) * (1 - 0.55 * dying)
+        heart = smooth(width * 0.6 + aa, width * 0.6 - aa, np.abs(xs)) * smooth(0.8, 0.76, tongues + 0.1)
+        core_width = width * 0.3 * (1 - 0.3 * v)
+        core = smooth(core_width + aa, core_width - aa, np.abs(xs - (fine - 0.5) * 0.03))
+        core = core * smooth(0.52, 0.48, tongues + 0.25 + v * 0.35)
+        # The body darkens towards its edge, so the ramp paints it a red rim round orange.
+        depth = smooth(0.0, 0.4, (width - np.abs(xs)) / np.maximum(width, 1e-3))
+        heat = (0.2 + 0.13 * depth + 0.33 * heart + 0.34 * core) * outer
+        heat = np.clip(heat * (0.86 + 0.28 * fine) * (1 - 0.35 * t), 0, 1)
+        cover = np.clip(outer * (0.88 + 0.12 * mid), 0, 1)
+        erode = np.clip(outer * (1 - v) * 0.55 + fine * 0.3 + mid * 0.15, 0, 1)
+        out.append(pack(heat, cover * smooth(1.0, 0.9, np.abs(x)) * smooth(1.0, 0.93, y), erode))
     return out
 
 
-def puff(n=128, frames=16, seed=73):
-    """Smoke: a soft, lumpy puff that swells, lifts and thins into wisps. Lit from above-left
-    by its own shape (heat is its shading), so it reads as round in any colour."""
+def puff(n=128, frames=16, seed=73, balls=11):
+    """Smoke as a painter draws it: a cluster of round lumps that swells, rises and thins, each
+    lump shaded from above-left with a soft band of shadow beneath, its outline broken by noise.
+    Heat is the shading, so any ramp colours it as lit smoke."""
     x, y = grid(n)
+    rng = np.random.default_rng(seed)
+    lumps = [(rng.uniform(-0.32, 0.32), rng.uniform(-0.25, 0.2), rng.uniform(0.1, 0.24), rng.uniform(-0.2, 0.2)) for _ in range(balls)]
     out = []
     for f in range(frames):
         t = (f + 0.5) / frames
-        radius = 0.32 + 0.5 * (1 - (1 - t) ** 2)
-        cx, cy = 0.0, -0.1 + 0.25 * t
-        lumps = fbm(x * 2.0, (y - t * 0.6) * 2.0, t * 0.8, seed, octaves=5)
-        r = np.hypot(x - cx, y - cy) / radius
-        density = smooth(1.15, 0.35, r + (lumps - 0.5) * 0.9)
-        thin = smooth(0.35, 1.0, t)
-        density = np.clip(density * (1.0 - 0.75 * thin) - thin * (0.5 - lumps) * 0.8, 0, 1)
-        # Lit from above: brighter towards its top and on its lumps, darker underneath.
-        detail = fbm(x * 4.0, (y - t * 0.6) * 4.0, t * 0.8 + 5.0, seed + 3, octaves=4)
-        shade = np.clip(0.5 + 0.3 * (y - cy) / max(radius, 1e-3) + (lumps - 0.5) * 0.7 + (detail - 0.5) * 0.4, 0, 1)
-        cover = density * smooth(1.0, 0.88, np.hypot(x, y))
-        out.append(pack(shade, cover, np.clip(density * 0.6 + lumps * 0.4, 0, 1)))
+        grow = 0.55 + 0.6 * (1 - (1 - t) ** 2)
+        field = np.zeros_like(x)
+        for cx, cy, r0, drift in lumps:
+            px, py = cx * grow * 1.25 + drift * t, cy * grow + 0.22 * t
+            r = r0 * grow
+            field = field + np.exp(-((x - px) ** 2 + (y - py) ** 2) / (r * r))
+        noise = fbm(x * 3.2, (y - t * 0.8) * 3.2, t * 0.9, seed, octaves=5)
+        fine = fbm(x * 8.0, (y - t * 0.8) * 8.0, t * 0.9 + 4.0, seed + 5, octaves=3)
+        rise = 0.38 + 0.42 * smooth(0.3, 1.0, t)
+        shape = field + (noise - 0.5) * 0.7 + (fine - 0.5) * 0.25
+        density = smooth(rise, rise + 0.35, shape)
+        gy, gx = np.gradient(field)
+        normal_x, normal_y = -gx * n * 0.12, gy * n * 0.12
+        lit = np.clip(0.5 + 0.5 * (normal_x * -0.6 + normal_y * 0.8) / np.sqrt(1 + normal_x ** 2 + normal_y ** 2), 0, 1)
+        shade = np.clip(0.3 + 0.5 * smooth(0.15, 0.85, lit) + (noise - 0.5) * 0.35 + (fine - 0.5) * 0.25, 0, 1)
+        thin = smooth(0.4, 1.0, t)
+        cover = density * (0.75 + 0.25 * fine) * (1 - 0.6 * thin) * smooth(1.0, 0.88, np.hypot(x, y))
+        out.append(pack(shade, cover, np.clip(smooth(rise, rise + 0.5, shape) * 0.7 + noise * 0.3, 0, 1)))
     return out
+
+
+def swirl(n=128, frames=16, seed=79, arms=3):
+    """A ball of magic turning on itself: a white-hot core, three spiral arms that twist out to
+    a bright rim, flecks of light caught in them. Loops: it turns once over the flipbook."""
+    x, y = grid(n)
+    r = np.hypot(x, y)
+    theta = np.arctan2(y, x)
+    rng = np.random.default_rng(seed)
+    flecks = [(rng.uniform(0, math.tau), rng.uniform(0.25, 0.8)) for _ in range(14)]
+    out = []
+    for f in range(frames):
+        phase = f / frames * math.tau
+        c, s_ = math.cos(phase), math.sin(phase)
+        xr, yr = x * c + y * s_, -x * s_ + y * c
+        noise = fbm(xr * 3.0 + 7.0, yr * 3.0 + 7.0, 0.5, seed, octaves=4)
+        spiral = 0.5 + 0.5 * np.cos(arms * (theta - phase) + 7.5 * r + (noise - 0.5) * 2.0)
+        arm = spiral ** 5 * smooth(0.92, 0.35, r) * smooth(0.06, 0.2, r)
+        core = np.exp(-(r / 0.17) ** 2)
+        rim = np.exp(-((r - 0.66) / 0.07) ** 2) * (0.5 + 0.5 * noise)
+        glints = np.zeros_like(x)
+        for a, d in flecks:
+            ang = a + phase
+            glints = np.maximum(glints, np.exp(-((x - d * math.cos(ang)) ** 2 + (y - d * math.sin(ang)) ** 2) / 0.0012))
+        heat = np.clip(core + arm * (0.55 + 0.35 * noise) + rim * 0.45 + glints * 0.9, 0, 1)
+        cover = np.clip(core + arm * 0.9 + rim * 0.7 + glints + 0.18 * smooth(0.9, 0.15, r), 0, 1)
+        out.append(pack(heat, cover * smooth(1.0, 0.92, r), np.clip(arm + core + glints, 0, 1)))
+    return out
+
+
+def starburst(n=256, seed=83, rays=28):
+    """An impact's flash: thin rays of different lengths flung out from a hot point, as in a
+    hand-drawn hit."""
+    x, y = grid(n)
+    r = np.hypot(x, y)
+    rng = np.random.default_rng(seed)
+    light = np.zeros_like(x)
+    for _ in range(rays):
+        a = rng.uniform(0, math.tau)
+        length = rng.uniform(0.35, 0.97)
+        width = rng.uniform(0.008, 0.022)
+        ca, sa = math.cos(a), math.sin(a)
+        along = x * ca + y * sa
+        across = -x * sa + y * ca
+        ray = np.exp(-(across / (width * (1 - np.clip(along / length, 0, 1)) + 0.002)) ** 2)
+        ray = ray * np.clip(1 - along / length, 0, 1) ** 1.3 * (along > 0)
+        light = np.maximum(light, ray * rng.uniform(0.6, 1.0))
+    core = np.exp(-(r / 0.12) ** 2)
+    glow = np.exp(-(r / 0.35) ** 2) * 0.35
+    heat = np.clip(light * 0.85 + core + glow * 0.5, 0, 1)
+    cover = np.clip(light + core + glow, 0, 1) * smooth(1.0, 0.95, r)
+    return pack(heat, cover, 1 - r)
 
 
 def wisp(n=128, frames=16, seed=53):
@@ -656,17 +756,32 @@ def sheet(frames, cols):
 # --- Tiling strips -------------------------------------------------------------------------------
 
 def tile_trail(n=256, seed=61):
-    """A trail's body: streaks running along u (it scrolls and repeats along a trail), soft
-    across v so a ribbon's edges fade."""
+    """A trail's body: crisp streaks running along u (it scrolls and repeats along a trail) over
+    a softer wash, with flecks of light, fading across v so a ribbon's edges dissolve."""
     x, y = grid(n)
     v = (y + 1) / 2
-    across = np.sin(np.pi * np.clip(v, 0, 1)) ** 1.5
-    streaks = tiles.stretched(n, 9.0, 1.0, seed).astype(np.float32)
-    fine = tiles.stretched(n, 22.0, 1.0, seed + 1).astype(np.float32)
-    heat = np.clip((streaks ** 1.5 * 0.8 + fine * 0.35) * across ** 1.3, 0, 1)
-    cover = np.clip((0.35 + 0.65 * streaks) * across, 0, 1)
-    erode = tiles.noise(n, 3, seed + 2).astype(np.float32)
+    across = np.sin(np.pi * np.clip(v, 0, 1)) ** 1.2
+    wash = tiles.stretched(n, 6.0, 1.0, seed).astype(np.float32)
+    streaks = smooth(0.52, 0.72, tiles.stretched(n, 14.0, 1.0, seed + 1).astype(np.float32))
+    fine = smooth(0.6, 0.8, tiles.stretched(n, 30.0, 1.0, seed + 2).astype(np.float32))
+    flecks = (tiles.noise(n, 60, seed + 3, power=0.4) > 0.86).astype(np.float32)
+    heat = np.clip((wash * 0.35 + streaks * 0.55 + fine * 0.3 + flecks * 0.6) * across, 0, 1)
+    cover = np.clip((0.3 + 0.35 * wash + 0.45 * streaks + 0.3 * flecks) * across, 0, 1)
+    erode = tiles.noise(n, 4, seed + 4).astype(np.float32)
     return pack(heat, cover, erode)
+
+
+def tile_energy(n=256, seed=89):
+    """Crackling energy that tiles: a web of thin bright cell walls over a darker, mottled
+    body, for warnings' fills and wards to scroll through. B is a noise for flicker."""
+    _, gap, _, _ = tiles.voronoi(n, 46, seed, warp=7.0)
+    web = np.exp(-(gap / 1.6) ** 2)
+    fine_gap = tiles.voronoi(n, 180, seed + 1, warp=3.0)[1]
+    fine = np.exp(-(fine_gap / 1.1) ** 2)
+    mottle = tiles.noise(n, 5, seed + 2).astype(np.float32)
+    heat = np.clip(web * 0.85 + fine * 0.3 + mottle * 0.25, 0, 1)
+    cover = np.clip(0.2 + web * 0.65 + fine * 0.2 + mottle * 0.3, 0, 1)
+    return pack(heat, cover, tiles.noise(n, 3, seed + 3).astype(np.float32))
 
 
 def tile_noise(n=256, seed=67):

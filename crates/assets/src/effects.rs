@@ -172,8 +172,10 @@ pub struct Layer {
     pub drag: f32,
     /// Shares of a life spent fading in and out.
     pub fade: [f32; 2],
-    /// Erosion threshold at birth and at death (sprites dissolve as it rises).
+    /// Erosion threshold at birth and at death (sprites dissolve as it rises), and how soft
+    /// the dissolving edge is: small values break shapes up crisply, as painted effects do.
     pub erode: [f32; 2],
+    pub erode_soft: f32,
     /// Soft-particle depth in metres (0: clip hard against what's in front).
     pub soft: f32,
     /// Share of its heat a particle loses over its life (fire cooling to embers).
@@ -243,6 +245,7 @@ impl Default for Layer {
             drag: 0.,
             fade: [0.1, 0.3],
             erode: [0.; 2],
+            erode_soft: 0.18,
             soft: 0.25,
             cool: 0.,
             delay: [0.; 2],

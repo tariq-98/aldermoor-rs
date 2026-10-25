@@ -111,14 +111,14 @@ fragment float4 quad_fragment(QuadVary i [[stage_in]],constant Frame& f [[buffer
     return over_output(c,m.params.w,f);
 }
 
-struct MeshVary{float4 position [[position]];float3 world,normal;float4 colour;float2 uv;float depth;uint instance [[flat]];};
+struct MeshVary{float4 position [[position]];float3 world,normal,object,object_normal;float4 colour;float2 uv;float depth;uint instance [[flat]];};
 
 vertex MeshVary mesh_vertex(uint vid [[vertex_id]],uint iid [[instance_id]],device const Vertex* vertices [[buffer(0)]],constant Frame& f [[buffer(1)]],device const MeshInstance* meshes [[buffer(2)]]){
     Vertex v=vertices[vid];
     device const MeshInstance& m=meshes[iid];
     float3 world=(m.model*float4(v.position.xyz,1)).xyz;
     float4 clip=f.vp*float4(world,1);
-    MeshVary o;o.position=clip;o.world=world;o.normal=(m.model*float4(v.normal.xyz,0)).xyz;o.colour=v.color;o.uv=v.uv.xy;o.depth=clip.w;o.instance=iid;
+    MeshVary o;o.position=clip;o.world=world;o.normal=(m.model*float4(v.normal.xyz,0)).xyz;o.object=v.position.xyz;o.object_normal=v.normal.xyz;o.colour=v.color;o.uv=v.uv.xy;o.depth=clip.w;o.instance=iid;
     return o;
 }
 
@@ -131,7 +131,21 @@ fragment float4 mesh_fragment(MeshVary i [[stage_in]],bool front [[front_facing]
     float mask=smoothstep(inst.shading.z,1.,i.colour.r)*inst.shading.w;
     float time=g.right.w;
     float twinkle=pow(0.5+0.5*sin(time*inst.terms.y+i.colour.g*43.),8.)*inst.terms.x;
-    float4 t=texel(m,i.uv+float2(0.,time*inst.terms.w),atlas,tiles)*inst.terms.z;
+    float4 t;
+    if(m.extra.x>0.5){
+        // Tiles wrap a mesh by its own shape (three projections, blended by its normal), so
+        // a shell needs no UVs and shows no seam.
+        float3 w=abs(normalize(i.object_normal));
+        w/=max(dot(w,float3(1)),0.001);
+        float2 scroll=float2(0.,time*inst.terms.w),rep=m.frame.zw;
+        uint layer=uint(m.extra.x-0.5);
+        t=tiles.sample(tile_sampler,i.object.zy*rep+scroll,layer)*w.x
+         +tiles.sample(tile_sampler,i.object.xz*rep+scroll,layer)*w.y
+         +tiles.sample(tile_sampler,i.object.xy*rep+scroll,layer)*w.z;
+    }else{
+        t=texel(m,i.uv+float2(0.,time*inst.terms.w),atlas,tiles);
+    }
+    t*=inst.terms.z;
     float heat=t.r+mask+rim+twinkle;
     // Edge-on surfaces fade out rather than alias at the silhouette.
     float cover=(t.g+mask+rim+twinkle*0.5)*smoothstep(0.,0.15,facing);
@@ -207,14 +221,16 @@ fragment float4 decal_fragment(DecalVary i [[stage_in]],float4 motion [[color(1)
         float edge=max(d.shape.w,0.01);
         // A crisp line on the boundary, a glow running in from it and a faint one outside.
         float line=exp(-abs(inside)/(edge*0.22+aa));
-        float rim=line*0.7+shape*exp(-max(inside,0.)/edge)*0.55+(1.-shape)*exp(min(inside,0.)/(edge*0.5))*0.25;
+        // A thinner second line just inside the first, as warnings in fights are drawn.
+        float inner=exp(-abs(inside-edge*1.6)/(edge*0.12+aa))*0.45*shape;
+        float rim=line*0.7+inner+shape*exp(-max(inside,0.)/edge)*0.45+(1.-shape)*exp(min(inside,0.)/(edge*0.5))*0.25;
         float filled=grown<0.?1.:smoothstep(aa,-aa,front);
         float lead=grown<0.||grown>=1.?0.:exp(-abs(front)/(edge*0.6))*shape;
         float breakup=1.;
-        if(m.extra.x>0.5)breakup=0.55+0.9*tiles.sample(tile_sampler,world.xz*m.frame.zw+m.frame.xy,uint(m.extra.x-0.5)).r;
+        if(m.extra.x>0.5)breakup=0.3+1.4*tiles.sample(tile_sampler,world.xz*m.frame.zw+m.frame.xy,uint(m.extra.x-0.5)).r;
         // Bands running in from the edge, so a mark on the ground is plainly alive.
         float bands=0.5+0.5*sin(max(inside,0.)/edge*1.7-f.clock.x*5.);
-        float body=shape*filled*d.fill.a*breakup*(0.85+0.3*bands*bands*exp(-max(inside,0.)/(edge*5.)));
+        float body=shape*filled*d.fill.a*breakup*(0.9+0.18*bands*bands*exp(-max(inside,0.)/(edge*5.)));
         float3 light=m.colour.rgb*m.colour.a*(rim+lead)+d.fill.rgb*body;
         out=float4(light,body*m.params.w);
     }

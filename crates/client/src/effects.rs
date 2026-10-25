@@ -854,7 +854,7 @@ impl Part {
             next,
             params: [
                 lerp(l.erode[0], l.erode[1], t),
-                if eroding { 0.18 } else { 0. },
+                if eroding { l.erode_soft.max(0.01) } else { 0. },
                 l.soft,
                 l.blend,
             ],
