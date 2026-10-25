@@ -58,6 +58,8 @@ struct Options {
     /// Overrides the settings file's scheme.
     scheme: Option<controls::Scheme>,
     controls: Option<PathBuf>,
+    /// How characters blend from one clip to the next (#210). The others are for comparisons.
+    blend: anim::Method,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -90,6 +92,7 @@ impl Options {
             reset_on_look: false,
             scheme: None,
             controls: None,
+            blend: anim::Method::default(),
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -164,13 +167,21 @@ impl Options {
                 "--controls" => {
                     o.controls = Some(args.next().context("--controls needs a file")?.into())
                 }
+                "--blend" => {
+                    o.blend = match args.next().as_deref() {
+                        Some("inertialize") => anim::Method::Inertialize,
+                        Some("dead") => anim::Method::DeadBlend,
+                        Some("off") => anim::Method::Off,
+                        _ => anyhow::bail!("--blend expects inertialize, dead or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -932,6 +943,7 @@ impl Game {
             }
             let c = self.characters.get_mut(&u.id).unwrap();
             c.partial_updates = !self.options.legacy_cpu;
+            c.blender.set_method(self.options.blend);
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
             c.update_combat(
                 u,

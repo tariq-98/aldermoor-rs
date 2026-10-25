@@ -45,12 +45,17 @@ impl Transform {
     pub fn matrix(self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
-    pub fn blend(self, other: Self, t: f32) -> Self {
-        Self {
-            translation: self.translation.lerp(other.translation, t),
-            rotation: self.rotation.slerp(other.rotation, t),
-            scale: self.scale.lerp(other.scale, t),
-        }
+}
+impl anim::Bone for Transform {
+    fn rotation(&self) -> Quat {
+        self.rotation
+    }
+    fn translation(&self) -> Vec3 {
+        self.translation
+    }
+    fn set(&mut self, rotation: Quat, translation: Vec3) {
+        self.rotation = rotation;
+        self.translation = translation;
     }
 }
 #[derive(Clone, Debug)]
