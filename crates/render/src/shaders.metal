@@ -151,7 +151,19 @@ struct GuiVary{float4 position [[position]];float2 uv;float4 colour;};
 vertex GuiVary gui_vertex(uint id [[vertex_id]],device const GuiVertex* vertices [[buffer(0)]],constant float4& size [[buffer(1)]]){GuiVertex v=vertices[id];return {float4(v.position/size.xy*float2(2,-2)+float2(-1,1),0,1),v.uv,v.colour};}
 fragment float4 gui_fragment(GuiVary i [[stage_in]],texture2d<float> image [[texture(0)]]){constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);float4 c=i.colour*image.sample(s,i.uv);float3 rgb=c.a>0.?c.rgb/c.a:float3(0);rgb=select(rgb/12.92,pow((rgb+0.055)/1.055,float3(2.4)),rgb>0.04045);return float4(rgb*c.a,c.a);}
 
-fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer(1)]],constant Surfaces& surfaces [[buffer(3)]],texture2d<float> sky_map [[texture(11)]]){constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear);float4 point=f.inverse_vp*float4(i.uv*float2(2,-2)+float2(-1,1),1,1);float3 ray=normalize(point.xyz/point.w-f.eye.xyz);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);float4 previous=f.previous_vp*float4(ray,0);float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;return {float4(sky_map.sample(s,uv).rgb*surfaces.sky.y,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};}
+fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer(1)]],constant Surfaces& surfaces [[buffer(3)]],texture2d<float> sky_map [[texture(11)]]){
+    constexpr sampler s(coord::normalized,s_address::repeat,t_address::clamp_to_edge,filter::linear,mip_filter::linear);
+    float4 point=f.inverse_vp*float4(i.uv*float2(2,-2)+float2(-1,1),1,1);
+    float3 ray=normalize(point.xyz/point.w-f.eye.xyz);
+    float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);
+    // Longitude is periodic: a quad crossing atan2's wrap spans a small arc, not a full map.
+    // Keep latitude's derivative unchanged and clamp its pole samples instead of wrapping.
+    float2 gx=dfdx(uv),gy=dfdy(uv);
+    gx.x-=round(gx.x);gy.x-=round(gy.x);
+    float4 previous=f.previous_vp*float4(ray,0);
+    float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;
+    return {float4(sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*surfaces.sky.y,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};
+}
 
 // Renderer-derived lighting data from the supplied sky; no authored texture or look values.
 fragment float4 prefilter_sky(Full i [[stage_in]],constant float& rough [[buffer(0)]],texture2d<float> sky [[texture(0)]]) {
