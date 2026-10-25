@@ -1,0 +1,33 @@
+{
+  "base_revision": "feb05ef",
+  "measured_revision": "bf43200e45079aa57524b8e6ef630741e2407e52",
+  "mode": "built-in display, fullscreen",
+  "output": "2560x1600",
+  "internal": "1920x1200",
+  "scale": 0.75,
+  "in_flight": 1,
+  "overlay_visible": false,
+  "native_dimensions_and_presentation_verified": true,
+  "native_display_acceptance_verified": false,
+  "before_gpu_median_ms": 34.801,
+  "after_gpu_median_ms": 34.120374999474734,
+  "before_gpu_p95_ms": 49.266,
+  "after_gpu_p95_ms": 57.76258333935402,
+  "full_scene_12ms_budget_pass": false,
+  "counter_overhead": {
+    "verdict": "incomplete",
+    "requested_measured_frames": 12000,
+    "report_produced": false,
+    "target_below_0_1ms_established": false,
+    "reason": "Stopped after more than 18 minutes with very slow progress and no complete report. No partial estimate selected."
+  },
+  "ten_minute_thermal_acceptance_verified": false,
+  "display_setting_restored": true,
+  "restored_logical_resolution": "1440x900",
+  "restored_retina_backing": "2880x1800",
+  "latest_head_F3_visual_verified": false,
+  "visual_blocker": "UI-control service timed out; current-head F3 interaction and appearance were not confirmed.",
+  "publication_blocker": "Sandbox network restriction; reports saved locally, GitHub not updated.",
+  "resident_memory_verified": false,
+  "memory_measure": "MTLDevice.currentAllocatedSize is allocation bytes, not physical residency."
+}

@@ -1,6 +1,8 @@
+> Latest evidence: [native-display validation](NATIVE-VALIDATION.md). Display restoration verified; counter-overhead acceptance remains incomplete.
+
 # Issue #26: per-pass counter validation
 
-## Latest reference-setting measurements
+## Earlier offscreen reference-setting measurements
 
 M1 Air (7 GPU cores, 16 GB), AC power, 2560×1600 output, 1920×1200 internal,
 75% render scale, custom TAA, one frame in flight. All four runs are **offscreen**;
@@ -58,17 +60,11 @@ coverage for expected passes, draw calls, visible triangles and allocation bytes
 - Hosted macOS CI has a paravirtual GPU without stage counters. Tests explicitly verify
   unavailable timestamps and continued rendering there; physical-M1 tests exercise counters.
 
-**Native-display checks and display restoration are pending.** The user approved a temporary
-switch from 1440×900 logical to 1280×800 logical. The change succeeded: macOS reports
-2560×1600 physical pixels and 1280×800 logical at 60 Hz. The Mac then locked, and the
-computer-control service paused automatic unlocking after detecting physical input.
-It requires a manual unlock before on-screen validation or restoration to 1440×900.
-No native presentation measurements were obtained. The user has been asked to unlock.
-
-After unlock: repeat F3 on the current build, measure on-display overhead at the native
-panel setting, and restore the original display mode. Keep the PR draft until the required
-checks pass. Codex creates no capture files; a Claude Mac check can capture the visible
-F3 panel and its hidden state for the PR.
+Native dimensions and presentation were subsequently measured on `bf43200`, and the
+original display mode was restored. See [native validation](NATIVE-VALIDATION.md) for
+the completed before/after reports and the incomplete counter-overhead run. Current-head
+F3 visual validation remains outstanding. These latest reports are local and not yet
+published to GitHub because sandbox networking is blocked.
 
 ## Interpretation and earlier evidence
 
