@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, stable_cascades},
+    visibility::{Bounds, FarShadowCache, Frustum, stable_cascades},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -296,6 +296,7 @@ pub struct Renderer {
     motion_msaa: Obj<dyn MTLTexture>,
     depth: Obj<dyn MTLTexture>,
     shadow: Obj<dyn MTLTexture>,
+    far_shadow_cache: FarShadowCache,
     history: [Obj<dyn MTLTexture>; 2],
     output: Obj<dyn MTLTexture>,
     pub width: u32,
@@ -725,6 +726,7 @@ impl Renderer {
             motion_msaa,
             depth,
             shadow,
+            far_shadow_cache: FarShadowCache::default(),
             history,
             output,
             width,
@@ -1188,7 +1190,7 @@ impl Renderer {
         self.stats.history_resets += usize::from(!valid);
         let previous_vp = if valid { self.previous_vp } else { unjittered };
         let sun = Vec3::from_array(self.look.sun_direction).normalize();
-        let cascades = stable_cascades(
+        let mut cascades = stable_cascades(
             camera.eye,
             camera.target,
             camera.fov,
@@ -1196,6 +1198,11 @@ impl Renderer {
             sun,
             SHADOW_SIZE as u32,
         );
+        let (far_matrix, refresh_far) =
+            self.far_shadow_cache
+                .plan(self.frame, cascades[2], SHADOW_SIZE as u32, !valid);
+        // Sampling and caster culling must use the matrix that produced the stored layer.
+        cascades[2] = far_matrix;
         let view = Frustum::new(unjittered);
         let shadow_views = cascades.map(Frustum::new);
         let time = self
@@ -1419,6 +1426,10 @@ impl Renderer {
         let submitted_at = self.started.elapsed().as_secs_f64();
         let mut pass_mask = 0u16;
         for cascade in 0..3 {
+            if cascade == 2 && !refresh_far {
+                // Preserve the layer without an encoder, clear, or stale timestamp samples.
+                continue;
+            }
             let pass = MTLRenderPassDescriptor::new();
             if let Some(c) = counters {
                 c.attach(&pass, cascade);
@@ -1445,6 +1456,9 @@ impl Renderer {
                 DrawPass::Shadow(cascade),
             )?;
             enc.endEncoding();
+            if cascade == 2 {
+                self.far_shadow_cache.encoded(self.frame, far_matrix);
+            }
         }
         let split_scene = self.profile_scene && counters.is_some();
         // MSAA depth cannot be stored/reloaded as a resolved depth texture here.
