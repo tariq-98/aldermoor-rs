@@ -113,6 +113,7 @@ fn unit(id: u32, look: Look, pose: Pose, speed: f32) -> UnitState {
         target: None,
         look: look.into(),
         traversal: Default::default(),
+        aim_pitch: 0,
     }
 }
 
