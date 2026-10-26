@@ -397,9 +397,9 @@ and landings to distance:
   for a move mostly across, so an eject's hop doesn't count. Where the path stands still, the clock
   carries it on: climbing straight up to the next hold, the body arrives with five eighths of the
   move done and the hands finish it. A wrap round a corner swings round it instead
-  (`sim::climbing::corner_carry`), easing out as a hop across does, so it plays by the clock. The
-  shimmy loops slide 0.48 m a loop, made at the sim's 1.2 m/s (`SHIMMY_STRIDE`), and play by the
-  distance slid, so the hands keep still on the hold at any speed.
+  (`sim::climbing::corner_carry`), so it plays by the clock, its clip made on that swing (#305).
+  The shimmy loops slide 0.48 m a loop, made at the sim's 1.2 m/s (`SHIMMY_STRIDE`), and play by
+  the distance slid, so the hands keep still on the hold at any speed.
 - **Hands on the hold, feet on the wall** (#248). The clips are made on the broad human frame, which
   hangs with its wrists 7 cm out from the wall and 3 cm below the hold (`GRIP_OUT`, `GRIP_DOWN`).
   Each skeleton measures its own hang once (`Hang_Idle_Loop`'s first frame, `ClipSet::reach`) and
@@ -417,6 +417,26 @@ and landings to distance:
   or the ones its move goes from and to, found from where the sim has it, among the holds filed
   once by the squares of ground they can be hung from over, so looking neither allocates nor hashes
   (`crates/client/src/holds.rs`, `Character::set_holds`).
+- **Leaps, ejects, corners, wall runs and roll landings** (#305) have clips of their own, made on
+  the sim's numbers as the others are. From a hang, a move onto a hold that takes longer than 0.45 s
+  (`climb::LONG_MOVE`) is a climb leap, mostly up (`Hang_Leap_Up`: a pull on the hold and a push off
+  the wall to a hold 1.4 m up), or a side eject (`Hang_Eject_L` / `_R`: a push off along the wall,
+  flying 2 m with a 0.35 m hop, the leading hand reaching for the hold), not a climb or a hop. Round
+  a corner, a body carried on more than 0.1 m ahead (`CORNER_AHEAD`) wraps round an outer one onto
+  the wall's side (`Hang_Corner_Out_L` / `_R`), and otherwise turns into an inner one where it hangs
+  (`Hang_Corner_In_L` / `_R`): the sim turns it a quarter at 4 rad/s, the clips are made turning
+  with it, and the body follows on the carried spring. A wall run plays `Wall_Run` (three steps up
+  the face, slowing, the hands reaching for the top) by how high the body has run
+  (`climb::run_progress`), its hands and feet as the clip has them: there's no hold. Kicked off a
+  hang or a wall run backwards, rising and thrown out from the wall faster than 2.5 m/s (`KICK`),
+  `Hang_Eject_Back` (the hands letting go, the feet pushing off, the body opening out into the
+  falling loop) plays by the clock as the body flies, for its 0.5 s. The sim's step off the wall
+  doesn't move the body yet, so it plays from there until the body moves across, for up to 0.1 s
+  (`KICK_SEEN`), and on only if the body is thrown out: a side eject into the air and letting go
+  don't kick. A roll that starts in the air, the roll landing, plays `Roll_Land`: it touches down as
+  `Jump_Land` does, folds over the knees with the hands going down and rolls over the shoulder as
+  the vendor roll does, faster, by the 3 m it covers, its feet under it as the move ends; then it
+  stands as the roll does.
 - **Afloat**, the swim loops play: `Swim_Idle_Loop` treading water, and `Swim_Fwd_Loop` on the
   move, its strokes paced by the speed (made for 2.7 m/s, the sim's swim at a run, `SWIM_SPEED`;
   between half and 1.5 times their pace). The clips have the surface at their origin and the sim
@@ -437,9 +457,11 @@ and landings to distance:
   ground), shimmies round both corners of the wall's end onto its outer face and lets go; sprints
   at the hall's stepped east wall, runs up it and pulls onto the lookout; lowers itself over the
   lookout's edge, shimmies left, ejects right along the hold, shimmies back and climbs up; steps
-  down, drops to hang from the step below and leaps up to the lookout's hold, and lets go (#247's
-  clips, #248's timing and hands and feet); and lunges at the nearest wolf in the meadow. It logs
-  each step as it starts, so captures can be cut by step.
+  down, drops to hang from the step below and leaps up to the lookout's hold, then kicks off it
+  backwards, turning in the air, and rolls as it lands (#247's clips, #248's timing and hands and
+  feet, #305's corners, wall run, eject, leap, kick and roll landing); and lunges at the nearest
+  wolf in the meadow. It logs each step as it starts, so captures can be cut by step. The valley's
+  holds have no inner corner yet, so `Hang_Corner_In_L` / `_R` can't be seen on it.
 
 ## Switches
 
@@ -720,8 +742,8 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   step is reached and every place arrived at, and on the way the player rolls four times, climbs
   the field wall twice, the ruin's east and rear walls and back up from a hang, swims, hangs from
   the rear wall and goes round both its corners, runs up the wall to the lookout and pulls onto it,
-  shimmies and ejects along the lookout's hold, leaps up to it from the step below, comes down
-  unhurt, and lunges.
+  shimmies and ejects along the lookout's hold, leaps up to it from the step below, kicks off it
+  to land over 2 m out and rolls the landing on 3 m, comes down unhurt, and lunges.
 
 ## Cost
 
@@ -742,23 +764,23 @@ for the ground on the way down and the pelvis dipping on landing.
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 | After #218 | After #213 | After #248 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 | 53,520 | 53,724 | 53,865 |
-| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 | 62,189 | 62,394 | 62,445 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 | 67,602 | 67,800 | 67,936 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 | 61,625 | 61,830 | 61,963 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 | 62,728 | 62,935 | 63,071 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 | 72,931 | 73,132 | 73,275 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 | 80,397 | 80,593 | 80,722 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 | 82,908 | 83,105 | 83,247 |
-| circle | | | | | | | | 61,546 | 63,414 | 63,842 | 64,047 | 64,213 |
-| jump | | | | | | | | 83,542 | 85,944 | 86,151 | 86,346 | 86,484 |
-| run + hits | | | | | | | | | 93,452 | 91,832 | 92,041 | 92,238 |
-| run + rolls | | | | | | | | | | 83,603 | 91,053 | 91,208 |
-| climb | | | | | | | | | | 78,142 | 92,481 | 85,653 |
-| swim | | | | | | | | | | 67,993 | 44,598 | 44,748 |
-| hang | | | | | | | | | | | 60,810 | 83,782 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 | After #218 | After #213 | After #248 | After #305 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 | 53,520 | 53,724 | 53,865 | 53,866 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 | 62,189 | 62,394 | 62,445 | 62,454 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 | 67,602 | 67,800 | 67,936 | 67,943 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 | 61,625 | 61,830 | 61,963 | 61,974 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 | 62,728 | 62,935 | 63,071 | 63,080 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 | 72,931 | 73,132 | 73,275 | 73,269 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 | 80,397 | 80,593 | 80,722 | 80,733 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 | 82,908 | 83,105 | 83,247 | 83,261 |
+| circle | | | | | | | | 61,546 | 63,414 | 63,842 | 64,047 | 64,213 | 64,220 |
+| jump | | | | | | | | 83,542 | 85,944 | 86,151 | 86,346 | 86,484 | 86,505 |
+| run + hits | | | | | | | | | 93,452 | 91,832 | 92,041 | 92,238 | 92,256 |
+| run + rolls | | | | | | | | | | 83,603 | 91,053 | 91,208 | 91,253 |
+| climb | | | | | | | | | | 78,142 | 92,481 | 85,653 | 85,667 |
+| swim | | | | | | | | | | 67,993 | 44,598 | 44,748 | 44,757 |
+| hang | | | | | | | | | | | 60,810 | 83,782 | 83,783 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -858,6 +880,12 @@ M1, nearly twice the runner's, the difference is under 2 µs. At half detail it'
 frame, and at quarter detail not at all. The column is against #213's code on today's main measured
 the same way, 86 to 161 instructions above the After #213 column, which was measured on an older
 main.
+
+#305 moves every case by 45 instructions a pose or less, either way (under 0.05%), within the noise:
+off the wall, a look at whether the body has just kicked off it, and on it, which of the moves'
+clips plays. The new clips play as the others do, so a body leaping, ejecting, wrapping round a
+corner or running up a wall costs what a body moving between holds does, and one kicking off or
+rolling a landing what a jump or a roll does.
 
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are

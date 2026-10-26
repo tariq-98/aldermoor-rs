@@ -853,14 +853,21 @@ def smooth(k):
     return k * k * (3 - 2 * k)
 
 
-def edge_grip(c, side, edge, x, lift=0.0):
-    """A hand over the edge at `edge` (the point on it in front of the root), `x` across: wrist
-    just back from the lip, fingers over it. `lift` raises the hand off the edge as it moves."""
+def grip_on(c, side, at, out=-FWD, lift=0.0):
+    """A hand over an edge at `at` on it, its wall's face turned `out` (level): wrist just back
+    from the lip, fingers over it. `lift` raises the hand off the edge as it moves."""
     sign = 1 if side == "l" else -1
-    wrist = Vector((x, edge.y + 0.07 + 0.08 * min(lift / 0.08, 1.0), edge.z - 0.03 + lift))
-    c.p.hand_dir(side, fingers=Vector((0.12 * sign, -0.75, -0.62)), palm=Vector((0.0, 0.3, -1.0)), wrist=wrist,
-                 elbow=(0.6 * sign, 0.45, -0.45))
+    out = Vector(out).normalized()
+    left = out.cross(UP)
+    wrist = Vector(at) + out * (0.07 + 0.08 * min(lift / 0.08, 1.0)) + UP * (lift - 0.03)
+    c.p.hand_dir(side, fingers=0.12 * sign * left - 0.75 * out - 0.62 * UP, palm=0.3 * out - UP, wrist=wrist,
+                 elbow=0.6 * sign * left + 0.45 * out - 0.45 * UP)
     c.p.fingers(side, curl=(1.0, 1.3, 0.9), thumb=(0.45, 0.55, 0.4))
+
+
+def edge_grip(c, side, edge, x, lift=0.0):
+    """A hand over the edge at `edge` (the point on it in front of the root), `x` across."""
+    grip_on(c, side, Vector((x, edge.y, edge.z)), lift=lift)
 
 
 def place_hips(c, target, tilt=0.0, turn=0.0):
@@ -877,11 +884,20 @@ def lean_to(c, shoulders):
     p.spine(bend=want - have)
 
 
-def foot_on_wall(c, side, ankle, knee_out=0.3, pitch=-1.05):
-    """A foot braced on the wall in front: ball on the wall, toes up, knee bent out a little."""
+def brace_on(c, side, ankle, out=-FWD, knee_out=0.3, pitch=-1.05):
+    """A foot braced on a wall whose face is turned `out`: ball on the wall, toes up, knee bent
+    out a little. Pitched less, the toes come down off it."""
     sign = 1 if side == "l" else -1
-    rot = Matrix.Rotation(pitch, 3, "X") @ c.p.rest[f"foot_{side}"].to_3x3()
-    c.p.leg(side, Vector(ankle), knee=(knee_out * sign, -1.0, 0.05), foot_rot=rot)
+    out = Vector(out).normalized()
+    left = out.cross(UP)
+    facing = Matrix.Rotation(math.atan2(-out.x, out.y), 3, "Z")
+    rot = Matrix.Rotation(pitch, 3, left) @ facing @ c.p.rest[f"foot_{side}"].to_3x3()
+    c.p.leg(side, Vector(ankle), knee=knee_out * sign * left - out + 0.05 * UP, foot_rot=rot)
+
+
+def foot_on_wall(c, side, ankle, knee_out=0.3, pitch=-1.05):
+    """A foot braced on the wall in front."""
+    brace_on(c, side, ankle, knee_out=knee_out, pitch=pitch)
 
 
 def hang(c, edge=EDGE, hands=(0.22, -0.22), lifts=(0.0, 0.0), feet=((0.17, 0.42), (-0.15, 0.47)), hips=(0.0, 0.06, 0.95),
@@ -1143,6 +1159,456 @@ def hang_hop_r(c):
     return dict(keys=keys, events=[{"t": 0.16, "name": "hold"}])
 
 
+# Parkour (#305): the moves #246 added, keyed on the sim's numbers (docs/MOVEMENT.md, "Climbing").
+# Each is planned where things are in the world, as the sim carries the root through the move
+# (turning it, round a corner), and turned into the root's frame (`into`). They're keyed every
+# frame, so the motion between keys is the planned one.
+
+LEAP_RISE = 1.4      # a climb leap's rise, the middle of sim::climbing::LEAP_REACH (1 to 1.8 m)
+
+
+def into(root, turn, p):
+    """A point planned where it is in the world, in the frame of a root at `root` turned left by
+    `turn` radians."""
+    return Matrix.Rotation(-turn, 3, "Z") @ (Vector(p) - Vector(root))
+
+
+def bump(k, a, b):
+    """Nothing outside `a`..`b`, swelling smoothly to 1 in its middle."""
+    s = min(max((k - a) / (b - a), 0.0), 1.0)
+    return math.sin(math.pi * s) ** 2
+
+
+def frames(seconds):
+    """Every frame's share of a clip `seconds` long."""
+    n = round(seconds * sc.FPS)
+    return [f / n for f in range(n + 1)]
+
+
+def hand_across(c, side, k, old, new, off, on, root, via, turn=0.0, out=-FWD, reach=UP, out_new=None):
+    """A hand that lets go of an edge at `old` (where it grips, in the world) at `off` through the
+    move and takes one at `new` at `on`: lifted off, swung through `via` (where it reaches, in the
+    world, wherever the body has got to) with its fingers pointing along `reach`, and lowered onto
+    the new edge. `out` is the old edge's wall's face, in the world, and `out_new` the new one's,
+    round a corner."""
+    sign = 1 if side == "l" else -1
+    spin = Matrix.Rotation(-turn, 3, "Z")
+    out_old, out_new = Vector(out), Vector(out if out_new is None else out_new)
+    if k < off or k >= on:
+        at, face, lift = ((old, out_old, 0.08 * smooth((k - off + 0.05) / 0.05)) if k < off
+                          else (new, out_new, 0.1 * (1 - smooth((k - on) / 0.06))))
+        grip_on(c, side, into(root, turn, at), spin @ face, lift)
+        return
+    s = smooth((k - off) / (on - off))
+    reach = Vector(reach).normalized()
+    start, end = Vector(old) + out_old * 0.15 + UP * 0.05, Vector(new) + out_new * 0.15 + UP * 0.07
+    wrist = start.lerp(Vector(via), s).lerp(Vector(via).lerp(end, s), s)
+    w = bump(s, 0, 1)
+    out = out_old.lerp(out_new, s).normalized()
+    left = out.cross(UP)
+    fingers = (0.12 * sign * left - 0.75 * out - 0.62 * UP).lerp(0.1 * sign * left - 0.25 * out + reach, w)
+    palm = (0.3 * out - UP).lerp(-out, w)
+    elbow = (0.6 * sign * left + 0.45 * out - 0.45 * UP).lerp(0.8 * sign * left + 0.3 * out - 0.2 * UP, w)
+    c.p.hand_dir(side, fingers=spin @ fingers, palm=spin @ palm, wrist=into(root, turn, wrist), elbow=spin @ elbow)
+    c.p.fingers(side, curl=(1.0 - 0.75 * w, 1.3 - 0.85 * w, 0.9 - 0.6 * w), thumb=(0.45 - 0.15 * w, 0.55 - 0.2 * w, 0.4 - 0.1 * w))
+
+
+def foot_across(c, side, k, old, new, off, on, hang, root, turn=0.0, out=-FWD, out_new=None):
+    """A foot that pushes off the wall from `old` (its ankle, in the world) at `off` and braces
+    on it again at `new` by `on`, hanging below the body at `hang` (in the root's frame) between,
+    clear of the wall, toes down. `out` is the wall's face, and `out_new` the next wall's, round a
+    corner."""
+    spin = Matrix.Rotation(-turn, 3, "Z")
+    leave, land = smooth((k - off) / 0.1), smooth((k - on + 0.12) / 0.12)
+    ankle = into(root, turn, old).lerp(Vector(hang), leave).lerp(into(root, turn, new), land)
+    face = Vector(out).lerp(Vector(out if out_new is None else out_new), smooth((k - off) / (on - off)))
+    brace_on(c, side, ankle, spin @ face.normalized(), knee_out=0.3 - 0.15 * leave * (1 - land),
+             pitch=-1.05 + 1.5 * leave * (1 - land))
+
+
+def leap_root(k):
+    """Where the sim has carried the root `k` through a climb leap straight up (sim::climbing::
+    carry): up first, quick to start and slowing."""
+    return Vector((0, 0, LEAP_RISE * ease(min(1.6 * k, 1.0))))
+
+
+def leap(c, k):
+    """Up to a hold LEAP_RISE above: a pull on the hold and a push off the wall, the hands letting
+    go at the top of the pull and reaching up, the right first, and the body swinging in to hang
+    from the new hold, settling a little below it and coming back up."""
+    p = c.p
+    root = leap_root(k)
+    old, new = EDGE, EDGE + UP * LEAP_RISE
+    # The body: held back by the pull at first, then rising after the root, and over its top a
+    # little as the hands take the new hold.
+    rise = LEAP_RISE * smooth((k - 0.03) / 0.5) + 0.04 * bump(k, 0.45, 0.8) - 0.03 * bump(k, 0.75, 1.0)
+    out = 0.06 - 0.05 * bump(k, 0.0, 0.3) + 0.06 * bump(k, 0.2, 0.75)
+    c.base("Idle_Loop", 0.3 * k)
+    place_hips(c, into(root, 0, (0, out, 0.95 + rise)), tilt=0.15 + 0.1 * bump(k, 0.0, 0.25) - 0.2 * bump(k, 0.2, 0.6))
+    p.spine(bend=0.45 + 0.08 * bump(k, 0.0, 0.25) - 0.3 * bump(k, 0.2, 0.6))
+    # The hands let go before the hold drops below the shoulders.
+    for side, x, off, on in (("l", 0.22, 0.19, 0.55), ("r", -0.22, 0.16, 0.47)):
+        # Up past the shoulder, reaching for the hold above.
+        via = (x * 1.1, EDGE.y + 0.2, 0.95 + rise + 1.2)
+        hand_across(c, side, k, old + LEFT * x, new + LEFT * x, off, on, root, via)
+    for side, (x, z), off, on in (("l", (0.17, 0.42), 0.22, 0.74), ("r", (-0.15, 0.47), 0.2, 0.7)):
+        ankle = Vector((x, EDGE.y + 0.13, z))
+        hang_at = into(root, 0, (x * 0.7, 0.05, 0.95 + rise - 0.82 + 0.15 * bump(k, 0.35, 0.7)))
+        foot_across(c, side, k, ankle, ankle + UP * LEAP_RISE, off, on, hang_at, root)
+    p.look(pitch=-0.25 - 0.45 * bump(k, 0.0, 0.6))
+
+
+@clip("Hang_Leap_Up", 0.5, tags=["locomotion", "climb"])
+def hang_leap_up(c):
+    keys = []
+    for k in frames(0.5):
+        leap(c, k)
+        keys.append((0.5 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.24, "name": "hold"}])
+
+
+EJECT = 2.0          # a side eject's reach: sim::climbing::eject_target aims 2 m along
+EJECT_ARC = 0.35     # sim::climbing::EJECT_ARC
+
+
+def glide(k, a, b, c, d):
+    """A body's share of a jump's distance `k` through it: its speed builds from `a` to `b` (the
+    push), holds to `c` (the flight) and dies away by `d` (the catch)."""
+    area = (c + d - a - b) / 2
+    if k <= a:
+        return 0.0
+    if k < b:
+        return (k - a) ** 2 / (2 * (b - a)) / area
+    if k < c:
+        return ((b - a) / 2 + k - b) / area
+    if k < d:
+        return ((b - a) / 2 + c - b + (k - c) - (k - c) ** 2 / (2 * (d - c))) / area
+    return 1.0
+
+
+def eject_root(k):
+    """Where the sim has carried the root `k` through a side eject to the right (-X) onto a hold
+    level with this one (sim::climbing::carry): along, quick to start and slowing, hopping
+    EJECT_ARC on the way."""
+    return Vector((-EJECT * ease(k), 0, EJECT_ARC * math.sin(math.pi * k)))
+
+
+def eject(c, k):
+    """Along the wall to a hold EJECT to the right: a dip and a shove off the wall with both
+    feet, the right hand letting go first and reaching out for the new hold, the body flying
+    after it as the left hand swings up; the right hand catches, then the left, and the feet
+    swing in to the wall as the body settles into the hang."""
+    p = c.p
+    root = eject_root(k)
+    old, new = EDGE, EDGE - LEFT * EJECT
+    # The body: dipping away from the jump, then flying along on its arc a little out from the
+    # wall, and swinging on past the hands as they take the new hold.
+    arc = math.sin(math.pi * min(max((k - 0.1) / 0.62, 0.0), 1.0))
+    body = Vector((0.05 * bump(k, 0.0, 0.2) - EJECT * glide(k, 0.04, 0.16, 0.62, 0.88) - 0.04 * bump(k, 0.7, 1.0),
+                   0.06 + 0.1 * bump(k, 0.1, 0.75),
+                   0.95 - 0.06 * bump(k, 0.0, 0.2) + 0.3 * arc - 0.05 * bump(k, 0.62, 1.0)))
+    flying = bump(k, 0.08, 0.85)
+    c.base("Idle_Loop", 0.0)
+    place_hips(c, into(root, 0, body), tilt=0.15 - 0.1 * flying, turn=-0.2 * flying)
+    p.spine(bend=0.45 + 0.06 * bump(k, 0.0, 0.2) - 0.25 * bump(k, 0.12, 0.8), lean=-0.3 * flying)
+    # The leading hand reaches out ahead of the body for the hold; the other swings up after it.
+    for side, x, off, on, via, reach in (("r", -0.22, 0.1, 0.62, (-0.8, -0.2, 0.6), (-1, 0, 0.6)),
+                                         ("l", 0.22, 0.2, 0.74, (-0.45, -0.3, 0.35), (-0.3, 0, 1))):
+        hand_across(c, side, k, old + LEFT * x, new + LEFT * x, off, on, root, body + Vector(via), reach=reach)
+    # The trailing leg hangs long, the leading one tucked.
+    for side, (x, z), off, on, below in (("r", (-0.15, 0.47), 0.1, 0.8, (-0.12, -0.05, -0.62)),
+                                         ("l", (0.17, 0.42), 0.14, 0.86, (0.2, 0.05, -0.85))):
+        ankle = Vector((x, EDGE.y + 0.13, z))
+        foot_across(c, side, k, ankle, ankle - LEFT * EJECT, off, on, into(root, 0, body + Vector(below)), root)
+    p.look(pitch=-0.25 + 0.15 * bump(k, 0.0, 0.7), yaw=-0.6 * bump(k, 0.0, 0.75))
+
+
+@clip("Hang_Eject_R", 0.55, tags=["locomotion", "climb"])
+def hang_eject_r(c):
+    keys = []
+    for k in frames(0.55):
+        eject(c, k)
+        keys.append((0.55 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.34, "name": "hold"}])
+
+
+CORNER_TURN = 4.0    # how fast the sim turns a body round a corner, in radians a second
+
+
+def corner_yaw(k, sign):
+    """How far the sim has turned the root `k` through a wrap round a corner, left (`sign` 1) or
+    right (-1): at CORNER_TURN, a quarter turn by 0.785 of the move."""
+    return sign * min(CORNER_TURN * 0.5 * k, math.pi / 2)
+
+
+def swing(pivot, a, b, g):
+    """A point swung round `pivot` from `a` to `b`, `g` of the way: round the shorter way, its
+    distance from the pivot and its height changing evenly (sim::climbing::corner_carry)."""
+    r0, r1 = Vector(a).xy - Vector(pivot), Vector(b).xy - Vector(pivot)
+    a0 = math.atan2(r0.y, r0.x)
+    turn = (math.atan2(r1.y, r1.x) - a0 + math.pi) % (2 * math.pi) - math.pi
+    r = r0.length + (r1.length - r0.length) * g
+    return Vector((pivot[0] + math.cos(a0 + turn * g) * r, pivot[1] + math.sin(a0 + turn * g) * r,
+                   a[2] + (b[2] - a[2]) * g))
+
+
+def hung(root, yaw, x, z=0.0, out=None):
+    """A point `x` across and `z` up from where a hang's hands meet its edge (as `hang` has
+    them), for a body hanging at `root` turned `yaw` from the clip's: on the edge, or with `out`,
+    that far out from the wall."""
+    spin = Matrix.Rotation(yaw, 3, "Z")
+    return Vector(root) + spin @ Vector((x, -HANG_OUT + (out or 0.0), HANG_DROP + z))
+
+
+def wrap_round(c, k, sign, pivot, end, steps):
+    """Round a corner to the right, onto the hold on the next wall: an outer corner (`sign` 1, the
+    body turning left onto the wall's side) or an inner one (-1, turning right onto the wall
+    across). The root swings round `pivot` to `end` as the sim carries it, turning as the sim
+    does; the body swings round smoothly, leading with its chest and head. `steps` time each hand
+    and foot across, the right ones first: (off, on, via or the point a foot hangs at, in the
+    world)."""
+    p = c.p
+    root, turn = swing(pivot, (0, 0, 0), end, ease(k)), corner_yaw(k, sign)
+    face = sign * math.pi / 2 * smooth(min(k / 0.85, 1.0))
+    out_old, out_new = -FWD, Matrix.Rotation(sign * math.pi / 2, 3, "Z") @ -FWD
+    # The pelvis keeps its place in the hang, the body swinging round the corner.
+    hips = swing(pivot, (0, 0.06, 0.95), hung(end, sign * math.pi / 2, 0, -0.95, HANG_OUT + 0.06), ease(smooth(k)))
+    hips += Vector((0, 0, -0.03 * bump(k, 0.1, 0.9))) + (out_old + out_new) * 0.04 * bump(k, 0.1, 0.9)
+    c.base("Idle_Loop", 0.0)
+    place_hips(c, into(root, turn, hips), tilt=0.15, turn=face - turn)
+    p.spine(bend=0.45 - 0.08 * bump(k, 0.1, 0.9), twist=0.25 * sign * bump(k, 0.0, 0.7))
+    hands, feet = steps
+    for side, x, (off, on, via, reach) in zip(("r", "l"), (-0.22, 0.22), hands):
+        hand_across(c, side, k, hung((0, 0, 0), 0, x), hung(end, sign * math.pi / 2, x), off, on, root, via, turn,
+                    out=out_old, reach=reach, out_new=out_new)
+    for side, (x, z), (off, on, below) in zip(("r", "l"), ((-0.15, 0.47), (0.17, 0.42)), feet):
+        old, new = hung((0, 0, 0), 0, x, z - HANG_DROP, 0.13), hung(end, sign * math.pi / 2, x, z - HANG_DROP, 0.13)
+        foot_across(c, side, k, old, new, off, on, into(root, turn, below), root, turn, out=out_old, out_new=out_new)
+    p.look(pitch=-0.25, yaw=0.5 * sign * bump(k, 0.0, 0.6))
+
+
+# Round an outer corner: the hold ends 0.2 to the right of the hands' middle, where the sim stops
+# a shimmy (sim::climbing END), and the next runs back along the wall's side; the body comes onto
+# it 0.2 along, hanging HANG_OUT out from the side.
+CORNER_OUT = Vector((-0.2, -HANG_OUT))
+CORNER_OUT_END = Vector((-0.2 - HANG_OUT, -HANG_OUT - 0.2, 0))
+# Into an inner corner: the wall across stands 0.37 to the right, where it stops a shimmy (the body
+# keeps 0.9 of its radius clear of it); the body comes onto its hold 0.4 out from the corner, as
+# far as clears the wall it leaves, so it barely moves, turning on the spot.
+CORNER_IN = Vector((-0.37, -HANG_OUT))
+CORNER_IN_END = Vector((0.03, 0, 0))
+
+
+@clip("Hang_Corner_Out_R", 0.5, tags=["locomotion", "climb"])
+def hang_corner_out_r(c):
+    """Round the corner onto the wall's side: the right hand reaches round it first, the body
+    swings round after it, and the left hand follows, the feet stepping round."""
+    hands = ((0.06, 0.4, (-0.42, -0.25, 2.02), (0.4, -0.6, 0.4)), (0.45, 0.8, (0.0, -0.18, 2.05), (-1, 0, 0.5)))
+    feet = ((0.15, 0.55, (-0.4, -0.2, 0.55)), (0.42, 0.86, (-0.35, -0.1, 0.5)))
+    keys = []
+    for k in frames(0.5):
+        wrap_round(c, k, 1, CORNER_OUT, CORNER_OUT_END, (hands, feet))
+        keys.append((0.5 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.2, "name": "hold"}])
+
+
+@clip("Hang_Corner_In_R", 0.5, tags=["locomotion", "climb"])
+def hang_corner_in_r(c):
+    """Into the corner, onto the wall across: the right hand goes over to it, the body turns to
+    face it, and the left hand follows, the feet stepping across."""
+    hands = ((0.06, 0.4, (-0.15, 0.0, 2.05), (-0.6, 0.4, 0.4)), (0.45, 0.8, (0.0, -0.3, 2.05), (-1, -0.3, 0.5)))
+    feet = ((0.2, 0.55, (-0.1, 0.0, 0.5)), (0.45, 0.86, (0.0, -0.12, 0.45)))
+    keys = []
+    for k in frames(0.5):
+        wrap_round(c, k, -1, CORNER_IN, CORNER_IN_END, (hands, feet))
+        keys.append((0.5 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.2, "name": "hold"}])
+
+
+WALL_RUN_RISE = 1.8  # sim::climbing::WALL_RUN_RISE, in WALL_RUN_TIME 0.5 s
+
+
+def keyed(k, keys):
+    """A value eased from key to key: `keys` are (k, value) pairs in order, the values numbers or
+    Vectors."""
+    if k <= keys[0][0]:
+        return keys[0][1]
+    for (k0, a), (k1, b) in zip(keys, keys[1:]):
+        if k <= k1:
+            return a + (b - a) * smooth((k - k0) / (k1 - k0))
+    return keys[-1][1]
+
+
+def stride(k, keys):
+    """A foot `k` through keyed (k, ankle in the world, pitch) moves: held where a key repeats the
+    one before (planted), and swung out from the wall between."""
+    if k <= keys[0][0]:
+        return Vector(keys[0][1]), keys[0][2]
+    for (k0, a, pa), (k1, b, pb) in zip(keys, keys[1:]):
+        if k <= k1:
+            s = smooth((k - k0) / (k1 - k0))
+            a, b = Vector(a), Vector(b)
+            out = 0.0 if a == b else 0.15 * math.sin(math.pi * s)
+            return a.lerp(b, s) - FWD * out, pa + (pb - pa) * s
+    return Vector(keys[-1][1]), keys[-1][2]
+
+
+def wall_run(c, k):
+    """Running up a wall (sim::climbing::wall_run_step): the root carried WALL_RUN_RISE up the
+    face, quick to start and slowing, HANG_OUT out from it. Four steps on the face, each foot
+    planted while the leg can push, the arms driving against the legs, then both reaching up the
+    wall for whatever the hands can catch."""
+    p = c.p
+    root = Vector((0, 0, WALL_RUN_RISE * ease(k)))
+    # The body falls behind the root's sudden start, and catches it up.
+    hips = Vector((keyed(k, [(0, -0.03), (0.22, 0.03), (0.4, -0.03), (0.7, 0.03), (1, 0.02)]), 0.0,
+                   0.95 + WALL_RUN_RISE * ease(k) - 0.2 * bump(k, 0.0, 0.35)))
+    turn = keyed(k, [(0, -0.15), (0.22, 0.15), (0.4, -0.15), (0.7, 0.1), (1, 0.0)])
+    c.base("Idle_Loop", 0.0)
+    place_hips(c, into(root, 0, hips), tilt=-0.08, turn=turn)
+    p.spine(bend=0.12, twist=-0.8 * turn)
+    pelvis = p.head("pelvis")
+    # Planted, a foot's ankle is as far out from the face as a braced one's in the hang.
+    on = EDGE.y + 0.12
+    for side, keys in (("r", [(0, (-0.12, on, 0.55), -1.2), (0.2, (-0.12, on, 0.55), -1.2), (0.4, (-0.12, on, 1.7), -1.2),
+                              (0.68, (-0.12, on, 1.7), -1.2), (1, (-0.12, -0.03, 1.95), 0.3)]),
+                       ("l", [(0, (0.12, 0.3, 0.12), 0.5), (0.22, (0.12, on, 1.1), -1.2), (0.36, (0.12, on, 1.1), -1.2),
+                              (0.7, (0.12, on, 2.2), -1.2), (1, (0.12, on, 2.2), -1.2)])):
+        ankle, pitch = stride(k, keys)
+        brace_on(c, side, into(root, 0, ankle), knee_out=0.15, pitch=pitch)
+    # The wrists, from the pelvis: each arm swings forward and up as the other leg pushes, down
+    # past the hip and back, clear of the wall, until both reach up it.
+    arms = {"l": [(0, (0.2, -0.2, 0.75)), (0.1, (0.2, -0.22, 0.9)), (0.2, (0.22, 0.0, 0.2)), (0.3, (0.24, 0.2, 0.3)),
+                  (0.38, (0.2, 0.0, 0.25)), (0.5, (0.18, -0.2, 1.0)), (0.7, (0.17, -0.2, 1.25)), (1, (0.16, -0.2, 1.35))],
+            "r": [(0, (-0.22, 0.2, 0.25)), (0.1, (-0.22, 0.05, 0.15)), (0.2, (-0.2, -0.2, 0.8)), (0.3, (-0.18, -0.2, 0.95)),
+                  (0.4, (-0.22, 0.0, 0.3)), (0.5, (-0.24, 0.12, 0.4)), (0.6, (-0.22, -0.15, 0.55)), (0.7, (-0.17, -0.2, 1.2)),
+                  (1, (-0.16, -0.2, 1.36))]}
+    for side, keys in arms.items():
+        sign = 1 if side == "l" else -1
+        wrist = pelvis + keyed(k, [(kk, Vector(v)) for kk, v in keys])
+        up = smooth((wrist.z - pelvis.z - 0.5) / 0.6)
+        p.shrug(side, up=0.3 * up)
+        p.arm_to(side, wrist, elbow=Vector((0.3 * sign, 0.6, -0.7)).lerp(Vector((0.7 * sign, 0.3, -0.3)), up))
+        if k < 0.55:
+            p.fist(side, 0.8)
+        else:
+            p.fingers(side, curl=(0.3, 0.45, 0.3), thumb=(0.15, 0.2, 0.1), spread=0.15)
+    p.look(pitch=keyed(k, [(0, -0.2), (0.5, -0.45), (1, -0.6)]))
+
+
+@clip("Wall_Run", 0.5, tags=["locomotion", "climb"])
+def wall_run_clip(c):
+    keys = []
+    for k in frames(0.5):
+        wall_run(c, k)
+        keys.append((0.5 * k, finish(c)))
+    return dict(keys=keys)
+
+
+BACK_EJECT = 5.0     # sim::climbing::BACK_EJECT: out from the wall and up, in metres a second
+GRAVITY = 20.0       # sim::movement::GRAVITY
+
+
+def eject_back(c, k):
+    """Kicking off the wall backwards (sim::climbing::jump_off), the body thrown out and up at
+    BACK_EJECT: the hands shove off the hold and the feet off the wall as the body falls behind
+    the root's sudden start, the back arching and the arms flung wide as it flies, then gathering
+    into the falling loop. The sim turns it round to the way pressed, so it's made facing the
+    wall, as the root does at first."""
+    p = c.p
+    t = 0.5 * k
+    root = Vector((0, BACK_EJECT * t, BACK_EJECT * t - GRAVITY / 2 * t * t))
+    loose = smooth((k - 0.45) / 0.55)     # handing over to the falling loop
+    c.base("Jump_Loop", 0.0)
+    base = {n: p.head(n) - p.head("pelvis") for n in ("hand_l", "hand_r", "foot_l", "foot_r")}
+    rest = {s: p.m(f"foot_{s}").to_3x3() for s in ("l", "r")}
+    lag = bump(k, 0.0, 0.35)
+    hips = Vector((0, 0.06 - 0.15 * lag, 0.95 - 0.12 * lag)).lerp(p.head("pelvis"), loose)
+    place_hips(c, hips, tilt=keyed(k, [(0, 0.15), (0.12, 0.0), (0.3, -0.3), (0.6, -0.1), (1, 0.0)]))
+    p.spine(bend=keyed(k, [(0, 0.45), (0.12, 0.2), (0.3, -0.25), (0.6, 0.0), (1, 0.0)]))
+    p.look(pitch=keyed(k, [(0, -0.25), (0.3, -0.6), (1, 0.0)]))
+    pelvis = p.head("pelvis")
+    for side, x, off in (("r", -0.22, 0.05), ("l", 0.22, 0.07)):
+        sign = 1 if side == "l" else -1
+        hold = EDGE + LEFT * x
+        if k < off:
+            grip_on(c, side, into(root, 0, hold), lift=0.08 * smooth((k - off + 0.05) / 0.05))
+            continue
+        go = into(root, 0, hold - FWD * 0.15 + UP * 0.05) - pelvis
+        wrist = keyed(k, [(off, go), (0.15, Vector((0.3 * sign, -0.05, 1.05))), (0.3, Vector((0.6 * sign, 0.2, 0.6))),
+                          (0.6, Vector((0.6 * sign, 0.05, 0.45)))])
+        p.arm_to(side, pelvis + wrist.lerp(base[f"hand_{side}"], loose), elbow=(0.8 * sign, 0.3, -0.2))
+        p.fingers(side, curl=(0.3, 0.45, 0.3), thumb=(0.15, 0.2, 0.1), spread=0.2 * (1 - loose))
+    for side, (x, z), off in (("r", (-0.15, 0.47), 0.12), ("l", (0.17, 0.42), 0.14)):
+        sign = 1 if side == "l" else -1
+        planted = Vector((x, EDGE.y + 0.13, z))
+        if k < off:
+            foot_on_wall(c, side, into(root, 0, planted))
+            continue
+        go = into(root, 0, planted) - pelvis
+        ankle = keyed(k, [(off, go), (0.25, Vector((0.12 * sign, -0.35, -0.8))), (0.5, Vector((0.12 * sign, -0.2, -0.6)))])
+        braced = Matrix.Rotation(-1.05, 3, LEFT) @ p.rest[f"foot_{side}"].to_3x3()
+        w = smooth((k - off) / 0.3)
+        rot = braced.to_quaternion().slerp(rest[side].to_quaternion(), w).to_matrix()
+        p.leg(side, pelvis + ankle.lerp(base[f"foot_{side}"], loose), knee=(0.2 * sign, -1, 0.2), foot_rot=rot)
+
+
+@clip("Hang_Eject_Back", 0.5, tags=["locomotion", "climb"])
+def hang_eject_back(c):
+    keys = []
+    for k in frames(0.5):
+        eject_back(c, k)
+        keys.append((0.5 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.03, "name": "push"}])
+
+
+def blend(a, b, w):
+    """Two snapshots mixed, `w` of the way to `b`."""
+    out = {}
+    for n, (qa, la) in a.items():
+        qb, lb = b[n]
+        if qa.dot(qb) < 0:
+            qb = -qb
+        out[n] = (qa.slerp(qb, w), la.lerp(lb, w))
+    return out
+
+
+def seconds_of(clip):
+    start, end = bpy.data.actions[clip].frame_range
+    return (end - start) / sc.FPS
+
+
+@clip("Roll_Land", 0.967, tags=["locomotion"])
+def roll_land(c):
+    """A roll landing (sim::movement::landing_roll): 3 m on along the ground in 0.45 s, out of a
+    fall. It touches down as `Jump_Land` does, folds over the knees with the hands going down, and
+    rolls over the shoulder and up as the vendor roll does (its hands down at 0.45 s, its feet
+    under it at 0.87), faster, its feet under it as the move ends; after, it stands as the roll
+    does."""
+    p = c.p
+    land, roll = seconds_of("Jump_Land"), seconds_of("Roll")
+    keys, folded = [], None
+    for f in range(round(0.967 * sc.FPS) + 1):
+        t = f / sc.FPS
+        if t <= 0.1 + 1e-6:
+            s = smooth(t / 0.1)
+            c.base("Jump_Land", t / land)
+            p.spine(bend=0.55 * s)
+            p.look(pitch=0.5 * s)
+            for side in ("l", "r"):
+                sign = 1 if side == "l" else -1
+                wrist, elbow = p.head(f"hand_{side}"), p.head(f"lowerarm_{side}")
+                bend = elbow - (p.head(f"upperarm_{side}") + wrist) / 2
+                p.arm_to(side, wrist.lerp(Vector((0.22 * sign, -0.5, 0.12)), s), elbow=bend.lerp(Vector((0.5 * sign, 0.4, -0.5)), s))
+            folded = finish(c)
+            keys.append((t, folded))
+            continue
+        vendor = 0.45 + (t - 0.1) * (0.867 - 0.45) / 0.35 if t <= 0.45 else 0.867 + (t - 0.45) * 0.6 / 0.517
+        c.base("Roll", min(vendor / roll, 1.0))
+        keys.append((t, blend(folded, finish(c), smooth((t - 0.1) / 0.1))))
+    return dict(keys=keys, curves={"travel": [[0, 0], [0.45, 1]]})
+
+
 # Robes: the arms held a little out, so hands clear a skirt.
 
 @clip("Idle_Robe_Loop", 2.5, loop=True, tags=["idle"])
@@ -1166,6 +1632,9 @@ MIRRORS = {
     "Sheathe_Bow": "Sheathe_Pole",
     "Hang_Shimmy_L_Loop": "Hang_Shimmy_R_Loop",
     "Hang_Hop_L": "Hang_Hop_R",
+    "Hang_Eject_L": "Hang_Eject_R",
+    "Hang_Corner_Out_L": "Hang_Corner_Out_R",
+    "Hang_Corner_In_L": "Hang_Corner_In_R",
 }
 
 

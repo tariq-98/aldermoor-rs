@@ -9,9 +9,9 @@
 //! Round to the hall's east side, they sprint at its stepped east wall and run up it onto a step
 //! (#246), climb to the lookout under the gable, drop to hang from its edge, shimmy left, eject
 //! right along the hold, shimmy back and climb up; then step down, drop to hang from the step
-//! below and leap up to the lookout's hold, and let go. Last they run at the wolves in the meadow
-//! west of the road, lunging at the first within reach. Each step is logged as it starts, so
-//! captures can be cut by frame.
+//! below and leap up to the lookout's hold, and kick off the wall backwards, rolling as they land
+//! (#305). Last they run at the wolves in the meadow west of the road, lunging at the first within
+//! reach. Each step is logged as it starts, so captures can be cut by frame.
 use glam::{Vec2, Vec3, Vec3Swizzles};
 use protocol::{Command, UnitId};
 use std::f32::consts::FRAC_PI_2;
@@ -42,6 +42,10 @@ enum Step {
     /// Space with `way` degrees round from facing `yaw` pressed, then nothing for `seconds`.
     /// Hanging, that leaps (into the wall), ejects (along it) or kicks off it (away).
     Jump { seconds: f32, yaw: f32, way: f32 },
+    /// In the air, going `way` degrees round from facing `yaw` (left is positive) and facing the
+    /// way it goes, with Roll pressed coming down within [`LANDING`] of the ground, so the landing
+    /// rolls on; then standing for `seconds`, facing `yaw`.
+    Land { seconds: f32, yaw: f32, way: f32 },
     /// To the point (x, z) at `pace`, facing the way it goes.
     Go { to: Vec2, pace: Pace },
     /// At the nearest enemy, lunging at it (the sword's third skill) once it's within reach, then
@@ -91,6 +95,17 @@ const fn jump(name: &'static str, seconds: f32, way: f32) -> (&'static str, Step
     )
 }
 
+const fn land(name: &'static str, seconds: f32, way: f32) -> (&'static str, Step) {
+    (
+        name,
+        Step::Land {
+            seconds,
+            yaw: WEST,
+            way,
+        },
+    )
+}
+
 const fn go(name: &'static str, x: f32, z: f32, pace: Pace) -> (&'static str, Step) {
     (
         name,
@@ -105,7 +120,7 @@ const fn go(name: &'static str, x: f32, z: f32, pace: Pace) -> (&'static str, St
 /// back at 8 a second, so they're 5 s apart.
 const ROLL: f32 = 0.45;
 
-const STEPS: [(&str, Step); 52] = [
+const STEPS: [(&str, Step); 53] = [
     stand("stand", 1.),
     strafe("strafe left", 0.5, 90., false),
     strafe("roll left", ROLL, 90., true),
@@ -173,7 +188,11 @@ const STEPS: [(&str, Step); 52] = [
     roll("drop to hang below", 1.5, 180.),
     strafe("shimmy to the end", 0.6, -90., false),
     jump("leap up", 1.5, 0.),
-    roll("let go", 2., 0.),
+    // Space pressing away from the wall kicks off it backwards, out over the slope east of the
+    // hall; pressing on that way, the player turns to face it in the air, and Roll as the feet
+    // come down rolls the landing on (#305).
+    jump("kick off", 0.05, 180.),
+    land("roll the landing", 2., 180.),
     // Round the gable's buttress.
     go("round the ruin", -12., 38., Pace::Run),
     // The wolves are at (-38, 30) and notice a player 13 m off.
@@ -191,6 +210,9 @@ const LUNGE_REACH: f32 = 9.5;
 const LUNGE_SLOT: u8 = 2;
 /// How long the player waits for an enemy to come within reach before giving up, in seconds.
 const LUNGE_WAIT: f32 = 20.;
+/// Coming down, Roll is pressed with the feet this far over the ground, in metres: a fraction of
+/// a second before landing, inside the sim's 0.2 s (`sim::movement::LANDING_ROLL`).
+const LANDING: f32 = 1.;
 
 /// Where the player is on the course.
 #[derive(Default)]
@@ -200,12 +222,21 @@ pub struct Course {
     began: Option<(f32, f32)>,
     target: Option<UnitId>,
     lunged: Option<f32>,
+    /// Whether the step has pressed Roll for the landing.
+    rolled: bool,
 }
 
 impl Course {
-    /// The commands for this frame, `now` seconds into the course with the player at `at` and
-    /// the living enemies in view at `foes`. Empty once the course is over.
-    pub fn update(&mut self, now: f32, at: Vec3, foes: &[(UnitId, Vec3)]) -> Vec<Command> {
+    /// The commands for this frame, `now` seconds into the course with the player at `at`, their
+    /// feet `above` the ground under them, and the living enemies in view at `foes`. Empty once
+    /// the course is over.
+    pub fn update(
+        &mut self,
+        now: f32,
+        at: Vec3,
+        above: f32,
+        foes: &[(UnitId, Vec3)],
+    ) -> Vec<Command> {
         let mut out = Vec::new();
         while let Some(&(_, step)) = STEPS.get(self.step) {
             let (began, limit) = *self.began.get_or_insert_with(|| {
@@ -214,6 +245,7 @@ impl Course {
                     | Step::Strafe { seconds, .. }
                     | Step::Roll { seconds, .. }
                     | Step::Jump { seconds, .. }
+                    | Step::Land { seconds, .. }
                     | Step::Lunge { seconds } => seconds,
                     // Long enough at a swim, and over walls on the way.
                     Step::Go { to, .. } => to.distance(at.xz()) / 1.5 + 4.,
@@ -232,6 +264,7 @@ impl Course {
             if over && !first {
                 self.step += 1;
                 self.began = None;
+                self.rolled = false;
                 continue;
             }
             match step {
@@ -265,6 +298,16 @@ impl Course {
                         Some(yaw),
                     ));
                 }
+                Step::Land { yaw, way, .. } if above > 0.05 => {
+                    let way = yaw + way.to_radians();
+                    let direction = Vec2::new(way.sin(), way.cos());
+                    if !self.rolled && above < LANDING {
+                        out.push(Command::Dodge { direction });
+                        self.rolled = true;
+                    }
+                    out.push(walk(direction, Pace::Run, None));
+                }
+                Step::Land { yaw, .. } => out.push(walk(Vec2::ZERO, Pace::Run, Some(yaw))),
                 Step::Go { to, pace } => {
                     out.push(walk((to - at.xz()).normalize_or_zero(), pace, None));
                 }
@@ -326,10 +369,12 @@ mod tests {
     /// player rolls four times, climbs the field wall twice, the ruin's east and rear walls and
     /// back up from a hang, swims, hangs from the rear wall and goes round both its corners, runs
     /// up the wall to the lookout and pulls onto it, hangs from the lookout, shimmies and ejects
-    /// along it, leaps up to it from the step below, takes no harm letting go, and lunges.
+    /// along it, leaps up to it from the step below, kicks off it to land over 2 m out and roll
+    /// on 3 m, takes no harm, and lunges.
     #[test]
     fn the_course_rolls_climbs_swims_hangs_and_lunges() {
         let mut sim = sim::Sim::brambleford(0xa1de);
+        let valley = world::Valley::new();
         let me = sim.spawn_player("Traveller", Vec2::new(6., 28.), std::f32::consts::PI);
         let mut course = Course::default();
         let start = sim.tick();
@@ -345,7 +390,8 @@ mod tests {
                 .collect();
             let now = (sim.tick() - start) as f32 / 60.;
             assert!(now < 150., "still on {} after 150 s", STEPS[step].0);
-            let commands = course.update(now, u.position, &foes);
+            let above = u.position.y - valley.ground(u.position.x, u.position.z);
+            let commands = course.update(now, u.position, above, &foes);
             if let Some(was) = reached.last().copied().filter(|was| *was != step)
                 && let Step::Go { to, .. } = STEPS[was].1
             {
@@ -376,7 +422,7 @@ mod tests {
         }
         assert_eq!(reached, (0..STEPS.len()).collect::<Vec<_>>());
         let count = |kind| moves.iter().filter(|m| m.kind == kind).count();
-        assert_eq!(count(ForcedKind::Roll), 4, "{moves:?}");
+        assert_eq!(count(ForcedKind::Roll), 5, "{moves:?}");
         assert_eq!(count(ForcedKind::Climb), 5, "{moves:?}");
         assert_eq!(count(ForcedKind::Hold), 5, "{moves:?}");
         assert_eq!(count(ForcedKind::Corner), 2, "{moves:?}");
@@ -395,6 +441,16 @@ mod tests {
         assert!(
             eject.is_some_and(|m| (m.to - m.from).with_y(0.).length() > 0.8),
             "no eject: {moves:?}"
+        );
+        // Off the lookout's hold on the east wall, hanging at x -14: thrown out east from it, the
+        // landing rolls on 3 m the same way (a roll on the ground goes 5).
+        let landing = moves.iter().rfind(|m| m.kind == ForcedKind::Roll).unwrap();
+        let rolled = (landing.to - landing.from).with_y(0.).length();
+        assert!(
+            landing.from.x > -14. + 2.
+                && landing.to.x > landing.from.x + 2.9
+                && (rolled - 3.).abs() < 0.1,
+            "no kick off and roll landing: {landing:?}"
         );
         assert!(swam, "never swam");
         let along = hung.iter().fold(f32::MIN, |a, &z| a.max(z))
