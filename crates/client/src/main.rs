@@ -1865,7 +1865,7 @@ impl Game {
             stats = r.stats;
         }
         // Completion IDs prevent the same delayed GPU result steering more than once.
-        // Resizing drains old submissions and invalidates history before the next frame.
+        // Frames already submitted at the old scale are skipped by ID, without a drain.
         if let Some(controller) = &mut self.resolution
             && let Some(sample) = stats.completed
             && sample.frame >= self.options.warmup as usize
@@ -1885,9 +1885,7 @@ impl Game {
                 resize.elapsed().as_secs_f64() * 1000.,
             );
             controller.resize_completed(
-                r.stats
-                    .completed
-                    .map_or(sample.frame, |completed| completed.frame),
+                r.last_submitted_frame().unwrap_or(sample.frame),
                 self.start.elapsed().as_secs_f64(),
             );
             eprintln!(

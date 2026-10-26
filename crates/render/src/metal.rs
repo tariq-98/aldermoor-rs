@@ -1139,8 +1139,12 @@ impl Renderer {
         if width == 0 || height == 0 {
             return Ok(());
         }
-        self.wait()?;
         let output_changed = width != self.width || height != self.height;
+        // Command buffers retain the textures they encode, so a scale-only change swaps
+        // targets while earlier frames finish. Draining here stalled a whole GPU frame.
+        if output_changed || self.metalfx_requested {
+            self.wait()?;
+        }
         let (w, h) = (
             (width as f32 * scale).round().max(1.) as usize,
             (height as f32 * scale).round().max(1.) as usize,
@@ -1217,7 +1221,7 @@ impl Renderer {
         } else {
             None
         };
-        // All allocations have succeeded and the old in-flight users have completed.
+        // All allocations have succeeded; in-flight frames keep their own references.
         self.hdr = hdr;
         self.msaa = msaa;
         self.motion = motion;
@@ -1360,7 +1364,7 @@ impl Renderer {
                     || !p.colour.usage().contains(self.hdr.usage())
             })
         {
-            self.wait()?;
+            // In-flight frames retain the old targets, as in `resize_at_scale`.
             self.post_targets = Some(PostTargets::new(
                 &self.device,
                 self.hdr.width(),
@@ -2352,6 +2356,10 @@ impl Renderer {
         self.completed_frames.push_back(measured);
         Ok(())
     }
+    /// The newest frame ID handed to the GPU, which completion samples report as `frame`.
+    pub fn last_submitted_frame(&self) -> Option<usize> {
+        self.frame.checked_sub(1)
+    }
     pub fn wait(&mut self) -> Result<()> {
         // Slots may wrap, so completion consumers identify samples by submitted frame number.
         for i in 0..self.slots.len() {
@@ -2486,7 +2494,7 @@ mod temporal_tests {
     }
 
     #[test]
-    fn resolution_changes_drain_slots_preserve_native_output_and_reset_history() {
+    fn resolution_changes_keep_in_flight_frames_preserve_native_output_and_reset_history() {
         let mut r = Renderer::new(64, 64, 0.75).unwrap();
         r.set_frames_in_flight(3).unwrap();
         let camera = Camera {
@@ -2499,7 +2507,11 @@ mod temporal_tests {
         assert!(r.slots.iter().any(|slot| slot.pending.is_some()));
         let output = r.output.clone();
         r.set_render_scale(0.55).unwrap();
-        assert!(r.slots.iter().all(|slot| slot.pending.is_none()));
+        assert!(
+            r.slots.iter().any(|slot| slot.pending.is_some()),
+            "a scale-only change must not drain in-flight frames"
+        );
+        assert_eq!(r.last_submitted_frame(), Some(1));
         assert_eq!((r.hdr.width(), r.hdr.height()), (35, 35));
         assert_eq!((r.history[0].width(), r.history[1].height()), (35, 35));
         assert_eq!((r.output.width(), r.output.height()), (64, 64));
