@@ -1,0 +1,101 @@
+{
+  "source_commit": "da2627dd8e19fa050da95c9f1f2d818e39493207",
+  "base_commit": "f630bca0228eb11ee8da30b7892ffd65bdf5a391",
+  "machine": "Apple M1 MacBook Air",
+  "mode": "offscreen, split scene passes, fixed river-review camera, rigid scenery, no characters or HUD",
+  "output": [
+    2560,
+    1600
+  ],
+  "scale": 0.75,
+  "in_flight": 1,
+  "frames": 600,
+  "warmup": 120,
+  "gpu_lock": "mkdir /tmp/aldermoor-gpu.lock; owner written; removed with rmdir after the run",
+  "own_linux_build": "paused for the whole ABBA comparison",
+  "runs": [
+    {
+      "run": "1-metal",
+      "gpu_ms": {
+        "median": 9.664541670645121,
+        "p95": 10.087000002386048
+      },
+      "cpu_encode_ms": {
+        "median": 0.455125,
+        "p95": 0.52775
+      },
+      "frame_work_ms": {
+        "median": 10.4385,
+        "p95": 10.961667
+      },
+      "draw_calls": [
+        434
+      ],
+      "peak_rss_bytes": 483786752
+    },
+    {
+      "run": "2-wgpu",
+      "gpu_ms": {
+        "median": 14.904333,
+        "p95": 15.624791
+      },
+      "cpu_encode_ms": {
+        "median": 2.957917,
+        "p95": 4.109208
+      },
+      "frame_work_ms": {
+        "median": 18.740707999999998,
+        "p95": 32.137541
+      },
+      "draw_calls": [
+        434
+      ],
+      "peak_rss_bytes": 339476480
+    },
+    {
+      "run": "3-wgpu",
+      "gpu_ms": {
+        "median": 14.185291999999999,
+        "p95": 14.587375
+      },
+      "cpu_encode_ms": {
+        "median": 4.958749999999999,
+        "p95": 5.585332999999999
+      },
+      "frame_work_ms": {
+        "median": 20.224875,
+        "p95": 20.913166
+      },
+      "draw_calls": [
+        434
+      ],
+      "peak_rss_bytes": 341131264
+    },
+    {
+      "run": "4-metal",
+      "gpu_ms": {
+        "median": 9.837624995270744,
+        "p95": 10.491541666851845
+      },
+      "cpu_encode_ms": {
+        "median": 1.9820419999999999,
+        "p95": 3.841375
+      },
+      "frame_work_ms": {
+        "median": 12.760916,
+        "p95": 15.673
+      },
+      "draw_calls": [
+        434
+      ],
+      "peak_rss_bytes": 480722944
+    }
+  ],
+  "limitations": [
+    "Short ABBA comparison, not a ten-minute steady-state soak",
+    "No visual-parity acceptance or captures yet",
+    "CPU timings drifted strongly between the two Metal runs",
+    "Per-pass elapsed spans overlap and must not be added",
+    "Launch-to-first-frame and a draw-count stress are not measured"
+  ]
+}

@@ -1,0 +1,55 @@
+name: wgpu slice
+on:
+  pull_request:
+    paths:
+      - 'crates/render/examples/wgpu_slice/**'
+      - '.github/workflows/wgpu-slice.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  slice:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/wgpu-slice
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/lfs-pull
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/render/examples/wgpu_slice -> ../../../../target/wgpu-slice
+      - name: Use runner SDK
+        if: runner.os == 'macOS'
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+      - name: Install software Vulkan
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers
+      - name: Format isolated sources
+        run: rustfmt --edition 2024 --config skip_children=true --check crates/render/examples/wgpu_slice/src/main.rs crates/render/examples/wgpu_slice/src/backend.rs
+      - name: Lint
+        run: cargo clippy --manifest-path crates/render/examples/wgpu_slice/Cargo.toml --all-targets --locked
+      - name: Validate shader ports and portable math
+        run: cargo test --manifest-path crates/render/examples/wgpu_slice/Cargo.toml --locked
+      - name: Build
+        run: cargo build --manifest-path crates/render/examples/wgpu_slice/Cargo.toml --locked
+      - name: Draw with validation
+        shell: bash
+        run: |
+          until mkdir /tmp/aldermoor-gpu.lock 2>/dev/null; do sleep 30; done
+          trap 'rm -f /tmp/aldermoor-gpu.lock/owner; rmdir /tmp/aldermoor-gpu.lock' EXIT
+          echo "CI #95 validation" > /tmp/aldermoor-gpu.lock/owner
+          "$CARGO_TARGET_DIR/debug/aldermoor-wgpu-slice" --assets "$GITHUB_WORKSPACE/assets" \
+            --width 320 --height 200 --frames 3 --warmup 1 --validate > wgpu-smoke.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wgpu-smoke-${{ runner.os }}
+          path: wgpu-smoke.json
