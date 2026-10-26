@@ -45,6 +45,12 @@ struct Options {
     offscreen: bool,
     showcase: bool,
     smoke: bool,
+    /// Play on a server across the network (`--connect ADDR`), trusting the certificate at
+    /// `server_cert`, instead of the built-in one.
+    connect: Option<String>,
+    server_cert: PathBuf,
+    /// The character's name on the server.
+    name: String,
     effects_review: bool,
     /// The effects review as a captioned reel of close shots, one effect at a time, from this
     /// many seconds in.
@@ -92,6 +98,9 @@ impl Options {
             offscreen: false,
             showcase: false,
             smoke: false,
+            connect: None,
+            server_cert: PathBuf::from("aldermoor.der"),
+            name: "Traveller".into(),
             effects_review: false,
             reel: false,
             reel_from: 0.,
@@ -199,6 +208,11 @@ impl Options {
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
+                "--connect" => o.connect = Some(args.next().context("--connect needs HOST:PORT")?),
+                "--server-cert" => {
+                    o.server_cert = args.next().context("--server-cert needs a file")?.into()
+                }
+                "--name" => o.name = args.next().context("--name needs a name")?,
                 "--effects-review" => {
                     o.effects_review = true;
                     o.showcase = true;
@@ -235,7 +249,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -368,7 +382,23 @@ struct Game {
 impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
-        let host = server::Host::start(0xa1de, "Traveller");
+        let host = match &options.connect {
+            None => server::Host::start(0xa1de, &options.name),
+            Some(addr) => {
+                let cert = std::fs::read(&options.server_cert).with_context(|| {
+                    format!(
+                        "the server's certificate {} (--server-cert)",
+                        options.server_cert.display()
+                    )
+                })?;
+                server::Host::connect(
+                    addr.as_str(),
+                    &server::net::CertificateDer::from(cert),
+                    &options.name,
+                )
+                .with_context(|| format!("connecting to {addr}"))?
+            }
+        };
         let settings_path = options.controls.clone().unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
                 .join("Library/Application Support/Aldermoor/controls.json")
