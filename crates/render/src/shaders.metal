@@ -81,11 +81,18 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
             if(weights[layer]>weights[first]){second=first;first=layer;}
             else if(weights[layer]>weights[second])second=layer;
         }
-        float retained=weights[first]+weights[second];
+        float third=0.;
+        for(uint layer=0;layer<surfaces.flags.x;layer++){
+            if(layer!=first&&layer!=second)third=max(third,weights[layer]);
+        }
+        float w1=max(weights[first]-third,0.),w2=max(weights[second]-third,0.);
+        float retained=w1+w2;
         float4 strongest=0.;
-        strongest[first]=weights[first]/retained;
-        strongest[second]=weights[second]/retained;
-        weights=strongest;
+        strongest[first]=w1/max(retained,0.0001);
+        strongest[second]=w2/max(retained,0.0001);
+        // At a three/four-way tie, choosing just one winner is discontinuous. Blend
+        // back to the original weights inside the numerical floor; otherwise sample two.
+        weights=strongest+weights*(1.-saturate(retained/0.0001));
         float3 projections=pow(abs(normalize(i.normal)),float3(4));
         projections/=max(dot(projections,float3(1)),0.0001);
         albedo.rgb=0.;surface_roughness=0.;
