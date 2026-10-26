@@ -180,7 +180,9 @@ fragment SceneOutput water_fragment(Vary i [[stage_in]],bool front [[front_facin
     float z=opaque_depth.sample(nearest,uv);
     float3 bed=water_world(uv,z,f);
     float shore=z<1.?max(i.world.y-bed.y,0.):INFINITY;
-    float3 colour=water.lit;
+    // Opaque samples already contain scene fog. Fog only the local lighting/fallback once.
+    float fog=1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);
+    float3 colour=mix(water.lit,f.fog.rgb,fog);
     if(surfaces.water_features.z>0){
         // Offset in world metres, projected with the same unjittered VP plus raster jitter.
         float3 offset=float3(water.normal.x,0.,water.normal.z)*surfaces.water_screen.w;
@@ -208,7 +210,7 @@ fragment SceneOutput water_fragment(Vary i [[stage_in]],bool front [[front_facin
             colour=mix(colour,opaque_colour.sample(linear,refracted_uv).rgb,transmission);
         }
     }
-    float3 reflection=water.reflection;
+    float3 reflection=mix(water.reflection,f.fog.rgb,fog);
     if(surfaces.water_features.y>0){
         float3 view=normalize(f.eye.xyz-i.world),ray=reflect(-view,water.normal);
         float4 hit=water_trace(i.world+water.normal*surfaces.water_screen.y,ray,f,surfaces,opaque_colour,opaque_depth);
@@ -222,11 +224,10 @@ fragment SceneOutput water_fragment(Vary i [[stage_in]],bool front [[front_facin
         float2 p=(i.world.xz+f.clock.x*surfaces.water_flow.yz)*surfaces.water_shore.z;
         float breakup=0.5+0.5*sin(p.x+sin(p.y));
         float foam=(1.-coverage)*breakup*surfaces.water_shore.y;
-        colour=mix(colour,surfaces.water_shallow.rgb,foam);
+        colour=mix(colour,mix(surfaces.water_shallow.rgb,f.fog.rgb,fog),foam);
         result.colour.a*=coverage;
     }
-    float fog=1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);
-    result.colour.rgb=mix(colour,f.fog.rgb,fog);
+    result.colour.rgb=colour;
     return result;
 }
 
