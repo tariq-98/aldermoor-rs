@@ -36,6 +36,22 @@ What this says:
 - **History for lag compensation costs almost nothing** in time; its memory is per region, not
   per player.
 
+### Over QUIC
+
+Linux server in an arm64 container on the M1 Air (8 cores), release build, 26 October 2026,
+`cargo run -p server --release --example load_test -- --players 1,50,200 --monsters 2000`
+(bots over QUIC on loopback; "out" is view payload before QUIC's own headers):
+
+| Players | Ticks/s | Tick p50 / p99 ms | Out per player | Out total |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 60.0 | 3.25 / 8.06 | 13 KB/s | 0.0 MB/s |
+| 50 | 60.0 | 5.73 / 22.01 | 24 KB/s | 1.2 MB/s |
+| 200 | 60.0 | 8.84 / 14.97 | 68 KB/s | 13.6 MB/s |
+
+The Mac client against that server (`--connect`, the smoke route with its wolf fight, a few wolves
+nearby): 186 KB sent by the server's network interface over a 45 s run including start-up, all
+QUIC headers, acks and keep-alives counted, so about 6 KB/s while connected.
+
 ## Regions
 
 The world is split into **regions**: designed areas such as Brambleford, the river valley north
@@ -187,11 +203,23 @@ A player sees others where they were about 100 ms ago: the view is interpolated 
 Mac): no window, GPU or Metal, stepping at 60 Hz and printing step and view times every ten
 seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks the world.
 
-- **Transport:** plain TCP, each message a 4-byte little-endian length then postcard
-  (`server::net`). A client says `Hello` with its name and `protocol::VERSION`, gets `Welcome`
-  (or `Refused` for another version), sends `Command`s and gets a `View` every third step (20 a
-  second, each player on their own third of the steps), which it answers with `Ack`. QUIC (#86)
-  replaces the transport and keeps the messages.
+- **Transport:** QUIC over UDP (`quinn`, #86), with the same postcard messages as before.
+  A client opens one reliable stream and says `Hello` with its name and `protocol::VERSION`, gets
+  `Welcome` (or `Refused` for another version), then sends `Command`s and `Ack`s on it, each a
+  4-byte little-endian length then postcard. Views go the other way unreliably, a `View` every
+  third step (20 a second, each player on their own third of the steps): one datagram when it
+  fits, which is nearly always, else a one-way stream of its own (the first view, a crowd
+  arriving). A lost or late view costs only its own update, because the next is a delta against
+  the last view the client acknowledged, not the last one sent. One small runtime (two threads)
+  carries every connection in a process.
+- **Certificates:** the server's identity is a self-signed certificate for `aldermoor` and its
+  private key, made the first time (`--cert aldermoor.der`, key beside it as `aldermoor.key`,
+  readable only by its owner). Players get the `.der` file, never the key, and the client trusts
+  exactly it with ordinary TLS checks (`--server-cert`); a server with another certificate is
+  refused. A certificate from a real authority waits for accounts and a host name (#88).
+- **Playing on a server:** `client --connect HOST:PORT --server-cert aldermoor.der --name NAME`
+  plays the same as solo, through the same `server::Host` interface (`Host::connect`). Over the
+  network the host's clock is the views' arrival, so it carries the network's jitter.
 - **Views on the wire** (`protocol::wire`, #34): a unit's kind, body, name and look go once, in an
   intro, when it comes into view or changes (and are remembered for ten seconds after it leaves,
   so a unit wandering along the edge of view doesn't send them again). After that a view carries
