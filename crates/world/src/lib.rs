@@ -623,6 +623,8 @@ impl Grid {
 
     #[inline]
     fn cell(p: Vec2) -> (usize, usize) {
+        // Truncating what's kept at 0 or above floors it without calling `floor`, which on
+        // targets without a rounding instruction costs more than the rest of the lookup.
         let f = |v: f32| (((v + BOUNDS) / CELL).max(0.0) as usize).min(SIDE - 1);
         (f(p.x), f(p.y))
     }
