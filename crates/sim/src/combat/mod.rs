@@ -218,6 +218,11 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::StopWork => crate::crafting::stop(world, e),
             Command::UseItem { slot } => crate::consumables::use_item(world, e, slot),
             Command::Viewing { tick } => crate::rewind::viewing(world, e, tick),
+            Command::Aim { pitch } => {
+                if let Some(mut m) = world.get_mut::<Motion>(e) {
+                    m.aim_pitch = pitch;
+                }
+            }
             Command::AssignXp { specialty, amount } => {
                 if let Some(s) = crate::Specialty::from_key(&specialty) {
                     crate::progress::assign(world, e, s, amount);

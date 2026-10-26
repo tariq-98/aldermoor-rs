@@ -193,6 +193,7 @@ struct Quantised {
     /// When the pose began, in milliseconds of sim time.
     since: i64,
     traversal: Traversal,
+    aim_pitch: i8,
     health: u32,
     max_health: f32,
     hostile: bool,
@@ -340,6 +341,7 @@ pub struct UnitRef<'a> {
     pub pose: Pose,
     pub pose_time: f32,
     pub traversal: Traversal,
+    pub aim_pitch: i8,
     pub health: f32,
     pub max_health: f32,
     pub hostile: bool,
@@ -361,6 +363,7 @@ impl<'a> From<&'a UnitState> for UnitRef<'a> {
             pose: u.pose,
             pose_time: u.pose_time,
             traversal: u.traversal,
+            aim_pitch: u.aim_pitch,
             health: u.health,
             max_health: u.max_health,
             hostile: u.hostile,
@@ -724,6 +727,7 @@ fn quantise(u: &UnitRef, now_ms: i64) -> Quantised {
         pose: u.pose,
         since: now_ms - (u.pose_time as f64 * 1000.0).round() as i64,
         traversal: u.traversal,
+        aim_pitch: u.aim_pitch,
         health: (u.health.max(0.0) * HEALTH).round() as u32,
         max_health: u.max_health,
         hostile: u.hostile,
@@ -745,6 +749,7 @@ fn unit(id: UnitId, q: &Quantised, i: &Intro, now_ms: i64) -> UnitState {
         pose: q.pose,
         pose_time: ((now_ms - q.since) as f64 / 1000.0).max(0.0) as f32,
         traversal: q.traversal,
+        aim_pitch: q.aim_pitch,
         health: q.health as f32 / HEALTH,
         max_health: q.max_health,
         hostile: q.hostile,
@@ -796,7 +801,7 @@ fn write_units(out: &mut Vec<u8>, changed: &[(UnitId, Quantised, Option<Quantise
             Some(b) => {
                 (POS * (q.pos != from) as u8)
                     | (VELOCITY * (q.vel != b.vel) as u8)
-                    | (FACING * (q.yaw != b.yaw) as u8)
+                    | (FACING * (q.yaw != b.yaw || q.aim_pitch != b.aim_pitch) as u8)
                     | (POSE * (q.pose != b.pose || q.since != b.since) as u8)
                     | (TRAVERSAL * (q.traversal != b.traversal) as u8)
                     | (HEALTH_BIT * (q.health != b.health) as u8)
@@ -817,6 +822,7 @@ fn write_units(out: &mut Vec<u8>, changed: &[(UnitId, Quantised, Option<Quantise
         if mask & FACING != 0 {
             let turn = q.yaw.wrapping_sub(base.map_or(0, |b| b.yaw)) as i16;
             put(out, &turn);
+            out.push(q.aim_pitch as u8);
         }
         if mask & POSE != 0 {
             put(out, &(q.pose, now_ms - q.since));
@@ -850,6 +856,7 @@ fn read_units(mut input: &[u8], base: &Sorted<(Quantised, Arc<Intro>)>, now_ms: 
                 pose: Pose::Idle,
                 since: now_ms,
                 traversal: Traversal::Ground,
+                aim_pitch: 0,
                 health: 0,
                 max_health: 0.0,
                 hostile: false,
@@ -875,6 +882,9 @@ fn read_units(mut input: &[u8], base: &Sorted<(Quantised, Arc<Intro>)>, now_ms: 
         if mask & FACING != 0 {
             let turn: i16 = take(&mut input)?;
             q.yaw = q.yaw.wrapping_add(turn as u16);
+            let (&pitch, rest) = input.split_first().ok_or_else(|| WireError::Malformed("aim pitch".into()))?;
+            q.aim_pitch = pitch as i8;
+            input = rest;
         }
         if mask & POSE != 0 {
             let (pose, ago): (Pose, i64) = take(&mut input)?;
