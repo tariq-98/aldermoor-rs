@@ -132,7 +132,8 @@ Health, power and armour are multipliers on the level's base numbers (below).
   bleeding, burning, poisoned, weakness, vulnerable, chilled, crippled; **shields** absorb harm.
 - **Crowd control:** stun, knockdown, daze (no skills), silence, root, fear, sleep, slow.
 - **Diminishing returns:** within 18 s, repeats in the same group (stuns and knockdowns; roots;
-  fears and sleep; silences and dazes) last half as long, then a quarter, then don't land.
+  fears and sleep; silences and dazes) last half as long, then a quarter, then don't land. Between
+  players the window is 24 s, so a chain of controls can't lock a duel down.
 - **Defiance:** elites and bosses shrug off crowd control while their defiance bar holds. Control
   chips it (60 a second of control it would have held; 90 for a knockback), and so do skills that
   break defiance. Broken, they're stunned for 3 s and take 50% more for 6 s; the bar is back
@@ -183,7 +184,10 @@ and a field's pulses send no `Hit` at all. The numbers live in `content::combat:
 - They change targets only when someone pulls 10% ahead (in melee) or 30% ahead (at range).
 - **Taunts** put the taunter on top for 3 s.
 - **Noticing:** a monster starts a fight with a player who comes within its notice radius
-  (`aggro` in mobs.ron, 10 to 16 m) and is in sight. The radius is 1 m shorter for each level
+  (`aggro` in mobs.ron, 10 to 16 m) and is in sight: nothing solid stands between their chests,
+  neither a building, the mill or the shed, nor masonry too tall to climb standing above the
+  line between them (#311). Walls low enough to climb don't hide anyone. The same goes for
+  skills aimed at a target ("Your target isn't in sight."). The radius is 1 m shorter for each level
   the player is above the monster and 1 m longer for each level below, from 4 m to twice its
   own (`sim::notice_radius`). A monster 10 or more levels below a player never starts a fight
   with them, but fights back when attacked. Once the Wilderness scales levels to its bands
@@ -229,7 +233,21 @@ rolls). Skill wins, out of 40 duels each (24 October 2026; unchanged when melee 
 So skill reliably beats up to five levels, it's even at six, and seven or more levels win. The
 tests hold the targets: skill wins at the same level, usually wins five levels down, and loses
 ten down. `cargo test -p sim --release --test duels sweep -- --ignored --nocapture` prints the
-table again after tuning.
+table again after tuning. Duels are between players, so they're fought with the PvP numbers below
+(the 24 s window left the table as it was on 25 October).
+
+**PvP numbers.** As Guild Wars 2 and WoW do, fights between players are balanced apart from
+monsters, so PvE can be generous without one-shots in the Wilderness. Any ability or aura can
+carry `pvp: (damage, healing, duration)`, multiples of its PvE numbers (left out, all 1; the
+loader allows more than 0 and up to 2):
+
+- `damage`: what it deals to an enemy player (an aura's: its ticks).
+- `healing`: its heals on a player who hurt or was hurt by a player in the last 6 s.
+- `duration`: how long an aura lasts on an enemy player (an ability's: the auras it puts on one).
+
+"Player" includes a player's summons, on either side. Fields use the numbers of the ability that
+made them, and combos those of the finisher. Today only Execution has a split (80% damage on
+players, so a duel's last quarter isn't one blow).
 
 ## Checks
 
@@ -240,5 +258,6 @@ table again after tuning.
   aimed, led, homing), hit events (direction, weight and hitstop for blows, arrows, blocks and
   parries), downed and rallying, bleeding out, respawning, reviving, summons, combos,
   the combat view, determinism, every skill on every bar, and the step budget (in release).
-- `crates/sim/tests/duels.rs`: the balance targets above.
+- `crates/sim/tests/duels.rs`: the balance targets above, PvP numbers landing only between
+  players, and the longer diminishing returns between them.
 - The Swift game's combat checks are covered by these.

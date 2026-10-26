@@ -1966,6 +1966,20 @@ impl Renderer {
         }
         Ok(count)
     }
+    /// The number the next drawn frame will carry (as `presented_at` takes it).
+    pub fn next_frame(&self) -> usize {
+        self.frame
+    }
+    /// When frame `frame` reached the screen, on the media clock, if it has.
+    pub fn presented_at(&self, frame: usize) -> Option<f64> {
+        let samples = self.presented.lock().unwrap();
+        samples
+            .iter()
+            .rev()
+            .take(64)
+            .find(|(f, t)| *f == frame && *t > 0.)
+            .map(|(_, t)| *t)
+    }
     pub fn presentation_times(&self, warmup: usize) -> Vec<f64> {
         let mut samples = self.presented.lock().unwrap().clone();
         samples.sort_by_key(|(frame, _)| *frame);

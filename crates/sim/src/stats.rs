@@ -23,6 +23,10 @@ pub const GCD: f64 = 1.0;
 pub const DOWNED_TIME: f64 = 18.0;
 /// The window in which repeated crowd control diminishes.
 pub const DR_WINDOW: f64 = 18.0;
+/// The same between players: long enough that a chain of controls can't lock a duel down.
+pub const PVP_DR_WINDOW: f64 = 24.0;
+/// Seconds after a player last hurt or was hurt by a player that heals on them take PvP numbers.
+pub const PVP_COMBAT: f64 = 6.0;
 /// Crowd control on an elite or boss chips this much defiance per second it would have held
 /// them (a knockback counts as 1.5 seconds), on top of a skill's own defiance damage.
 pub const DEFIANCE_PER_SECOND: f32 = 60.0;

@@ -115,32 +115,40 @@ fn players() {
     drop(sim);
     // The wire size from a second run of the same scene, so the encoders' memory doesn't change
     // what the measured part costs. A view every third step for the first 20 players, each on
-    // its own third of the steps, as the server sends them.
+    // its own third of the steps, picked from the step's shared frame as the server does (#286).
+    // Five seconds of it, so the views that introduce everyone weigh no more than they would.
     const WIRED: usize = 20;
+    const WIRE_STEPS: u32 = 300;
     let (mut sim, ids) = players_scene();
+    let mut frame = sim.net_frame(None);
     let mut encoders: Vec<Encoder> = ids[..WIRED]
         .iter()
         .map(|&id| {
             let mut e = Encoder::new();
-            wire(&mut e, &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), Vec::new());
+            let view = sim.encode_view(&frame, id, &mut e, &[]);
+            e.ack(view.tick);
             e
         })
         .collect();
     let (mut bytes, mut recent) = (0, std::collections::VecDeque::new());
-    for step in 0..STEPS {
+    for step in 0..WIRE_STEPS {
         move_players(&mut sim, &ids, 20 + step);
         sim.step();
         recent.push_back(sim.take_events());
         if recent.len() > SEND_EVERY {
             recent.pop_front();
         }
+        frame = sim.net_frame(Some(&frame));
+        let events: Vec<Event> = recent.iter().flatten().cloned().collect();
         for (i, &id) in ids[..WIRED].iter().enumerate() {
             if (step as usize + i) % SEND_EVERY == 0 {
-                bytes += wire(&mut encoders[i], &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), recent.iter().flatten().cloned().collect());
+                let view = sim.encode_view(&frame, id, &mut encoders[i], &events);
+                encoders[i].ack(view.tick);
+                bytes += postcard::to_allocvec(&view).unwrap().len();
             }
         }
     }
-    let per_second = bytes as f64 / (STEPS as usize * WIRED) as f64 * sim::TICK_RATE as f64;
+    let per_second = bytes as f64 / (WIRE_STEPS as usize * WIRED) as f64 * sim::TICK_RATE as f64;
     println!("players: {STEPS} steps, wire {per_second:.0} B/s per player");
 }
 
