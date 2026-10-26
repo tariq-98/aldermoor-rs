@@ -29,7 +29,7 @@ fn main() {
         monsters(&mut sim, Vec2::new(-60.0, -30.0));
         sim
     });
-    let mut realm = Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: Vec::new(), open });
+    let mut realm = Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: Vec::new(), open, reuse_after: server::regions::REUSE_AFTER });
     let heroes: Vec<(u32, f32)> = (0..CAP * 3)
         .map(|n| {
             let a = n as f32 * 2.399;

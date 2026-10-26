@@ -161,7 +161,7 @@ mod layers {
             assert_eq!(ground, 0, "only the town fills up");
             Sim::region(land.clone(), 100 + id as u64, id, west())
         });
-        Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: if wild { vec![0] } else { Vec::new() }, open })
+        Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: if wild { vec![0] } else { Vec::new() }, open, reuse_after: server::regions::REUSE_AFTER })
     }
 
     #[test]
@@ -230,6 +230,49 @@ mod layers {
         let y = realm.with_unit(last, |sim, id| sim.get::<sim::Transform>(id).unwrap().pos.z);
         run(&mut realm, 1.0);
         assert!(realm.with_unit(last, |sim, id| sim.get::<sim::Transform>(id).unwrap().pos.z) > y + 3.0);
+    }
+
+    /// A town layered at two players, with one living there, reusing closed layers' IDs after
+    /// `reuse_after` ticks.
+    fn crowded(reuse_after: u64) -> Realm {
+        let (a, b) = two_regions(31);
+        let land = brambleford_land();
+        let open = Box::new(move |_: u32, id: u32| Sim::region(land.clone(), 100 + id as u64, id, west()));
+        let mut realm = Realm::layered(vec![a, b], Layering { cap: 2, unlayered: Vec::new(), open, reuse_after });
+        realm.spawn_player("Resident", Vec2::new(-20.0, 0.0)).unwrap();
+        realm
+    }
+
+    /// Two players fill the town and open a layer, then leave, and the layer folds back. The
+    /// layer's region ID.
+    fn open_and_close(realm: &mut Realm) -> u32 {
+        let visitor = realm.spawn_player("Visitor", Vec2::new(-20.0, 2.0)).unwrap();
+        let id = realm.spawn_player("Passing", Vec2::new(-20.0, 4.0)).expect("a layer opens");
+        let layer = realm.region_of(id);
+        assert_ne!(layer, 0);
+        realm.with(0, move |sim| sim.export(visitor));
+        realm.with(layer, move |sim| sim.export(id));
+        run(realm, 1.0);
+        assert_eq!(realm.layers(0), vec![0], "the empty layer stayed open");
+        layer
+    }
+
+    #[test]
+    fn closed_layers_ids_come_back_into_use() {
+        // More layers over a life than there are region IDs (#274).
+        let mut realm = crowded(0);
+        let ids: std::collections::BTreeSet<u32> = (0..sim::region::REGIONS + 20).map(|_| open_and_close(&mut realm)).collect();
+        assert!(ids.len() < 4, "layers took {} IDs", ids.len());
+    }
+
+    #[test]
+    fn a_closed_layers_id_waits_before_it_comes_back() {
+        let mut realm = crowded(120);
+        let first = open_and_close(&mut realm);
+        // A second after: still too soon.
+        assert_ne!(open_and_close(&mut realm), first);
+        run(&mut realm, 2.0);
+        assert_eq!(open_and_close(&mut realm), first);
     }
 
     #[test]
