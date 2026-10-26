@@ -71,3 +71,20 @@ fn a_client_refuses_a_server_it_doesnt_know() {
     let stranger = server::net::Identity::generate().unwrap().certificate;
     assert!(server::net::Client::connect(addr.as_str(), &stranger, "Wary").is_err());
 }
+
+#[test]
+fn the_headless_server_runs_a_realm_and_its_players_cross_borders() {
+    // Two regions split at x = 5; players start just east of it.
+    let (_running, addr, certificate) = start("realm", &["--regions", "2", "--crowd", "40"]);
+    let mut client = server::net::Client::connect(addr.as_str(), &certificate, "Crosser").unwrap();
+    let (first, _) = client.next_view().unwrap();
+    let x0 = first.unit(client.player).expect("the player is in its own view").position.x;
+    assert!(x0 > 5.0, "started at x {x0}");
+    client.send(Command::Move { direction: Vec2::new(-1.0, 0.0), walk: false, sprint: false, face_yaw: None }).unwrap();
+    let mut last = first;
+    for _ in 0..60 {
+        last = client.next_view().unwrap().0;
+    }
+    let x = last.unit(client.player).expect("still in its own view after crossing").position.x;
+    assert!(x < 0.0, "walked to x {x}, not across the border");
+}
