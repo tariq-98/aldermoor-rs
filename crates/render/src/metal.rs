@@ -2430,6 +2430,9 @@ mod temporal_tests {
         r.wait().unwrap();
         assert_eq!(legacy, output_bytes(&r));
         let counters = counter_device_or_verify_fallback(&mut r);
+        if counters {
+            r.set_gpu_counters(true).unwrap();
+        }
         for features in [[1, 1, 0, 0], [1, 0, 1, 0], [1, 0, 0, 1], [1, 1, 1, 1]] {
             r.surface_uniform.water_features = features;
             r.resize_water_inputs().unwrap();
@@ -2437,6 +2440,12 @@ mod temporal_tests {
             r.wait().unwrap();
             let pixels = output_bytes(&r);
             assert!(pixels.chunks_exact(4).any(|p| p[..3] != [0, 0, 0]));
+            if features[2] != 0 || features[3] != 0 {
+                assert_ne!(
+                    legacy, pixels,
+                    "bed/shore features must change visible river pixels"
+                );
+            }
             if counters {
                 let frame = r.stats.completed.unwrap();
                 assert!(frame.passes[10].is_some(), "water must actually draw");

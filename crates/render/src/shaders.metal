@@ -58,7 +58,7 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
     return result;
 }
 struct SceneOutput{float4 colour [[color(0)]];float4 motion [[color(1)]];};
-// Shared lighting keeps disabled water byte-for-byte on the legacy shader path.
+// Shared lighting keeps disabled water on the legacy shader path.
 struct WaterLighting {float3 lit,normal,reflection;float fresnel;};
 SceneOutput shade_scene(Vary i,bool front,constant Frame& f,constant Draw* instances,texture2d<float> base,texture2d<float> normal,texture2d<float> orm,texture2d<float> emission,texture2d<float> occlusion,depth2d_array<float> shadow,texture2d<float> dye_mask,constant Surfaces& surfaces,texture2d_array<float> terrain_colour,texture2d_array<float> terrain_normal,texture2d<float> terrain_weights,texture2d<float> water_normal,texture2d<float> sky_map,texture2d<float> sky_reflection,thread WaterLighting& water){
     constant Draw& d=instances[i.instance];constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
