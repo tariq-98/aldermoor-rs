@@ -288,6 +288,7 @@ impl Options {
         {
             o.scale = Some(render::settings::DynamicResolution::MAX_SCALE);
         }
+        o.perf.adaptive_scale = o.scale.is_none();
         if o.offscreen && o.frames.is_none() {
             o.frames = Some(120)
         }
@@ -1741,7 +1742,15 @@ impl Game {
                 sample.gpu_ms,
             )
         {
+            let from = r.scale;
+            let resize = Instant::now();
             r.set_render_scale(scale)?;
+            self.perf.scale_step(
+                sample.frame,
+                from,
+                scale,
+                resize.elapsed().as_secs_f64() * 1000.,
+            );
             controller.resize_completed(
                 r.stats
                     .completed
@@ -1760,6 +1769,8 @@ impl Game {
             self.options.warmup,
             self.options.benchmark,
         );
+        self.perf
+            .frame_interval((finished - self.finished_at).as_secs_f64() * 1000.);
         if self.frame > self.options.warmup && !done {
             self.gpu.push(stats.gpu_ms);
             self.intervals
