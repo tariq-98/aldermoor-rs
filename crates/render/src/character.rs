@@ -2784,7 +2784,9 @@ impl Character {
             return;
         }
         // The holds the hands may be on, in the model's frame: the one the body hangs from, or
-        // the ones its move goes from and to.
+        // the ones its move goes from and to. Only where it hangs: standing on the top it climbs
+        // onto or drops from, or in the air before a catch, it hangs from none, and a hold within
+        // reach above (the bellcote's, over the gable's coping) would pass for one.
         let to_model = Quat::from_rotation_y(-body);
         let edge = |h: world::Hold| climb::Edge {
             a: to_model * (h.a - position),
@@ -2793,14 +2795,21 @@ impl Character {
             braced: h.braced,
         };
         let edges = match (on_wall, &self.holds) {
-            (Some(OnWall { at: [from, to], .. }), Some(holds)) => [
-                holds(from).map(edge),
-                if to == from {
-                    None
-                } else {
-                    holds(to).map(edge)
-                },
-            ],
+            (Some(w), Some(holds)) => {
+                let [from, to] = w.at;
+                [
+                    if matches!(w.wall, Wall::Drop | Wall::Catch) {
+                        None
+                    } else {
+                        holds(from).map(edge)
+                    },
+                    if to == from || w.wall == Wall::ClimbUp {
+                        None
+                    } else {
+                        holds(to).map(edge)
+                    },
+                ]
+            }
             _ => [None; 2],
         };
         let want = on_wall.map_or(Vec3::ZERO, |w| {
@@ -5464,6 +5473,84 @@ mod combat_tests {
                 let apart = a[side].distance(b[side]);
                 assert!(apart < 0.01, "the hands {apart} m apart: {a:?} and {b:?}");
             }
+        }
+    }
+    #[test]
+    fn a_body_asks_for_its_hold_only_where_it_hangs() {
+        // Climbing onto the top, lowering itself from it and catching a hold out of a fall, the
+        // hold is looked up only at the end of the move where the body hangs: on the top, or in
+        // the air, a hold in reach above (the bellcote's, over the gable's coping) would pass for
+        // the one it hangs from.
+        let dt = 1. / 60.;
+        let top = Vec3::new(0., HANG, 0.7);
+        let air = Vec3::new(0., 0.6, -0.3);
+        for (before, pose, kind, from, to, clip) in [
+            (
+                Pose::Hang,
+                Pose::Jump,
+                ForcedKind::Climb,
+                Vec3::ZERO,
+                top,
+                "Hang_ClimbUp",
+            ),
+            (
+                Pose::Idle,
+                Pose::Hang,
+                ForcedKind::Hold,
+                top,
+                Vec3::ZERO,
+                "Hang_Drop",
+            ),
+            (
+                Pose::Fall,
+                Pose::Hang,
+                ForcedKind::Hold,
+                air,
+                Vec3::ZERO,
+                "Hang_Catch",
+            ),
+        ] {
+            let (mut c, mut u) = climber("male");
+            let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let log = Arc::clone(&asked);
+            c.set_holds(Arc::new(move |p: Vec3| {
+                log.lock().unwrap().push(p);
+                (p.length() < 0.3).then_some(world::Hold {
+                    a: Vec3::new(1.5, HANG, 0.4),
+                    b: Vec3::new(-1.5, HANG, 0.4),
+                    out: Vec2::new(0., -1.),
+                    braced: true,
+                })
+            }));
+            u.position = from;
+            if before != Pose::Hang {
+                (u.pose, u.traversal) = (before, Traversal::Ground);
+            }
+            for _ in 0..10 {
+                c.update(&u, dt);
+            }
+            asked.lock().unwrap().clear();
+            let m = protocol::ForcedMove {
+                kind,
+                from,
+                to,
+                start: 2.,
+                duration: 0.5,
+            };
+            (u.pose, u.traversal) = (pose, Traversal::Forced(m));
+            for frame in 0..=30 {
+                u.position = anim::climb::carry(from, to, frame as f32 / 30.);
+                c.update(&u, dt);
+                assert_eq!(c.last_clip, clip);
+            }
+            let (hangs, stands) = if kind == ForcedKind::Climb {
+                (from, to)
+            } else {
+                (to, from)
+            };
+            let asked = asked.lock().unwrap();
+            assert!(asked.contains(&hangs), "{clip}: never asked where it hangs");
+            assert!(!asked.contains(&stands), "{clip}: asked at {stands}");
         }
     }
     #[test]
