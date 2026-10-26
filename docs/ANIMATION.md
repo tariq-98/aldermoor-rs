@@ -850,8 +850,9 @@ hanging still, 0.8 s each. Hanging costs 22,970 more (38%): moving the body by i
 2,100, as everything on the pelvis moves with it, and the hands on the hold and the feet on the
 wall the other 20,900, two thirds of that the arms' IK (rebuilding each arm's bones, fingers and
 all). The bench's hold is a closure; in the game, finding it in the client's copy of the valley's
-holds costs about 560 more a look, once a frame for a body hanging and twice for one moving between
-holds, and allocates nothing. Wall clock on the cloud runner (the median of nine runs at full
+holds costs about 1,440 more a look (860 searching the holds near the body, the rest the ground
+under it), once a frame for a body hanging and twice for one moving between holds, and allocates
+nothing. Wall clock on the cloud runner (the median of nine runs at full
 detail), hanging goes from 8.9 to 12.2 µs a character a frame; at the rate #210 measured on the
 M1, nearly twice the runner's, the difference is under 2 µs. At half detail it's paid every other
 frame, and at quarter detail not at all. The column is against #213's code on today's main measured
