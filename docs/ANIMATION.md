@@ -432,10 +432,14 @@ and landings to distance:
   facing west as `--gait` does: the player strafes and rolls left, right, back and ahead in turn,
   running on out of two rolls and standing up out of the other two; climbs onto the field wall west
   of the north road and drops off its far side; runs through the village and swims across the river
-  east of the bridge and back; climbs the wall from the other side; climbs the ruined hall's
-  stepped east wall to its lookout, lowers itself over the edge to hang, shimmies left and right,
-  climbs back up, then drops to hang again and lets go (#247's clips); and lunges at the nearest
-  wolf in the meadow. It logs each step as it starts, so captures can be cut by step.
+  east of the bridge and back; climbs the wall from the other side; at the ruined hall, climbs onto
+  its rear wall, lowers itself over the inner edge to hang (a low hold: the feet stand on the
+  ground), shimmies round both corners of the wall's end onto its outer face and lets go; sprints
+  at the hall's stepped east wall, runs up it and pulls onto the lookout; lowers itself over the
+  lookout's edge, shimmies left, ejects right along the hold, shimmies back and climbs up; steps
+  down, drops to hang from the step below and leaps up to the lookout's hold, and lets go (#247's
+  clips, #248's timing and hands and feet); and lunges at the nearest wolf in the meadow. It logs
+  each step as it starts, so captures can be cut by step.
 
 ## Switches
 
@@ -714,8 +718,10 @@ frame (median and 95th percentile) and how many characters were at each tier on 
 - The client's `--traverse` run (`crates/client/src/course.rs`, see Traversal) is for captures
   too. Its test runs the course against the valley as the client's own server starts it: every
   step is reached and every place arrived at, and on the way the player rolls four times, climbs
-  the field wall twice and the ruin's steps five times, swims, hangs from the lookout twice,
-  shimmies along it and climbs back up, comes down unhurt, and lunges.
+  the field wall twice, the ruin's east and rear walls and back up from a hang, swims, hangs from
+  the rear wall and goes round both its corners, runs up the wall to the lookout and pulls onto it,
+  shimmies and ejects along the lookout's hold, leaps up to it from the step below, comes down
+  unhurt, and lunges.
 
 ## Cost
 
