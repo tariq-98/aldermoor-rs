@@ -370,6 +370,8 @@ struct Game {
     /// The right button holds the guard in the Action scheme.
     guard_button: bool,
     last_move: Option<Command>,
+    /// The aim pitch last sent.
+    last_aim: Option<i8>,
     /// The camera's jolt from blows landing.
     kick: controls::camera::Kick,
     last: Instant,
@@ -505,6 +507,7 @@ impl Game {
             attacking: None,
             guard_button: false,
             last_move: None,
+            last_aim: None,
             kick: controls::camera::Kick::default(),
             last: Instant::now(),
             start: Instant::now(),
@@ -965,6 +968,15 @@ impl Game {
         if self.last_move.as_ref() != Some(&c) {
             self.host.send(c.clone());
             self.last_move = Some(c);
+        }
+        // The crosshair's pitch, for others to see where this player aims (#244).
+        if let Some(v) = self.view {
+            let d = v.target - v.eye;
+            let pitch = protocol::aim_pitch_byte(d.y.atan2(Vec2::new(d.x, d.z).length()));
+            if self.last_aim != Some(pitch) {
+                self.host.send(Command::Aim { pitch });
+                self.last_aim = Some(pitch);
+            }
         }
         self.keep_swinging(dt);
     }
