@@ -2738,11 +2738,16 @@ mod temporal_tests {
                 let after = shadow_depth_bytes(&mut r, &draws, time, false);
                 for c in 0..3 {
                     let range = c * 4096..(c + 1) * 4096;
-                    assert_eq!(
-                        before[range.clone()],
-                        after[range.clone()],
-                        "bits={bits},time={time},cascade={c}"
-                    );
+                    if let Some((pixel, (before, after))) = before[range.clone()]
+                        .iter()
+                        .zip(&after[range.clone()])
+                        .enumerate()
+                        .find(|(_, (a, b))| a != b)
+                    {
+                        panic!(
+                            "shadow depth differs: bits={bits},time={time},cascade={c},pixel={pixel},before={before:#010x},after={after:#010x}"
+                        );
+                    }
                     let covered = after[range]
                         .iter()
                         .filter(|&&z| z != 1f32.to_bits())

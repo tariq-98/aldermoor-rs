@@ -35,7 +35,8 @@ vertex Vary shadow_vertex(uint id [[vertex_id]],uint instance [[instance_id]],de
     if(flags&4){joints=uint4(v[at],v[at+1],v[at+2],v[at+3]);at+=4;weights=float4(as_type<float>(v[at]),as_type<float>(v[at+1]),as_type<float>(v[at+2]),as_type<float>(v[at+3]));at+=4;}
     constant Draw& d=instances[instance];
     if(d.morph.z>0.)p+=morphs[id*2].xyz*d.morph.x+morphs[id*2+1].xyz*d.morph.y;
-    float4x4 skin=d.flags.y!=0?bones[joints.x]*weights.x+bones[joints.y]*weights.y+bones[joints.z]*weights.z+bones[joints.w]*weights.w:float4x4(1.);
+    Vertex a={};a.joints=joints;a.weights=weights;
+    float4x4 skin=skin_matrix(a,bones,d.flags.y!=0);
     float3 world=wind((d.model*skin*float4(p,1)).xyz,weight,f.clock.x,f.clock.z);
     Vary o={};o.instance=instance;o.position=f.shadows[cascade]*float4(world,1);
     int hidden_region=int(round(region));if(hidden_region>=0&&hidden_region<31&&(d.flags.x&(1u<<hidden_region)))o.position=float4(2,2,2,1);
