@@ -210,10 +210,15 @@ float2 post_ao_value(Full i, constant Frame& f, constant PostUniform& post, Dept
     normal *= rsqrt(norm2);
     if (dot(normal, f.eye.xyz - center.xyz) < 0.) normal = -normal;
     float2 radius = post.ao.x * post.projection.xy * 0.5 * float2(size) / center.w;
+    // Interleaved gradient noise breaks up the fixed ring. The post pass supplies
+    // a frame phase only when temporal reconstruction can integrate the samples.
+    float2 noise_pixel = floor(i.position.xy) + post.projection.z * 5.588238;
+    float noise = fract(52.9829189 * fract(dot(noise_pixel, float2(0.06711056, 0.00583715))));
     float obscurance = 0.;
     for (uint k = 0; k < 8; ++k) {
-        float angle = float(k) * (2. * M_PI_F / 8.);
-        float2 offset = float2(cos(angle), sin(angle)) * radius * (k % 2 == 0 ? 1. : 0.5);
+        float angle = (float(k) / 8. + noise) * (2. * M_PI_F);
+        float radial = sqrt((float(k) + noise) / 8.);
+        float2 offset = float2(cos(angle), sin(angle)) * radius * radial;
         int2 q = pixel + int2(round(offset));
         // No repeated clamped border samples: off-screen occluders are unknown.
         if (any(q < 0) || any(q >= size)) continue;
@@ -238,16 +243,30 @@ fragment float4 post_bloom_extract(Full i [[stage_in]], constant PostUniform& po
     int2 size = int2(source.get_width(), source.get_height());
     int2 base = int2(i.position.xy) * 2;
     float3 sum = 0.;
+    float weights = 0.;
+    // projection.w is the authored knee/threshold ratio; zero retains a hard threshold.
+    float knee = post.bloom.x * post.projection.w;
     for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
         float3 c = max(source.read(uint2(min(base + int2(x, y), size - 1))).rgb, 0.);
         float peak = max(c.r, max(c.g, c.b));
-        sum += c * (max(peak - post.bloom.x, 0.) / max(peak, 1e-6));
+        float excess = max(peak - post.bloom.x, 0.);
+        if (knee > 0.) {
+            float soft = clamp(peak - post.bloom.x + knee, 0., 2. * knee);
+            excess = max(excess, soft * soft / (4. * knee));
+        }
+        // Karis weighting suppresses isolated HDR fireflies before downsampling.
+        // These are linear Rec.709 luminance coefficients, not look tuning.
+        float weight = 1. / (1. + dot(c, float3(0.2126, 0.7152, 0.0722)));
+        sum += c * (excess / max(peak, 1e-6)) * weight;
+        weights += weight;
     }
-    return float4(min(sum * 0.25, 65504.), 1);
+    return float4(min(sum / weights, 65504.), 1);
 }
 fragment float4 post_bloom_blur(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]]) {
     constexpr sampler linear(coord::normalized, address::clamp_to_edge, filter::linear);
     // Bilinear pairs implement the normalised [1,4,6,4,1]/16 binomial kernel.
+    // A radius above roughly two texels spreads these taps apart and can ring;
+    // wide bloom needs a mip chain, not a larger authored radius on this one level.
     float2 offset = post.blur.xy * post.bloom.y * 1.2 / float2(source.get_width(), source.get_height());
     float3 c = source.sample(linear, i.uv).rgb * 0.375;
     c += (source.sample(linear, i.uv - offset).rgb + source.sample(linear, i.uv + offset).rgb) * 0.3125;
@@ -272,6 +291,8 @@ float4 post_apply_value(Full i, constant Frame& f, constant PostUniform& post, t
                 weighted += tap.x * weight;
                 weights += weight;
             }
+            // This forward post pass can only attenuate the complete lit colour,
+            // including direct/emissive light. Ambient-only AO needs scene-pass integration.
             c.rgb *= weights > 1e-6 ? weighted / weights : 1.;
         }
     }

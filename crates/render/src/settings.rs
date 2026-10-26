@@ -24,6 +24,8 @@ pub struct LookSettings {
     /// Linear-HDR bloom; radius is measured in half-resolution texels.
     pub bloom_enabled: bool,
     pub bloom_threshold: f32,
+    /// Soft-knee width as a fraction of threshold; zero gives a hard threshold.
+    pub bloom_knee: f32,
     pub bloom_radius: f32,
     pub bloom_strength: f32,
 }
@@ -54,6 +56,7 @@ impl Default for LookSettings {
             ao_strength: 0.,
             bloom_enabled: false,
             bloom_threshold: 0.,
+            bloom_knee: 0.5,
             bloom_radius: 0.,
             bloom_strength: 0.,
         }
@@ -90,6 +93,7 @@ impl LookSettings {
                 self.ao_bias,
                 self.ao_strength,
                 self.bloom_threshold,
+                self.bloom_knee,
                 self.bloom_radius,
                 self.bloom_strength,
             ]);
@@ -113,6 +117,7 @@ impl LookSettings {
                 && self.ao_bias >= 0.
                 && (0. ..=1.).contains(&self.ao_strength)
                 && self.bloom_threshold >= 0.
+                && (0. ..=1.).contains(&self.bloom_knee)
                 && self.bloom_radius >= 0.
                 && self.bloom_strength >= 0.,
             "invalid AO/bloom settings"
@@ -159,6 +164,16 @@ mod post_tests {
         look.bloom_threshold = -1.;
         assert!(look.validate().is_err());
         look.bloom_threshold = 0.;
+        assert_eq!(look.bloom_knee, 0.5);
+        for knee in [0., 0.5, 1.] {
+            look.bloom_knee = knee;
+            look.validate().unwrap();
+        }
+        for knee in [-0.01, 1.01, f32::NAN, f32::INFINITY] {
+            look.bloom_knee = knee;
+            assert!(look.validate().is_err());
+        }
+        look.bloom_knee = 0.5;
         look.bloom_strength = f32::INFINITY;
         assert!(look.validate().is_err());
     }

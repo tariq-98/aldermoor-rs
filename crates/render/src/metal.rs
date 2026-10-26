@@ -72,7 +72,7 @@ impl PostUniform {
             } else {
                 [0.; 4]
             },
-            projection: [projection / aspect, projection, 0., 0.],
+            projection: [projection / aspect, projection, 0., look.bloom_knee],
             blur: [0.; 4],
         }
     }
@@ -363,7 +363,7 @@ pub struct Renderer {
     composite: Obj<dyn MTLRenderPipelineState>,
     post_pipelines: [Obj<dyn MTLRenderPipelineState>; 4],
     post_targets: Option<PostTargets>,
-    post_config: [[f32; 4]; 2],
+    post_config: [[f32; 4]; 3],
     depth_state: Obj<dyn MTLDepthStencilState>,
     read_depth: Obj<dyn MTLDepthStencilState>,
     hdr: Obj<dyn MTLTexture>,
@@ -837,7 +837,7 @@ impl Renderer {
             composite,
             post_pipelines,
             post_targets: None,
-            post_config: [[0.; 4]; 2],
+            post_config: [[0.; 4]; 3],
             depth_state,
             read_depth,
             hdr,
@@ -1281,8 +1281,27 @@ impl Renderer {
         let width = self.hdr.width() as f32;
         let height = self.hdr.height() as f32;
         let aspect = self.width as f32 / self.height as f32;
-        let post = PostUniform::new(&self.look, camera, aspect);
-        let post_config = [post.ao, post.bloom];
+        let mut post = PostUniform::new(&self.look, camera, aspect);
+        // Repeat a bounded sampling sequence; keep non-temporal AA stable between frames.
+        post.projection[2] = if self.temporal || self.metalfx.is_some() {
+            (self.frame % 64) as f32
+        } else {
+            0.
+        };
+        let post_config = [
+            post.ao,
+            post.bloom,
+            [
+                if post.bloom[3] > 0. {
+                    post.projection[3]
+                } else {
+                    0.
+                },
+                0.,
+                0.,
+                0.,
+            ],
+        ];
         if self.post_config != post_config {
             // A toggle or changed look must not blend the old effect through temporal history.
             self.history_valid = false;
@@ -2629,6 +2648,40 @@ mod temporal_tests {
                 .all(|(a, b)| *a <= b.saturating_add(1)),
             "AO cannot brighten geometry"
         );
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(after, output_bytes(&r), "non-temporal AO must stay stable");
+        let ao_bytes = |r: &Renderer| {
+            let texture = &r.post_targets.as_ref().unwrap().ao;
+            let row = texture.width() * 4; // RG16Float
+            let size = row * texture.height();
+            let buffer = r
+                .device
+                .newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared)
+                .unwrap();
+            let cb = r.queue.commandBuffer().unwrap();
+            let enc = cb.blitCommandEncoder().unwrap();
+            unsafe {
+                enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                    texture, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 },
+                    MTLSize { width: texture.width(), height: texture.height(), depth: 1 },
+                    &buffer, 0, row, size);
+            }
+            enc.endEncoding();
+            cb.commit();
+            cb.waitUntilCompleted();
+            assert!(cb.error().is_none());
+            unsafe {
+                std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), size).to_vec()
+            }
+        };
+        r.temporal = true;
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let first = ao_bytes(&r);
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_ne!(first, ao_bytes(&r), "temporal AO must vary its samples");
         let mut r = Renderer::new(64, 64, 1.).unwrap();
         for metalfx in [false, true] {
             if metalfx && !r.enable_metalfx(true).unwrap() {
@@ -2651,6 +2704,18 @@ mod temporal_tests {
                 resets + 1,
                 "stable post look keeps history"
             );
+            r.look.bloom_knee = 1.;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(
+                r.stats.history_resets,
+                resets + 2,
+                "knee changes reset history"
+            );
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(r.stats.history_resets, resets + 2);
+            r.look.bloom_knee = 0.5;
         }
     }
 
