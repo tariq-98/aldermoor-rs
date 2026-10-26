@@ -228,7 +228,7 @@ fn struck(world: &World, p: &Projectile, from: Vec3, to: Vec3) -> Vec<(Entity, f
         }
         let Some(e) = entity(world, id) else { continue };
         let (Some(u), Some(v), Some(t)) = (world.get::<Unit>(e), world.get::<Vitals>(e), world.get::<Transform>(e)) else { continue };
-        if !u.faction.is_enemy(p.src.faction) || v.dead {
+        if !(u.faction.is_enemy(p.src.faction) || crate::wilderness::may_hit(world, p.src.unit, e)) || v.dead {
             continue;
         }
         let body = world.get::<Body>(e).copied().unwrap_or(Body { radius: 0.4, height: 1.8 });

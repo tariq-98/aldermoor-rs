@@ -81,7 +81,7 @@ pub(crate) fn gap(world: &World, a: Entity, b: Entity) -> f32 {
 /// `b` is a living enemy of `a` (downed counts: it can still be finished off).
 pub(crate) fn can_attack(world: &World, a: Entity, b: Entity) -> bool {
     let (Some(ua), Some(ub), Some(vb)) = (world.get::<Unit>(a), world.get::<Unit>(b), world.get::<Vitals>(b)) else { return false };
-    a != b && ua.faction.is_enemy(ub.faction) && !vb.dead
+    a != b && !vb.dead && (ua.faction.is_enemy(ub.faction) || crate::wilderness::may_duel(world, a, b))
 }
 
 pub(crate) fn is_ally(world: &World, a: Entity, b: Entity) -> bool {
