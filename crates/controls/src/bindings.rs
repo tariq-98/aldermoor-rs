@@ -1,6 +1,7 @@
 //! Which keys and mouse buttons do what, as data the player can change. Inputs are named the
 //! way winit names them (`KeyW`, `ShiftLeft`, `Digit1`) plus `Mouse3`..`Mouse5` for the middle
-//! and thumb buttons. The left and right buttons stay fixed: they click, look and steer.
+//! and thumb buttons. The left and right buttons stay fixed: in Action they attack and guard, in
+//! Classic they click, look and steer.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -25,6 +26,11 @@ pub enum Control {
     SwapWeapons,
     Revive,
     Respawn,
+    Specialties,
+    Loot,
+    Bag,
+    Interact,
+    Skills,
     Slot1,
     Slot2,
     Slot3,
@@ -39,7 +45,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the menu lists them.
-    pub const ALL: [Control; 27] = [
+    pub const ALL: [Control; 32] = [
         Self::Forward,
         Self::Back,
         Self::Left,
@@ -57,6 +63,11 @@ impl Control {
         Self::SwapWeapons,
         Self::Revive,
         Self::Respawn,
+        Self::Specialties,
+        Self::Loot,
+        Self::Bag,
+        Self::Interact,
+        Self::Skills,
         Self::Slot1,
         Self::Slot2,
         Self::Slot3,
@@ -88,6 +99,11 @@ impl Control {
             Self::SwapWeapons => "Swap weapons",
             Self::Revive => "Revive",
             Self::Respawn => "Respawn",
+            Self::Specialties => "Specialties and quest XP",
+            Self::Loot => "Loot the nearest pile",
+            Self::Bag => "Bag",
+            Self::Interact => "Gather or skin (strike while working)",
+            Self::Skills => "Gathering and crafting skills",
             Self::Slot1 => "Skill 1",
             Self::Slot2 => "Skill 2",
             Self::Slot3 => "Skill 3",
@@ -128,6 +144,11 @@ impl Control {
             Self::SwapWeapons => &["Backquote"],
             Self::Revive => &["KeyG"],
             Self::Respawn => &["KeyR"],
+            Self::Specialties => &["KeyK"],
+            Self::Loot => &["KeyL"],
+            Self::Bag => &["KeyB"],
+            Self::Interact => &["KeyX"],
+            Self::Skills => &["KeyP"],
             Self::Slot1 => &["Digit1"],
             Self::Slot2 => &["Digit2"],
             Self::Slot3 => &["Digit3"],

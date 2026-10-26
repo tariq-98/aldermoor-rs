@@ -32,6 +32,8 @@ pub struct HitSource {
     pub ability: Option<AbilityId>,
     /// Where the blow comes from (the attacker, or the missile): what a guard must face.
     pub from: Vec3,
+    /// A player or a player's summon: what it does to an enemy player takes PvP numbers.
+    pub player: bool,
 }
 
 pub(crate) fn now(world: &World) -> f64 {
@@ -89,15 +91,19 @@ pub(crate) fn is_ally(world: &World, a: Entity, b: Entity) -> bool {
     }
 }
 
-/// Nothing solid between two points (houses, the mill, the shed). Sampled every half metre.
+/// Nothing solid between two points: no building, mill or shed, nor masonry too tall to climb
+/// standing above the line between them (#311; walls low enough to climb don't hide anyone).
+/// Sampled every half metre.
 pub(crate) fn line_of_sight(world: &World, a: Vec3, b: Vec3) -> bool {
     let land = &world.resource::<Land>().0;
     let (a2, b2) = (Vec2::new(a.x, a.z), Vec2::new(b.x, b.z));
     let d = b2 - a2;
     let steps = (d.length() / 0.5).ceil() as i32;
     for i in 1..steps {
-        let p = a2 + d * (i as f32 / steps as f32);
-        if land.blocked(p, 0.05) {
+        let k = i as f32 / steps as f32;
+        let p = a2 + d * k;
+        let tall = land.top_at(p).filter(|&top| top - land.surface(p.x, p.y) > movement::CLIMB_HEIGHT);
+        if land.blocked(p, 0.05) || tall.is_some_and(|top| top > a.y + (b.y - a.y) * k) {
             return false;
         }
     }
@@ -118,7 +124,24 @@ pub fn source(world: &World, e: Entity, ability: Option<&AbilityDef>) -> Option<
         faction: u.faction,
         ability: ability.and_then(|a| crate::content::catalog().ability_id(a.key)),
         from: world.get::<Transform>(e).map_or(Vec3::ZERO, |t| t.pos),
+        player: player_side(world, e, u),
     })
+}
+
+/// `e` (whose unit is `u`) is a player, or something a player summoned.
+fn player_side(world: &World, e: Entity, u: &Unit) -> bool {
+    use protocol::UnitKind::Player;
+    u.kind == Player || world.get::<crate::Summoned>(e).and_then(|s| entity(world, s.owner)).and_then(|o| world.get::<Unit>(o)).is_some_and(|o| o.kind == Player)
+}
+
+/// Player against player: `src` and `te` are on players' sides and enemies, so PvP numbers apply.
+pub(crate) fn pvp(world: &World, src: &HitSource, te: Entity) -> bool {
+    src.player && world.get::<Unit>(te).is_some_and(|u| u.faction.is_enemy(src.faction) && player_side(world, te, u))
+}
+
+/// `te` is a player who hurt or was hurt by a player a moment ago: heals on it take PvP numbers.
+pub(crate) fn in_pvp(world: &World, te: Entity) -> bool {
+    world.get::<Fighter>(te).is_some_and(|f| now(world) < f.pvp_until)
 }
 
 /// Applies queued commands in the order they arrived, then lets go any roll that was waiting for
@@ -175,6 +198,8 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::Guard(up) => {
                 if up && world.get::<Motion>(e).is_some_and(|m| m.swimming) {
                     tell(world, e, "You can't guard while swimming.");
+                } else if up && world.get::<Motion>(e).is_some_and(|m| m.hang.is_some()) {
+                    tell(world, e, "You can't guard while climbing.");
                 } else if up {
                     guard::raise(world, e);
                 } else {
@@ -193,6 +218,11 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::StopWork => crate::crafting::stop(world, e),
             Command::UseItem { slot } => crate::consumables::use_item(world, e, slot),
             Command::Viewing { tick } => crate::rewind::viewing(world, e, tick),
+            Command::Aim { pitch } => {
+                if let Some(mut m) = world.get_mut::<Motion>(e) {
+                    m.aim_pitch = pitch;
+                }
+            }
             Command::AssignXp { specialty, amount } => {
                 if let Some(s) = crate::Specialty::from_key(&specialty) {
                     crate::progress::assign(world, e, s, amount);
@@ -225,6 +255,10 @@ fn roll(world: &mut World, e: Entity, id: UnitId, direction: Vec2, now: f64) {
         m.dodge_queued = None;
     }
     let ctl = control(world, e);
+    // Hanging, Roll lets go; at an edge, rolling toward the drop lowers you to hang from it.
+    if crate::climbing::roll(world, e, direction, now, ctl.can_move() && !ctl.stunned) {
+        return;
+    }
     let swimming = world.get::<Motion>(e).is_some_and(|m| m.swimming);
     if ctl.stunned || ctl.fleeing.is_some() || swimming || world.get::<Vitals>(e).is_none_or(|v| v.downed || v.dead) {
         return;

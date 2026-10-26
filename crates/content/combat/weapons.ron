@@ -277,6 +277,8 @@
             cooldown: 8.0,
             effects: [Damage(base: 8.0, coeff: 0.7)],
             execute: Some((0.25, 2.5)),
+            // Softer on players, so a duel's last quarter isn't over in one blow.
+            pvp: (damage: 0.8),
             action: Overhead,
         ),
         // Shield (off hand).

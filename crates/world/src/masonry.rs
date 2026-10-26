@@ -1,7 +1,8 @@
 //! Masonry you can climb: dry-stone walls round the fields south of the village and the ruined hall
 //! on the hill. Each piece is a prop the renderer draws and the solids it adds to the valley, from
 //! the one list here, so what you see and what you stand on can't drift apart. The art build reads
-//! the same list (`examples/ground_fields.rs` writes it out) and builds each prop to fill its blocks.
+//! the same list (`examples/ground_fields.rs` writes it out) and builds each prop to fill its blocks
+//! and to carry its grips.
 
 use glam::{Vec2, Vec3};
 
@@ -21,6 +22,19 @@ pub struct Block {
     pub part: &'static str,
 }
 
+/// A grip on a piece of masonry (#249): a dressed stone standing proud of a face, held by its top
+/// edge, with no room above it to climb onto: a sill, a jamb stone, a keystone. In the piece's
+/// frame, its edge from `a` to `b` (x, height above the origin, z) and `out`, level and away from
+/// the face. Unlike a block it stands in nobody's way: it's too small to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grip {
+    pub a: Vec3,
+    pub b: Vec3,
+    pub out: Vec2,
+    /// What it is, for the art build ("lancet sill", "keystone"…).
+    pub part: &'static str,
+}
+
 /// A piece of masonry: the prop drawn at `origin` turned by `yaw` (0 faces +z), and its blocks.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Masonry {
@@ -28,6 +42,8 @@ pub struct Masonry {
     pub origin: Vec3,
     pub yaw: f32,
     pub blocks: Vec<Block>,
+    /// The grips on its faces. None on field walls.
+    pub grips: Vec<Grip>,
     /// A wall's coping along its centre line, in the piece's frame: (x, top above the origin, z)
     /// at both ends, every corner and every half metre between. The tops of its blocks run
     /// straight between these points, and neighbouring pieces of a wall share their end points.
@@ -36,6 +52,18 @@ pub struct Masonry {
 }
 
 impl Masonry {
+    /// A point in the piece's frame (x, height above the origin, z), in the valley.
+    pub fn place(&self, p: Vec3) -> Vec3 {
+        let (s, c) = self.yaw.sin_cos();
+        Vec3::new(self.origin.x + c * p.x + s * p.z, self.origin.y + p.y, self.origin.z - s * p.x + c * p.z)
+    }
+
+    /// A level direction in the piece's frame, in the valley.
+    pub fn turn(&self, v: Vec2) -> Vec2 {
+        let (s, c) = self.yaw.sin_cos();
+        Vec2::new(c * v.x + s * v.y, -s * v.x + c * v.y)
+    }
+
     /// The blocks as solids in the valley.
     pub fn solids(&self) -> impl Iterator<Item = crate::Solid> + '_ {
         let (s, c) = self.yaw.sin_cos();
@@ -168,6 +196,7 @@ pub(crate) fn field_walls(ground: impl Fn(f32, f32) -> f32) -> Vec<Masonry> {
                         part: "",
                     })
                     .collect(),
+                grips: Vec::new(),
                 line,
             });
         }
@@ -247,12 +276,21 @@ impl Wall {
 pub const RUIN_AT: Vec2 = Vec2::new(-18.0, 47.0);
 pub const RUIN_YAW: f32 = std::f32::consts::PI;
 
-/// The hall in its own frame: 7.2 m across (x) and 11.4 m long (z), walls 0.95 m thick. The gable,
-/// its buttresses and the door jambs stand too tall to climb; the east wall breaks down in steps
-/// from the gable to the rear, each one a climb from the last; the rest has fallen to low walls
-/// and stumps.
-const RUIN: [Block; 18] = [
-    block("gable", 0.0, 5.225, 3.6, 0.475, None),
+/// The hall in its own frame: 7.2 m across (x) and 11.4 m long (z), walls 0.95 m thick. The east
+/// wall breaks down in steps from the gable to the rear, each one a climb from the last, to a
+/// lookout under the gable; the rest has fallen to low walls and stumps. The gable's buttresses
+/// and the door jambs stand too tall to climb.
+///
+/// The gable climbs (#249): from the lookout a jump reaches its raked coping, which you walk up to
+/// the empty bellcote on its apex, and a line of grips climbs its outer face from the lancet's
+/// sill, up the window's east jamb and over its arch to the oculus and the bellcote
+/// ([`RUIN_GRIPS`]). The gable's blocks are its two raked halves, their tops the coping's top, and
+/// the bellcote between them, over the window.
+const RUIN: [Block; 21] = [
+    raked("gable", -3.6, -0.75, GABLE_RIDGE, GABLE_RAKE),
+    raked("bellcote", -0.75, 0.0, BELLCOTE_RIDGE, BELLCOTE_RAKE),
+    raked("bellcote", 0.0, 0.75, BELLCOTE_RIDGE, BELLCOTE_RAKE),
+    raked("gable", 0.75, 3.6, GABLE_RIDGE, GABLE_RAKE),
     block("buttress", -3.1, 6.15, 0.5, 0.45, None),
     block("buttress", 3.1, 6.15, 0.5, 0.45, None),
     // The east wall (−x, east once turned), stepping down from the gable to the rear.
@@ -276,6 +314,45 @@ const RUIN: [Block; 18] = [
     Block { center: Vec2::new(0.4, -6.6), half: Vec2::new(0.55, 0.45), yaw: -0.3, top: Some(0.4), rise: 0.0, part: "fallen" },
 ];
 
+/// The grips up the gable's outer face, from the lancet's sill to the bellcote's, each within a
+/// climb (1 m) or a climb leap (1.8 m) of the one below. The sill stands 0.12 m proud of the face,
+/// the corbelled stones above it 0.15 m, and the bell's sill 0.16 m proud of the bellcote, which
+/// is set back 0.08 m.
+const RUIN_GRIPS: [Grip; 7] = [
+    grip("lancet sill", -0.75, 0.75, 2.6, 0.12),
+    grip("jamb stone", -0.95, -0.57, 3.55, 0.15),
+    grip("jamb stone", -0.95, -0.57, 4.45, 0.15),
+    grip("label stop", -0.95, -0.57, 5.3, 0.15),
+    grip("keystone", -0.25, 0.25, 6.75, 0.15),
+    grip("oculus sill", -0.45, 0.45, 7.2, 0.15),
+    grip("bell sill", -0.3, 0.3, 8.95, 0.08),
+];
+
+/// A grip on the gable's outer face from x0 to x1, `y` up and standing `proud` of the face.
+const fn grip(part: &'static str, x0: f32, x1: f32, y: f32, proud: f32) -> Grip {
+    Grip { a: Vec3::new(x0, y, GABLE_FACE + proud), b: Vec3::new(x1, y, GABLE_FACE + proud), out: Vec2::new(0.0, 1.0), part }
+}
+
+/// The gable wall runs along x at z = 5.225, 0.95 m thick: its outer face, toward the village.
+const GABLE_Z: f32 = 5.225;
+const GABLE_FACE: f32 = GABLE_Z + 0.475;
+/// The gable's coping: the top of its stones over the middle (were the bellcote not there), and
+/// how much it rises a metre toward the middle (3 m up over 3.6 m, from the eaves at 6 m to the
+/// apex at 9 m, the coping 0.276 m above the masonry).
+const GABLE_RIDGE: f32 = 9.276;
+const GABLE_RAKE: f32 = 3.0 / 3.6;
+/// The bellcote's own small coping, from its eaves 0.75 m either side of the apex up to its peak.
+const BELLCOTE_RIDGE: f32 = 10.796;
+const BELLCOTE_RAKE: f32 = 0.65 / 0.75;
+
+/// A stretch of the gable from x0 to x1 whose top is a coping rising `rake` a metre toward x = 0,
+/// where it would reach `ridge`.
+const fn raked(part: &'static str, x0: f32, x1: f32, ridge: f32, rake: f32) -> Block {
+    let x = (x0 + x1) / 2.0;
+    let (away, rise) = if x < 0.0 { (-x, rake) } else { (x, -rake) };
+    Block { center: Vec2::new(x, GABLE_Z), half: Vec2::new((x1 - x0) / 2.0, 0.475), yaw: 0.0, top: Some(ridge - away * rake), rise, part }
+}
+
 const fn block(part: &'static str, x: f32, z: f32, hx: f32, hz: f32, top: Option<f32>) -> Block {
     Block { center: Vec2::new(x, z), half: Vec2::new(hx, hz), yaw: 0.0, top, rise: 0.0, part }
 }
@@ -287,6 +364,7 @@ pub(crate) fn ruin(ground: impl Fn(f32, f32) -> f32) -> Masonry {
         origin: Vec3::new(RUIN_AT.x, ground(RUIN_AT.x, RUIN_AT.y), RUIN_AT.y),
         yaw: RUIN_YAW,
         blocks: RUIN.to_vec(),
+        grips: RUIN_GRIPS.to_vec(),
         line: Vec::new(),
     }
 }
@@ -354,10 +432,9 @@ mod tests {
     }
 
     #[test]
-    fn the_ruin_climbs_in_steps_to_a_lookout_under_a_gable_too_tall_to_climb() {
+    fn the_ruin_climbs_in_steps_to_a_lookout_and_on_up_its_gable() {
         let v = Valley::new();
         let ruin = v.masonry.iter().find(|m| m.prop == "ruin.hall").expect("the ruin");
-        assert!(ruin.blocks.iter().any(|b| b.part == "gable" && b.top.is_none()), "the gable blocks");
         // The east wall, from the rear to the gable: each step a climb from the one before.
         let mut steps: Vec<_> = ruin.blocks.iter().filter(|b| b.part == "east wall").collect();
         steps.sort_by(|a, b| a.center.y.total_cmp(&b.center.y));
@@ -369,12 +446,52 @@ mod tests {
             from = top;
         }
         assert!(from > 4.0, "the lookout is {from} m up");
-        // Nothing within reach of the lookout stands taller, so it's the top.
+        // Over the lookout, the gable's coping is too tall to climb but in reach of a jump (a
+        // mantle reaches 2.2 m above the feet at the top of a 1.1 m jump).
         let lookout = ruin.blocks.iter().find(|b| b.top == Some(from)).unwrap();
-        for b in &ruin.blocks {
-            if let Some(top) = b.top {
-                assert!(top <= from + 1e-3 || (b.center - lookout.center).length() > 3.0, "{} rises past the lookout", b.part);
+        let top = |b: &Block, x: f32| b.top.unwrap() + b.rise * (x - b.center.x);
+        let gable = ruin.blocks.iter().find(|b| b.part == "gable" && b.center.x < 0.0).unwrap();
+        let over = top(gable, lookout.center.x) - from;
+        assert!(over > CLIMB && over < 3.2, "the coping is {over} m over the lookout");
+        // It rises to the bellcote, whose top is the highest point of the ruin.
+        let halves: Vec<_> = ruin.blocks.iter().filter(|b| b.part == "gable").collect();
+        assert_eq!(halves.len(), 2);
+        let peak = ruin.blocks.iter().filter(|b| b.part == "bellcote").map(|b| top(b, 0.0)).fold(f32::MIN, f32::max);
+        for b in ruin.blocks.iter().filter(|b| b.part != "bellcote") {
+            for x in [b.center.x - b.half.x, b.center.x + b.half.x] {
+                assert!(b.top.is_none_or(|_| top(b, x) < peak), "{} stands above the bellcote", b.part);
             }
         }
+        // Where the coping meets the bellcote, the gable and the bellcote's tops are continuous
+        // with their neighbours' across the apex.
+        for g in &halves {
+            let inner = if g.center.x < 0.0 { g.center.x + g.half.x } else { g.center.x - g.half.x };
+            assert!((top(g, inner) - (9.276 - 0.75 * 3.0 / 3.6)).abs() < 1e-3);
+        }
     }
+
+    #[test]
+    fn a_line_of_grips_climbs_the_gables_face_each_in_reach_of_the_last() {
+        let v = Valley::new();
+        let ruin = v.masonry.iter().find(|m| m.prop == "ruin.hall").expect("the ruin");
+        let face = 5.225 + 0.475;
+        for g in &ruin.grips {
+            // Proud of the face, so a hand can close on it, and level along it.
+            assert!(g.a.z - face >= 0.05 && g.a.z == g.b.z && g.a.y == g.b.y, "{} isn't proud of the face", g.part);
+            assert!(g.out == Vec2::Y && (g.b.x - g.a.x) > 0.35, "{} faces the wrong way or is too short", g.part);
+        }
+        // The first is caught in a jump from the ground (the hands reach 2.1 m above the feet, and
+        // a jump 1.1 m), and each after it is a climb (1 m) or a climb leap (1.8 m) above the last.
+        assert!(ruin.grips[0].a.y <= 2.1 + 1.1, "the lowest grip is out of a jump's reach");
+        for w in ruin.grips.windows(2) {
+            let up = w[1].a.y - w[0].a.y;
+            assert!(up > 0.0 && up <= 1.8, "{} is {up} m above the grip below", w[1].part);
+        }
+        let prev = ruin.grips.last().unwrap().a.y;
+        assert_eq!(ruin.grips.first().unwrap().part, "lancet sill");
+        // The last is a climb leap below the bellcote's coping.
+        let coping = ruin.blocks.iter().filter(|b| b.part == "bellcote").map(|b| b.top.unwrap() + b.rise * -b.center.x).fold(f32::MIN, f32::max);
+        assert!(coping - 0.2 - prev <= 1.8, "the bellcote is {} m above the bell's sill", coping - prev);
+    }
+
 }

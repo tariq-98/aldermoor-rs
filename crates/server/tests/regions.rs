@@ -161,7 +161,7 @@ mod layers {
             assert_eq!(ground, 0, "only the town fills up");
             Sim::region(land.clone(), 100 + id as u64, id, west())
         });
-        Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: if wild { vec![0] } else { Vec::new() }, open })
+        Realm::layered(vec![a, b], Layering { cap: CAP, unlayered: if wild { vec![0] } else { Vec::new() }, open, reuse_after: server::regions::REUSE_AFTER })
     }
 
     #[test]
@@ -232,6 +232,49 @@ mod layers {
         assert!(realm.with_unit(last, |sim, id| sim.get::<sim::Transform>(id).unwrap().pos.z) > y + 3.0);
     }
 
+    /// A town layered at two players, with one living there, reusing closed layers' IDs after
+    /// `reuse_after` ticks.
+    fn crowded(reuse_after: u64) -> Realm {
+        let (a, b) = two_regions(31);
+        let land = brambleford_land();
+        let open = Box::new(move |_: u32, id: u32| Sim::region(land.clone(), 100 + id as u64, id, west()));
+        let mut realm = Realm::layered(vec![a, b], Layering { cap: 2, unlayered: Vec::new(), open, reuse_after });
+        realm.spawn_player("Resident", Vec2::new(-20.0, 0.0)).unwrap();
+        realm
+    }
+
+    /// Two players fill the town and open a layer, then leave, and the layer folds back. The
+    /// layer's region ID.
+    fn open_and_close(realm: &mut Realm) -> u32 {
+        let visitor = realm.spawn_player("Visitor", Vec2::new(-20.0, 2.0)).unwrap();
+        let id = realm.spawn_player("Passing", Vec2::new(-20.0, 4.0)).expect("a layer opens");
+        let layer = realm.region_of(id);
+        assert_ne!(layer, 0);
+        realm.with(0, move |sim| sim.export(visitor));
+        realm.with(layer, move |sim| sim.export(id));
+        run(realm, 1.0);
+        assert_eq!(realm.layers(0), vec![0], "the empty layer stayed open");
+        layer
+    }
+
+    #[test]
+    fn closed_layers_ids_come_back_into_use() {
+        // More layers over a life than there are region IDs (#274).
+        let mut realm = crowded(0);
+        let ids: std::collections::BTreeSet<u32> = (0..sim::region::REGIONS + 20).map(|_| open_and_close(&mut realm)).collect();
+        assert!(ids.len() < 4, "layers took {} IDs", ids.len());
+    }
+
+    #[test]
+    fn a_closed_layers_id_waits_before_it_comes_back() {
+        let mut realm = crowded(120);
+        let first = open_and_close(&mut realm);
+        // A second after: still too soon.
+        assert_ne!(open_and_close(&mut realm), first);
+        run(&mut realm, 2.0);
+        assert_eq!(open_and_close(&mut realm), first);
+    }
+
     #[test]
     fn a_full_wilderness_turns_players_back_at_its_border() {
         let mut realm = layered(true);
@@ -257,4 +300,59 @@ mod layers {
         run(&mut realm, 2.0);
         assert_eq!(realm.region_of(outside), 0);
     }
+}
+
+#[test]
+fn a_served_realm_follows_its_players_across_a_border() {
+    let (a, b) = two_regions(5);
+    let server = server::Server::start_realm(Realm::new(vec![a, b]));
+    let listener = server::net::listen(&server, "127.0.0.1:0").unwrap();
+    // The spawn point is east of the border; both players walk west across it.
+    let mut host = server::Host::join(server, "Walker");
+    let mut remote = server::net::Client::connect(listener.addr(), listener.certificate(), "Runner").unwrap();
+    let (first, _) = remote.next_view().unwrap();
+    assert!(first.unit(host.player).is_some_and(|u| u.name == "Walker"), "players at the spawn see each other");
+    let start = host.snapshot().unwrap();
+    assert!(start.unit(host.player).unwrap().position.x > BORDER);
+    let west = Command::Move { direction: -Vec2::X, walk: false, sprint: false, face_yaw: None };
+    host.send(west.clone());
+    remote.send(west).unwrap();
+    let mut last = first;
+    for _ in 0..60 {
+        last = remote.next_view().unwrap().0;
+    }
+    let here = host.snapshot().unwrap();
+    assert!(here.tick >= start.tick + 150, "the realm kept stepping: {} to {}", start.tick, here.tick);
+    let walker = here.unit(host.player).expect("the walker still sees itself");
+    assert!(walker.position.x < BORDER - HANDOFF, "the walker is at x {}", walker.position.x);
+    assert!(host.combat().unwrap().units.iter().any(|u| u.id == host.player));
+    let runner = last.unit(remote.player).expect("the runner still sees itself");
+    assert!(runner.position.x < BORDER - HANDOFF, "the runner is at x {}", runner.position.x);
+    assert!(last.unit(host.player).is_some(), "and still sees the walker beside it");
+    host.stop();
+}
+
+#[test]
+fn ghosts_bring_their_combat_detail_and_side_across() {
+    let (mut a, mut b) = two_regions(6);
+    let hero = a.spawn_hero("Hero", Specialty::Mage, 7, Vec2::new(BORDER - 1.0, 10.0), 0.0);
+    let e = a.entity(hero).unwrap();
+    let src = source(&a.world, e, None).unwrap();
+    assert!(auras::apply_key(&mut a.world, "revive_sickness", e, &src));
+    let skeleton = b.spawn_mob("skeleton", Vec2::new(BORDER + 1.0, 10.0)).unwrap();
+    let se = b.entity(skeleton).unwrap();
+    b.world.entity_mut(se).remove::<Brain>();
+    let mut realm = Realm::new(vec![a, b]);
+    run(&mut realm, 0.1);
+    // From the skeleton's side of the border, the hero is a ghost with its aura.
+    let seen = realm.combat_view(skeleton);
+    let ghost = seen.units.iter().find(|u| u.id == hero).expect("the hero's ghost is in the combat view");
+    assert!(ghost.auras.iter().any(|a| a.key == "revive_sickness"), "{:?}", ghost.auras);
+    assert!(seen.units.windows(2).all(|w| w[0].id < w[1].id), "combat units stay in ID order");
+    let hostile = |realm: &Realm| realm.snapshot(skeleton).units.iter().find(|u| u.id == hero).map(|u| u.hostile);
+    assert_eq!(hostile(&realm), Some(false));
+    // The hero turns on its own side (charmed, say): the ghost changes side with it.
+    realm.with(0, move |sim| sim.get_mut::<sim::Unit>(hero).unwrap().faction = sim::Faction::Hostile);
+    run(&mut realm, 0.1);
+    assert_eq!(hostile(&realm), Some(true), "the ghost kept its old side");
 }

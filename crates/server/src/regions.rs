@@ -14,7 +14,7 @@
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use protocol::{Command, Event, Snapshot, UnitId};
-use sim::region::{Bounds, GhostState, Request, UnitRecord, BLOCK, GHOST_BAND, HANDOFF};
+use sim::region::{Bounds, GhostState, Request, UnitRecord, BLOCK, GHOST_BAND, HANDOFF, REGIONS};
 use sim::Sim;
 use std::collections::{BTreeSet, HashMap};
 use std::thread::JoinHandle;
@@ -95,12 +95,19 @@ pub struct Layering {
     /// Makes a new layer of `ground` as region `id`, with its own monsters, the way the first
     /// copy was made (from [`Sim::region`] with that ID and the same bounds).
     pub open: Box<dyn FnMut(u32, u32) -> Sim + Send>,
+    /// Ticks a closed layer's region ID waits before a new layer may take it again (#274), and
+    /// with it the IDs of its block; [`REUSE_AFTER`] is a minute.
+    pub reuse_after: u64,
 }
+
+/// A minute: long after anyone's client has forgotten the units it saw with those IDs (ten
+/// seconds, `protocol::wire`), and after any blow in flight from them has landed.
+pub const REUSE_AFTER: u64 = 3600;
 
 impl Layering {
     /// No cap: every ground is one region.
     pub fn none() -> Layering {
-        Layering { cap: usize::MAX, unlayered: Vec::new(), open: Box::new(|_, _| unreachable!("a world without layers opened one")) }
+        Layering { cap: usize::MAX, unlayered: Vec::new(), open: Box::new(|_, _| unreachable!("a world without layers opened one")), reuse_after: REUSE_AFTER }
     }
 }
 
@@ -113,8 +120,11 @@ pub struct Realm {
     /// Each original ground and the regions near it, for the layers opened later.
     layout: Vec<(u32, Bounds)>,
     layering: Layering,
-    /// The next region ID a layer takes. IDs are never reused, so neither are unit IDs.
+    /// The next region ID never used yet.
     next_id: u32,
+    /// Region IDs of layers closed, oldest first, with the tick each closed: taken again once
+    /// `layering.reuse_after` has passed and no unit from their block is left anywhere (#274).
+    closed: std::collections::VecDeque<(u32, u64)>,
     tick: u64,
     /// Units living outside their own block's region, because they crossed.
     moved: HashMap<UnitId, u32>,
@@ -142,6 +152,7 @@ impl Realm {
             layout,
             layering,
             next_id,
+            closed: Default::default(),
             tick,
             moved: HashMap::new(),
             next: Vec::new(),
@@ -207,8 +218,8 @@ impl Realm {
         if self.layering.unlayered.contains(&ground) {
             return None;
         }
-        let id = self.next_id;
-        self.next_id += 1;
+        // Out of IDs, the ground is full for now, as if it were never layered.
+        let id = self.free_id()?;
         let mut sim = (self.layering.open)(ground, id);
         assert_eq!(sim.region_info().id, id, "a layer is made as the region it was asked for");
         sim.set_tick(self.tick);
@@ -217,6 +228,27 @@ impl Realm {
         let i = self.start(sim, ground, layer, players);
         self.regroup();
         Some(i)
+    }
+
+    /// A region ID for a new layer: a closed layer's whose block is empty everywhere, after it
+    /// has waited long enough, or else one never used. `None` when there are none.
+    fn free_id(&mut self) -> Option<u32> {
+        let ready = self.closed.iter().take_while(|&&(_, at)| self.tick - at >= self.layering.reuse_after).count();
+        let regions: Vec<u32> = self.workers.iter().map(|w| w.id).collect();
+        for n in 0..ready {
+            let id = self.closed[n].0;
+            if !regions.iter().any(|&r| self.with(r, move |sim| sim.holds_block(id))) {
+                self.closed.remove(n);
+                // Whatever's still noted about its old units is about nobody now.
+                self.moved.retain(|unit, _| unit / BLOCK != id);
+                return Some(id);
+            }
+        }
+        if self.next_id < REGIONS {
+            self.next_id += 1;
+            return Some(self.next_id - 1);
+        }
+        None
     }
 
     /// Every region sends its neighbours whole ghosts next tick, because who pairs with whom
@@ -280,6 +312,21 @@ impl Realm {
         let mut snapshot = self.with_unit(viewer, |sim, id| sim.snapshot(Some(id)));
         snapshot.events = self.index(self.region_of(viewer)).map(|i| self.events[i].clone()).unwrap_or_default();
         snapshot
+    }
+
+    /// Combat detail as `viewer` sees it, from the region it's in.
+    pub fn combat_view(&self, viewer: UnitId) -> protocol::CombatView {
+        self.with_unit(viewer, |sim, id| sim.combat_view(Some(id)))
+    }
+
+    /// The regions running now, layers included.
+    pub fn regions(&self) -> Vec<u32> {
+        self.workers.iter().map(|w| w.id).collect()
+    }
+
+    /// The tick every region has stepped to.
+    pub fn tick(&self) -> u64 {
+        self.tick
     }
 
     /// What happened in a region last tick.
@@ -408,6 +455,7 @@ impl Realm {
             self.next[p].arrivals.extend(records);
             self.next[p].arrivals.extend(pending.arrivals);
             self.moved.retain(|_, r| *r != gone);
+            self.closed.push_back((gone, self.tick));
             let mut w = self.workers.remove(l);
             self.next.remove(l);
             self.events.remove(l);

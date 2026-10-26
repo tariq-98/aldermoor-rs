@@ -814,6 +814,320 @@ def sheathe_pole(c):
     return dict(keys=keys, curves=SHEATHE_CURVES, events=[{"t": 0.48, "name": "stow"}])
 
 
+# Climbing (docs/MOVEMENT.md, "Climbing"; #245-#247). The sim hangs a body with its feet HANG_DROP
+# below the hold and its middle HANG_OUT out from the wall, facing it, so these clips put the hands
+# over an edge HANG_DROP up and HANG_OUT ahead of the root, and the feet on the wall below. Moves
+# onto, off and between holds follow the sim's own carries (sim::climbing::carry, and the climb's
+# up-then-over), so a hand on the edge stays on it while the body travels: each key is planned
+# against the edge, where it is in the world, and turned into the moving root's frame.
+
+HANG_DROP = 1.9     # sim::climbing::HANG_DROP
+HANG_OUT = 0.4      # the body's radius
+EDGE = Vector((0, -HANG_OUT, HANG_DROP))
+SHIMMY_SPEED = 1.2  # sim::climbing::SHIMMY_SPEED
+SHIMMY_STEP = 0.4   # seconds per step of each hand; the loop is one step
+DROP_IN = 0.4       # how far in from the edge a drop to hang is planned to start
+
+
+def ease(k):
+    return 1 - (1 - k) * (1 - k)
+
+
+def smooth(k):
+    k = min(max(k, 0.0), 1.0)
+    return k * k * (3 - 2 * k)
+
+
+def edge_grip(c, side, edge, x, lift=0.0):
+    """A hand over the edge at `edge` (the point on it in front of the root), `x` across: wrist
+    just back from the lip, fingers over it. `lift` raises the hand off the edge as it moves."""
+    sign = 1 if side == "l" else -1
+    wrist = Vector((x, edge.y + 0.07 + 0.08 * min(lift / 0.08, 1.0), edge.z - 0.03 + lift))
+    c.p.hand_dir(side, fingers=Vector((0.12 * sign, -0.75, -0.62)), palm=Vector((0.0, 0.3, -1.0)), wrist=wrist,
+                 elbow=(0.6 * sign, 0.45, -0.45))
+    c.p.fingers(side, curl=(1.0, 1.3, 0.9), thumb=(0.45, 0.55, 0.4))
+
+
+def place_hips(c, target, tilt=0.0, turn=0.0):
+    c.p.hips(offset=Vector(target) - c.p.head("pelvis"), tilt=tilt, turn=turn)
+
+
+def lean_to(c, shoulders):
+    """Bends the spine forward until the shoulders' middle is over `shoulders` (y, z), roughly."""
+    p = c.p
+    mid = (p.head("upperarm_l") + p.head("upperarm_r")) / 2
+    pel = p.head("pelvis")
+    want = math.atan2(-(shoulders[0] - pel.y), shoulders[1] - pel.z)
+    have = math.atan2(-(mid.y - pel.y), mid.z - pel.z)
+    p.spine(bend=want - have)
+
+
+def foot_on_wall(c, side, ankle, knee_out=0.3, pitch=-1.05):
+    """A foot braced on the wall in front: ball on the wall, toes up, knee bent out a little."""
+    sign = 1 if side == "l" else -1
+    rot = Matrix.Rotation(pitch, 3, "X") @ c.p.rest[f"foot_{side}"].to_3x3()
+    c.p.leg(side, Vector(ankle), knee=(knee_out * sign, -1.0, 0.05), foot_rot=rot)
+
+
+def hang(c, edge=EDGE, hands=(0.22, -0.22), lifts=(0.0, 0.0), feet=((0.17, 0.42), (-0.15, 0.47)), hips=(0.0, 0.06, 0.95),
+         sway=0.0, at=0.0):
+    """The braced hang: hands over the edge, feet on the wall below, hips out from it. `feet` are
+    (across, height) from the root; `sway` shifts the hips toward the left hand (+) or the right."""
+    p = c.p
+    c.base("Idle_Loop", at)
+    hx, hy, hz = hips
+    place_hips(c, (hx + 0.08 * sway, hy, hz - 0.02 * abs(sway)), tilt=0.15, turn=-0.12 * sway)
+    p.spine(bend=0.45, lean=-0.12 * sway)
+    for side, x, lift, (fx, fz) in (("l", hands[0], lifts[0], feet[0]), ("r", hands[1], lifts[1], feet[1])):
+        edge_grip(c, side, edge, x, lift)
+        foot_on_wall(c, side, (fx, edge.y + 0.13, fz))
+    p.look(pitch=-0.25, yaw=0.15 * sway)
+
+
+@clip("Hang_Idle_Loop", 2.4, loop=True, tags=["locomotion", "climb"])
+def hang_idle_loop(c):
+    keys = []
+    for t, breath in ((0.0, 0.0), (0.6, 0.5), (1.2, 1.0), (1.8, 0.5), (2.4, 0.0)):
+        hang(c, hips=(0.0, 0.06 - 0.01 * breath, 0.95 - 0.015 * breath), at=t / 2.4)
+        keys.append((t, finish(c)))
+    return dict(keys=keys)
+
+
+def shimmy(c, t):
+    """Shimmying right (to -X) at the sim's speed: each step the leading hand reaches, the
+    trailing hand follows it, and the feet step after them. Hands and feet are planned along the
+    edge, where they grip, and turned into the root's frame as the root slides along."""
+    travel = SHIMMY_SPEED * SHIMMY_STEP
+
+    def limb(base, start, dur, lift):
+        k = smooth((t - start) / dur)
+        return base + travel * k - SHIMMY_SPEED * t, lift * math.sin(math.pi * k)
+
+    lead, lead_lift = limb(0.22, 0.0, 0.16, 0.06)
+    trail, trail_lift = limb(-0.22, 0.2, 0.16, 0.06)
+    lead_foot, lead_up = limb(0.15, 0.08, 0.18, 0.05)
+    trail_foot, trail_up = limb(-0.15, 0.26, 0.14, 0.05)
+    sway = -math.sin(2 * math.pi * t / SHIMMY_STEP) * 0.6
+    # Along the edge to the right is -X in the clip.
+    hang(c, hands=(-trail, -lead), lifts=(trail_lift, lead_lift),
+         feet=((-trail_foot, 0.45 + trail_up), (-lead_foot, 0.47 + lead_up)), sway=sway)
+
+
+@clip("Hang_Shimmy_R_Loop", SHIMMY_STEP, loop=True, tags=["locomotion", "climb"])
+def hang_shimmy_r(c):
+    keys = []
+    for t in (0.0, 0.08, 0.16, 0.24, 0.32, SHIMMY_STEP):
+        shimmy(c, t)
+        keys.append((t, finish(c)))
+    return dict(keys=keys)
+
+
+def climb_up_root(k):
+    """Where the sim has carried the root, `k` through the climb from a hang onto the top: up
+    first (the whole HANG_DROP by 0.62), then in over the edge (HANG_OUT plus the 0.5 m in to
+    stand on the top)."""
+    return Vector((0, -(HANG_OUT + 0.5) * k * k, HANG_DROP * ease(min(1.6 * k, 1.0))))
+
+
+def climb_up(c, k):
+    p = c.p
+    e = EDGE - climb_up_root(k)
+    if k == 0.0:
+        hang(c)
+        return
+    if k >= 1.0:
+        stance(c)
+        return
+    c.base("Idle_Loop", 0.3 * k)
+    if k < 0.2:
+        # Pulling: chest up to the hands, elbows down by the ribs, feet driving on the wall.
+        place_hips(c, (0, -0.06, e.z - 0.62), tilt=0.1)
+        lean_to(c, (-0.2, e.z - 0.12))
+        for side, x in (("l", 0.2), ("r", -0.2)):
+            edge_grip(c, side, e, x)
+        foot_on_wall(c, "l", (0.15, e.y + 0.13, e.z - 1.05))
+        foot_on_wall(c, "r", (-0.15, e.y + 0.13, e.z - 0.8))
+        p.look(pitch=-0.15)
+    elif k < 0.38:
+        # Pressing down over the top, chest past the edge, the right knee coming up to it.
+        place_hips(c, (0, e.y + 0.25, e.z - 0.08), tilt=0.25)
+        lean_to(c, (e.y - 0.08, e.z + 0.36))
+        for side, x in (("l", 0.24), ("r", -0.24)):
+            sign = 1 if side == "l" else -1
+            p.hand_dir(side, fingers=Vector((0.15 * sign, -1.0, -0.15)), palm=-UP, wrist=Vector((x, e.y - 0.14, e.z + 0.05)),
+                       elbow=(0.6 * sign, 0.6, 0.3))
+            p.fingers(side, curl=(0.3, 0.4, 0.3), thumb=(0.2, 0.2, 0.1), spread=0.1)
+        p.leg("r", Vector((-0.14, e.y + 0.12, e.z - 0.22)), knee=(-0.2, -1.0, 0.8),
+              foot_rot=Matrix.Rotation(-0.6, 3, "X") @ p.rest["foot_r"].to_3x3())
+        foot_on_wall(c, "l", (0.15, e.y + 0.14, e.z - 0.85))
+        p.look(pitch=0.05)
+    else:
+        # The right foot on the top, rising over it; the left leg coming up behind.
+        s = (k - 0.38) / 0.62
+        place_hips(c, (0, e.y - 0.05 - 0.2 * s, e.z + 0.55 + 0.37 * s), tilt=0.3 - 0.3 * s)
+        lean_to(c, (e.y - 0.25 - 0.15 * s, e.z + 1.0 + 0.42 * s))
+        p.leg("r", Vector((-0.13, e.y - 0.2, e.z + 0.1)), knee=(-0.1, -1.0, 0.4), foot_rot=p.rest["foot_r"].to_3x3())
+        p.leg("l", Vector((0.13, e.y + 0.08 - 0.3 * s, e.z + 0.12 + 0.15 * (1 - s))), knee=(0.1, -1.0, 0.3),
+              foot_rot=p.rest["foot_l"].to_3x3())
+        for side in ("l", "r"):
+            sign = 1 if side == "l" else -1
+            p.arm_to(side, p.carry("pelvis", Vector((0.3 * sign, -0.12 - 0.1 * (1 - s), 0.95 + 0.12 * (1 - s)))),
+                     elbow=(0.3 * sign, 0.6, -0.6))
+            p.relaxed(side)
+        p.look(pitch=0.05)
+
+
+@clip("Hang_ClimbUp", 0.8, tags=["locomotion", "climb"])
+def hang_climb_up(c):
+    keys = []
+    for k in (0.0, 0.15, 0.3, 0.45, 0.6, 0.8, 1.0):
+        climb_up(c, k)
+        keys.append((0.8 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.24, "name": "push"}, {"t": 0.4, "name": "land"}])
+
+
+def drop_root(k):
+    """Where the sim has carried the root, `k` through lowering over an edge: back over the edge
+    first, then down, from DROP_IN in from it to the hang."""
+    return Vector((0, (DROP_IN + HANG_OUT) * ease(min(1.6 * k, 1.0)), -HANG_DROP * k * k))
+
+
+def drop(c, k):
+    """Planned against the edge (the top at z = 0, its lip DROP_IN behind the start)."""
+    p = c.p
+    root = drop_root(k)
+    lip = Vector((0, DROP_IN, 0))
+
+    def rel(v):
+        return Vector(v) - root
+
+    e = rel(lip)
+    if k == 0.0:
+        stance(c)
+        p.look(pitch=0.1)
+        return
+    if k >= 1.0:
+        hang(c)
+        return
+    c.base("Idle_Loop", 0.2)
+    if k < 0.3:
+        # Squatting at the edge, back to the drop, hands going down to it beside the feet.
+        place_hips(c, rel((0, DROP_IN - 0.18, 0.42)), tilt=0.6)
+        lean_to(c, rel((0, DROP_IN - 0.42, 0.88)).yz)
+        for side, x in (("l", 0.24), ("r", -0.24)):
+            sign = 1 if side == "l" else -1
+            p.hand_dir(side, fingers=Vector((0.1 * sign, 0.65, -0.75)), palm=Vector((0, 0.3, -1)), wrist=Vector((x, e.y - 0.1, e.z + 0.06)),
+                       elbow=(0.7 * sign, -0.3, 0.2))
+            p.fingers(side, curl=(1.0, 1.3, 0.9), thumb=(0.45, 0.55, 0.4))
+        for side, x in (("l", 0.16), ("r", -0.16)):
+            p.leg(side, rel((x, DROP_IN - 0.2, 0.1)), knee=(0.45 * (1 if side == "l" else -1), -1.0, 0.4),
+                  foot_rot=p.rest[f"foot_{side}"].to_3x3())
+        p.look(pitch=0.5)
+    else:
+        # Swinging down the wall, hands on the edge, feet finding the wall below.
+        s = smooth((k - 0.3) / 0.7)
+        pelvis = -0.25 - 0.7 * s
+        place_hips(c, rel((0, DROP_IN + 0.36 + 0.1 * (1 - s), pelvis)), tilt=0.15)
+        lean_to(c, rel((0, DROP_IN + 0.2, pelvis + 0.5 - 0.02 * s)).yz)
+        for side, x in (("l", 0.22), ("r", -0.22)):
+            edge_grip(c, side, e, x)
+        foot_on_wall(c, "l", rel((0.17, DROP_IN + 0.27, pelvis - 0.53 + 0.05 * (1 - s))))
+        foot_on_wall(c, "r", rel((-0.15, DROP_IN + 0.27, pelvis - 0.48 + 0.05 * (1 - s))))
+        p.look(pitch=0.35 * (1 - s) - 0.2 * s)
+
+
+@clip("Hang_Drop", 0.6, tags=["locomotion", "climb"])
+def hang_drop(c):
+    keys = []
+    for k in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        drop(c, k)
+        keys.append((0.6 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.15, "name": "hold"}])
+
+
+@clip("Hang_Catch", 0.2, tags=["locomotion", "climb"])
+def hang_catch(c):
+    """Caught in the air: arms straight up on the edge and the legs hanging, swinging in to the
+    braced hang."""
+    p = c.p
+    c.base("Jump_Loop", 0.5)
+    place_hips(c, (0, -0.25, 0.72), tilt=-0.05)
+    lean_to(c, (-0.3, 1.25))
+    for side, x in (("l", 0.24), ("r", -0.24)):
+        edge_grip(c, side, EDGE, x)
+    for side, x in (("l", 0.12), ("r", -0.12)):
+        p.leg(side, Vector((x, -0.12, 0.08)), knee=(0, -1, 0.1), foot_rot=Matrix.Rotation(0.5, 3, "X") @ p.rest[f"foot_{side}"].to_3x3())
+    p.look(pitch=-0.3)
+    keys = [(0.0, finish(c))]
+    hang(c)
+    keys.append((0.2, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.0, "name": "hold"}])
+
+
+def climb_between(c, k, rise):
+    """Hand over hand to a hold `rise` metres up (or down, if negative), on the sim's carry: up
+    before across when rising, across before down when dropping."""
+    p = c.p
+    up = rise > 0
+    y = ease(min(1.6 * k, 1.0)) if up else k * k
+    root = Vector((0, 0, rise * y))
+    old, new = EDGE - root, EDGE + Vector((0, 0, rise)) - root
+    # The body rises (or sinks) smoothly from hang to hang, whatever the root does.
+    body = Vector((0, 0, rise * smooth(k))) - root
+    lead, trail = ("r", "l") if up else ("l", "r")
+    lead_k = smooth(k / 0.5)                  # the leading hand moves first
+    trail_k = smooth((k - 0.45) / 0.5)
+    c.base("Idle_Loop", 0.25 * k)
+    place_hips(c, Vector((0, 0.06, 0.95)) + body, tilt=0.15)
+    p.spine(bend=0.45)
+    for side, kk in ((lead, lead_k), (trail, trail_k)):
+        x = 0.22 if side == "l" else -0.22
+        e = old.lerp(new, kk)
+        edge_grip(c, side, e, x, lift=0.08 * math.sin(math.pi * kk))
+    feet_k = smooth((k - (0.3 if up else 0.0)) / 0.6)
+    for side, x, z in (("l", 0.17, 0.42), ("r", -0.15, 0.47)):
+        foot_on_wall(c, side, Vector((x, EDGE.y + 0.13, z + rise * feet_k)) - root)
+    p.look(pitch=-0.25 - 0.15 * (1 if up else -1) * math.sin(math.pi * k))
+
+
+@clip("Hang_Climb_Up", 0.4, tags=["locomotion", "climb"])
+def hang_climb_up_hold(c):
+    keys = []
+    for k in (0.0, 0.25, 0.5, 0.75, 1.0):
+        climb_between(c, k, 0.8)
+        keys.append((0.4 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.2, "name": "hold"}])
+
+
+@clip("Hang_Climb_Down", 0.4, tags=["locomotion", "climb"])
+def hang_climb_down_hold(c):
+    keys = []
+    for k in (0.0, 0.25, 0.5, 0.75, 1.0):
+        climb_between(c, k, -0.8)
+        keys.append((0.4 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.2, "name": "hold"}])
+
+
+HOP = 0.7  # A hop to the next hold along: the gap (up to sim::climbing::HOLD_GAP) and the hands' spacing.
+
+
+@clip("Hang_Hop_R", 0.3, tags=["locomotion", "climb"])
+def hang_hop_r(c):
+    """Across a gap to the next hold on the right (-X): the leading hand flies over, the body
+    swings after it, and the trailing hand follows."""
+    keys = []
+    for k in (0.0, 0.3, 0.55, 0.8, 1.0):
+        root = Vector((-HOP * ease(k), 0, 0))
+        lead_k, trail_k = smooth(k / 0.55), smooth((k - 0.3) / 0.55)
+        lead = -0.22 - HOP * lead_k - root.x
+        trail = 0.22 - HOP * trail_k - root.x
+        hang(c, hands=(trail, lead), lifts=(0.1 * math.sin(math.pi * trail_k), 0.12 * math.sin(math.pi * lead_k)),
+             feet=((0.17 - HOP * smooth((k - 0.35) / 0.65) - root.x, 0.42), (-0.15 - HOP * smooth((k - 0.2) / 0.6) - root.x, 0.47)),
+             sway=-0.8 * math.sin(math.pi * k))
+        keys.append((0.3 * k, finish(c)))
+    return dict(keys=keys, events=[{"t": 0.16, "name": "hold"}])
+
+
 # Robes: the arms held a little out, so hands clear a skirt.
 
 @clip("Idle_Robe_Loop", 2.5, loop=True, tags=["idle"])
@@ -835,6 +1149,8 @@ MIRRORS = {
     "Sheathe_Hip_L": "Sheathe_Hip",
     "Draw_Bow": "Draw_Pole",
     "Sheathe_Bow": "Sheathe_Pole",
+    "Hang_Shimmy_L_Loop": "Hang_Shimmy_R_Loop",
+    "Hang_Hop_L": "Hang_Hop_R",
 }
 
 

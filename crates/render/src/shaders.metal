@@ -35,12 +35,14 @@ float shadow_visibility(float3 p,float depth,float nl,constant Frame& f,depth2d_
 // Explicit gradients keep mip selection valid when a negligible projection is skipped.
 struct TerrainSample {float3 colour;float3 perturbation;};
 TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float> normals,
-    float3 position,float3 dx,float3 dy,float3 weights,uint layer,float mip_bias) {
+    float3 position,float3 dx,float3 dy,float3 weights,float2 side_signs,uint layer,float mip_bias) {
     constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
     // Side projections stand upright: u runs along the face and v down it, so a layer's rows
     // lie level on a cliff (the limestone's bedding) and its columns hang plumb.
-    float2 uv[3]={float2(position.z,-position.y),position.xz,float2(position.x,-position.y)};
-    float2 gx[3]={float2(dx.z,-dx.y),dx.xz,float2(dx.x,-dx.y)},gy[3]={float2(dy.z,-dy.y),dy.xz,float2(dy.x,-dy.y)};
+    // Keep UVs, explicit mip gradients and tangent slopes in the same signed basis.
+    float2 uv[3]={float2(position.z*side_signs.x,-position.y),position.xz,float2(position.x*side_signs.y,-position.y)};
+    float2 gx[3]={float2(dx.z*side_signs.x,-dx.y),dx.xz,float2(dx.x*side_signs.y,-dx.y)};
+    float2 gy[3]={float2(dy.z*side_signs.x,-dy.y),dy.xz,float2(dy.x*side_signs.y,-dy.y)};
     TerrainSample result={float3(0),float3(0)};
     for(uint axis=0;axis<3;axis++) {
         if(weights[axis]<0.001)continue;
@@ -49,8 +51,8 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
         float3 nm=normals.sample(s,uv[axis],layer,grad).rgb*2.-1.;
         float2 slope=nm.xy/max(nm.z,0.1);
         // Green points towards the image top (-v), matching the supplied normal maps.
-        float3 perturb=axis==0?float3(0,slope.y,slope.x):
-            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x,slope.y,0));
+        float3 perturb=axis==0?float3(0,slope.y,slope.x*side_signs.x):
+            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x*side_signs.y,slope.y,0));
         result.perturbation+=perturb*weights[axis];
     }
     return result;
@@ -79,7 +81,8 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
             if(weights[layer]==0.)continue;
             TerrainSample sample=terrain_layer(terrain_colour,terrain_normal,
                 i.world*surfaces.scales[layer],world_dx*surfaces.scales[layer],world_dy*surfaces.scales[layer],
-                projections,layer,f.params.z);
+                // With v down, +u points right when cross(T_u,T_v) == -normal.
+                projections,float2(-sign(i.normal.x),sign(i.normal.z)),layer,f.params.z);
             albedo.rgb+=sample.colour*weights[layer];
             terrain_perturbation+=sample.perturbation*weights[layer];
             surface_roughness+=surfaces.roughness[layer]*weights[layer];
@@ -151,7 +154,20 @@ struct GuiVary{float4 position [[position]];float2 uv;float4 colour;};
 vertex GuiVary gui_vertex(uint id [[vertex_id]],device const GuiVertex* vertices [[buffer(0)]],constant float4& size [[buffer(1)]]){GuiVertex v=vertices[id];return {float4(v.position/size.xy*float2(2,-2)+float2(-1,1),0,1),v.uv,v.colour};}
 fragment float4 gui_fragment(GuiVary i [[stage_in]],texture2d<float> image [[texture(0)]]){constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);float4 c=i.colour*image.sample(s,i.uv);float3 rgb=c.a>0.?c.rgb/c.a:float3(0);rgb=select(rgb/12.92,pow((rgb+0.055)/1.055,float3(2.4)),rgb>0.04045);return float4(rgb*c.a,c.a);}
 
-fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer(1)]],constant Surfaces& surfaces [[buffer(3)]],texture2d<float> sky_map [[texture(11)]]){constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear);float4 point=f.inverse_vp*float4(i.uv*float2(2,-2)+float2(-1,1),1,1);float3 ray=normalize(point.xyz/point.w-f.eye.xyz);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);float4 previous=f.previous_vp*float4(ray,0);float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;return {float4(sky_map.sample(s,uv).rgb*f.sky.w,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};}
+fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer(1)]],constant Surfaces& surfaces [[buffer(3)]],texture2d<float> sky_map [[texture(11)]]){
+    constexpr sampler s(coord::normalized,s_address::repeat,t_address::clamp_to_edge,filter::linear,mip_filter::linear);
+    float4 point=f.inverse_vp*float4(i.uv*float2(2,-2)+float2(-1,1),1,1);
+    float3 ray=normalize(point.xyz/point.w-f.eye.xyz);
+    float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);
+    // Longitude is periodic: a quad crossing atan2's wrap spans a small arc, not a full map.
+    // Keep latitude's derivative unchanged and clamp its pole samples instead of wrapping.
+    float2 gx=dfdx(uv),gy=dfdy(uv);
+    gx.x-=round(gx.x);
+    gy.x-=round(gy.x);
+    float4 previous=f.previous_vp*float4(ray,0);
+    float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;
+    return {float4(sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*f.sky.w,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};
+}
 
 // Renderer-derived lighting data from the supplied sky; no authored texture or look values.
 fragment float4 prefilter_sky(Full i [[stage_in]],constant float& rough [[buffer(0)]],texture2d<float> sky [[texture(0)]]) {

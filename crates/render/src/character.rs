@@ -2,7 +2,7 @@
 use crate::model::*;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Quat, Vec3, Vec3Swizzles};
-use protocol::{Action, Look, Pose, UnitCombat, UnitState};
+use protocol::{Action, ForcedKind, Look, Pose, Traversal, UnitCombat, UnitState};
 use std::{collections::HashMap, sync::Arc};
 
 pub struct Part {
@@ -66,6 +66,11 @@ pub struct Character {
     idle: String,
     gear_scale: f32,
     last_pose: Pose,
+    /// How the body was getting about last frame, and the climbing move playing (#247), and
+    /// whether its last shimmy went right (a wrap round a corner carries on that way).
+    last_traversal: Traversal,
+    climb: Option<ClimbMove>,
+    shimmied_right: bool,
     attack: usize,
     transition: Option<(String, f32)>,
     last_drawn: bool,
@@ -94,6 +99,16 @@ pub struct Character {
 }
 /// What `set_lod` keeps of a LOD it swapped out: its parts, its clips and their binding.
 type Stashed = (Vec<Part>, Arc<Model>, Arc<ClipSet>);
+
+/// A climbing clip under way (#247): the sim's move onto, between or off holds that it plays,
+/// and how far into that move the renderer has got.
+struct ClimbMove {
+    clip: &'static str,
+    /// The move's start, in sim time: a new start is a new move.
+    start: f64,
+    time: f32,
+    duration: f32,
+}
 
 /// Which bones a clip drives. The upper body is `spine_01` and everything under it.
 #[derive(Clone, Copy, PartialEq)]
@@ -267,6 +282,9 @@ impl Character {
             idle: "Idle_Loop".into(),
             gear_scale: body.and_then(|b| b.gear_scale).unwrap_or(1.),
             last_pose: Pose::Idle,
+            last_traversal: Traversal::Ground,
+            climb: None,
+            shimmied_right: true,
             attack: 0,
             transition: None,
             last_drawn: look.drawn,
@@ -806,7 +824,7 @@ impl Character {
                 Pose::Idle => "idle",
                 Pose::Walk => "walk",
                 Pose::Run | Pose::Dodge => "run",
-                Pose::Jump | Pose::Fall => "jump",
+                Pose::Jump | Pose::Fall | Pose::Hang => "jump",
                 Pose::Attack | Pose::Cast => "attack",
                 Pose::Hit => "hit",
                 Pose::Dead => "death",
@@ -827,7 +845,8 @@ impl Character {
             .into(),
             Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()).into(),
             Pose::Jump => "Jump_Start".into(),
-            Pose::Fall => "Jump_Loop".into(),
+            // Hanging borrows the falling loop until the climbing clips land (#247).
+            Pose::Fall | Pose::Hang => "Jump_Loop".into(),
             Pose::Dodge => "Roll".into(),
             Pose::Attack | Pose::Cast => self
                 .main
@@ -844,6 +863,88 @@ impl Character {
                 .into(),
             Pose::Hit => "Hit_Chest".into(),
             Pose::Dead => "Death01".into(),
+        }
+    }
+    /// What a humanoid on a wall plays (#247; docs/CONTRACT.md, "Poses to animation"), with the
+    /// clip time and whether it loops: the clip for the sim's move onto, between or off holds,
+    /// timed so it ends as the move does, or else the hang, shimmying whichever way the body
+    /// slides along the wall. `None` off the wall.
+    fn climbing(&mut self, u: &UnitState, dt: f32) -> Option<(&'static str, f32, bool)> {
+        let (last, last_pose) = (self.last_traversal, self.last_pose);
+        self.last_traversal = u.traversal;
+        let (s, c) = u.yaw.sin_cos();
+        let right = Vec3::new(-c, 0., s);
+        match u.traversal {
+            Traversal::Hanging => {
+                self.climb = None;
+                let side = u.velocity.dot(right);
+                if side.abs() > 0.3 {
+                    self.shimmied_right = side > 0.;
+                }
+                let clip = if side > 0.3 {
+                    "Hang_Shimmy_R_Loop"
+                } else if side < -0.3 {
+                    "Hang_Shimmy_L_Loop"
+                } else {
+                    "Hang_Idle_Loop"
+                };
+                Some((clip, u.pose_time, true))
+            }
+            Traversal::Forced(f) => {
+                if self.climb.as_ref().is_none_or(|m| m.start != f.start) {
+                    // Which move this is, from how the body got here: a new move is decided
+                    // once, on its first frame.
+                    let from_hang = matches!(last, Traversal::Hanging)
+                        || matches!(last, Traversal::Forced(g) if matches!(g.kind, ForcedKind::Hold | ForcedKind::Corner));
+                    let d = f.to - f.from;
+                    let clip = match f.kind {
+                        ForcedKind::Climb if from_hang => "Hang_ClimbUp",
+                        // Up or down to the next hold, or across to one (a side eject's longer
+                        // hop until it has a clip of its own).
+                        ForcedKind::Hold if from_hang => {
+                            let across = d.dot(right);
+                            if d.y > 0.3 && d.y > across.abs() {
+                                "Hang_Climb_Up"
+                            } else if d.y < -0.3 && -d.y > across.abs() {
+                                "Hang_Climb_Down"
+                            } else if across > 0. {
+                                "Hang_Hop_R"
+                            } else {
+                                "Hang_Hop_L"
+                            }
+                        }
+                        ForcedKind::Corner if self.shimmied_right => "Hang_Hop_R",
+                        ForcedKind::Corner => "Hang_Hop_L",
+                        ForcedKind::Hold if matches!(last_pose, Pose::Jump | Pose::Fall) => {
+                            "Hang_Catch"
+                        }
+                        ForcedKind::Hold => "Hang_Drop",
+                        _ => {
+                            self.climb = None;
+                            return None;
+                        }
+                    };
+                    self.climb = Some(ClimbMove {
+                        clip,
+                        start: f.start,
+                        time: 0.,
+                        duration: f.duration.max(0.05),
+                    });
+                } else if let Some(m) = &mut self.climb {
+                    m.time += dt;
+                }
+                let m = self.climb.as_ref()?;
+                let length = self
+                    .clips
+                    .clips
+                    .get(m.clip)
+                    .map_or(m.duration, |a| a.duration);
+                Some((m.clip, (m.time / m.duration).min(1.) * length, false))
+            }
+            _ => {
+                self.climb = None;
+                None
+            }
         }
     }
     /// The locomotion pose the legs keep while a humanoid attacks or casts on the move, by the
@@ -1022,7 +1123,15 @@ impl Character {
                 self.transition = None;
             }
         }
-        let name = self.clip_for(u);
+        let climbing = if self.humanoid {
+            self.climbing(u, dt)
+        } else {
+            None
+        };
+        let name = match climbing {
+            Some((clip, _, _)) => clip.to_owned(),
+            None => self.clip_for(u),
+        };
         let speed = u.velocity.xz().length();
         let moving = self.moving_legs(u);
         let legs = moving.map(|pose| locomotion_clip(pose, speed));
@@ -1104,6 +1213,8 @@ impl Character {
                 };
             }
         }
+        let (clip_time, looping) =
+            climbing.map_or((clip_time, looping), |(_, time, looping)| (time, looping));
         self.apply_clip(&name, clip_time, looping, Bones::All);
         if let Some(legs) = legs {
             self.walk_under(legs);
@@ -1461,6 +1572,7 @@ mod combat_tests {
             pose: Pose::Run,
             pose_time: 0.2,
             traversal: Default::default(),
+            aim_pitch: 0,
             health: 100.,
             max_health: 100.,
             hostile: false,
@@ -1576,6 +1688,7 @@ mod combat_tests {
             pose: Pose::Attack,
             pose_time: 0.,
             traversal: Default::default(),
+            aim_pitch: 0,
             health: 100.,
             max_health: 100.,
             hostile: false,
@@ -1646,6 +1759,7 @@ mod combat_tests {
             pose: if speed > 3.2 { Pose::Run } else { Pose::Idle },
             pose_time: 0.,
             traversal: Default::default(),
+            aim_pitch: 0,
             health: 100.,
             max_health: 100.,
             hostile: false,

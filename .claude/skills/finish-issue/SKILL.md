@@ -38,10 +38,16 @@ Never leave a claimed issue silent. Pick the case that fits.
    then `merge_pull_request` with `merge_method: squash`; gh: `gh pr ready <pr>` then
    `gh pr merge <pr> --squash --delete-branch`). Merging closes the issue. If any item fails, leave
    the PR open and comment exactly what's missing.
-8. **Clean up after the merge.** Run `cargo clean` in your checkout (or delete its `target/`), and
-   any extra worktrees you made for this issue. Keep the checkout itself and reuse it for your next
-   issue; one checkout per agent, never a `CARGO_TARGET_DIR` shared between agents (cargo's lock
-   would make their builds wait on each other).
+8. **Clean up after the merge.** Delete everything the issue made as soon as it's merged:
+   - the checkout's `target/` (or `cargo clean`);
+   - any worktree or clone you made for this issue (`git worktree remove <path>`; a checkout you
+     reuse for your next issue can stay, minus its `target/`);
+   - its captures and other scratch files. Keep those in a temp folder (your scratchpad or
+     `$TMPDIR`) from the start, never in the repo or `~/code`.
+
+   Never a `CARGO_TARGET_DIR` shared between agents (cargo's lock would make their builds wait on
+   each other). On the Mac a launchd job also deletes `target/` folders idle for 2 hours when the
+   disk runs low, but don't rely on it.
 
 ## Stopping before it's done: release
 

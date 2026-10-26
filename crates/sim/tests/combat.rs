@@ -2,7 +2,7 @@
 //! warned blows, guards and parries, blows from behind, being downed, help, summons, combos,
 //! and what all of it looks like from outside.
 
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::{Vec2, Vec3};
 use protocol::{Avoid, Command, Event, HitWeight, ResourceKind, Shape};
@@ -1256,4 +1256,20 @@ fn hit_directions_are_256ths_of_a_turn_from_south() {
     assert_eq!(quantise_yaw(PI), 128);
     assert_eq!(quantise_yaw(-PI / 2.0), 192);
     assert_eq!(quantise_yaw(-0.001), 0);
+}
+
+#[test]
+fn masonry_too_tall_to_climb_blocks_sight_and_low_walls_do_not() {
+    // #311: a goblin archer north of the ruined hall's gable, a hero inside the hall behind it.
+    let mut f = Fight::new();
+    let archer = f.dummy("goblin_archer", Vec2::new(-18.0, 38.5), 0.0);
+    let hero = f.hero(Specialty::Warrior, 1, Vec2::new(-18.0, 44.5), PI);
+    f.step();
+    assert!(!f.force(archer, "goblin_shot", Some(hero)), "shot through the gable");
+    // Across a field wall, about a metre high, the same shot goes off.
+    let mut f = Fight::new();
+    let archer = f.dummy("goblin_archer", Vec2::new(5.0, 8.0), FRAC_PI_2);
+    let hero = f.hero(Specialty::Warrior, 1, Vec2::new(11.0, 8.0), -FRAC_PI_2);
+    f.step();
+    assert!(f.force(archer, "goblin_shot", Some(hero)), "a field wall hid the hero");
 }
