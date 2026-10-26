@@ -3,9 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{
-        Bounds, Frustum, ShadowCasterVolume, stable_cascades, terrain_lod, terrain_shadow_lod,
-    },
+    visibility::{Bounds, Frustum, ShadowCasterVolume, stable_cascades, terrain_lod},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -1876,10 +1874,12 @@ impl Renderer {
             let p = group[0];
             let d = &draws[p.draw];
             let g = &self.meshes[&(d.model.id, d.primitive)];
+            // Shadows use the visible terrain's own detail: a coarser caster under a finer
+            // surface shadowed that surface in chunk-shaped patches (Mac check on #329).
             let level = if g.terrain_indices.is_empty() {
                 0
             } else {
-                cascade.map_or(p.terrain_lod, |c| terrain_shadow_lod(p.terrain_lod, c))
+                p.terrain_lod
             };
             let (indices, index_count) = g.indices_at(level);
             let m = &g.material;

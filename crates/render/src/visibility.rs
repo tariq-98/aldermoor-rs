@@ -143,11 +143,6 @@ pub(crate) fn terrain_lod(bounds: Bounds, eye: Vec3, previous: Option<usize>) ->
     }
 }
 
-/// Near matches the scene, mid is at least half detail, far is quarter detail.
-pub(crate) fn terrain_shadow_lod(scene: usize, cascade: usize) -> usize {
-    scene.max(cascade)
-}
-
 pub fn stable_cascades(
     eye: Vec3,
     target: Vec3,
@@ -221,15 +216,6 @@ mod tests {
         assert_eq!(select(57., Some(1)), 0);
         assert_eq!(select(300., Some(0)), 2); // camera teleport
         assert_eq!(select(0., Some(2)), 0);
-        for scene in 0..=2 {
-            for cascade in 0..3 {
-                let shadow = terrain_shadow_lod(scene, cascade);
-                assert!(shadow >= scene && shadow <= 2);
-                if cascade == 2 {
-                    assert_eq!(shadow, 2);
-                }
-            }
-        }
     }
 
     #[test]
