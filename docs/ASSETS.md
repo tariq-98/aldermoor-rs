@@ -249,6 +249,13 @@ later key wins. `assets::curve` implements this, and the workshop's `perform.js`
 | `reach` | The hand taking or stowing an item is pulled onto it where it rides |
 | `string` | The drawing hand holds the bowstring |
 | `arrow` | A nocked arrow shows |
+| `travel` | Not a weight: the share of a traversal move's path (a roll, a leap, a charge, a climb) covered by then, rising from 0 to 1. The game plays the clip by how far the body has come, so it reaches the last key as the move ends, and what follows plays after the move (CONTRACT.md, "Poses to animation") |
+
+The vendor's traversal clips have `travel` curves measured from their poses, set in
+`build_clips.py`'s `VENDOR_CURVES`: `Roll` dives at 0.1 s, its hands touch down at 0.43 (half the
+path) and its feet plant at 0.87; `Sword_Dash` and `Shield_Dash` lunge from 0.03 to 0.25 and 0.27;
+`ClimbUp_1m` and `NinjaJump_Start` travel throughout. The asset check refuses a `travel` curve that
+doesn't rise from 0 to 1.
 
 **Events** mark moments: `grab` (the item moves to the hand), `stow` (it moves back to where it
 rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands), `cast` (a

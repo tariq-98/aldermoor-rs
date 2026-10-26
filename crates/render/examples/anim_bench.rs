@@ -10,7 +10,10 @@
 //! it (#212), as if following someone about.
 use anim::Tier;
 use glam::Vec3;
-use protocol::{Action, HitWeight, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
+use protocol::{
+    Action, ForcedKind, ForcedMove, HitWeight, Look, Pose, ResourceKind, Traversal, UnitCombat,
+    UnitKind, UnitState,
+};
 use render::character::{Character, Ground};
 use render::model::ModelCache;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -85,6 +88,13 @@ fn look(i: usize) -> Look {
     }
 }
 
+/// The "climb" case's ledges (#213): each 1.2 m higher than the last, the first one's face 0.1 m
+/// ahead of where a body starts (where the sim starts a climb), and each as far on from the last
+/// as a climb over it (0.85 m) and 0.4 s running at 6 m/s take the body.
+const LEDGE: f32 = 1.2;
+const FACE: f32 = 0.1;
+const CLIMB_EVERY: f32 = 0.85 + 0.4 * 6.;
+
 fn unit(id: u32, look: Look, pose: Pose, speed: f32) -> UnitState {
     UnitState {
         id,
@@ -143,6 +153,9 @@ fn main() -> anyhow::Result<()> {
     // and "jump" runs and jumps every second, the legs reaching for the ground on the way down
     // and the pelvis dipping on landing. "run + hits" runs taking a blow every half second (#218),
     // from all round and light, heavy and big in turn, so the body is flinching most of the time.
+    // "run + rolls" runs and rolls to one side and then the other every second, and "climb" climbs
+    // a ledge every second and runs on over its top to the next (#213), so both are carried
+    // through moves about half the time, then recover from them; "swim" swims ahead.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
         ("turn", Pose::Idle, 0., Action::None),
@@ -155,6 +168,9 @@ fn main() -> anyhow::Result<()> {
         ("circle", Pose::Run, 6., Action::None),
         ("jump", Pose::Run, 6., Action::None),
         ("run + hits", Pose::Run, 6., Action::None),
+        ("run + rolls", Pose::Run, 6., Action::None),
+        ("climb", Pose::Run, 6., Action::None),
+        ("swim", Pose::Run, 2.7, Action::None),
     ] {
         if only.as_ref().is_some_and(|o| o != label) {
             continue;
@@ -163,11 +179,6 @@ fn main() -> anyhow::Result<()> {
             let mut characters = (0..count)
                 .map(|i| Character::load_lod(&cat, &mut cache, &look(i), lod))
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            for c in &mut characters {
-                c.set_tier(tier);
-                c.set_ground(Arc::clone(&ground));
-                c.foot_placement = feet;
-            }
             // Side by side on the slopes west of the village, going north over the terraces.
             let mut units: Vec<_> = (0..count)
                 .map(|i| {
@@ -177,6 +188,9 @@ fn main() -> anyhow::Result<()> {
                         0.,
                         -70. - 3. * (i / 20) as f32,
                     );
+                    if label == "swim" {
+                        u.traversal = Traversal::Swimming;
+                    }
                     u
                 })
                 .collect();
@@ -185,6 +199,27 @@ fn main() -> anyhow::Result<()> {
                     u.velocity = Vec3::new(speed, 0., 0.);
                 }
             }
+            // Climbing, each goes up a flight of ledges: one every `CLIMB_EVERY` from just ahead
+            // of where it starts, each `LEDGE` higher than the last.
+            let grounds: Vec<Ground> = (units.iter())
+                .map(|u| match label {
+                    "climb" => {
+                        let (valley, start) = (Arc::clone(&valley), u.position.z + FACE);
+                        Arc::new(move |x: f32, z: f32| {
+                            let ledges = ((z - start) / CLIMB_EVERY).floor() + 1.;
+                            valley.ground(x, z) + LEDGE * ledges.max(0.)
+                        }) as Ground
+                    }
+                    _ => Arc::clone(&ground),
+                })
+                .collect();
+            for ((c, u), ground) in characters.iter_mut().zip(&mut units).zip(&grounds) {
+                c.set_tier(tier);
+                c.set_ground(Arc::clone(ground));
+                c.foot_placement = feet;
+                u.position.y = ground(u.position.x, u.position.z);
+            }
+            let mut moves: Vec<Option<ForcedMove>> = vec![None; count];
             let fight = |id: u32, t: f32| UnitCombat {
                 id,
                 action,
@@ -204,7 +239,8 @@ fn main() -> anyhow::Result<()> {
                 let t = frame as f32 / 60.;
                 let before = ALLOCATIONS.load(Relaxed);
                 let started = Instant::now();
-                for (c, u) in characters.iter_mut().zip(&mut units) {
+                let each = characters.iter_mut().zip(&mut units).zip(&mut moves);
+                for (((c, u), m), under) in each.zip(&grounds) {
                     if label == "start-stop" {
                         let running = (t / 0.5) as usize % 2 == 1;
                         u.pose = if running { Pose::Run } else { Pose::Idle };
@@ -232,11 +268,8 @@ fn main() -> anyhow::Result<()> {
                         }
                         u.pose = if cycle < 0.25 { Pose::Hit } else { Pose::Run };
                     }
-                    u.pose_time = if matches!(label, "idle" | "turn" | "walk" | "run" | "strafe") {
-                        t
-                    } else {
-                        cycle
-                    };
+                    let steady = ["idle", "turn", "walk", "run", "strafe", "swim"];
+                    u.pose_time = if steady.contains(&label) { t } else { cycle };
                     // Up at 6.6 m/s under the sim's gravity, then running till the next second.
                     let (mut up, rise) = (0., 6.6 / anim::land::GRAVITY);
                     if label == "jump" {
@@ -253,9 +286,65 @@ fn main() -> anyhow::Result<()> {
                             0.
                         };
                     }
+                    // Carried through a move (#213) as the sim carries a body: a roll 5 m to one
+                    // side, fastest at the start with a 0.15 m hop, or a climb up the ledge just
+                    // ahead and over its top, rising before it goes over. Then running on.
+                    let mut carried = None;
+                    if matches!(label, "run + rolls" | "climb") {
+                        let climb = label == "climb";
+                        let (kind, duration) = match climb {
+                            true => (ForcedKind::Climb, 0.6),
+                            false => (ForcedKind::Roll, 0.45),
+                        };
+                        let at = t % 1.;
+                        if frame % 60 == 0 {
+                            let side = [1., -1.][(frame / 60 + u.id as usize) % 2];
+                            let to = match climb {
+                                true => u.position + Vec3::new(0., LEDGE, 0.85),
+                                false => u.position + Vec3::X * 5. * side,
+                            };
+                            *m = Some(ForcedMove {
+                                kind,
+                                from: u.position,
+                                to,
+                                start: t as f64,
+                                duration,
+                            });
+                        }
+                        match *m {
+                            Some(mv) if at < duration => {
+                                let k = at / duration;
+                                let there = if climb {
+                                    let up = 1. - (1. - (k * 1.6).min(1.)).powi(2);
+                                    mv.from.lerp(mv.to, k * k).with_y(mv.from.y + LEDGE * up)
+                                } else {
+                                    let eased = 1. - (1. - k) * (1. - k);
+                                    let hop = (k * std::f32::consts::PI).sin() * 0.15;
+                                    mv.from.lerp(mv.to, eased) + Vec3::Y * hop
+                                };
+                                u.velocity = (there - u.position) * 60.;
+                                u.pose = if climb { Pose::Jump } else { Pose::Dodge };
+                                (u.pose_time, u.traversal) = (at, Traversal::Forced(mv));
+                                carried = Some(there);
+                            }
+                            _ => {
+                                // The sim lets go where the move ends.
+                                if let Traversal::Forced(mv) = u.traversal {
+                                    u.position = mv.to;
+                                }
+                                (u.pose, u.pose_time) = (Pose::Run, at - duration);
+                                (u.velocity, u.traversal) = (Vec3::Z * speed, Traversal::Ground);
+                            }
+                        }
+                    }
                     let f = fight(u.id, if action == Action::None { t } else { cycle });
-                    u.position += u.velocity.with_y(0.) / 60.;
-                    u.position.y = valley.ground(u.position.x, u.position.z) + up;
+                    match carried {
+                        Some(there) => u.position = there,
+                        None => {
+                            u.position += u.velocity.with_y(0.) / 60.;
+                            u.position.y = under(u.position.x, u.position.z) + up;
+                        }
+                    }
                     let phase = t + u.id as f32;
                     let round = u.yaw + 1.2 * (0.7 * phase).sin();
                     c.look_at(Some(

@@ -77,6 +77,19 @@ VENDOR_EVENTS = {
     "OverhandThrow": [("cast", 0.37)],
 }
 
+# Where the vendor's traversal clips cover a move's path (#213), as `travel` curves: the share of
+# the path covered by each moment, so the game plays them by how far the body has come. Measured
+# from the clips' poses: the roll dives at 0.1 s, its hands touch down at 0.43 and its feet plant
+# at 0.87, before it stands; the dashes lunge from 0.03; the climb and the ninja jump travel
+# throughout. What follows the last key plays after the move, as its recovery.
+VENDOR_CURVES = {
+    "Roll": {"travel": [[0.1, 0], [0.43, 0.5], [0.87, 1]]},
+    "ClimbUp_1m": {"travel": [[0, 0], [0.667, 1]]},
+    "NinjaJump_Start": {"travel": [[0, 0], [0.967, 1]]},
+    "Shield_Dash": {"travel": [[0.03, 0], [0.27, 1]]},
+    "Sword_Dash": {"travel": [[0.03, 0], [0.25, 1]]},
+}
+
 # Single swings cut out of longer vendor clips: name: (source, start, end or None, events).
 # The heavy combo's last blow is a clean one-handed overhead on its own.
 CUTS = {
@@ -139,6 +152,8 @@ def vendor_library():
             "group": tags[0],
             "tags": tags,
         }
+        if action.name in VENDOR_CURVES:
+            entry["curves"] = VENDOR_CURVES[action.name]
         if action.name in VENDOR_EVENTS:
             entry["events"] = [{"t": t, "name": kind} for kind, t in VENDOR_EVENTS[action.name]]
         clips.append(entry)

@@ -128,7 +128,7 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 | Pose | Timing |
 |---|---|
 | Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed. Charging is Run |
-| Jump, Fall | Rising, then falling. A skill's leap or vault is Jump |
+| Jump, Fall | Rising, then falling. A skill's leap or vault is Jump, and so is a climb or a mantle: `traversal` says which |
 | Hang | Hanging from a hold by the hands: still, shimmying along it, carried onto it or round a corner (docs/MOVEMENT.md, "Climbing"). The body faces the wall with the hands on the hold and the feet 1.9 m below it. Climbing from a hang onto the top is Jump, as pulling up over a ledge is, and so is a wall run until it has a clip |
 | Dodge | A roll: 0.45 s, about 5 m |
 | Attack | Holds 0.5 s after a blow or a release. A heavy blow's pose starts with its 0.4 s wind-up and runs on unbroken through the blow (0.9 s in all): time the clip so its strike lands when the wind-up ends (the cast bar gives the wind-up). Every attack clip marks its strike with a `hit` event, and spells and throws their release with `cast`; combos have one `hit` per blow |
@@ -143,6 +143,15 @@ the action's clip plays from `spine_01` up. The upper body turns about the verti
 the clip's own hips faced it, until the chest is 60° round from the moving hips (or the clip's own
 twist, if more), so side-on stances still aim forward and whole-body pivots keep a believable spine.
 Kneeling (Revive), the downed and getting up stay whole-body. Beasts play actions on the whole body.
+
+While `traversal` is `Forced`, a humanoid's roll, leap, charge, climb, mantle or vault plays by how
+far the body has come along the move's path, not by the clock: each move's clip has a `travel`
+curve saying how much of the path each moment of it covers (docs/ASSETS.md), so it reaches the end
+of that stretch as the move ends, and the rest of it (standing up, a recovery) plays on after, by
+the clock. Rolls, climbs, mantles and vaults turn the body to face the way they go. Moves onto
+holds, and climbing up from a hang, play the climbing clips stretched to the move instead (#247).
+Swimming plays the swim loops, with the body raised 0.5 m to the surface. How: docs/ANIMATION.md,
+"Traversal".
 
 The combat view's `action` says which motion to play within the pose. Clips from `anims.glb`
 and the held item's `clips` (docs/ASSETS.md):
@@ -162,8 +171,8 @@ and the held item's `clips` (docs/ASSETS.md):
 | Channel | A staff's `channel` (`Staff_Channel_Loop`); otherwise `Spell_Simple_Idle_Loop` |
 | CastSelf | `Spell_Simple_Enter`, then `Spell_Simple_Exit` |
 | Kick | `Punch_Cross` |
-| Leap | A sword's or shield's `dash` (`Sword_Dash`, `Shield_Dash`); otherwise `NinjaJump_Start` |
-| Charge | The item's `dash`; otherwise `Sprint_Loop` |
+| Leap | A sword's or shield's `dash` (`Sword_Dash`, `Shield_Dash`); otherwise, or hopping back, `NinjaJump_Start` |
+| Charge | The item's `dash`; otherwise `Sprint_Loop`. Whatever the action, the main item's `dash` while a charge carries the body (the sword's lunge is a Thrust that charges), its lunge ending on arrival, where the blow lands |
 | Roar | `Spell_Simple_Enter` for now (a shout of its own is on the art list) |
 | Stagger | `Hit_Knockback`; `Idle_Shield_Break` if it was guarding a moment before (its guard broke) |
 | Downed | `Death01`, held at its end; `LayToIdle` when `Rallied` |
@@ -206,10 +215,11 @@ Humanoid clips by pose, from `anims.glb`:
 | Idle | `Idle_Loop`; with weapons drawn, the main-hand item's `clips.idle` (`Sword_Idle`, `Bow_Idle_Loop`, `Staff_Idle_Loop`, `Spear_Idle_Loop`, `GreatSword_Idle_Loop`); a piece with an `idle` (the robes' `Idle_Robe_Loop`) replaces `Idle_Loop` |
 | Walk | `Walk_Loop`; with weapons drawn, the item's idle on the upper body over it |
 | Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 7 m/s of ground speed (ignore the vertical part: a normal run is 6 m/s, and slopes add to the full speed), for swiftness and charges (the same layering when drawn) |
-| Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
+| Swimming (`traversal`) | `Swim_Idle_Loop` standing, `Swim_Fwd_Loop` moving, its strokes paced by the speed |
+| Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land`; climbing or mantling 0.4 m or higher, `ClimbUp_1m`, with the hands on the edge |
 | Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold mostly above or below: a climb or a climb leap) or `Hang_Hop_L` / `_R` (mostly across: a gap or a side eject). A `Corner` plays `Hang_Hop_L` / `_R`, the way the body last shimmied. Each one-off is stretched to the move's `duration` |
 | Jump, climbing from a hang | A `Climb` move that starts from `Hanging` plays `Hang_ClimbUp`, stretched to the move |
-| Dodge | `Roll` |
+| Dodge | `Roll`, by the ground it covers |
 | Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |
 | Cast | A staff's `clips.attacks` (`Staff_Cast`); otherwise `Spell_Simple_Shoot` |
 | Hit | `Hit_Chest` |

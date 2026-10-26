@@ -22,7 +22,7 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 - **Cliffs:** ground steeper than 2:1 (about 63°) is a wall. Walking into one either climbs it
   or slides along it.
   - A face that tops out within **1.5 m** of your feet (chest height) is climbed: a 0.6 s pull-up
-    onto the top, as a forced move (no skills meanwhile, pose `Jump` until climbing art exists).
+    onto the top, as a forced move (no skills meanwhile; pose `Jump`, which plays the climb).
   - A taller face stops you, unless you jump at it or run up it (a wall run, below). In a jump,
     a face that tops out within **2.2 m** of your feet at that moment is caught and pulled up
     onto in 0.5 s (a mantle, `ForcedKind::Mantle`), as long as you aren't yet falling faster than
@@ -179,5 +179,11 @@ or in a forced move (roll, leap, charge, climb, a move onto a hold or round a co
 knockback, with where and when it starts and ends), so animation can show it on other players
 and monsters too (CONTRACT.md).
 
-Not yet: free climbing anywhere (holds only, by design), mounts, clips for leaps, ejects, wall
-runs and corners, and swimming animations (walk and idle in water).
+Rolls, leaps, charges and climbs play their clips by how far the body has come through them, and
+swimmers swim (#213, ANIMATION.md, "Traversal"); hanging and the moves between holds play the
+climbing clips (#247). The climb's height comes in faster than its way across, so a climber's hands
+only grab the edge before the shoulders rise out of reach; a climb that rose more slowly, or mantle
+clips matched to this one (#108), would let them hang on.
+
+Not yet: free climbing anywhere (holds only, by design), mounts, and clips for leaps, ejects, wall
+runs and corners.

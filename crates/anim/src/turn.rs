@@ -9,7 +9,8 @@
 //! spine, then the neck and head). Past [`STEP_AT`], or held past [`HOLD_AT`] for [`HOLD`], the
 //! feet step round ([`Steps`]) while the body catches up, no faster than [`STEP_RATE`]. Moving or
 //! acting, the body follows on a critically damped spring, so its yaw and turning speed never
-//! jump.
+//! jump. Carried through a roll or a climb (#213), the body turns to face the way it goes almost
+//! at once, on a spring of [`CARRIED_HALF_LIFE`].
 use crate::locomotion::Spring;
 use glam::Vec3;
 use std::f32::consts::{LN_2, PI, TAU};
@@ -29,6 +30,9 @@ pub const FOLLOW_HALF_LIFE: f32 = 0.08;
 pub const STEP_HALF_LIFE: f32 = 0.15;
 /// The fastest the body turns while its feet step round, in radians a second (230°/s).
 pub const STEP_RATE: f32 = 4.;
+/// Half-life of the aim and the body turning to face a move they are carried through, in seconds:
+/// they are 85% of the way round within 0.1 s, however far.
+pub const CARRIED_HALF_LIFE: f32 = 0.025;
 /// The furthest the body falls behind the aim, in radians (270°): spun round faster than the feet
 /// can follow for long, it is dragged.
 const MAX_LAG: f32 = 4.7;
@@ -48,6 +52,9 @@ pub enum Stance {
     Standing,
     /// Moving, or busy with an action, which turns the whole body: the body follows on a spring.
     Moving,
+    /// Carried through a move it faces (a roll, a climb): the upper body and the body turn to
+    /// face it together, fast and with no limit on how fast.
+    Carried,
     /// Too far away to see the difference, or just appeared: the body faces the sim's yaw.
     Snap,
 }
@@ -89,6 +96,12 @@ impl Turn {
             }
         };
         self.goal += wrap(target - self.goal);
+        if stance == Stance::Carried {
+            self.aim.update(self.goal, CARRIED_HALF_LIFE, dt);
+            spring.update(self.aim.value, CARRIED_HALF_LIFE, dt);
+            (self.stepping, self.held) = (false, 0.);
+            return self.unwind();
+        }
         let was = self.aim.value;
         self.aim.update(self.goal, AIM_HALF_LIFE, dt);
         limit(&mut self.aim, was, AIM_RATE, dt);
@@ -124,7 +137,15 @@ impl Turn {
             self.stepping = off >= STEP_AT || self.held >= HOLD;
         }
         spring.value = aim + (spring.value - aim).clamp(-MAX_LAG, MAX_LAG);
-        // Whole turns off all three, to keep the numbers small.
+        self.unwind()
+    }
+
+    /// Takes whole turns off the body's yaw, the aim and the goal, to keep the numbers small, and
+    /// returns the body's yaw.
+    fn unwind(&mut self) -> f32 {
+        let Some(spring) = &mut self.yaw else {
+            return 0.;
+        };
         let turns = (spring.value / TAU).round() * TAU;
         spring.value -= turns;
         self.aim.value -= turns;
@@ -430,6 +451,34 @@ mod tests {
         stand(&mut turn, 0.2, |_| 1.);
         assert!((turn.update(2.5, Stance::Snap, DT) - 2.5).abs() < 1e-6);
         assert!(turn.offset().abs() < 1e-6);
+        assert!(!turn.stepping());
+    }
+
+    #[test]
+    fn carried_into_a_roll_the_body_faces_it_at_once_and_turns_back_after() {
+        // Strafing, facing 0: a roll backward, then the sim's yaw again.
+        let mut turn = standing_at(0.);
+        let mut yaws = vec![];
+        for _ in 0..27 {
+            yaws.push(turn.update(PI - 0.01, Stance::Carried, DT));
+        }
+        assert!(
+            degrees(yaws[5]) > 150.,
+            "{}° round after 0.1 s",
+            degrees(yaws[5])
+        );
+        assert!(yaws.windows(2).all(|w| w[1] >= w[0]), "{yaws:?}");
+        assert!(turn.offset().abs() < 0.01);
+        // Back to the facing on the moving springs: at no more than the aim's rate.
+        let back: Vec<_> = (0..40)
+            .map(|_| turn.update(0., Stance::Moving, DT))
+            .collect();
+        assert!(
+            degrees(back[10]) > 30.,
+            "{}° after 0.18 s",
+            degrees(back[10])
+        );
+        assert!(back.last().unwrap().abs() < 0.02);
         assert!(!turn.stepping());
     }
 

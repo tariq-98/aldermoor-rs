@@ -1,6 +1,7 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
 mod bag;
 mod combat;
+mod course;
 mod craft;
 mod crowd;
 mod effects;
@@ -68,6 +69,9 @@ struct Options {
     sequence_step: u64,
     /// Plays the scripted run in `gait.rs` instead of taking input, for animation captures.
     gait: bool,
+    /// Plays the scripted course in `course.rs` instead of taking input, for traversal captures
+    /// (#213).
+    traverse: bool,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -104,6 +108,9 @@ struct Options {
     /// Whether blows tip characters and hitstops hold their poses (#218), or the hit clip plays
     /// in full, to compare.
     flinch: bool,
+    /// Whether characters play rolls, leaps, charges and climbs by how far they've come and
+    /// swimmers swim (#213), or the clips go by the clock and swimmers run, to compare.
+    traversal: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -128,6 +135,7 @@ impl Options {
             sequence: None,
             sequence_step: 1,
             gait: false,
+            traverse: false,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -155,6 +163,7 @@ impl Options {
             foot_ik: true,
             lean: true,
             flinch: true,
+            traversal: true,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -254,6 +263,7 @@ impl Options {
                     o.reel_from = args.next().context("--reel-from needs seconds")?.parse()?
                 }
                 "--gait" => o.gait = true,
+                "--traverse" => o.traverse = true,
                 "--scheme" => {
                     o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
@@ -301,13 +311,20 @@ impl Options {
                         _ => anyhow::bail!("--flinch expects on or off"),
                     }
                 }
+                "--traversal" => {
+                    o.traversal = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--traversal expects on or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait --traverse\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--traversal on|off: off plays rolls, leaps, charges and climbs by the clock and swimmers as runners, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures; traverse rolls, climbs, swims, hangs from a wall and lunges over a course for traversal captures."
                     );
                     std::process::exit(0)
                 }
@@ -423,6 +440,10 @@ struct Game {
     /// Sim tick the `--gait` run started on, and the leg it is on.
     gait_tick: Option<u64>,
     gait_leg: Option<usize>,
+    /// The `--traverse` course, the sim tick it started on, and the step last logged.
+    course: course::Course,
+    course_tick: Option<u64>,
+    course_step: Option<usize>,
     perf: perf_overlay::Overlay,
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
@@ -548,6 +569,9 @@ impl Game {
             smoke_checks: [false; 4],
             gait_tick: None,
             gait_leg: None,
+            course: course::Course::default(),
+            course_tick: None,
+            course_step: None,
             hud_context: egui::Context::default(),
             hud_input: None,
             platform_output: None,
@@ -1254,6 +1278,35 @@ impl Game {
             self.last_move = Some(command);
         }
     }
+    /// Sends the `--traverse` course's commands for this frame (#213), and logs each step as it
+    /// starts so captures can be cut by frame.
+    fn traverse(&mut self) {
+        let start = *self.course_tick.get_or_insert(self.snaps.current.tick);
+        let now = self.snaps.current.tick.saturating_sub(start) as f32 / 60.;
+        let Some(me) = self.snaps.current.unit(self.host.player) else {
+            return;
+        };
+        let foes: Vec<_> = (self.snaps.current.units.iter())
+            .filter(|u| u.hostile && u.health > 0.)
+            .map(|u| (u.id, u.position))
+            .collect();
+        let commands = self.course.update(now, me.position, &foes);
+        if let Some((step, name)) = self.course.step()
+            && self.course_step != Some(step)
+        {
+            self.course_step = Some(step);
+            eprintln!("traverse: {name} from frame {}", self.frame);
+        }
+        for c in commands {
+            if let Command::Move { .. } = c {
+                if self.last_move.as_ref() == Some(&c) {
+                    continue;
+                }
+                self.last_move = Some(c.clone());
+            }
+            self.host.send(c);
+        }
+    }
     /// `--hit-churn` (#218): staged blows, every 0.75 s, each held as `Pose::Hit` for a quarter of
     /// a second, as the sim holds them. In the showcase the first character swings, and its blow
     /// lands a quarter of a second in, holding the swing for the hitstop; as it lands, each of the
@@ -1384,6 +1437,8 @@ impl Game {
             self.smoke()
         } else if self.options.gait {
             self.gait()
+        } else if self.options.traverse {
+            self.traverse()
         } else {
             self.controls(dt)
         }
@@ -1699,6 +1754,7 @@ impl Game {
             c.foot_placement = self.options.foot_ik;
             c.leaning = self.options.lean;
             c.flinching = self.options.flinch;
+            c.traversing = self.options.traversal;
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
             let tier = tiers.get(i).copied().unwrap_or_default();
             counts[tier as usize] += 1;
@@ -1736,12 +1792,13 @@ impl Game {
             .context("no local player in snapshot")?;
         self.frame += 1;
         // A smoke run also lasts until its schedule has played out, plus a second for the last
-        // events, so a short --frames or slow frames can't end it early; a gait run until its
-        // script has.
+        // events, so a short --frames or slow frames can't end it early; a gait run or a course
+        // until its script has.
         let done = self.options.frames.is_some_and(|n| self.frame >= n)
             && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.)
             && (!self.options.gait
-                || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none());
+                || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none())
+            && (!self.options.traverse || self.course.step().is_none());
         self.perf
             .animate(animation, self.frame > self.options.warmup && !done);
         let frame_file = self
@@ -2798,7 +2855,7 @@ fn main() -> Result<()> {
                 } else if now - deadline > period {
                     deadline = now;
                 }
-            } else if game.options.smoke || game.options.gait {
+            } else if game.options.smoke || game.options.gait || game.options.traverse {
                 std::thread::sleep(Duration::from_millis(16).saturating_sub(start.elapsed()));
             }
         }
