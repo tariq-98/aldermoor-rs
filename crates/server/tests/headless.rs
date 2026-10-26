@@ -3,9 +3,11 @@
 use glam::Vec2;
 use protocol::Command;
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command as Process, Stdio};
+use std::process::{Child, ChildStdout, Command as Process, Stdio};
 
-struct Running(Child);
+/// The server, and its output kept open while it runs: closing it would fail the server's next
+/// line ("failed printing to stdout").
+struct Running(Child, #[allow(dead_code)] BufReader<ChildStdout>);
 
 /// Starts the server binary on a free port with its certificate in a folder of its own, and
 /// returns it with its address and certificate.
@@ -30,7 +32,7 @@ fn start(name: &str, args: &[&str]) -> (Running, String, server::net::Certificat
         let mode = std::fs::metadata(cert.with_extension("key")).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "the key is readable by others: {mode:o}");
     }
-    (Running(child), addr, certificate)
+    (Running(child, out), addr, certificate)
 }
 
 impl Drop for Running {

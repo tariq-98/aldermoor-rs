@@ -44,7 +44,9 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Walls and ruins can be climbed too. A `world::Solid` with a `top` is ground, not an
     obstacle: its sides are faces like any cliff's, so one that tops out within 1.5 m is climbed
     and stood on, and a taller one stops you a body's width short of it, as a building's wall
-    does (#216; `world::Valley::off_faces`). Buildings and trees have no top and only block.
+    does (#216; `world::Valley::off_faces`). It stops rolls, leaps, charges, knockbacks and
+    blinks the same way, rather than carrying you over it (#311; `world::Valley::slide_below`).
+    Buildings and trees have no top and only block.
     A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
     a step at a time.
   - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
