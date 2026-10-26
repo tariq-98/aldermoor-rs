@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, stable_cascades},
+    visibility::{Bounds, Frustum, ShadowCasterVolume, stable_cascades},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -298,6 +298,7 @@ pub struct Renderer {
     opaque: Obj<dyn MTLRenderPipelineState>,
     blend: Obj<dyn MTLRenderPipelineState>,
     shadow_pipeline: Obj<dyn MTLRenderPipelineState>,
+    shadow_mask_pipeline: Obj<dyn MTLRenderPipelineState>,
     taa: Obj<dyn MTLRenderPipelineState>,
     composite: Obj<dyn MTLRenderPipelineState>,
     depth_state: Obj<dyn MTLDepthStencilState>,
@@ -563,7 +564,9 @@ impl Renderer {
             true,
             true,
         )?;
-        let shadow_pipeline = pipeline(
+        // Opaque casters need only depth. Keep discard confined to masked casters.
+        let shadow_pipeline = pipeline("shadow_vertex", None, 1, &[], true, false)?;
+        let shadow_mask_pipeline = pipeline(
             "shadow_vertex",
             Some("shadow_fragment"),
             1,
@@ -727,6 +730,7 @@ impl Renderer {
             opaque,
             blend,
             shadow_pipeline,
+            shadow_mask_pipeline,
             taa,
             composite,
             depth_state,
@@ -1209,7 +1213,6 @@ impl Renderer {
             SHADOW_SIZE as u32,
         );
         let view = Frustum::new(unjittered);
-        let shadow_views = cascades.map(Frustum::new);
         let time = self
             .scene_time
             .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
@@ -1248,6 +1251,16 @@ impl Renderer {
             splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
         }
         .with_height_fog(self.look.height_fog);
+        let shadow_views: [_; 3] = std::array::from_fn(|i| {
+            ShadowCasterVolume::new(
+                cascades[i],
+                unjittered,
+                camera.eye,
+                camera.target - camera.eye,
+                f.splits[i],
+                SHADOW_SIZE as u32,
+            )
+        });
         let effects = self.effects.take();
         let fx = self
             .fx_pass
@@ -1306,13 +1319,9 @@ impl Renderer {
                 bounds = bounds.padded(0.2 + self.look.wind_strength * 0.12);
             }
             let scene = view.intersects(bounds);
-            let swept = Bounds {
-                center: bounds.center - sun * 50.,
-                half: bounds.half + sun.abs() * 50.,
-            };
-            let shadows = shadow_views
-                .each_ref()
-                .map(|v| v.intersects(bounds) && view.intersects(swept));
+            let shadows = std::array::from_fn(|cascade| {
+                shadow_views[cascade].intersects(bounds, sun, cascade > 0)
+            });
             if !scene && !shadows.iter().any(|v| *v) {
                 culled += 1;
                 continue;
@@ -1446,7 +1455,6 @@ impl Renderer {
             let enc = cb
                 .renderCommandEncoderWithDescriptor(&pass)
                 .context("cascade encoder")?;
-            enc.setRenderPipelineState(&self.shadow_pipeline);
             enc.setDepthStencilState(Some(&self.depth_state));
             enc.setDepthBias_slopeScale_clamp(0.001, 1.25, 0.01);
             calls += self.encode(
@@ -1846,6 +1854,19 @@ impl Renderer {
             let blended = self.blended(d);
             if cascade.is_some() && (blended || m.name == "__water_placeholder") {
                 continue;
+            }
+            if cascade.is_some() {
+                // Every instance in a batch shares its material. Blended draws were
+                // excluded above, so this matches DrawUniform.flags.z == 1 exactly.
+                let masked = m.alpha_mode == 1;
+                if last_pipeline != Some(masked) {
+                    enc.setRenderPipelineState(if masked {
+                        &self.shadow_mask_pipeline
+                    } else {
+                        &self.shadow_pipeline
+                    });
+                    last_pipeline = Some(masked);
+                }
             }
             if cascade.is_none() && last_pipeline != Some(blended) {
                 enc.setRenderPipelineState(if blended { &self.blend } else { &self.opaque });
