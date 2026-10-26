@@ -38,11 +38,23 @@ struct Frame {
     ambient: [f32; 4],
     sky: [f32; 4],
     fog: [f32; 4],
+    // Height fog reserves grade[0/1/2].w: base height, height falloff, sky distance.
     grade: [[f32; 4]; 3],
+    // params.w is height-fog enabled; grading RGB and params.xyz keep their meaning.
     params: [f32; 4],
     clock: [f32; 4],
     viewport: [f32; 4],
     splits: [f32; 4],
+}
+impl Frame {
+    fn with_height_fog(mut self, fog: crate::settings::HeightFogSettings) -> Self {
+        let values = fog.uniform();
+        for (row, value) in self.grade.iter_mut().zip(values) {
+            row[3] = value;
+        }
+        self.params[3] = values[3];
+        self
+    }
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1302,7 +1314,8 @@ impl Renderer {
             ],
             viewport: [width, height, 1. / width, 1. / height],
             splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
-        };
+        }
+        .with_height_fog(self.look.height_fog);
         let shadow_views: [_; 3] = std::array::from_fn(|i| {
             ShadowCasterVolume::new(
                 cascades[i],
@@ -2254,6 +2267,37 @@ fn texture_array(
 #[cfg(test)]
 mod temporal_tests {
     use super::*;
+    #[test]
+    fn frame_packs_height_fog_without_changing_other_channels() {
+        use crate::settings::HeightFogSettings;
+        let mut original: Frame = bytemuck::Zeroable::zeroed();
+        original.grade = [[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]];
+        original.params = [13., 14., 15., 16.];
+        for enabled in [false, true] {
+            let fog = HeightFogSettings {
+                enabled,
+                base_height: -12.,
+                height_falloff: 0.25,
+                sky_distance: 800.,
+            };
+            let mut packed = original.with_height_fog(fog);
+            assert_eq!(
+                [
+                    packed.grade[0][3],
+                    packed.grade[1][3],
+                    packed.grade[2][3],
+                    packed.params[3]
+                ],
+                fog.uniform()
+            );
+            for (row, before) in packed.grade.iter_mut().zip(original.grade) {
+                row[3] = before[3];
+            }
+            packed.params[3] = original.params[3];
+            assert_eq!(bytemuck::bytes_of(&packed), bytemuck::bytes_of(&original));
+        }
+    }
+
     /// Hosted macOS uses a paravirtual GPU. Verify the real fallback there; never
     /// swallow allocation/sampling failures on hardware that advertises support.
     fn counter_device_or_verify_fallback(r: &mut Renderer) -> bool {
@@ -2587,6 +2631,30 @@ mod temporal_tests {
                 assert!(frame.passes[11].is_some(), "input copies must be measured");
             }
         }
+        // Exercise the water path with the fog fixture supplied in Claude's #319 Mac check.
+        let clear_water = output_bytes(&r);
+        r.look.fog_density = 0.004;
+        r.look.height_fog = crate::settings::HeightFogSettings {
+            enabled: true,
+            base_height: 0.,
+            height_falloff: 0.08,
+            sky_distance: 600.,
+        };
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_ne!(clear_water, output_bytes(&r));
+        r.surface_uniform.water_features = [0; 4];
+        r.resize_water_inputs().unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let legacy_fog = output_bytes(&r);
+        r.surface_uniform.water_features = [1, 0, 0, 0];
+        r.resize_water_inputs().unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(legacy_fog, output_bytes(&r));
+        r.surface_uniform.water_features = [1; 4];
+        r.resize_water_inputs().unwrap();
         r.set_frames_in_flight(3).unwrap();
         r.resize(128, 96).unwrap();
         let (colour, depth) = r.water_inputs.as_ref().unwrap();

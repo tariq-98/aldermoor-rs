@@ -57,9 +57,24 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
     }
     return result;
 }
+// Integrate density * exp(-falloff * max(y-base, 0)) along a finite ray.
+// Splitting at the base caps density underground and avoids overflowing exp on downward rays.
+float height_fog_amount(float3 eye,float3 point,float density,float base,float falloff) {
+    if(density<=0.)return 0.;
+    float distance=length(point-eye);
+    if(distance==0.)return 0.;
+    float low=min(eye.y,point.y)-base,high=max(eye.y,point.y)-base;
+    float below=high<=0.?1.:(low>=0.?0.:-low/(high-low));
+    float span=max(high,0.)-max(low,0.);
+    float x=falloff*span;
+    // The series removes cancellation at level/near-level rays; it includes x == 0.
+    float average=x<0.01?1.-x*0.5+x*x/6.-x*x*x/24.:(1.-exp(-x))/x;
+    float mean=below+(1.-below)*exp(-falloff*max(low,0.))*average;
+    return 1.-exp(-(mean*density)*distance);
+}
 struct SceneOutput{float4 colour [[color(0)]];float4 motion [[color(1)]];};
 // Shared lighting keeps disabled water on the legacy shader path.
-struct WaterLighting {float3 lit,normal,reflection;float fresnel;};
+struct WaterLighting {float3 lit,normal,reflection;float fresnel,fog;};
 SceneOutput shade_scene(Vary i,bool front,constant Frame& f,constant Draw* instances,texture2d<float> base,texture2d<float> normal,texture2d<float> orm,texture2d<float> emission,texture2d<float> occlusion,depth2d_array<float> shadow,texture2d<float> dye_mask,constant Surfaces& surfaces,texture2d_array<float> terrain_colour,texture2d_array<float> terrain_normal,texture2d<float> terrain_weights,texture2d<float> water_normal,texture2d<float> sky_map,texture2d<float> sky_reflection,thread WaterLighting& water){
     constant Draw& d=instances[i.instance];constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
     float4 texel=base.sample(s,i.uv,bias(f.params.z));float4 albedo=texel*d.base;
@@ -119,7 +134,10 @@ SceneOutput shade_scene(Vary i,bool front,constant Frame& f,constant Draw* insta
     float3 colour=(diffuse+spec)*f.sun_colour.rgb*f.sun.w*nl*visibility+albedo.rgb*(1.-metal)*f.ambient.rgb*ao+indirect+emission.sample(s,i.uv,bias(f.params.z)).rgb*d.emission.rgb;
     water.lit=colour;water.normal=n;water.fresnel=0.;water.reflection=0.;
     if(d.flags.w==2&&surfaces.flags.y>0){float3 reflection=f.sky.rgb;if(surfaces.flags.z>0){float3 ray=reflect(-v,n);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);reflection=sky_map.sample(s,uv).rgb*f.sky.w;}float f0=pow((surfaces.sky.z-1.)/(surfaces.sky.z+1.),2.);float fresnel=f0+(1.-f0)*pow(1.-nv,5.);water.reflection=reflection;water.fresnel=saturate(fresnel*surfaces.water_absorption.w);colour=mix(colour,reflection,water.fresnel);}
-    float fog=1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);colour=mix(colour,f.fog.rgb,fog);
+    float fog=f.params.w>0.5
+        ?height_fog_amount(f.eye.xyz,i.world,f.fog.w,f.grade[0].w,f.grade[1].w)
+        :1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);
+    water.fog=fog;colour=mix(colour,f.fog.rgb,fog);
     float2 current=i.current_clip.xy/i.current_clip.w*float2(0.5,-0.5)+0.5;float2 previous=i.previous_clip.xy/max(i.previous_clip.w,0.001)*float2(0.5,-0.5)+0.5;
     return {float4(colour,albedo.a),float4(current-previous,max(i.previous_clip.w,0.001),max(i.current_clip.w,0.001))};
 }
@@ -181,7 +199,7 @@ fragment SceneOutput water_fragment(Vary i [[stage_in]],bool front [[front_facin
     float3 bed=water_world(uv,z,f);
     float shore=z<1.?max(i.world.y-bed.y,0.):INFINITY;
     // Opaque samples already contain scene fog. Fog only the local lighting/fallback once.
-    float fog=1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);
+    float fog=water.fog;
     float3 colour=mix(water.lit,f.fog.rgb,fog);
     if(surfaces.water_features.z>0){
         // Offset in world metres, projected with the same unjittered VP plus raster jitter.
@@ -277,7 +295,12 @@ fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer
     gy.x-=round(gy.x);
     float4 previous=f.previous_vp*float4(ray,0);
     float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;
-    return {float4(sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*f.sky.w,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};
+    float3 colour=sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*f.sky.w;
+    if(f.params.w>0.5&&f.grade[2].w>0.){
+        float fog=height_fog_amount(f.eye.xyz,f.eye.xyz+ray*f.grade[2].w,f.fog.w,f.grade[0].w,f.grade[1].w);
+        colour=mix(colour,f.fog.rgb,fog);
+    }
+    return {float4(colour,1),float4(i.uv-f.jitter.zw-old_uv,800,800)};
 }
 
 // Renderer-derived lighting data from the supplied sky; no authored texture or look values.
