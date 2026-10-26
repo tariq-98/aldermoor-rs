@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub mod wire;
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -397,6 +397,8 @@ pub struct NodeView {
     pub level: u8,
     /// False while it's run out and growing back.
     pub ready: bool,
+    /// How close you must stand to work it, in metres (further for a fishing spot).
+    pub reach: f32,
 }
 
 /// A crafting station and its recipes.
