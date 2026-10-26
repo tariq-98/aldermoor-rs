@@ -1212,8 +1212,9 @@ impl Renderer {
             sun: sun.extend(lighting.sun_intensity).to_array(),
             sun_colour: Vec3::from_array(lighting.sun_colour).extend(1.).to_array(),
             ambient: Vec3::from_array(lighting.ambient).extend(1.).to_array(),
+            // Combine the two authored factors once, retaining one multiply per sky sample.
             sky: Vec3::from_array(lighting.sky)
-                .extend(lighting.sky_texture_intensity)
+                .extend(lighting.sky_texture_intensity * self.surface_uniform.sky[1])
                 .to_array(),
             fog: Vec3::from_array(lighting.fog_colour)
                 .extend(lighting.fog_density)
