@@ -388,11 +388,35 @@ and landings to distance:
   the mantle clips have to match its timing (#108).
 - **On a wall** (#247), the climbing clips play instead (docs/CONTRACT.md, "Poses to animation"):
   the hang, shimmying whichever way the body slides along the wall, and the moves onto, between
-  and off holds, climbing up from a hang included. They're keyed on the sim's own carries with the
-  hands on the edge, so each plays stretched to its move by the clock, and the body isn't carried:
-  no turn on the carried spring (the sim turns it to the wall) and no hands put on the edge. A
-  climb from the ground or a mantle still plays `ClimbUp_1m` (`pulling_up`). #248 times the
-  climbing clips by distance, as above, and puts the hands on the hold and the feet on the wall.
+  and off holds, climbing up from a hang included. The body isn't carried: no turn on the carried
+  spring (the sim turns it to the wall) and no hands put on the edge. A climb from the ground or a
+  mantle still plays `ClimbUp_1m` (`pulling_up`).
+- **Climbing by distance** (#248, `anim::climb`). Each move's clip is made on the sim's own path
+  for it (`sim::climbing::carry`), `k` of the clip `k` of the way along, so it plays at the share of
+  its move the body has come (`climb::progress`): the nearest point of the path, seen from above
+  for a move mostly across, so an eject's hop doesn't count. Where the path stands still, the clock
+  carries it on: climbing straight up to the next hold, the body arrives with five eighths of the
+  move done and the hands finish it. A wrap round a corner swings round it instead
+  (`sim::climbing::corner_carry`), easing out as a hop across does, so it plays by the clock. The
+  shimmy loops slide 0.48 m a loop, made at the sim's 1.2 m/s (`SHIMMY_STRIDE`), and play by the
+  distance slid, so the hands keep still on the hold at any speed.
+- **Hands on the hold, feet on the wall** (#248). The clips are made on the broad human frame, which
+  hangs with its wrists 7 cm out from the wall and 3 cm below the hold (`GRIP_OUT`, `GRIP_DOWN`).
+  Each skeleton measures its own hang once (`Hang_Idle_Loop`'s first frame, `ClipSet::reach`) and
+  moves by the difference, up and in toward the wall: as the clips have them, dwarves and goblins
+  hang 35 to 46 cm short of the hold and 5 to 6 cm back from it, and elves 8 to 12 cm past it. A
+  hold less than 1.9 m above the feet, where the sim stands a climber on the ground under it (over
+  half the valley's hold length), lowers the body by as much: the clips brace the feet half a metre
+  up the wall, so they stay on it. All of it comes in as the body lowers itself or catches the hold,
+  goes as it climbs onto the top, and eases in and out with a 0.05 s half-life (`RAISE_HALF_LIFE`).
+  Then, at full and half detail, two-bone IK closes each hand on the hold nearest it, where the clip
+  has it along the hold: firmly with the clip's wrist within 10 cm of there and not at all past
+  25 cm (`HOLD`, `LET_GO`), lifting off as the clip lifts it. It braces the balls of the feet 1 cm
+  out from the face below (`BALL_OUT`; the nearer face, round a corner), not up at the edge nor
+  under an overhang. The holds are the client's own copy of `world`'s: the one the body hangs from,
+  or the ones its move goes from and to, found from where the sim has it, among the holds filed
+  once by the squares of ground they can be hung from over, so looking neither allocates nor hashes
+  (`crates/client/src/holds.rs`, `Character::set_holds`).
 - **Afloat**, the swim loops play: `Swim_Idle_Loop` treading water, and `Swim_Fwd_Loop` on the
   move, its strokes paced by the speed (made for 2.7 m/s, the sim's swim at a run, `SWIM_SPEED`;
   between half and 1.5 times their pace). The clips have the surface at their origin and the sim
@@ -403,14 +427,19 @@ and landings to distance:
   on the ground and no drawn idle goes over the strokes. Water breaks a fall: landing in it never
   plays the hard landing. Beasts play their clips as before.
 - **To compare and capture.** `--traversal off` plays the moves by the clock and swimmers as
-  runners, as before. `--traverse` runs a course for captures (`crates/client/src/course.rs`),
+  runners, as before, and climbers' clips by the clock with their hands and feet as the clips have
+  them. `--traverse` runs a course for captures (`crates/client/src/course.rs`),
   facing west as `--gait` does: the player strafes and rolls left, right, back and ahead in turn,
   running on out of two rolls and standing up out of the other two; climbs onto the field wall west
   of the north road and drops off its far side; runs through the village and swims across the river
-  east of the bridge and back; climbs the wall from the other side; climbs the ruined hall's
-  stepped east wall to its lookout, lowers itself over the edge to hang, shimmies left and right,
-  climbs back up, then drops to hang again and lets go (#247's clips); and lunges at the nearest
-  wolf in the meadow. It logs each step as it starts, so captures can be cut by step.
+  east of the bridge and back; climbs the wall from the other side; at the ruined hall, climbs onto
+  its rear wall, lowers itself over the inner edge to hang (a low hold: the feet stand on the
+  ground), shimmies round both corners of the wall's end onto its outer face and lets go; sprints
+  at the hall's stepped east wall, runs up it and pulls onto the lookout; lowers itself over the
+  lookout's edge, shimmies left, ejects right along the hold, shimmies back and climbs up; steps
+  down, drops to hang from the step below and leaps up to the lookout's hold, and lets go (#247's
+  clips, #248's timing and hands and feet); and lunges at the nearest wolf in the meadow. It logs
+  each step as it starts, so captures can be cut by step.
 
 ## Switches
 
@@ -689,8 +718,10 @@ frame (median and 95th percentile) and how many characters were at each tier on 
 - The client's `--traverse` run (`crates/client/src/course.rs`, see Traversal) is for captures
   too. Its test runs the course against the valley as the client's own server starts it: every
   step is reached and every place arrived at, and on the way the player rolls four times, climbs
-  the field wall twice and the ruin's steps five times, swims, hangs from the lookout twice,
-  shimmies along it and climbs back up, comes down unhurt, and lunges.
+  the field wall twice, the ruin's east and rear walls and back up from a hang, swims, hangs from
+  the rear wall and goes round both its corners, runs up the wall to the lookout and pulls onto it,
+  shimmies and ejects along the lookout's hold, leaps up to it from the step below, comes down
+  unhurt, and lunges.
 
 ## Cost
 
@@ -711,22 +742,23 @@ for the ground on the way down and the pelvis dipping on landing.
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 | After #218 | After #213 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 | 53,520 | 53,724 |
-| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 | 62,189 | 62,394 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 | 67,602 | 67,800 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 | 61,625 | 61,830 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 | 62,728 | 62,935 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 | 72,931 | 73,132 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 | 80,397 | 80,593 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 | 82,908 | 83,105 |
-| circle | | | | | | | | 61,546 | 63,414 | 63,842 | 64,047 |
-| jump | | | | | | | | 83,542 | 85,944 | 86,151 | 86,346 |
-| run + hits | | | | | | | | | 93,452 | 91,832 | 92,041 |
-| run + rolls | | | | | | | | | | 83,603 | 91,053 |
-| climb | | | | | | | | | | 78,142 | 92,481 |
-| swim | | | | | | | | | | 67,993 | 44,598 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 | After #218 | After #213 | After #248 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 | 53,520 | 53,724 | 53,865 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 | 62,189 | 62,394 | 62,445 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 | 67,602 | 67,800 | 67,936 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 | 61,625 | 61,830 | 61,963 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 | 62,728 | 62,935 | 63,071 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 | 72,931 | 73,132 | 73,275 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 | 80,397 | 80,593 | 80,722 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 | 82,908 | 83,105 | 83,247 |
+| circle | | | | | | | | 61,546 | 63,414 | 63,842 | 64,047 | 64,213 |
+| jump | | | | | | | | 83,542 | 85,944 | 86,151 | 86,346 | 86,484 |
+| run + hits | | | | | | | | | 93,452 | 91,832 | 92,041 | 92,238 |
+| run + rolls | | | | | | | | | | 83,603 | 91,053 | 91,208 |
+| climb | | | | | | | | | | 78,142 | 92,481 | 85,653 |
+| swim | | | | | | | | | | 67,993 | 44,598 | 44,748 |
+| hang | | | | | | | | | | | 60,810 | 83,782 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -806,6 +838,26 @@ body running through the river blended the walk and the jog on one stride (15,00
 the feet on the ground afloat (10,000). Wall clock on the cloud runner (the median of six runs at
 full detail) goes the same way: rolling 15% dearer, climbing 17%, swimming half the cost, and `run`
 within the noise.
+
+#248 costs 33 to 47 instructions a pose for a body that isn't on a wall (under 0.1%): checking for a
+wall, and for a raise still to come down from. Turning comes out 72 cheaper (0.1%) and climbing
+6,960 (7.5%): the arms' two-bone IK now turns the shoulder and the elbow and rebuilds the arm's
+bones once, where it rebuilt them after turning each joint, which pays wherever a hand reaches for
+something (a staff's off hand in `turn`, the hands on the edge in `climb`). Its case is new (its
+After #213 number is #213's code running it, the clips by the clock with the hands and feet where
+they put them): `hang` hangs 1 m off the ground from a 6 m hold, shimmying right, then left, then
+hanging still, 0.8 s each. Hanging costs 22,970 more (38%): moving the body by its reach about
+2,100, as everything on the pelvis moves with it, and the hands on the hold and the feet on the
+wall the other 20,900, two thirds of that the arms' IK (rebuilding each arm's bones, fingers and
+all). The bench's hold is a closure; in the game, finding it in the client's copy of the valley's
+holds costs about 1,440 more a look (860 searching the holds near the body, the rest the ground
+under it), once a frame for a body hanging and twice for one moving between holds, and allocates
+nothing. Wall clock on the cloud runner (the median of nine runs at full
+detail), hanging goes from 8.9 to 12.2 µs a character a frame; at the rate #210 measured on the
+M1, nearly twice the runner's, the difference is under 2 µs. At half detail it's paid every other
+frame, and at quarter detail not at all. The column is against #213's code on today's main measured
+the same way, 86 to 161 instructions above the After #213 column, which was measured on an older
+main.
 
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are

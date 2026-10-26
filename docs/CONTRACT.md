@@ -149,7 +149,8 @@ far the body has come along the move's path, not by the clock: each move's clip 
 curve saying how much of the path each moment of it covers (docs/ASSETS.md), so it reaches the end
 of that stretch as the move ends, and the rest of it (standing up, a recovery) plays on after, by
 the clock. Rolls, climbs, mantles and vaults turn the body to face the way they go. Moves onto
-holds, and climbing up from a hang, play the climbing clips stretched to the move instead (#247).
+holds, and climbing up from a hang, play the climbing clips instead (#247), by how far the body
+has come along the sim's own path for the move (#248).
 Swimming plays the swim loops, with the body raised 0.5 m to the surface. How: docs/ANIMATION.md,
 "Traversal".
 
@@ -217,8 +218,8 @@ Humanoid clips by pose, from `anims.glb`:
 | Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 7 m/s of ground speed (ignore the vertical part: a normal run is 6 m/s, and slopes add to the full speed), for swiftness and charges (the same layering when drawn) |
 | Swimming (`traversal`) | `Swim_Idle_Loop` standing, `Swim_Fwd_Loop` moving, its strokes paced by the speed |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land`; climbing or mantling 0.4 m or higher, `ClimbUp_1m`, with the hands on the edge |
-| Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold mostly above or below: a climb or a climb leap) or `Hang_Hop_L` / `_R` (mostly across: a gap or a side eject). A `Corner` plays `Hang_Hop_L` / `_R`, the way the body last shimmied. Each one-off is stretched to the move's `duration` |
-| Jump, climbing from a hang | A `Climb` move that starts from `Hanging` plays `Hang_ClimbUp`, stretched to the move |
+| Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold mostly above or below: a climb or a climb leap) or `Hang_Hop_L` / `_R` (mostly across: a gap or a side eject). A `Corner` plays `Hang_Hop_L` / `_R`, the way the body last shimmied. Each one-off plays by how far the body has come along the move's path (`sim::climbing::carry`; by the clock where that stands still, and round a corner), and the shimmy loops by the distance slid (0.48 m a loop, at 1.2 m/s). The body moves to reach the hold from its own hang, and the hands close on it and the feet brace on the wall below, from the client's copy of `world`'s holds (#248) |
+| Jump, climbing from a hang | A `Climb` move that starts from `Hanging` plays `Hang_ClimbUp`, by how far the body has come along the climb (#248) |
 | Dodge | `Roll`, by the ground it covers |
 | Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |
 | Cast | A staff's `clips.attacks` (`Staff_Cast`); otherwise `Spell_Simple_Shoot` |

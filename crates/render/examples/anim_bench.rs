@@ -14,7 +14,7 @@ use protocol::{
     Action, ForcedKind, ForcedMove, HitWeight, Look, Pose, ResourceKind, Traversal, UnitCombat,
     UnitKind, UnitState,
 };
-use render::character::{Character, Ground};
+use render::character::{Character, Ground, HoldAt};
 use render::model::ModelCache;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::Arc;
@@ -155,7 +155,9 @@ fn main() -> anyhow::Result<()> {
     // from all round and light, heavy and big in turn, so the body is flinching most of the time.
     // "run + rolls" runs and rolls to one side and then the other every second, and "climb" climbs
     // a ledge every second and runs on over its top to the next (#213), so both are carried
-    // through moves about half the time, then recover from them; "swim" swims ahead.
+    // through moves about half the time, then recover from them; "swim" swims ahead. "hang" hangs
+    // from a hold on a wall (#248), shimmying right, then left, then hanging still, in turn every
+    // 0.8 s, its hands on the hold and its feet on the wall.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
         ("turn", Pose::Idle, 0., Action::None),
@@ -171,6 +173,7 @@ fn main() -> anyhow::Result<()> {
         ("run + rolls", Pose::Run, 6., Action::None),
         ("climb", Pose::Run, 6., Action::None),
         ("swim", Pose::Run, 2.7, Action::None),
+        ("hang", Pose::Hang, 0., Action::None),
     ] {
         if only.as_ref().is_some_and(|o| o != label) {
             continue;
@@ -190,6 +193,9 @@ fn main() -> anyhow::Result<()> {
                     );
                     if label == "swim" {
                         u.traversal = Traversal::Swimming;
+                    }
+                    if label == "hang" {
+                        u.traversal = Traversal::Hanging;
                     }
                     u
                 })
@@ -218,6 +224,21 @@ fn main() -> anyhow::Result<()> {
                 c.set_ground(Arc::clone(ground));
                 c.foot_placement = feet;
                 u.position.y = ground(u.position.x, u.position.z);
+                if label == "hang" {
+                    // Hanging 1 m off the ground from a wall 0.4 m ahead, 6 m long.
+                    u.position.y += 1.;
+                    let at = u.position;
+                    let holds: HoldAt = Arc::new(move |p: Vec3| {
+                        let near = (p.x - at.x).abs() <= 3. && (p - at).with_x(0.).length() < 0.3;
+                        near.then_some(world::Hold {
+                            a: at + Vec3::new(3., 1.9, 0.4),
+                            b: at + Vec3::new(-3., 1.9, 0.4),
+                            out: glam::Vec2::new(0., -1.),
+                            braced: true,
+                        })
+                    });
+                    c.set_holds(holds);
+                }
             }
             let mut moves: Vec<Option<ForcedMove>> = vec![None; count];
             let fight = |id: u32, t: f32| UnitCombat {
@@ -268,7 +289,10 @@ fn main() -> anyhow::Result<()> {
                         }
                         u.pose = if cycle < 0.25 { Pose::Hit } else { Pose::Run };
                     }
-                    let steady = ["idle", "turn", "walk", "run", "strafe", "swim"];
+                    if label == "hang" {
+                        u.velocity.x = [-1.2, 1.2, 0.][(t / 0.8) as usize % 3];
+                    }
+                    let steady = ["idle", "turn", "walk", "run", "strafe", "swim", "hang"];
                     u.pose_time = if steady.contains(&label) { t } else { cycle };
                     // Up at 6.6 m/s under the sim's gravity, then running till the next second.
                     let (mut up, rise) = (0., 6.6 / anim::land::GRAVITY);
@@ -340,6 +364,7 @@ fn main() -> anyhow::Result<()> {
                     let f = fight(u.id, if action == Action::None { t } else { cycle });
                     match carried {
                         Some(there) => u.position = there,
+                        None if label == "hang" => u.position += u.velocity / 60.,
                         None => {
                             u.position += u.velocity.with_y(0.) / 60.;
                             u.position.y = under(u.position.x, u.position.z) + up;

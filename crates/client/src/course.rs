@@ -4,11 +4,14 @@
 //! into the field wall west of the north road, climbing onto it, and drop off its far side; run
 //! north through the village and east of the bridge, where the banks are gentle, wade into the
 //! river, swim across, wade out and swim back. They run back south, climbing the wall from the
-//! other side, and on up the ruined hall's stepped east wall to the lookout under its gable,
-//! where they lower themselves over the edge to hang (#245), shimmy left and right, climb back
-//! up, then drop to hang again and let go. Last they run at the wolves in the meadow west of the
-//! road, lunging at the first within reach. Each step is logged as it starts, so captures can be
-//! cut by frame.
+//! other side, to the ruined hall, climbing onto its rear wall to lower themselves over its inner
+//! edge to hang (#245), shimmy round its end onto the outer face, two corners (#246), and let go.
+//! Round to the hall's east side, they sprint at its stepped east wall and run up it onto a step
+//! (#246), climb to the lookout under the gable, drop to hang from its edge, shimmy left, eject
+//! right along the hold, shimmy back and climb up; then step down, drop to hang from the step
+//! below and leap up to the lookout's hold, and let go. Last they run at the wolves in the meadow
+//! west of the road, lunging at the first within reach. Each step is logged as it starts, so
+//! captures can be cut by frame.
 use glam::{Vec2, Vec3, Vec3Swizzles};
 use protocol::{Command, UnitId};
 use std::f32::consts::FRAC_PI_2;
@@ -17,6 +20,8 @@ use std::f32::consts::FRAC_PI_2;
 enum Pace {
     Walk,
     Run,
+    /// Shift held: at a wall too tall to climb, runs up it.
+    Sprint,
 }
 
 #[derive(Clone, Copy)]
@@ -34,6 +39,9 @@ enum Step {
     /// Rolling `way` degrees round from facing `yaw` (left is positive), then standing for
     /// `seconds`. At an edge that lowers the player over it to hang, and hanging, it lets go.
     Roll { seconds: f32, yaw: f32, way: f32 },
+    /// Space with `way` degrees round from facing `yaw` pressed, then nothing for `seconds`.
+    /// Hanging, that leaps (into the wall), ejects (along it) or kicks off it (away).
+    Jump { seconds: f32, yaw: f32, way: f32 },
     /// To the point (x, z) at `pace`, facing the way it goes.
     Go { to: Vec2, pace: Pace },
     /// At the nearest enemy, lunging at it (the sword's third skill) once it's within reach, then
@@ -72,6 +80,17 @@ const fn roll(name: &'static str, seconds: f32, way: f32) -> (&'static str, Step
     )
 }
 
+const fn jump(name: &'static str, seconds: f32, way: f32) -> (&'static str, Step) {
+    (
+        name,
+        Step::Jump {
+            seconds,
+            yaw: WEST,
+            way,
+        },
+    )
+}
+
 const fn go(name: &'static str, x: f32, z: f32, pace: Pace) -> (&'static str, Step) {
     (
         name,
@@ -86,7 +105,7 @@ const fn go(name: &'static str, x: f32, z: f32, pace: Pace) -> (&'static str, St
 /// back at 8 a second, so they're 5 s apart.
 const ROLL: f32 = 0.45;
 
-const STEPS: [(&str, Step); 39] = [
+const STEPS: [(&str, Step); 52] = [
     stand("stand", 1.),
     strafe("strafe left", 0.5, 90., false),
     strafe("roll left", ROLL, 90., true),
@@ -116,21 +135,44 @@ const STEPS: [(&str, Step); 39] = [
     go("climb it from the north", -2., 25., Pace::Run),
     // The ruined hall on the hill (`world::masonry`): its east wall, along x -14.9, steps up from
     // the rear at z 52 to the lookout under the gable, 4.2 m up, each step a climb from the last.
-    // The lookout's outer edge is a hold 2.35 m long, from z 44.6 to 42.25.
-    go("to the ruin", -11., 51.6, Pace::Run),
-    go("onto its east wall", -14.9, 51.6, Pace::Walk),
-    go("up the steps", -14.9, 43.4, Pace::Walk),
+    // The rear wall's east half, from x -15.35 to -17.15, stands 1.6 m over the hall and 0.9 m
+    // over the east wall's lowest step, with a hold along its inner face, round its west end and
+    // along its outer face.
+    go("to the ruin", -11., 52.2, Pace::Run),
+    go("onto its east wall", -14.9, 52.2, Pace::Walk),
+    go("onto the rear wall", -16., 52.2, Pace::Walk),
+    stand("on the rear wall", 1.),
+    // Rolling south lowers the player over the inner edge, to hang facing north; then west round
+    // the wall's end onto it, and north round the next corner onto the outer face.
+    roll("drop to hang inside", 1.5, -90.),
+    strafe("shimmy round the corner", 1.6, 0., false),
+    strafe("round the end", 1.2, 90., false),
+    roll("let go outside", 1.5, 0.),
+    go("round the rear", -12., 54., Pace::Run),
+    // The lookout is 4.2 m up, too tall to climb, so sprinting at it runs up the wall, and at the
+    // top of the run the hands reach its edge to pull up onto it. The ground under it rises to
+    // the north: at z 44 the hands have 3 cm to spare, at its middle less than 1.
+    go("east of the ruin", -10.5, 44., Pace::Run),
+    go("run up to the lookout", -14.9, 44., Pace::Sprint),
     stand("on the lookout", 1.),
-    // Facing in over the hall, so rolling back lowers the player over the outer edge, to hang
-    // facing the wall.
+    // Facing in over the hall, so rolling back lowers the player over the outer edge, a hold
+    // 2.35 m long from z 44.6 to 42.25, to hang facing the wall.
     roll("drop to hang", 1.5, 180.),
     strafe("shimmy left", 0.6, 90., false),
-    strafe("shimmy right", 1., -90., false),
+    // Space pressing right: a side eject to the far end of the same hold.
+    jump("eject right", 1., -90.),
+    strafe("shimmy back", 1., 90., false),
     // Into the wall climbs onto the top in 0.8 s; pressing on after that would walk off the far
     // side, so this lets go as the climb starts.
     strafe("climb up", 0.5, 0., false),
     stand("back on the lookout", 1.5),
-    roll("drop to hang again", 1.5, 180.),
+    // Down onto the step below, over its outer edge to hang from its hold, 1.3 m under the
+    // lookout's, and right to its end, under the end of the lookout's: Space leaps up to that.
+    go("down a step", -14.9, 45.6, Pace::Walk),
+    stand("on the step", 1.),
+    roll("drop to hang below", 1.5, 180.),
+    strafe("shimmy to the end", 0.6, -90., false),
+    jump("leap up", 1.5, 0.),
     roll("let go", 2., 0.),
     // Round the gable's buttress.
     go("round the ruin", -12., 38., Pace::Run),
@@ -171,6 +213,7 @@ impl Course {
                     Step::Stand { seconds, .. }
                     | Step::Strafe { seconds, .. }
                     | Step::Roll { seconds, .. }
+                    | Step::Jump { seconds, .. }
                     | Step::Lunge { seconds } => seconds,
                     // Long enough at a swim, and over walls on the way.
                     Step::Go { to, .. } => to.distance(at.xz()) / 1.5 + 4.,
@@ -209,6 +252,18 @@ impl Course {
                         });
                     }
                     out.push(walk(Vec2::ZERO, Pace::Run, Some(yaw)));
+                }
+                Step::Jump { yaw, way, .. } => {
+                    let way = yaw + way.to_radians();
+                    let direction = Vec2::new(way.sin(), way.cos());
+                    if first {
+                        out.push(Command::Jump);
+                    }
+                    out.push(walk(
+                        if first { direction } else { Vec2::ZERO },
+                        Pace::Run,
+                        Some(yaw),
+                    ));
                 }
                 Step::Go { to, pace } => {
                     out.push(walk((to - at.xz()).normalize_or_zero(), pace, None));
@@ -256,7 +311,7 @@ fn walk(direction: Vec2, pace: Pace, face_yaw: Option<f32>) -> Command {
     Command::Move {
         direction,
         walk: pace == Pace::Walk,
-        sprint: false,
+        sprint: pace == Pace::Sprint,
         face_yaw,
     }
 }
@@ -268,9 +323,10 @@ mod tests {
 
     /// The course run against the valley as the client's own server starts it, the player at its
     /// spawn facing north: every step is reached, every place arrived at, and on the way the
-    /// player rolls four times, climbs the field wall twice and the ruin's wall and steps five
-    /// times, swims, hangs from the lookout twice, shimmies along it and climbs back up from it,
-    /// takes no harm letting go, and lunges.
+    /// player rolls four times, climbs the field wall twice, the ruin's east and rear walls and
+    /// back up from a hang, swims, hangs from the rear wall and goes round both its corners, runs
+    /// up the wall to the lookout and pulls onto it, hangs from the lookout, shimmies and ejects
+    /// along it, leaps up to it from the step below, takes no harm letting go, and lunges.
     #[test]
     fn the_course_rolls_climbs_swims_hangs_and_lunges() {
         let mut sim = sim::Sim::brambleford(0xa1de);
@@ -288,7 +344,7 @@ mod tests {
                 .map(|f| (f.id, f.position))
                 .collect();
             let now = (sim.tick() - start) as f32 / 60.;
-            assert!(now < 120., "still on {} after 120 s", STEPS[step].0);
+            assert!(now < 150., "still on {} after 150 s", STEPS[step].0);
             let commands = course.update(now, u.position, &foes);
             if let Some(was) = reached.last().copied().filter(|was| *was != step)
                 && let Step::Go { to, .. } = STEPS[was].1
@@ -303,10 +359,11 @@ mod tests {
                 && last != Some(m.start)
             {
                 last = Some(m.start);
-                moves.push(m.kind);
+                moves.push(m);
             }
             swam |= u.traversal == Traversal::Swimming;
-            if u.traversal == Traversal::Hanging {
+            // From the lookout's hold, 4.2 m up the east wall.
+            if u.traversal == Traversal::Hanging && u.position.y > 12.5 {
                 hung.push(u.position.z);
             }
             if step < wolves {
@@ -318,11 +375,27 @@ mod tests {
             sim.step();
         }
         assert_eq!(reached, (0..STEPS.len()).collect::<Vec<_>>());
-        let count = |kind| moves.iter().filter(|k| **k == kind).count();
+        let count = |kind| moves.iter().filter(|m| m.kind == kind).count();
         assert_eq!(count(ForcedKind::Roll), 4, "{moves:?}");
-        assert_eq!(count(ForcedKind::Climb), 8, "{moves:?}");
-        assert_eq!(count(ForcedKind::Hold), 2, "{moves:?}");
+        assert_eq!(count(ForcedKind::Climb), 5, "{moves:?}");
+        assert_eq!(count(ForcedKind::Hold), 5, "{moves:?}");
+        assert_eq!(count(ForcedKind::Corner), 2, "{moves:?}");
+        assert_eq!(count(ForcedKind::WallRun), 1, "{moves:?}");
+        assert_eq!(count(ForcedKind::Mantle), 1, "{moves:?}");
         assert_eq!(count(ForcedKind::Charge), 1, "{moves:?}");
+        let onto = |m: &&protocol::ForcedMove, seconds: f64| {
+            m.kind == ForcedKind::Hold && (f64::from(m.duration) - seconds).abs() < 1e-3
+        };
+        let leap = moves.iter().find(|m| onto(m, sim::climbing::LEAP_TIME));
+        assert!(
+            leap.is_some_and(|m| m.to.y - m.from.y > 1.),
+            "no leap: {moves:?}"
+        );
+        let eject = moves.iter().find(|m| onto(m, sim::climbing::EJECT_TIME));
+        assert!(
+            eject.is_some_and(|m| (m.to - m.from).with_y(0.).length() > 0.8),
+            "no eject: {moves:?}"
+        );
         assert!(swam, "never swam");
         let along = hung.iter().fold(f32::MIN, |a, &z| a.max(z))
             - hung.iter().fold(f32::MAX, |a, &z| a.min(z));
