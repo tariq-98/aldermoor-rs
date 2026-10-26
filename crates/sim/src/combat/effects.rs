@@ -7,7 +7,7 @@ use protocol::{Avoid, Event, HitWeight, Pose, School, Shape};
 
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
 use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, Pvp, HITSTOP, WINDUP};
-use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
+use crate::movement::{heading, ATTACK_POSE, CLIMB_HEIGHT, HIT_POSE};
 use crate::region::Landing;
 use crate::spatial::Spatial;
 use crate::stats::{armor_reduction, scale, CRIT_MULTIPLIER, PVP_COMBAT};
@@ -625,7 +625,8 @@ pub fn leap(world: &mut World, e: Entity, delta: Vec2, seconds: f64, arc: f32, k
         return;
     }
     let radius = world.get::<Body>(e).map_or(0.4, |b| b.radius);
-    let end = world.resource::<Land>().0.slide(tr.xz(), delta, radius);
+    // Stopped by masonry too tall to step onto, not carried over it (#311).
+    let end = world.resource::<Land>().0.slide_below(tr.xz(), delta, radius, tr.pos.y + CLIMB_HEIGHT);
     if let Some(mut m) = world.get_mut::<Motion>(e) {
         m.forced = Some(Forced { kind, from: tr.pos, to: Vec3::new(end.x, tr.pos.y, end.y), start: t, duration: seconds, arc });
     }
@@ -651,7 +652,7 @@ fn blink(world: &mut World, u: Entity, distance: f32) {
     let Some(tr) = world.get::<Transform>(u).copied() else { return };
     let radius = world.get::<Body>(u).map_or(0.4, |b| b.radius);
     let land = &world.resource::<Land>().0;
-    let end = land.slide(tr.xz(), tr.forward() * distance, radius);
+    let end = land.slide_below(tr.xz(), tr.forward() * distance, radius, tr.pos.y + CLIMB_HEIGHT);
     let y = land.ground(end.x, end.y);
     if let Some(mut tr) = world.get_mut::<Transform>(u) {
         tr.pos = Vec3::new(end.x, y, end.y);
@@ -668,7 +669,7 @@ fn shadowstep(world: &mut World, u: Entity, target: Entity) {
     let reach = world.get::<Body>(u).map_or(0.4, |b| b.radius) + world.get::<Body>(target).map_or(0.4, |b| b.radius) + 0.4;
     let spot = tt.xz() - tt.forward() * reach;
     let land = &world.resource::<Land>().0;
-    if land.blocked(spot, 0.3) {
+    if land.blocked(spot, 0.3) || land.on_face(spot, 0.3, tt.pos.y + CLIMB_HEIGHT) {
         return;
     }
     let y = land.ground(spot.x, spot.y);

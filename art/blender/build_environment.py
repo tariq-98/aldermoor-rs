@@ -935,11 +935,12 @@ MASONRY = masonry.pieces()
 HEADS = masonry.heads(MASONRY)
 for _id, _piece in MASONRY.items():
     _blocks = [{k: b[k] for k in ("part", "center", "half", "yaw", "top", "rise")} for b in _piece["blocks"]]
+    _grips = [{k: g[k] for k in ("part", "a", "b", "out")} for g in _piece.get("grips", [])]
     if _id.startswith("wall.field."):
-        prop(_id, "Dry-stone wall", "masonry", blocks=_blocks, levels=True)(
+        prop(_id, "Dry-stone wall", "masonry", blocks=_blocks, grips=_grips, levels=True)(
             lambda lod, piece=_piece, pid=_id: masonry.field_wall(piece, HEADS[pid], lod, seed=sum(map(ord, pid))))
     elif _id == "ruin.hall":
-        prop(_id, "Ruined hall", "masonry", blocks=_blocks, levels=True)(lambda lod, piece=_piece: masonry.ruin_hall(piece, lod, seed=7))
+        prop(_id, "Ruined hall", "masonry", blocks=_blocks, grips=_grips, levels=True)(lambda lod, piece=_piece: masonry.ruin_hall(piece, lod, seed=7))
 
 
 def triangles(objs):

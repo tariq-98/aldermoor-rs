@@ -11,7 +11,7 @@ mod holds;
 mod masonry;
 mod noise;
 pub use holds::{Hold, Holds, HANG_MIN_DROP};
-pub use masonry::{Block, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
+pub use masonry::{Block, Grip, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
 pub use noise::{fbm, hash, mix, noise, smooth, Lcg};
 
 /// Something you can't walk through: a box on the ground, turned by `yaw`.
@@ -364,6 +364,18 @@ impl Valley {
     /// Moves `from` by `delta`, sliding along anything in the way (in short steps so nothing is
     /// tunnelled through).
     pub fn slide(&self, from: Vec2, delta: Vec2, radius: f32) -> Vec2 {
+        self.slide_where(from, delta, |p| self.blocked(p, radius))
+    }
+
+    /// Moves `from` by `delta` as [`Valley::slide`] does, also stopped a radius short of the faces
+    /// of solids whose tops stand higher than `above`: the masonry a body moving with its feet
+    /// below that can't step onto (#311). For moves the controls don't steer: rolls, leaps,
+    /// knockbacks, blinks.
+    pub fn slide_below(&self, from: Vec2, delta: Vec2, radius: f32, above: f32) -> Vec2 {
+        self.slide_where(from, delta, |p| self.blocked(p, radius) || self.on_face(p, radius, above))
+    }
+
+    fn slide_where(&self, from: Vec2, delta: Vec2, stopped: impl Fn(Vec2) -> bool) -> Vec2 {
         let len = delta.length();
         if len < 1e-6 {
             return from;
@@ -373,17 +385,40 @@ impl Valley {
         let mut p = from;
         for _ in 0..steps {
             let next = p + d;
-            if !self.blocked(next, radius) {
+            if !stopped(next) {
                 p = next;
-            } else if !self.blocked(Vec2::new(next.x, p.y), radius) {
+            } else if !stopped(Vec2::new(next.x, p.y)) {
                 p.x = next.x;
-            } else if !self.blocked(Vec2::new(p.x, next.y), radius) {
+            } else if !stopped(Vec2::new(p.x, next.y)) {
                 p.y = next.y;
             } else {
                 break;
             }
         }
         p
+    }
+
+    /// Whether a walker of `radius` at `p` stands in the side of a solid whose top is higher
+    /// than `above`: a face too tall for it to step onto (see [`Valley::off_faces`]).
+    pub fn on_face(&self, p: Vec2, radius: f32, above: f32) -> bool {
+        let (lo, hi) = self.tops_box;
+        if p.cmplt(lo - Vec2::splat(radius)).any() || p.cmpgt(hi + Vec2::splat(radius)).any() {
+            return false;
+        }
+        self.tops.near(p, radius).any(|i| {
+            let s = &self.solids[i as usize];
+            s.top_max().is_some_and(|top| top > above) && s.near(p, radius) && s.overlaps(p, radius) && s.top_nearest(p).is_some_and(|top| top > above)
+        })
+    }
+
+    /// The highest top of the solids standing at `p`, if any: masonry, without the terrain under
+    /// it.
+    pub fn top_at(&self, p: Vec2) -> Option<f32> {
+        let (lo, hi) = self.tops_box;
+        if p.cmplt(lo).any() || p.cmpgt(hi).any() {
+            return None;
+        }
+        self.tops.near(p, 0.0).filter_map(|i| self.solids[i as usize].top_at(p)).reduce(f32::max)
     }
 }
 

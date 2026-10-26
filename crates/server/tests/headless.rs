@@ -3,9 +3,37 @@
 use glam::Vec2;
 use protocol::Command;
 use std::io::{BufRead, BufReader};
-use std::process::{Child, Command as Process, Stdio};
+use std::process::{Child, ChildStdout, Command as Process, Stdio};
 
-struct Running(Child);
+/// The server, and its output kept open while it runs: closing it would fail the server's next
+/// line ("failed printing to stdout").
+struct Running(Child, #[allow(dead_code)] BufReader<ChildStdout>);
+
+/// Starts the server binary on a free port with its certificate in a folder of its own, and
+/// returns it with its address and certificate.
+fn start(name: &str, args: &[&str]) -> (Running, String, server::net::CertificateDer<'static>) {
+    let dir = std::env::temp_dir().join(format!("aldermoor-headless-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cert = dir.join("server.der");
+    let mut child = Process::new(env!("CARGO_BIN_EXE_server"))
+        .args(["--bind", "127.0.0.1:0", "--cert", cert.to_str().unwrap()])
+        .args(args)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("the server starts");
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    out.read_line(&mut line).unwrap();
+    let addr = line.trim().strip_prefix("listening on ").unwrap_or_else(|| panic!("unexpected first line {line:?}")).to_string();
+    let certificate = server::net::CertificateDer::from(std::fs::read(&cert).expect("the server saved its certificate"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(cert.with_extension("key")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "the key is readable by others: {mode:o}");
+    }
+    (Running(child, out), addr, certificate)
+}
 
 impl Drop for Running {
     fn drop(&mut self) {
@@ -16,17 +44,8 @@ impl Drop for Running {
 
 #[test]
 fn the_headless_server_takes_a_client() {
-    let mut child = Process::new(env!("CARGO_BIN_EXE_server"))
-        .args(["--bind", "127.0.0.1:0", "--seed", "7"])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("the server starts");
-    let mut line = String::new();
-    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let _running = Running(child);
-    let addr = line.trim().strip_prefix("listening on ").unwrap_or_else(|| panic!("unexpected first line {line:?}"));
-
-    let mut client = server::net::Client::connect(addr, "Tester").unwrap();
+    let (_running, addr, certificate) = start("takes", &["--seed", "7"]);
+    let mut client = server::net::Client::connect(addr.as_str(), &certificate, "Tester").unwrap();
     let (first, _) = client.next_view().unwrap();
     let p0 = first.unit(client.player).expect("the player is in its own view").position;
     client.send(Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, sprint: false, face_yaw: None }).unwrap();
@@ -41,15 +60,16 @@ fn the_headless_server_takes_a_client() {
 
 #[test]
 fn an_old_client_is_turned_away() {
-    use std::io::Write;
-    let mut child = Process::new(env!("CARGO_BIN_EXE_server")).args(["--bind", "127.0.0.1:0"]).stdout(Stdio::piped()).spawn().unwrap();
-    let mut line = String::new();
-    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let _running = Running(child);
-    let mut stream = std::net::TcpStream::connect(line.trim().strip_prefix("listening on ").unwrap()).unwrap();
-    stream.write_all(&server::net::encode(&server::net::ClientMsg::Hello { version: 0, name: "Old".into() })).unwrap();
-    match server::net::read::<server::net::ServerMsg>(&mut stream).unwrap() {
-        server::net::ServerMsg::Refused(why) => assert!(why.contains("protocol"), "{why}"),
-        other => panic!("expected a refusal, got {other:?}"),
+    let (_running, addr, certificate) = start("old", &[]);
+    match server::net::Client::hello(addr.as_str(), &certificate, "Old", 0) {
+        Err(e) => assert!(e.to_string().contains("protocol"), "{e}"),
+        Ok(_) => panic!("an old client was let in"),
     }
+}
+
+#[test]
+fn a_client_refuses_a_server_it_doesnt_know() {
+    let (_running, addr, _) = start("stranger", &["--seed", "2"]);
+    let stranger = server::net::Identity::generate().unwrap().certificate;
+    assert!(server::net::Client::connect(addr.as_str(), &stranger, "Wary").is_err());
 }
