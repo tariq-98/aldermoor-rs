@@ -91,15 +91,19 @@ pub(crate) fn is_ally(world: &World, a: Entity, b: Entity) -> bool {
     }
 }
 
-/// Nothing solid between two points (houses, the mill, the shed). Sampled every half metre.
+/// Nothing solid between two points: no building, mill or shed, nor masonry too tall to climb
+/// standing above the line between them (#311; walls low enough to climb don't hide anyone).
+/// Sampled every half metre.
 pub(crate) fn line_of_sight(world: &World, a: Vec3, b: Vec3) -> bool {
     let land = &world.resource::<Land>().0;
     let (a2, b2) = (Vec2::new(a.x, a.z), Vec2::new(b.x, b.z));
     let d = b2 - a2;
     let steps = (d.length() / 0.5).ceil() as i32;
     for i in 1..steps {
-        let p = a2 + d * (i as f32 / steps as f32);
-        if land.blocked(p, 0.05) {
+        let k = i as f32 / steps as f32;
+        let p = a2 + d * k;
+        let tall = land.top_at(p).filter(|&top| top - land.surface(p.x, p.y) > movement::CLIMB_HEIGHT);
+        if land.blocked(p, 0.05) || tall.is_some_and(|top| top > a.y + (b.y - a.y) * k) {
             return false;
         }
     }

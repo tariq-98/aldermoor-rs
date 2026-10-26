@@ -311,11 +311,12 @@ same kit the Swift village used, remade at the characters' quality.
   along the box so a wall follows a slope) and masonry too tall to climb, which blocks. The
   `world` crate owns the list (`crates/world/src/masonry.rs`); `ground_fields` writes it out
   with the drawn ground under each piece, and `aldermoor_art/masonry.py` builds each prop to
-  fill its blocks exactly, so the stone you see is the stone you stand on. Each prop records
-  its `blocks` (as `world` gave them, in its own frame), and `cargo test -p assets` fails if
-  `world` has moved them since: rebuild the environment art. A climbable top carries a lip of
-  worn, pale dressed stone (ART.md, "Reading the world"); masonry too tall to climb ends in
-  broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
+  fill its blocks exactly, so the stone you see is the stone you stand on, and to carry a stone
+  for each of its grips (`world::Grip`: a sill or a jamb stone you hang from, which stands in
+  nobody's way). Each prop records its `blocks` and `grips` (as `world` gave them, in its own
+  frame), and `cargo test -p assets` fails if `world` has moved them since: rebuild the
+  environment art. A climbable top carries a lip of worn, pale dressed stone (ART.md, "Reading
+  the world"), and so does every grip; masonry too tall to climb ends in broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
   metre-high wall is seen at LOD 2 from about 11 m.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
@@ -550,7 +551,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - that no piece costs more than four draws beyond its materials: parts that share a
     material are joined into one mesh at export (`export.joined`), so the renderer draws plate
     a material at a time, not a plate at a time;
-  - that every masonry prop was built for the blocks `world` stands it on;
+  - that every masonry prop was built for the blocks `world` stands it on and the grips it puts
+    on it;
   - that the ground, river and sky files exist, the terrain's layers match in size (they stack
     into texture arrays), the weights are square, the sky is twice as wide as tall, and the
     light's numbers make sense;
