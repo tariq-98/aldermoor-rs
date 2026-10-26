@@ -229,6 +229,10 @@ pub enum ForcedKind {
     Climb,
     /// Thrown by a blow.
     Knockback,
+    /// Caught a ledge in a jump and pulling up onto it.
+    Mantle,
+    /// Hopping a low wall in stride.
+    Vault,
 }
 
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
