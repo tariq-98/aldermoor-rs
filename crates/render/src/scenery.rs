@@ -205,7 +205,13 @@ impl Scenery {
             let local_start = inverse.transform_point3(target);
             let local_end = inverse.transform_point3(desired);
             let r = radius / m.x_axis.length();
-            if let Some(hit) = segment_box(local_start, local_end, bounds.padded(r)) {
+            let bounds = bounds.padded(r);
+            // A target inside one is the player on or against it (on a cottage's roof, or hanging
+            // from its gable with the camera over their shoulder): it can't come between them.
+            if (local_start - bounds.center).abs().cmple(bounds.half).all() {
+                continue;
+            }
+            if let Some(hit) = segment_box(local_start, local_end, bounds) {
                 t = t.min((hit - 0.01).max(0.));
             }
         }
@@ -261,5 +267,17 @@ mod tests {
         let target = b.center;
         let eye = scenery.camera_eye(target, target + Vec3::Z * 6., 0.25);
         assert!(eye.is_finite() && eye.distance(target) >= 0.049);
+        // A player on the roof (inside the box) keeps the whole view; one in front of the wall,
+        // looking back through the house, is pulled in to the wall.
+        let on_roof = Vec3::new(0., 3.5, 1.);
+        assert!(
+            scenery
+                .camera_eye(on_roof, on_roof + Vec3::Z * 6., 0.25)
+                .distance(on_roof)
+                > 5.9
+        );
+        let outside = Vec3::new(0., 2., 5.);
+        let eye = scenery.camera_eye(outside, outside - Vec3::Z * 6., 0.25);
+        assert!(eye.z > 3.25 && eye.z < 3.35, "{eye}");
     }
 }
