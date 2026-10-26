@@ -389,8 +389,9 @@ fn a_region_with_nobody_near_sleeps_and_wakes_when_someone_comes() {
     run(&mut realm, 1.25);
     assert_eq!(realm.stats().asleep, 1, "the empty east should be asleep");
     assert_eq!(realm.with(1, |sim| sim.tick()), realm.tick(), "a sleeping region keeps time");
-    walk(&mut realm, hero, Vec2::X);
-    run(&mut realm, 14.0);
+    // Over the border, where the handoff takes it east.
+    realm.with(0, move |sim| sim.get_mut::<sim::Transform>(hero).unwrap().pos.x = BORDER + HANDOFF + 2.0);
+    run(&mut realm, 0.5);
     assert_eq!(realm.region_of(hero), 1, "the hero crossed");
     assert_eq!(realm.stats().asleep, 0, "the east woke when the hero came");
 }
