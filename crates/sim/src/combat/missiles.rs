@@ -217,13 +217,14 @@ fn fly(world: &mut World, p: &mut Projectile) -> bool {
 }
 
 /// Where along the step from `from` to `to` (0 to 1) a missile first meets something solid: a
-/// building, trunk or parapet, or the ground or a wall's top rising above it (#337). Sampled every
-/// 0.1 m, so even a fast arrow can't skip a thin wall between one step's end and the next.
+/// building, trunk or parapet below its roof (#338), or the ground or a wall's top rising above it
+/// (#337). Sampled every 0.1 m, so even a fast arrow can't skip a thin wall between one step's end
+/// and the next.
 fn wall_along(land: &world::Valley, from: Vec3, to: Vec3) -> Option<f32> {
     let n = ((to - from).length() / WALL_SAMPLE).ceil().max(1.0) as u32;
     (1..=n).map(|i| i as f32 / n as f32).find(|&k| {
         let at = from + (to - from) * k;
-        land.blocked(Vec2::new(at.x, at.z), 0.05) || at.y < land.ground(at.x, at.z) - 0.05
+        land.blocked_at(Vec2::new(at.x, at.z), 0.05, at.y) || at.y < land.ground(at.x, at.z) - 0.05
     })
 }
 

@@ -188,8 +188,11 @@ and a field's pulses send no `Hit` at all. The numbers live in `content::combat:
 - **Taunts** put the taunter on top for 3 s.
 - **Noticing:** a monster starts a fight with a player who comes within its notice radius
   (`aggro` in mobs.ron, 10 to 16 m) and is in sight: nothing solid stands between their chests,
-  neither a building, the mill or the shed, nor masonry too tall to climb standing above the
-  line between them (#311). Walls low enough to climb don't hide anyone. The same goes for
+  neither the mill, the shed, a tree or the bridge's parapets standing above the line between
+  them, nor masonry too tall to climb (#311). Each obstacle stands to a height (`Solid::roof`,
+  #338): the shed 5.6 m, the windmill 12 m, a tree its canopy, the parapets a metre over the
+  deck, so a look or a shot from high ground, or over a parapet, gets by. Walls low enough to
+  climb don't hide anyone. Missiles stop at the same obstacles, below the same heights. The same goes for
   skills aimed at a target ("Your target isn't in sight."). The radius is 1 m shorter for each level
   the player is above the monster and 1 m longer for each level below, from 4 m to twice its
   own (`sim::notice_radius`). A monster 10 or more levels below a player never starts a fight

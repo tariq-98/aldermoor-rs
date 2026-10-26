@@ -334,7 +334,7 @@ fn at_a_wall(rise: f32) -> (Sim, u32, f32) {
     let at = Vec2::new(5.0, 12.0);
     let wall = at + Vec2::new(3.0, 0.0);
     let top = sim.land().ground(wall.x, wall.y) + rise;
-    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
     let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
     sim.step();
     go(&mut sim, id, Vec2::X, false);
@@ -361,7 +361,7 @@ fn at_wall(rise: f32, depth: f32, walk: bool, jump: Option<f32>, seconds: f32) -
     let at = Vec2::new(5.0, 10.0);
     let wall = at + Vec2::new(3.0, 0.0);
     let top = sim.land().ground(wall.x, wall.y) + rise;
-    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(depth / 2.0, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(depth / 2.0, 2.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
     let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
     sim.step();
     sim.command(id, Command::Move { direction: Vec2::X, walk, sprint: false, face_yaw: None });
@@ -423,11 +423,11 @@ fn walking_at_a_low_wall_or_running_at_a_deep_or_tall_one_doesnt_vault() {
 fn no_vault_onto_ground_that_isnt_clear() {
     let mut sim = Sim::new(7);
     // A shed right behind the wall.
-    sim.land_mut().add_solid(world::Solid { center: Vec2::new(9.6, 10.0), half: Vec2::new(0.5, 2.0), yaw: 0.0, top: None, rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center: Vec2::new(9.6, 10.0), half: Vec2::new(0.5, 2.0), yaw: 0.0, top: None, rise: 0.0, roof: None });
     let (kinds, ..) = {
         let wall = Vec2::new(8.0, 10.0);
         let top = sim.land().ground(wall.x, wall.y) + 1.0;
-        sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.2, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+        sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.2, 2.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
         let id = sim.spawn_player("Hero", Vec2::new(5.0, 10.0), std::f32::consts::FRAC_PI_2);
         sim.step();
         go(&mut sim, id, Vec2::X, false);

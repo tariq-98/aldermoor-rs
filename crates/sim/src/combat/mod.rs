@@ -102,8 +102,9 @@ pub(crate) fn line_of_sight(world: &World, a: Vec3, b: Vec3) -> bool {
     for i in 1..steps {
         let k = i as f32 / steps as f32;
         let p = a2 + d * k;
+        let y = a.y + (b.y - a.y) * k;
         let tall = land.top_at(p).filter(|&top| top - land.surface(p.x, p.y) > movement::CLIMB_HEIGHT);
-        if land.blocked(p, 0.05) || tall.is_some_and(|top| top > a.y + (b.y - a.y) * k) {
+        if land.blocked_at(p, 0.05, y) || tall.is_some_and(|top| top > y) {
             return false;
         }
     }
@@ -279,5 +280,25 @@ fn roll(world: &mut World, e: Entity, id: UnitId, direction: Vec2, now: f64) {
             f.queued = None;
         }
         emit(world, Event::Dodged { unit: id });
+    }
+}
+
+#[cfg(test)]
+mod sight_tests {
+    use super::*;
+
+    #[test]
+    fn you_can_see_over_a_bridge_parapet_from_the_deck() {
+        let sim = crate::Sim::new(1);
+        let z = world::river_z(world::BRIDGE_X);
+        // From chest height by the parapet in the middle of the deck (3 m up) to a spot on the
+        // bank 12 m off: the look clears the parapet's top.
+        let on_deck = Vec3::new(world::BRIDGE_X + 1.8, 3.0 + 1.3, z);
+        let beside = Vec3::new(world::BRIDGE_X + 13.8, 1.5, z);
+        assert!(line_of_sight(&sim.world, on_deck, beside), "the parapet hid what's below the bridge");
+        // Low on the deck, the parapet is in the way.
+        let crouched = Vec3::new(world::BRIDGE_X, 3.2, z);
+        let low = Vec3::new(world::BRIDGE_X + 6.0, 3.2, z);
+        assert!(!line_of_sight(&sim.world, crouched, low), "a look through the parapet got by");
     }
 }

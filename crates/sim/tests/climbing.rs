@@ -19,7 +19,7 @@ fn wall(sim: &mut Sim, center: Vec2, half: Vec2, rise: f32) -> f32 {
 
 /// A wall as [`wall`], with its top at the height `top`.
 fn wall_to(sim: &mut Sim, center: Vec2, half: Vec2, top: f32) {
-    sim.land_mut().add_solid(world::Solid { center, half, yaw: 0.0, top: Some(top), rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center, half, yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
 }
 
 /// By the field gate east of the road (nothing but the field beyond): a wall 3.4 m tall, 0.9 m
