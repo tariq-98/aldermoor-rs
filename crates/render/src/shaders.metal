@@ -5,7 +5,7 @@ struct Frame {
     float4x4 vp,previous_vp,inverse_vp;float4 jitter;float4x4 shadows[3];
     float4 eye,sun,sun_colour,ambient,sky,fog,grade[3],params,clock,viewport,splits;
 };
-struct Surfaces {float4 bounds,scales,roughness,water_deep,water_shallow,water_absorption,water_flow,sky;uint4 flags;};
+struct Surfaces {float4 bounds,scales,roughness,water_deep,water_shallow,water_absorption,water_flow,sky;uint4 flags;float4 water_screen,water_shore;uint4 water_features;};
 struct Draw {
     float4x4 model,previous_model;
     float4 base,emission,params;uint4 flags;float4 morph,previous_morph,dyes[2],references[2];
@@ -58,7 +58,9 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
     return result;
 }
 struct SceneOutput{float4 colour [[color(0)]];float4 motion [[color(1)]];};
-fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facing]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],texture2d<float> base [[texture(0)]],texture2d<float> normal [[texture(1)]],texture2d<float> orm [[texture(2)]],texture2d<float> emission [[texture(3)]],texture2d<float> occlusion [[texture(4)]],depth2d_array<float> shadow [[texture(5)]],texture2d<float> dye_mask [[texture(6)]],constant Surfaces& surfaces [[buffer(3)]],texture2d_array<float> terrain_colour [[texture(7)]],texture2d_array<float> terrain_normal [[texture(8)]],texture2d<float> terrain_weights [[texture(9)]],texture2d<float> water_normal [[texture(10)]],texture2d<float> sky_map [[texture(11)]],texture2d<float> sky_reflection [[texture(12)]]){
+// Shared lighting keeps disabled water byte-for-byte on the legacy shader path.
+struct WaterLighting {float3 lit,normal,reflection;float fresnel;};
+SceneOutput shade_scene(Vary i,bool front,constant Frame& f,constant Draw* instances,texture2d<float> base,texture2d<float> normal,texture2d<float> orm,texture2d<float> emission,texture2d<float> occlusion,depth2d_array<float> shadow,texture2d<float> dye_mask,constant Surfaces& surfaces,texture2d_array<float> terrain_colour,texture2d_array<float> terrain_normal,texture2d<float> terrain_weights,texture2d<float> water_normal,texture2d<float> sky_map,texture2d<float> sky_reflection,thread WaterLighting& water){
     constant Draw& d=instances[i.instance];constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
     float4 texel=base.sample(s,i.uv,bias(f.params.z));float4 albedo=texel*d.base;
     float2 mask=dye_mask.sample(s,i.uv,bias(f.params.z)).rg;float3 paint=albedo.rgb;
@@ -115,11 +117,119 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
     float a004=min(r.x*r.x,exp2(-9.28*nv))*r.x+r.y;float2 ab=float2(-1.04,1.04)*a004+r.zw;
     float3 indirect=environment*(F0*ab.x+ab.y)*ao;
     float3 colour=(diffuse+spec)*f.sun_colour.rgb*f.sun.w*nl*visibility+albedo.rgb*(1.-metal)*f.ambient.rgb*ao+indirect+emission.sample(s,i.uv,bias(f.params.z)).rgb*d.emission.rgb;
-    if(d.flags.w==2&&surfaces.flags.y>0){float3 reflection=f.sky.rgb;if(surfaces.flags.z>0){float3 ray=reflect(-v,n);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);reflection=sky_map.sample(s,uv).rgb*surfaces.sky.y;}float f0=pow((surfaces.sky.z-1.)/(surfaces.sky.z+1.),2.);float fresnel=f0+(1.-f0)*pow(1.-nv,5.);colour=mix(colour,reflection,saturate(fresnel*surfaces.water_absorption.w));}
+    water.lit=colour;water.normal=n;water.fresnel=0.;water.reflection=0.;
+    if(d.flags.w==2&&surfaces.flags.y>0){float3 reflection=f.sky.rgb;if(surfaces.flags.z>0){float3 ray=reflect(-v,n);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);reflection=sky_map.sample(s,uv).rgb*surfaces.sky.y;}float f0=pow((surfaces.sky.z-1.)/(surfaces.sky.z+1.),2.);float fresnel=f0+(1.-f0)*pow(1.-nv,5.);water.reflection=reflection;water.fresnel=saturate(fresnel*surfaces.water_absorption.w);colour=mix(colour,reflection,water.fresnel);}
     float fog=1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);colour=mix(colour,f.fog.rgb,fog);
     float2 current=i.current_clip.xy/i.current_clip.w*float2(0.5,-0.5)+0.5;float2 previous=i.previous_clip.xy/max(i.previous_clip.w,0.001)*float2(0.5,-0.5)+0.5;
     return {float4(colour,albedo.a),float4(current-previous,max(i.previous_clip.w,0.001),max(i.current_clip.w,0.001))};
 }
+fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facing]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],texture2d<float> base [[texture(0)]],texture2d<float> normal [[texture(1)]],texture2d<float> orm [[texture(2)]],texture2d<float> emission [[texture(3)]],texture2d<float> occlusion [[texture(4)]],depth2d_array<float> shadow [[texture(5)]],texture2d<float> dye_mask [[texture(6)]],constant Surfaces& surfaces [[buffer(3)]],texture2d_array<float> terrain_colour [[texture(7)]],texture2d_array<float> terrain_normal [[texture(8)]],texture2d<float> terrain_weights [[texture(9)]],texture2d<float> water_normal [[texture(10)]],texture2d<float> sky_map [[texture(11)]],texture2d<float> sky_reflection [[texture(12)]]){WaterLighting water;return shade_scene(i, front, f, instances, base, normal, orm, emission, occlusion, shadow, dye_mask, surfaces, terrain_colour, terrain_normal, terrain_weights, water_normal, sky_map, sky_reflection, water);}
+
+float3 water_world(float2 uv,float depth,constant Frame& f){
+    float4 p=f.inverse_vp*float4(uv*float2(2,-2)+float2(-1,1),depth,1);
+    return p.xyz/p.w;
+}
+bool water_project(float3 world,constant Frame& f,thread float2& uv,thread float& view_depth){
+    float4 p=f.vp*float4(world,1);view_depth=p.w;
+    if(p.w<=0.||p.z<0.||p.z>=p.w)return false;
+    uv=p.xy/p.w*float2(0.5,-0.5)+0.5+f.jitter.zw;
+    return all(uv>0.)&&all(uv<1.);
+}
+// Bounded 20-step world-space trace, then five binary refinements of a front-to-back crossing.
+float4 water_trace(float3 origin,float3 ray,constant Frame& f,constant Surfaces& s,
+                   texture2d<float> colour,depth2d<float> depth){
+    constexpr sampler nearest(coord::normalized,address::clamp_to_edge,filter::nearest);
+    constexpr sampler linear(coord::normalized,address::clamp_to_edge,filter::linear);
+    float stride=s.water_screen.x/20.,previous=0.,last_delta=-INFINITY;
+    for(uint step=1;step<=20;step++){
+        float distance=float(step)*stride,view_depth;float2 uv;
+        if(!water_project(origin+ray*distance,f,uv,view_depth))break;
+        float z=depth.sample(nearest,uv);
+        float scene_depth=(f.vp*float4(water_world(uv,z,f),1)).w;
+        float delta=view_depth-scene_depth;
+        if(z<1.&&delta>=0.&&last_delta<0.){
+            float lo=previous,hi=distance;
+            for(uint refine=0;refine<5;refine++){
+                float mid=(lo+hi)*0.5,mw;float2 mu;
+                if(!water_project(origin+ray*mid,f,mu,mw))return 0.;
+                float mz=depth.sample(nearest,mu);
+                float md=(f.vp*float4(water_world(mu,mz,f),1)).w;
+                if(mz<1.&&mw>=md)hi=mid;else lo=mid;
+            }
+            if(!water_project(origin+ray*hi,f,uv,view_depth))return 0.;
+            z=depth.sample(nearest,uv);
+            scene_depth=(f.vp*float4(water_world(uv,z,f),1)).w;
+            delta=view_depth-scene_depth;
+            if(z<1.&&delta>=0.&&delta<s.water_screen.y){
+                float edge=min(min(uv.x,uv.y),min(1.-uv.x,1.-uv.y));
+                float confidence=smoothstep(0.,s.water_screen.z,edge)*(1.-smoothstep(0.8,1.,hi/s.water_screen.x));
+                confidence*=1.-smoothstep(0.,s.water_screen.y,delta);
+                return float4(colour.sample(linear,uv).rgb,confidence);
+            }
+        }
+        last_delta=z<1.?delta:-INFINITY;previous=distance;
+    }
+    return 0.;
+}
+fragment SceneOutput water_fragment(Vary i [[stage_in]],bool front [[front_facing]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],texture2d<float> base [[texture(0)]],texture2d<float> normal [[texture(1)]],texture2d<float> orm [[texture(2)]],texture2d<float> emission [[texture(3)]],texture2d<float> occlusion [[texture(4)]],depth2d_array<float> shadow [[texture(5)]],texture2d<float> dye_mask [[texture(6)]],constant Surfaces& surfaces [[buffer(3)]],texture2d_array<float> terrain_colour [[texture(7)]],texture2d_array<float> terrain_normal [[texture(8)]],texture2d<float> terrain_weights [[texture(9)]],texture2d<float> water_normal [[texture(10)]],texture2d<float> sky_map [[texture(11)]],texture2d<float> sky_reflection [[texture(12)]],texture2d<float> opaque_colour [[texture(13)]],depth2d<float> opaque_depth [[texture(14)]]){
+    WaterLighting water;
+    SceneOutput result=shade_scene(i, front, f, instances, base, normal, orm, emission, occlusion, shadow, dye_mask, surfaces, terrain_colour, terrain_normal, terrain_weights, water_normal, sky_map, sky_reflection, water);
+    constexpr sampler nearest(coord::normalized,address::clamp_to_edge,filter::nearest);
+    constexpr sampler linear(coord::normalized,address::clamp_to_edge,filter::linear);
+    float2 uv=i.position.xy/float2(opaque_depth.get_width(),opaque_depth.get_height());
+    float z=opaque_depth.sample(nearest,uv);
+    float3 bed=water_world(uv,z,f);
+    float shore=z<1.?max(i.world.y-bed.y,0.):INFINITY;
+    float3 colour=water.lit;
+    if(surfaces.water_features.z>0){
+        // Offset in world metres, projected with the same unjittered VP plus raster jitter.
+        float3 offset=float3(water.normal.x,0.,water.normal.z)*surfaces.water_screen.w;
+        float2 refracted_uv;float ignored;
+        bool valid=water_project(i.world+offset,f,refracted_uv,ignored);
+        float rz=valid?opaque_depth.sample(nearest,refracted_uv):1.;
+        // Validate every bilinear colour tap; a nearest-only depth check leaks bank edges.
+        float water_z=i.current_clip.z/i.current_clip.w;
+        if(valid){
+            int2 size=int2(opaque_depth.get_width(),opaque_depth.get_height());
+            int2 corner=int2(floor(refracted_uv*float2(size)-0.5));
+            for(int y=0;y<2;y++)for(int x=0;x<2;x++){
+                int2 pixel=corner+int2(x,y);
+                if(any(pixel<0)||any(pixel>=size)){valid=false;continue;}
+                float tap=opaque_depth.read(uint2(pixel));
+                float3 point=water_world((float2(pixel)+0.5)/float2(size),tap,f);
+                if(tap<=water_z||tap>=1.||point.y>=i.world.y)valid=false;
+            }
+        }
+        // Rejected offsets sample the exact current pixel, whose depth passed raster testing.
+        if(!valid||rz<=water_z||rz>=1.){refracted_uv=uv;rz=z;}
+        if(rz<1.&&rz>water_z){
+            float path=length(water_world(refracted_uv,rz,f)-i.world);
+            float3 transmission=exp(-max(surfaces.water_absorption.rgb,0.)*path);
+            colour=mix(colour,opaque_colour.sample(linear,refracted_uv).rgb,transmission);
+        }
+    }
+    float3 reflection=water.reflection;
+    if(surfaces.water_features.y>0){
+        float3 view=normalize(f.eye.xyz-i.world),ray=reflect(-view,water.normal);
+        float4 hit=water_trace(i.world+water.normal*surfaces.water_screen.y,ray,f,surfaces,opaque_colour,opaque_depth);
+        reflection=mix(reflection,hit.rgb,hit.a);
+    }
+    colour=mix(colour,reflection,water.fresnel);
+    if(surfaces.water_features.w>0){
+        float coverage=smoothstep(0.,surfaces.water_shore.x,shore);
+        if(coverage<=0.)discard_fragment();
+        // Procedural band follows world-space flow, with no new foam texture or palette.
+        float2 p=(i.world.xz+f.clock.x*surfaces.water_flow.yz)*surfaces.water_shore.z;
+        float breakup=0.5+0.5*sin(p.x+sin(p.y));
+        float foam=(1.-coverage)*breakup*surfaces.water_shore.y;
+        colour=mix(colour,surfaces.water_shallow.rgb,foam);
+        result.colour.a*=coverage;
+    }
+    float fog=1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);
+    result.colour.rgb=mix(colour,f.fog.rgb,fog);
+    return result;
+}
+
 struct Full{float4 position [[position]];float2 uv;};
 vertex Full fullscreen(uint id [[vertex_id]]){float2 uv=float2((id<<1)&2,id&2);return {float4(uv*float2(2,-2)+float2(-1,1),0,1),uv};}
 float3 to_ycocg(float3 c){return float3(dot(c,float3(0.25,0.5,0.25)),dot(c,float3(0.5,0.,-0.5)),dot(c,float3(-0.25,0.5,-0.25)));}
