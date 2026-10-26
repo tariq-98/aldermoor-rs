@@ -201,7 +201,8 @@ A player sees others where they were about 100 ms ago: the view is interpolated 
 
 `cargo run -p server --release -- --bind 0.0.0.0:7878` runs the valley headless on Linux (or a
 Mac): no window, GPU or Metal, stepping at 60 Hz and printing step and view times every ten
-seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks the world.
+seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks the world;
+`--regions 2` or `4` runs it as a realm of regions (#208).
 
 - **Transport:** QUIC over UDP (`quinn`, #86), with the same postcard messages as before.
   A client opens one reliable stream and says `Hello` with its name and `protocol::VERSION`, gets
@@ -338,9 +339,19 @@ name, body and look only when they don't have it yet; after that, only what move
   their crowds packed against the borders, so about 500 ghosts go each way every tick. Cloud
   Linux, 25 October 2026: tick 1.8 ms mean, slowest region step 0.75 ms, ghosts and handoffs
   0.46 ms mean and 1.5 ms p99 a region, about 19 handoffs a second.
-- Not yet (#208): the headless server and solo host still run one region; the combat view
-  leaves ghosts out; a hit across a border doesn't build the attacker's rage or count toward
-  their XP, because the attacker is only a ghost where it lands.
+- **Serving a realm** (#208): `Server::start_realm` (and `server --regions 2` or `4`, which cut
+  the valley into halves or quarters) runs a `Realm` behind the same `Host` and network players
+  as one sim. A player joins the region at the spawn point; their commands go to the region they
+  live in and their views come from it, across borders, each region's views built on its own
+  thread from its own frame.
+- **Ghosts in the combat view:** a ghost carries its action, cast, auras and defiance as its
+  region published them, aged to the viewer's step, and its side, so a unit that changes side
+  changes for its neighbours too. With about 2,000 ghosts a tick in the realm example, that
+  takes ghosts and handoffs from 0.21 to 0.31 ms mean a region (0.42 to 0.73 ms p99; Linux in
+  a container on the M1 Air, 26 October 2026, main and this change ABAB).
+- Not yet (#208): a hit across a border doesn't build the attacker's rage or count toward
+  their XP, because the attacker is only a ghost where it lands; quiet regions still step
+  60 times a second.
 
 ## Follow-up work
 
