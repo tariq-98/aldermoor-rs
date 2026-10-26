@@ -90,11 +90,13 @@ fn main() -> anyhow::Result<()> {
     let mut cache = ModelCache::default();
     // "idle", "walk", "run" and "strafe" hold their pose throughout: "walk" blends the walk and
     // jog loops, and "strafe" runs square to the facing, the hips turned toward the travel and the
-    // chest turned back. "slash" and "run + slash" start the slash over every half second, and
-    // "start-stop" runs and stops every half second, so those three are blending clips most of the
-    // time.
+    // chest turned back. "turn" stands looking 80° either way and back every two seconds, as a
+    // player sweeping the camera round, so the chest twists and the feet step round on every
+    // sweep. "slash" and "run + slash" start the slash over every half second, and "start-stop"
+    // runs and stops every half second, so those three are blending clips most of the time.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
+        ("turn", Pose::Idle, 0., Action::None),
         ("walk", Pose::Walk, 2.5, Action::None),
         ("run", Pose::Run, 6., Action::None),
         ("strafe", Pose::Run, 6., Action::None),
@@ -140,8 +142,11 @@ fn main() -> anyhow::Result<()> {
                         u.pose = if running { Pose::Run } else { Pose::Idle };
                         u.velocity.z = if running { speed } else { 0. };
                     }
+                    if label == "turn" {
+                        u.yaw = 1.4 * (std::f32::consts::PI * t).sin();
+                    }
                     let cycle = t % 0.5;
-                    u.pose_time = if matches!(label, "idle" | "walk" | "run" | "strafe") {
+                    u.pose_time = if matches!(label, "idle" | "turn" | "walk" | "run" | "strafe") {
                         t
                     } else {
                         cycle
@@ -151,7 +156,7 @@ fn main() -> anyhow::Result<()> {
                 }
                 let posed = Instant::now();
                 for (c, u) in characters.iter().zip(&units) {
-                    draws += c.draws(u.position, u.yaw).len();
+                    draws += c.draws(u.position, c.body_yaw()).len();
                 }
                 let drawn = Instant::now();
                 pose_ns += (posed - started).as_nanos();
