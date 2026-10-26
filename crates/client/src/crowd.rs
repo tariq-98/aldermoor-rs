@@ -11,11 +11,16 @@ const FIRST_ID: u32 = 1_000_000;
 const RING: usize = 12;
 const SPACING: f32 = 3.6;
 
-/// The crowd round `base` (the player), `time` seconds in. A quarter of them stand looking one
-/// way and the other, so their feet step round; a quarter walk and a quarter run round their
-/// ring; and a quarter swing their weapons, a blow every 1.2 s. They wear five outfits in turn,
-/// two of them with capes.
-pub fn units(base: &UnitState, count: usize, time: f32) -> Vec<UnitState> {
+/// The crowd round `base` (the player), `time` seconds in, standing on the `ground` (its height at
+/// any x, z). A quarter of them stand looking one way and the other, so their feet step round; a
+/// quarter walk and a quarter run round their ring; and a quarter swing their weapons, a blow
+/// every 1.2 s. They wear five outfits in turn, two of them with capes.
+pub fn units(
+    base: &UnitState,
+    count: usize,
+    time: f32,
+    ground: impl Fn(f32, f32) -> f32,
+) -> Vec<UnitState> {
     (0..count)
         .map(|i| {
             let ring = (i / RING) as f32;
@@ -44,7 +49,7 @@ pub fn units(base: &UnitState, count: usize, time: f32) -> Vec<UnitState> {
             let at = Vec3::new(angle.cos(), 0., angle.sin()) * radius;
             let ahead = Vec3::new(-angle.sin(), 0., angle.cos());
             u.position = base.position + at;
-            u.position.y = world::height(u.position.x, u.position.z);
+            u.position.y = ground(u.position.x, u.position.z);
             u.velocity = ahead * speed;
             u.yaw = if speed > 0. {
                 ahead.x.atan2(ahead.z)
@@ -159,8 +164,8 @@ mod tests {
         };
         // At any time: nobody passes through anybody, even at 200.
         for time in [0., 3., 17.5, 60.] {
-            let now = units(&base, 200, time);
-            let next = units(&base, 200, time + 1. / 60.);
+            let now = units(&base, 200, time, world::height);
+            let next = units(&base, 200, time + 1. / 60., world::height);
             for (i, u) in now.iter().enumerate() {
                 assert!(u.id >= FIRST_ID);
                 let away = (u.position - base.position).with_y(0.).length();

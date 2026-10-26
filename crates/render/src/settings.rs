@@ -12,6 +12,7 @@ pub struct LookSettings {
     pub sky: [f32; 3],
     pub fog_colour: [f32; 3],
     pub fog_density: f32,
+    pub height_fog: HeightFogSettings,
     pub exposure: f32,
     pub grade: [[f32; 3]; 3],
     pub tone_map: ToneMap,
@@ -32,6 +33,45 @@ pub struct LookSettings {
     /// the static look; omitted keyframe channels inherit that look without new art values.
     pub time_of_day: Option<TimeOfDay>,
 }
+/// Optional height profile for the existing fog colour and density. Values come from the look.
+/// Disabled preserves homogeneous scene fog and leaves the sky unchanged.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct HeightFogSettings {
+    pub enabled: bool,
+    /// World Y in metres. Density stays constant below this height.
+    pub base_height: f32,
+    /// Exponential decay above the base, in inverse metres. Zero is homogeneous.
+    pub height_falloff: f32,
+    /// Integration distance for the sky, in metres. Zero leaves the sky unchanged.
+    pub sky_distance: f32,
+}
+impl HeightFogSettings {
+    /// Frame packing contract: grade[0..3].w, then params.w. RGB/XYZ stay unchanged.
+    pub fn uniform(self) -> [f32; 4] {
+        [
+            self.base_height,
+            self.height_falloff,
+            self.sky_distance,
+            u32::from(self.enabled) as f32,
+        ]
+    }
+
+    fn validate(self) -> Result<()> {
+        ensure!(
+            [self.base_height, self.height_falloff, self.sky_distance]
+                .into_iter()
+                .all(f32::is_finite),
+            "height fog settings must be finite"
+        );
+        ensure!(
+            self.height_falloff >= 0. && self.sky_distance >= 0.,
+            "height fog falloff and sky distance must be nonnegative"
+        );
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToneMap {
@@ -49,6 +89,7 @@ impl Default for LookSettings {
             sky: [0.5; 3],
             fog_colour: [0.5; 3],
             fog_density: 0.,
+            height_fog: HeightFogSettings::default(),
             exposure: 1.,
             grade: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
             tone_map: ToneMap::Linear,
@@ -79,6 +120,7 @@ impl LookSettings {
         Ok(s)
     }
     pub fn validate(&self) -> Result<()> {
+        self.height_fog.validate()?;
         let numbers = self
             .sun_direction
             .iter()
@@ -138,6 +180,64 @@ impl LookSettings {
             cycle.validate(self)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod height_fog_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn old_looks_keep_height_fog_disabled() {
+        let look: LookSettings = serde_json::from_value(json!({"fog_density": 0.02})).unwrap();
+        look.validate().unwrap();
+        assert_eq!(look.height_fog, HeightFogSettings::default());
+        assert_eq!(look.height_fog.uniform(), [0.; 4]);
+        assert_eq!(look.fog_density, 0.02);
+    }
+
+    #[test]
+    fn height_fog_round_trips_and_packs_authored_values() {
+        let look: LookSettings = serde_json::from_value(json!({"height_fog": {
+            "enabled": true, "base_height": -12., "height_falloff": 0.25, "sky_distance": 800.
+        }}))
+        .unwrap();
+        look.validate().unwrap();
+        assert_eq!(look.height_fog.uniform(), [-12., 0.25, 800., 1.]);
+        let copy: LookSettings =
+            serde_json::from_value(serde_json::to_value(&look).unwrap()).unwrap();
+        assert_eq!(copy.height_fog, look.height_fog);
+        let neutral: LookSettings =
+            serde_json::from_value(json!({"height_fog": {"enabled": true}})).unwrap();
+        neutral.validate().unwrap();
+        assert_eq!(neutral.height_fog.uniform(), [0., 0., 0., 1.]);
+        assert_eq!(neutral.fog_density, 0.);
+    }
+
+    #[test]
+    fn invalid_height_fog_is_rejected_even_when_disabled() {
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for field in 0..3 {
+                let mut look = LookSettings::default();
+                match field {
+                    0 => look.height_fog.base_height = bad,
+                    1 => look.height_fog.height_falloff = bad,
+                    _ => look.height_fog.sky_distance = bad,
+                }
+                assert!(look.validate().is_err());
+            }
+        }
+        for value in [
+            json!({"height_falloff": -0.01}),
+            json!({"sky_distance": -1.}),
+        ] {
+            let look: LookSettings = serde_json::from_value(json!({"height_fog": value})).unwrap();
+            assert!(look.validate().is_err());
+        }
+        assert!(
+            serde_json::from_value::<LookSettings>(json!({"height_fog": {"falloff": 1.}})).is_err()
+        );
     }
 }
 
