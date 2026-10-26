@@ -53,6 +53,9 @@ struct Options {
     /// Play on a server across the network (`--connect ADDR`), trusting the certificate at
     /// `server_cert`, instead of the built-in one.
     connect: Option<String>,
+    /// Log in to this account on the server (#88); the password comes from ALDERMOOR_PASSWORD.
+    account: Option<String>,
+    new_account: bool,
     server_cert: PathBuf,
     /// The character's name on the server.
     name: String,
@@ -127,6 +130,8 @@ impl Options {
             showcase: false,
             smoke: false,
             connect: None,
+            account: None,
+            new_account: false,
             server_cert: PathBuf::from("aldermoor.der"),
             name: "Traveller".into(),
             effects_review: false,
@@ -251,6 +256,8 @@ impl Options {
                     o.server_cert = args.next().context("--server-cert needs a file")?.into()
                 }
                 "--name" => o.name = args.next().context("--name needs a name")?,
+                "--account" => o.account = Some(args.next().context("--account needs a name")?),
+                "--new-account" => o.new_account = true,
                 "--effects-review" => {
                     o.effects_review = true;
                     o.showcase = true;
@@ -483,11 +490,22 @@ impl Game {
                         options.server_cert.display()
                     )
                 })?;
-                server::Host::connect(
-                    addr.as_str(),
-                    &server::net::CertificateDer::from(cert),
-                    &options.name,
-                )
+                let cert = server::net::CertificateDer::from(cert);
+                match &options.account {
+                    None => server::Host::connect(addr.as_str(), &cert, &options.name),
+                    Some(account) => {
+                        let password = std::env::var("ALDERMOOR_PASSWORD")
+                            .context("set ALDERMOOR_PASSWORD to log in with --account")?;
+                        server::Host::login(
+                            addr.as_str(),
+                            &cert,
+                            account,
+                            &password,
+                            &options.name,
+                            options.new_account,
+                        )
+                    }
+                }
                 .with_context(|| format!("connecting to {addr}"))?
             }
         };

@@ -49,6 +49,28 @@ impl World {
         }
     }
 
+    /// Adds a player as a saved record left them (#88). In a realm, in the region where they
+    /// stood, or `None` when there's no room there.
+    pub fn spawn_record(&mut self, record: &sim::CharacterRecord) -> Option<UnitId> {
+        match self {
+            World::One(w) => Some(w.sim.spawn_record(record)),
+            World::Many(w) => {
+                let id = w.realm.spawn_player(&record.name, glam::Vec2::from(record.at))?;
+                let record = record.clone();
+                w.realm.with_unit(id, move |sim, id| sim.restore(id, &record));
+                Some(id)
+            }
+        }
+    }
+
+    /// Player `id`'s character as it stands, to keep.
+    pub fn record(&self, id: UnitId) -> Option<sim::CharacterRecord> {
+        match self {
+            World::One(w) => w.sim.record(id),
+            World::Many(w) => w.realm.with_unit(id, |sim, id| sim.record(id)),
+        }
+    }
+
     pub fn command(&mut self, id: UnitId, c: Command) {
         match self {
             World::One(w) => w.sim.command(id, c),
