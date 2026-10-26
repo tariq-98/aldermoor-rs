@@ -2497,6 +2497,9 @@ mod temporal_tests {
         for mode in [0, 1, 4] {
             let mut r = Renderer::with_samples(65, 47, 1., mode).unwrap();
             let sampled = counter_device_or_verify_fallback(&mut r);
+            if sampled {
+                r.set_gpu_counters(true).unwrap();
+            }
             r.scene_time = Some(0.);
             r.draw(camera, &[], None).unwrap();
             r.wait().unwrap();
