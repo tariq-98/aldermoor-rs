@@ -68,6 +68,20 @@ pub enum Command {
     /// the newest). Send it with each batch of commands: a player's shots and blows at other
     /// players are tested where the sender saw them, up to 250 ms back.
     Viewing { tick: u64 },
+    /// Where the player aims up or down with the crosshair, as [`aim_pitch_byte`]: sent when
+    /// it changes, so others see bows and staves point where this player aims.
+    Aim { pitch: i8 },
+}
+
+/// An aim pitch in radians (up positive, clamped to a right angle either way) as one byte, in
+/// steps of about 0.7 degrees.
+pub fn aim_pitch_byte(pitch: f32) -> i8 {
+    (pitch / std::f32::consts::FRAC_PI_2 * 127.).round().clamp(-127., 127.) as i8
+}
+
+/// The pitch in radians that [`aim_pitch_byte`] stands for.
+pub fn aim_pitch_radians(byte: i8) -> f32 {
+    byte as f32 / 127. * std::f32::consts::FRAC_PI_2
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -292,6 +306,9 @@ pub struct UnitState {
     /// Seconds since the pose began, for animation timing.
     pub pose_time: f32,
     pub traversal: Traversal,
+    /// Where a player aims up (+) or down (-) with the crosshair, in 127ths of a right angle
+    /// ([`aim_pitch_byte`]); 0 for everyone else and for anyone aiming level.
+    pub aim_pitch: i8,
     pub health: f32,
     pub max_health: f32,
     pub hostile: bool,
@@ -683,6 +700,15 @@ impl Command {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn aim_pitch_fits_a_byte_in_steps_under_a_degree() {
+        assert_eq!(super::aim_pitch_byte(0.), 0);
+        assert_eq!(super::aim_pitch_byte(3.), 127);
+        assert_eq!(super::aim_pitch_byte(-3.), -127);
+        let p = 0.3;
+        let back = super::aim_pitch_radians(super::aim_pitch_byte(p));
+        assert!((back - p).abs() <= 0.5f32.to_radians(), "{back}");
+    }
     use super::*;
 
     #[test]
@@ -704,6 +730,7 @@ mod tests {
                 pose: Pose::Idle,
                 pose_time: 0.0,
                 traversal: Traversal::Ground,
+                aim_pitch: 0,
                 health: 100.0,
                 max_health: 100.0,
                 hostile: false,
