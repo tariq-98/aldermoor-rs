@@ -111,6 +111,10 @@ pub struct Character {
     spine_bones: Option<[usize; 4]>,
     /// The neck and head, which share the turn the chest can't take.
     head_bones: [Option<usize>; 2],
+    /// Where the character looks (#212), in the world, as the client last said; and the spine,
+    /// neck and head following it.
+    gaze_at: Option<Vec3>,
+    gaze: anim::Gaze,
     /// Each arm's upper arm, forearm, hand and hand socket, by `Side`, which reach for the
     /// weapon.
     arm_bones: [Option<[usize; 4]>; 2],
@@ -245,6 +249,9 @@ const MAX_TWIST: f32 = std::f32::consts::FRAC_PI_3;
 /// How much further round than the chest the neck and head turn, shared between them, when the
 /// chest can't turn as far as it should face (#211).
 const HEAD_TWIST: f32 = std::f32::consts::FRAC_PI_6;
+/// A point closer to the head than this, in metres, isn't looked at (#212): it would swing the
+/// head about for nothing.
+const NEAREST_GAZE: f32 = 0.5;
 /// The humanoid locomotion loops, slowest first, which blend by speed (#110).
 const LOOPS: [&str; 3] = ["Walk_Loop", "Jog_Fwd_Loop", "Sprint_Loop"];
 /// The humanoid loop for walking or running at `speed`, which the clip stack's switches and
@@ -466,6 +473,8 @@ impl Character {
             ground: None,
             spine_bones,
             head_bones,
+            gaze_at: None,
+            gaze: anim::Gaze::default(),
             arm_bones,
             main_sockets: None,
             drawn_now: look.drawn,
@@ -1217,6 +1226,60 @@ impl Character {
             }
         }
     }
+    /// Turns the spine, neck and head toward where the character looks (#212), `free` of the way
+    /// (0 fades the gaze out). `anim::Gaze` says how far each bone turns, round the vertical and
+    /// about the line across the shoulders, from where the upper body faces after turning on the
+    /// spot (#211). With a weapon drawn the spine aims, taking the arms and the weapon with it;
+    /// otherwise mostly the head turns.
+    fn follow_gaze(&mut self, u: &UnitState, body: f32, free: f32, dt: f32) {
+        let (Some([_, low, mid, chest]), [Some(neck), Some(head)]) =
+            (self.spine_bones, self.head_bones)
+        else {
+            return;
+        };
+        if free <= 0. && self.gaze.faded_out() {
+            return;
+        }
+        let bones = [low, mid, chest, neck, head];
+        // The point from the head, where it was last frame (near enough), in the model's frame.
+        let facing = self.turn.offset();
+        let from = self.world[head].w_axis.truncate();
+        let want = self.gaze_at.and_then(|at| {
+            let to = Quat::from_rotation_y(-body) * (at - u.position) - from;
+            let flat = to.xz().length();
+            (to.length() > NEAREST_GAZE).then(|| anim::Aim {
+                // Right overhead or underfoot, it looks the way it faces.
+                yaw: if flat > 0.3 {
+                    wrap(to.x.atan2(to.z) - facing)
+                } else {
+                    0.
+                },
+                pitch: to.y.atan2(flat),
+                aiming: u.look.drawn,
+            })
+        });
+        let turns = self.gaze.update(want, free, dt);
+        if turns == anim::Turns::default() {
+            return;
+        }
+        // Each bone turns round the vertical, then pitches about the line across the way it now
+        // faces, so the head ends up facing round and up by all of it.
+        let (mut above, mut yaw) = (Quat::IDENTITY, facing);
+        for (i, b) in bones.into_iter().enumerate() {
+            if i == 0 || self.nodes[b].parent != Some(bones[i - 1]) {
+                above = self.nodes[b]
+                    .parent
+                    .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+            }
+            yaw += turns.yaw[i];
+            let across = Quat::from_rotation_y(yaw) * Vec3::X;
+            let turn = Quat::from_axis_angle(across, -turns.pitch[i])
+                * Quat::from_rotation_y(turns.yaw[i]);
+            let local = &mut self.local[b];
+            local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
+            above *= local.rotation;
+        }
+    }
     /// Turns bone `i` by `angle` round the model's vertical, taking its children with it.
     fn turn_upright(&mut self, i: usize, angle: f32) {
         let above = self.nodes[i]
@@ -1726,6 +1789,15 @@ impl Character {
         if self.step_round(stance == anim::Stance::Standing, u.position, body, dt) {
             switch = switch.or(Some(anim::Switch::Layer));
         }
+        // The spine, neck and head follow where it looks (#212). A swing's clip keeps the head,
+        // but a shot or a bolt is aimed, and below half detail nobody looks about.
+        let shooting = matches!(u.pose, Pose::Attack | Pose::Cast)
+            && self.combat.as_ref().is_some_and(|c| {
+                !c.downed && matches!(c.action, Action::Shoot | Action::CastBolt | Action::Channel)
+            });
+        let held =
+            busy && !shooting || self.rally_time.is_some() || self.tier == anim::Tier::Quarter;
+        self.follow_gaze(u, body, if held { 0. } else { 1. }, dt);
         self.pose_world();
         self.drawn_now = u.look.drawn;
         self.main_offset = 0.;
@@ -1780,6 +1852,11 @@ impl Character {
     /// Stands the character on `ground` (#214). Without one, the ground is level with the unit.
     pub fn set_ground(&mut self, ground: Ground) {
         self.ground = Some(ground);
+    }
+    /// Has the character look at `at`, a point in the world, from its next update (#212): where
+    /// the crosshair points, its target, or someone stopping by. `None` looks ahead.
+    pub fn look_at(&mut self, at: Option<Vec3>) {
+        self.gaze_at = at;
     }
     /// Sets how often the pose is rebuilt, as `anim::Crowd` ranks the character this frame.
     pub fn set_tier(&mut self, tier: anim::Tier) {
@@ -2646,6 +2723,180 @@ mod combat_tests {
                 );
             }
         }
+    }
+    /// A ranger with a hunting bow, drawn or on the back, standing facing +z. Switches cut.
+    fn archer(drawn: bool) -> (Character, UnitState) {
+        let (_, mut u, _) = fighter(0.);
+        u.look = Look {
+            art: "male".into(),
+            drawn,
+            gear: vec![
+                ("main_hand".into(), "bow.hunting".into()),
+                ("back".into(), "quiver.leather".into()),
+            ],
+            ..Default::default()
+        }
+        .into();
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let mut c = Character::load(&cat, &mut ModelCache::default(), &u.look).unwrap();
+        c.blender.set_method(anim::Method::Off);
+        (c, u)
+    }
+    /// How bone `i` of `c` is turned from the same bone of `twin`, posed the same way without
+    /// the gaze (#212): the yaw (toward +x) and pitch (up) that turn takes the facing (+z) to, in
+    /// degrees.
+    fn gazed(c: &Character, twin: &Character, i: usize) -> (f32, f32) {
+        let turn = Quat::from_mat4(&c.world[i]) * Quat::from_mat4(&twin.world[i]).inverse();
+        let ahead = turn * Vec3::Z;
+        (
+            ahead.x.atan2(ahead.z).to_degrees(),
+            ahead.y.asin().to_degrees(),
+        )
+    }
+    #[test]
+    fn a_drawn_bow_pitches_the_spine_with_the_aim_and_a_look_mostly_the_head() {
+        // Looking at a point 30° up or down, 10 m ahead: the head ends up pitched all the way.
+        // With the bow drawn the spine takes all of it (anim::look::AIM_PITCH), so the arms and
+        // the bow point there too; with it on the back the chest takes a little (LOOK_PITCH).
+        for drawn in [true, false] {
+            for angle in [30f32, -30.] {
+                let (mut c, mut u) = archer(drawn);
+                let (mut twin, _) = archer(drawn);
+                let [head, chest, hand] = ["Head", "spine_03", "hand_l"].map(|n| c.names[n]);
+                c.update(&u, 1. / 60.);
+                let eyes = c.world[head].w_axis.truncate();
+                c.look_at(Some(
+                    eyes + Vec3::new(0., 10. * angle.to_radians().tan(), 10.),
+                ));
+                for frame in 0..60 {
+                    u.pose_time = frame as f32 / 60.;
+                    c.update(&u, 1. / 60.);
+                    twin.update(&u, 1. / 60.);
+                }
+                let share: f32 = if drawn {
+                    1.
+                } else {
+                    anim::look::LOOK_PITCH[..3].iter().sum()
+                };
+                let (yaw, pitch) = gazed(&c, &twin, head);
+                assert!(
+                    (pitch - angle).abs() < 1.5 && yaw.abs() < 1.,
+                    "drawn {drawn}, {angle}°: the head turned {yaw}° and pitched {pitch}°"
+                );
+                let (_, pitch) = gazed(&c, &twin, chest);
+                assert!(
+                    (pitch - angle * share).abs() < 1.5,
+                    "drawn {drawn}, {angle}°: the chest pitched {pitch}°"
+                );
+                if drawn {
+                    let (_, pitch) = gazed(&c, &twin, hand);
+                    assert!(
+                        (pitch - angle).abs() < 3.,
+                        "{angle}°: the bow hand pitched {pitch}°"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn heads_turn_toward_a_point_within_limits_and_let_go_behind() {
+        // A point at head height, round to the side: the head turns to it up to 70°, the chest
+        // taking a fifth; behind, it looks ahead again.
+        for (round, want) in [(60f32, 60f32), (-60., -60.), (100., 70.), (150., 0.)] {
+            let (mut c, mut u) = archer(false);
+            let (mut twin, _) = archer(false);
+            let [head, chest] = ["Head", "spine_03"].map(|n| c.names[n]);
+            c.update(&u, 1. / 60.);
+            let eyes = c.world[head].w_axis.truncate();
+            let way = round.to_radians();
+            c.look_at(Some(eyes + Vec3::new(way.sin(), 0., way.cos()) * 5.));
+            for frame in 0..90 {
+                u.pose_time = frame as f32 / 60.;
+                c.update(&u, 1. / 60.);
+                twin.update(&u, 1. / 60.);
+            }
+            let (yaw, pitch) = gazed(&c, &twin, head);
+            assert!(
+                (yaw - want).abs() < 2. && pitch.abs() < 2.,
+                "{round}°: the head turned {yaw}° and pitched {pitch}°"
+            );
+            let (yaw, _) = gazed(&c, &twin, chest);
+            assert!(
+                (yaw - want * 0.2).abs() < 1.,
+                "{round}°: the chest turned {yaw}°"
+            );
+        }
+    }
+    #[test]
+    fn a_swing_takes_the_head_back_and_a_shot_keeps_its_aim() {
+        // Looking 45° round and 20° up, a swordsman slashes: the slash's clip has the head, so
+        // the gaze fades out over the swing without jumping. An archer loosing a shot keeps aiming.
+        let way = 45f32.to_radians();
+        let point =
+            |eyes: Vec3| eyes + Vec3::new(way.sin(), 20f32.to_radians().tan(), way.cos()) * 5.;
+        let (mut c, mut u, mut fight) = fighter(0.);
+        let (mut twin, ..) = fighter(0.);
+        let head = c.names["Head"];
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        c.look_at(Some(point(c.world[head].w_axis.truncate())));
+        for frame in 0..60 {
+            u.pose_time = frame as f32 / 60.;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            twin.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        let start = gazed(&c, &twin, head);
+        assert!(
+            (start.0 - 45.).abs() < 2. && (start.1 - 20.).abs() < 2.,
+            "{start:?}"
+        );
+        u.pose = Pose::Attack;
+        fight.action = Action::Slash;
+        let mut last = start;
+        for frame in 0..30 {
+            let t = frame as f32 / 60.;
+            u.pose_time = t;
+            fight.action_time = t;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            twin.update_combat(&u, Some(&fight), 1. / 60.);
+            let now = gazed(&c, &twin, head);
+            let step = (now.0 - last.0).hypot(now.1 - last.1);
+            assert!(step < 5., "frame {frame}: the head jumped {step}°");
+            last = now;
+        }
+        assert!(
+            last.0.hypot(last.1) < 0.05 * start.0.hypot(start.1),
+            "after the swing the gaze still turns the head {last:?}"
+        );
+        // The archer looses a shot: still aiming where they were.
+        let (mut c, mut u) = archer(true);
+        let (mut twin, _) = archer(true);
+        let head = c.names["Head"];
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        c.look_at(Some(point(c.world[head].w_axis.truncate())));
+        let mut fight = fight.clone();
+        fight.action = Action::None;
+        for frame in 0..60 {
+            u.pose_time = frame as f32 / 60.;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            twin.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        u.pose = Pose::Attack;
+        fight.action = Action::Shoot;
+        for frame in 0..30 {
+            let t = frame as f32 / 60.;
+            u.pose_time = t;
+            fight.action_time = t;
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            twin.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        let (yaw, pitch) = gazed(&c, &twin, head);
+        assert!(
+            (yaw - 45.).abs() < 3. && (pitch - 20.).abs() < 3.,
+            "loosing, the archer's head turned {yaw}° and pitched {pitch}°"
+        );
     }
     #[test]
     fn on_a_wall_the_feet_leave_the_ground_even_taking_a_blow() {

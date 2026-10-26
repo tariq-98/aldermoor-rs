@@ -40,17 +40,20 @@ the unit's combat view and calls `update`, which builds the pose in this order:
    to `HEAD_TWIST` (30°) of what it can't take.
 7. **Feet stepping round** (`step_round`, #211): while the body turns on the spot, the legs reach
    with two-bone IK to where the feet stand.
-8. **World matrices**, then `perform`: the hand reaching for the sheath, the off hand on a
+8. **Gaze** (`follow_gaze`, #212): the spine, neck and head turn toward where the character
+   looks, so a drawn bow points where the crosshair does and heads turn to targets (see Aim and
+   look-at below). Before `perform`, so the hands keep their grips on what the arms now point.
+9. **World matrices**, then `perform`: the hand reaching for the sheath, the off hand on a
    two-handed grip, and the bow's string and arrow morphs.
-9. **The blender** (`anim::Blender`): when anything switched since the last frame it starts
-   carrying the old motion into the new, and while a switch settles it changes `local`, so the
-   world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
-   letting go of or taking a grip.
-10. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops and the legs
+10. **The blender** (`anim::Blender`): when anything switched since the last frame it starts
+    carrying the old motion into the new, and while a switch settles it changes `local`, so the
+    world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
+    letting go of or taking a grip.
+11. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops and the legs
     reach for the ground, and planted feet hold still (see Feet on the ground below). After the
     blender, so nothing smooths the feet off the ground, and the blender keeps the pose from
     before it.
-11. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
+12. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
 
 ## Locomotion
 
@@ -175,6 +178,46 @@ root yaw offset does, and the client draws each character at `Character::body_ya
   strikes. Beasts always follow this way, and so does anyone below full detail (#215), whose feet
   don't step round.
 
+## Aim and look-at
+
+Third-person games put two procedural layers on top of their clips: an aim offset, which pitches
+the spine with the aim so the arms and what they hold point where the crosshair does, and a
+look-at, which turns the head toward what matters. `anim::Gaze` (#212) does both for the five
+bones from `spine_01` to `Head`, and `Character::look_at` tells it where to look each frame, in
+the world:
+
+- **What it looks at** is the client's choice. You look where the crosshair points while aiming
+  (the ground under it, or 100 m along it into the sky, `FAR_GAZE`). Anyone with a target looks at
+  the target's head (`EYES`, 93% of its height) while it's within 40 m (`GAZE_RANGE`), and an NPC
+  with nothing targeted looks at the nearest player within 5 m (`NPC_GAZE_RANGE`). Anyone else
+  looks ahead: other players' aim isn't in the snapshot yet (#244). A point within 0.5 m of the
+  head (`NEAREST_GAZE`) isn't looked at, and the showcase looks at nothing.
+- **Aiming or looking.** With a weapon drawn it aims: the spine takes all the pitch (30%, 30% and
+  40% from the bottom, `AIM_PITCH`), so the bow, wand or staff points along the aim, up to 50° up
+  and 45° down (`AIM_UP`, `AIM_DOWN`: a bow up a cliff, or down from the bridge), following on a
+  critically damped spring with a half-life of 0.05 s (`AIM_HALF_LIFE`). Otherwise it only looks:
+  the neck and head take 85% of the pitch (`LOOK_PITCH`), up to 40° either way (`LOOK_LIMIT`), at a
+  person's pace (0.15 s, `LOOK_HALF_LIFE`). Drawing or stowing moves between the two on a 0.1 s
+  spring (`FADE_HALF_LIFE`).
+- **Round** from where the upper body faces (the sim's yaw, closely followed, after #211's turn),
+  the gaze turns up to 70° (`MAX_YAW`): a fifth of it in the chest, the rest in the neck and head
+  (`LOOK_YAW`). A point more than 110° round (`LET_GO`) is let go of, and the gaze comes back
+  ahead, rather than swinging from one shoulder to the other as the point passes behind. Under
+  action controls the sim turns you to the camera, so while you aim there is little to turn.
+- **Each bone** turns round the vertical by its share, then pitches about the line across the way
+  it now faces, so the head ends up turned and pitched by the whole of it. The gaze goes on before
+  `perform`, so the hands keep their grips, and before the blender, so a switch smooths it with the
+  rest of the pose.
+- **A swing owns the head.** While an action's clip plays (an attack, a cast, a roll, a flinch,
+  lying downed and getting back up, but not a shot, a bolt or a channel, which are aimed) and at
+  quarter detail, the gaze fades out on a 0.1 s spring, and back in after. A shot keeps its aim, so the arrow leaves the bow where the crosshair
+  points.
+- **Settled, it's free.** A spring that has all but got where it's going, and all but stopped,
+  stops there and isn't run again until it has somewhere new to go, so a character looking ahead
+  turns no bones, and one faded right out (at quarter detail, say) skips the gaze altogether. Fading
+  back in, it starts turned the way it now looks, rather than sweeping across from where it looked
+  before.
+
 ## Switches
 
 A switch is any change in what plays: the base clip's name, the legs' clip, the pose, the upper
@@ -292,7 +335,13 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   standing, in the air and landing; slower than the clips play, the steps shorten so planted feet
   stay put unheld; off the ground the placement fades out and comes back on landing; and a
   teleport lets go of the feet at once. Measuring a gait finds where each foot lifts off and how
-  high its planted ball is, and each step says which feet are planted and how much to warp.
+  high its planted ball is, and each step says which feet are planted and how much to warp. For
+  aim and look-at: the gaze turns no further than its limits, even on the way, and gets to them; it
+  splits the pitch over the chain as specified (aiming, the spine takes all of it; looking, the
+  neck and head 85%), and a look round turns the chest a fifth; it fades out smoothly through a
+  swing and comes back after; faded right out it stops, and fades back in turned the way it now
+  looks; and as the point jumps about, passes behind and goes, the head never turns 25° in a frame,
+  and behind, it looks ahead.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
   bone carries on at every switch, where cuts jump by over 0.5 rad (with the feet left as the
@@ -318,7 +367,15 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   before; at quarter rate it holds between rebuilds. `a_new_character_shows_its_pose_on_its_first_frame_at_any_tier` checks that
   nobody shows the rest pose. `below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step`
   drops a caped knight to half rate: the cape eases to the pose, its tip moving no more than a
-  tenth of the way in a frame, and turning on the spot the feet stay put. The model tests check
+  tenth of the way in a frame, and turning on the spot the feet stay put.
+  `a_drawn_bow_pitches_the_spine_with_the_aim_and_a_look_mostly_the_head` has an archer look 30° up
+  and down: the head pitches within 1.5° of it, and the chest by the spine's share (all of it with
+  the bow drawn, so the bow hand follows within 3°, and 15% with it on the back).
+  `heads_turn_toward_a_point_within_limits_and_let_go_behind` turns the head 60° either way, stops
+  it at 70° for a point 100° round and looks ahead for one 150° round, the chest taking a fifth.
+  `a_swing_takes_the_head_back_and_a_shot_keeps_its_aim` has a swordsman looking 45° round and 20°
+  up slash: the gaze fades below 5% over the swing, never moving the head 5° in a frame, while an
+  archer loosing a shot stays aimed within 3°. The model tests check
   that even keys are indexed and blended exactly (slerp for steps over 30°), uneven keys are
   resampled, a constant track keeps one key and step keys hold.
 - The client's `--crowd` test checks that nobody in the crowd passes through anybody, even at 200,
@@ -335,8 +392,9 @@ frame (median and 95th percentile) and how many characters were at each tier on 
 times `animate` (the pose) and `draws` (the skinning palettes) for a plate knight with sword,
 shield and cape, a ranger with a bow and an elf mage with a staff, at each LOD at full detail, then
 at half and quarter detail, and counts what posing allocates once it is going (nothing). They go
-over the slopes west of the village with their feet on the ground; `off` for the feet leaves them
-as the clips have them. The cases: `idle`, `walk` (2.5 m/s, between the walk and jog loops), `run`
+over the slopes west of the village with their feet on the ground, following with their eyes a
+point that sweeps round and up and down in front of them; `off` for the feet leaves them as the
+clips have them. The cases: `idle`, `walk` (2.5 m/s, between the walk and jog loops), `run`
 and `strafe` (running square to the facing) hold their pose, `turn` stands looking 80° either way
 and back every two seconds (the feet step round on every sweep), `slash` and `run + slash` start
 the slash over every half second, and `start-stop` runs and stops every half second, so those
@@ -345,16 +403,16 @@ three are blending most of the time.
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 |
-| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -392,6 +450,13 @@ being rebuilt. Wall clock on the cloud runner, posing at full detail goes from 7
 character a frame, so the 8 full-detail characters cost about 15 µs more a frame, however big the
 crowd.
 
+#212's gaze costs 2,400 to 2,900 instructions a pose while the character looks anywhere but
+straight ahead (4% to 5%; the bench has everyone follow a point that never stops moving).
+Looking ahead, it turns nothing, and held faded out (slashing over and over, or at quarter detail)
+it isn't run at all. Wall clock on
+the cloud runner can't tell it from the noise: posing at full detail measured 9.5 µs a character a
+frame, against 9.6 after #214, and quarter detail is unchanged.
+
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are
 the next cost to take on (#243): they're rebuilt every frame at every tier, and half of them are
@@ -399,8 +464,9 @@ copies of another part's.
 
 ## Next
 
-In the plan's order: #212 aim pitch and look-at, #217 lean, landings and the idle phase, #218
-hit flinches and hitstop (on `Event::Hit`, #191), and #213 traversal (after #192).
+In the plan's order: #217 lean, landings and the idle phase, #218 hit flinches and hitstop (on
+`Event::Hit`, #191), #213 traversal (after #192), and #244 remote players' real aim in the
+snapshot.
 
 One thing to watch: combat clips take their time from `UnitCombat::action_time` in each snapshot.
 Snapshots go out every tick today; if the send rate drops to 20–30 Hz (#73), attacks would play in

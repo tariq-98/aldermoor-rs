@@ -14,7 +14,7 @@ mod perf_overlay;
 mod stage;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
-use protocol::{Command, Look, Pose, UnitState};
+use protocol::{Command, Look, Pose, UnitKind, UnitState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use render::{
     Camera, Renderer,
@@ -1483,6 +1483,45 @@ impl Game {
             }
         });
         let combat_index: HashMap<_, _> = self.fight.units.iter().map(|c| (c.id, c)).collect();
+        // Where each character looks (#212): you where the crosshair points (the ground under
+        // it, or far along it into the sky), anyone with a target at its head, and townsfolk at a
+        // player close by.
+        let aim = self.aim_point();
+        let crosshair_at = (self.aiming() && !self.options.showcase).then(|| {
+            aim.unwrap_or(camera.eye + (camera.target - camera.eye).normalize_or_zero() * FAR_GAZE)
+        });
+        let heads: HashMap<u32, Vec3> = units
+            .iter()
+            .map(|u| {
+                let height = body_height(&self.characters, &self.catalog, u);
+                (u.id, u.position + Vec3::Y * EYES * height)
+            })
+            .collect();
+        let gaze = |u: &UnitState| -> Option<Vec3> {
+            if self.options.showcase {
+                return None;
+            }
+            if u.id == me.id && crosshair_at.is_some() {
+                return crosshair_at;
+            }
+            if let Some(target) = u.target.filter(|t| *t != u.id) {
+                return heads
+                    .get(&target)
+                    .copied()
+                    .filter(|at| at.distance(u.position) < GAZE_RANGE);
+            }
+            if u.kind != UnitKind::Npc {
+                return None;
+            }
+            units
+                .iter()
+                .filter(|v| v.kind == UnitKind::Player)
+                .map(|v| (v.position.distance_squared(u.position), v.id))
+                .filter(|(d, _)| *d < NPC_GAZE_RANGE * NPC_GAZE_RANGE)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .and_then(|(_, id)| heads.get(&id).copied())
+        };
+        let gazes: Vec<_> = units.iter().map(gaze).collect();
         // How often each character's pose rebuilds (#215): the player, their target and whoever
         // targets them first, then the nearest, as many at the higher rates as the budget allows.
         let tiers: &[anim::Tier] = if self.options.anim_tiers && !self.options.showcase {
@@ -1503,18 +1542,7 @@ impl Game {
         for (i, u) in units.iter().enumerate() {
             let mut look = (*u.look).clone();
             look.drawn = false;
-            let height = self
-                .characters
-                .get(&u.id)
-                .map(|c| c.rig_height)
-                .or_else(|| {
-                    self.catalog
-                        .humanoid
-                        .body_types
-                        .get(&u.look.art)
-                        .map(|b| b.height)
-                })
-                .unwrap_or(1.5);
+            let height = body_height(&self.characters, &self.catalog, u);
             let depth = (u.position - camera.eye).dot((camera.target - camera.eye).normalize());
             let pixels = render::visibility::screen_height(height, depth, camera.fov, r.height);
             let lod = render::visibility::lod_for_height(
@@ -1542,6 +1570,7 @@ impl Game {
             let tier = tiers.get(i).copied().unwrap_or_default();
             counts[tier as usize] += 1;
             c.set_tier(tier);
+            c.look_at(gazes[i]);
             let started = Instant::now();
             c.animate(
                 u,
@@ -1606,7 +1635,6 @@ impl Game {
         });
         let ctx = self.hud_context.clone();
         let mut actions = Vec::new();
-        let aim = self.aim_point();
         let radius = self
             .aim_slot
             .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
@@ -2096,12 +2124,37 @@ fn paint_caption(ctx: &egui::Context, text: &str) {
     painter.rect_filled(plate, 6., egui::Color32::from_black_alpha(150));
     painter.galley(top, galley, egui::Color32::WHITE);
 }
+/// How tall `u` stands, in metres: its character's rig, or its body type's before it has one.
+fn body_height(
+    characters: &HashMap<u32, Character>,
+    catalog: &assets::Catalog,
+    u: &UnitState,
+) -> f32 {
+    characters
+        .get(&u.id)
+        .map(|c| c.rig_height)
+        .or_else(|| {
+            catalog
+                .humanoid
+                .body_types
+                .get(&u.look.art)
+                .map(|b| b.height)
+        })
+        .unwrap_or(1.5)
+}
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
 /// Your own character is drawn at the newest sim time rather than a step behind (#219).
 const OWN_AHEAD: bool = true;
 /// How often a held attack button presses the basic attack again, in seconds.
 const SWING_REPEAT: f32 = 0.1;
+/// Where characters look (#212): how far along the crosshair you look when it points at the sky,
+/// how far off a target may be and still be looked at, and how close a player comes before
+/// townsfolk look at them, in metres; and the eyes' height, as a share of the body's.
+const FAR_GAZE: f32 = 100.;
+const GAZE_RANGE: f32 = 40.;
+const NPC_GAZE_RANGE: f32 = 5.;
+const EYES: f32 = 0.93;
 /// A press of the left or right button, until both are up again.
 struct Drag {
     from: (f64, f64),
