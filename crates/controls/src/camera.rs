@@ -24,6 +24,11 @@ const PIVOT_EASE: f32 = 20.;
 /// How fast the eye slides back out once nothing is in the way, in metres a second. Pulling
 /// in is instant so walls never come between the camera and the player.
 const REACH_SPEED: f32 = 4.;
+/// While climbing, the camera stands this much further back and looks this much higher, so the
+/// wall and the holds above are in view, easing there and back at this rate (#250).
+const CLIMB_OUT: f32 = 1.5;
+const CLIMB_LIFT: f32 = 0.5;
+const CLIMB_EASE: f32 = 4.;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Orbit {
@@ -119,6 +124,8 @@ pub struct View {
 pub struct Follow {
     /// None until the first frame, which snaps straight to the orbit.
     eased: Option<Eased>,
+    /// The player is hanging from a hold or running up a wall: frame the wall.
+    pub climbing: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,6 +134,8 @@ struct Eased {
     feet_y: f32,
     /// How far out the eye may go this frame.
     reach: f32,
+    /// 0 on the ground, 1 framing a climb.
+    climb: f32,
 }
 
 fn ease(from: f32, to: f32, rate: f32, dt: f32) -> f32 {
@@ -148,18 +157,21 @@ impl Follow {
                 distance: orbit.distance,
                 feet_y: feet.y,
                 reach: f32::INFINITY,
+                climb: if self.climbing { 1. } else { 0. },
             },
             Some(e) => Eased {
                 distance: ease(e.distance, orbit.distance, ZOOM_EASE, dt),
                 feet_y: ease(e.feet_y, feet.y, PIVOT_EASE, dt),
+                climb: ease(e.climb, if self.climbing { 1. } else { 0. }, CLIMB_EASE, dt),
                 ..e
             },
         };
         let shown = Orbit {
-            distance: e.distance,
+            distance: e.distance + CLIMB_OUT * e.climb,
             ..*orbit
         };
-        let target = shown.target(Vec3::new(feet.x, e.feet_y, feet.z));
+        let target =
+            shown.target(Vec3::new(feet.x, e.feet_y, feet.z)) + Vec3::Y * CLIMB_LIFT * e.climb;
         let clear = shown.eye(target, blocked);
         let room = clear.distance(target);
         let reach = if room <= e.reach {
@@ -237,6 +249,30 @@ impl Kick {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn climbing_eases_the_camera_back_and_up_and_leaving_eases_it_home() {
+        // Open meadow north of the village, clear of the terrain behind the camera.
+        let feet = Vec3::new(5., world::height(5., 10.), 10.);
+        let orbit = Orbit::default();
+        let mut f = Follow::default();
+        let open = |_: Vec3, eye: Vec3| eye;
+        let ground = f.update(&orbit, feet, 1. / 60., open);
+        f.climbing = true;
+        let mut v = ground;
+        for _ in 0..120 {
+            v = f.update(&orbit, feet, 1. / 60., open);
+        }
+        let out = v.eye.distance(v.target) - ground.eye.distance(ground.target);
+        assert!((out - CLIMB_OUT).abs() < 0.05, "eased out {out} m");
+        assert!((v.target.y - ground.target.y - CLIMB_LIFT).abs() < 0.02);
+        assert!(v.eye.y > ground.eye.y);
+        f.climbing = false;
+        for _ in 0..120 {
+            v = f.update(&orbit, feet, 1. / 60., open);
+        }
+        assert!(v.eye.distance(ground.eye) < 0.05, "didn't come home");
+    }
 
     #[test]
     fn kicks_add_up_to_a_cap_and_die_away_in_a_moment() {

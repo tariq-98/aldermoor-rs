@@ -1327,6 +1327,17 @@ impl Game {
             .iter()
             .find(|u| u.id == self.host.player)
             .context("no local player")?;
+        // Hanging, moving between holds or running up a wall: frame the wall (#250).
+        self.follow.climbing = match me.traversal {
+            protocol::Traversal::Hanging => true,
+            protocol::Traversal::Forced(f) => matches!(
+                f.kind,
+                protocol::ForcedKind::Hold
+                    | protocol::ForcedKind::Corner
+                    | protocol::ForcedKind::WallRun
+            ),
+            _ => false,
+        };
         let scenery = &self.scenery;
         let view = self
             .follow
