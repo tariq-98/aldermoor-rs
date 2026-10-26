@@ -468,6 +468,7 @@ dependencies = [
  "render",
  "serde_json",
  "server",
+ "sim",
  "winit",
  "world",
 ]

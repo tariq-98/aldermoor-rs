@@ -11,6 +11,7 @@ pub mod lean;
 pub mod locomotion;
 pub mod lod;
 pub mod look;
+pub mod traverse;
 pub mod turn;
 
 pub use feet::{Contact, Feet, Leg, Placement};
@@ -21,4 +22,5 @@ pub use lean::Lean;
 pub use locomotion::{Gait, Step, Stride};
 pub use lod::{Crowd, Importance, Tier};
 pub use look::{Aim, Gaze, Turns};
+pub use traverse::{Path, Progress};
 pub use turn::{Plant, Stance, Steps, Turn};
