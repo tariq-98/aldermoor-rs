@@ -6,6 +6,7 @@ mod craft;
 mod crowd;
 mod effects;
 mod gait;
+mod holds;
 mod hud;
 mod interpolate;
 mod menu;
@@ -18,7 +19,7 @@ use protocol::{Command, HitWeight, Look, Pose, UnitKind, UnitState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use render::{
     Camera, Renderer,
-    character::{Character, Draw, Ground},
+    character::{Character, Draw, Ground, HoldAt},
     model::{Model, ModelCache},
 };
 use std::{
@@ -307,7 +308,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait --traverse\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--traversal on|off: off plays rolls, leaps, charges and climbs by the clock and swimmers as runners, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures; traverse rolls, climbs, swims, hangs from a wall and lunges over a course for traversal captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait --traverse\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--traversal on|off: off plays rolls, leaps, charges and climbs by the clock and swimmers as runners, and climbers' clips by the clock with their hands and feet as the clips have them, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures; traverse rolls, climbs, swims, hangs from a wall and lunges over a course for traversal captures."
                     );
                     std::process::exit(0)
                 }
@@ -437,8 +438,10 @@ struct Game {
     /// A ground skill's key held down with Hold to aim: it casts on release.
     held_ground: Option<u8>,
     valley: Arc<world::Valley>,
-    /// The valley's ground, which characters put their feet on (#214).
+    /// The valley's ground, which characters put their feet on (#214), and the hold each climber
+    /// hangs from, which they put their hands on (#248).
     ground: Ground,
+    holds: HoldAt,
     effects: Option<effects::Effects>,
     /// The effects' art, for each renderer to upload.
     effects_art: Option<render::fx::Library>,
@@ -455,6 +458,10 @@ impl Game {
         let ground: Ground = {
             let valley = Arc::clone(&valley);
             Arc::new(move |x, z| valley.ground(x, z))
+        };
+        let holds: HoldAt = {
+            let filed = holds::Holds::new(Arc::clone(&valley));
+            Arc::new(move |p| filed.hung_from(p))
         };
         let settings_path = options.controls.clone().unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
@@ -545,6 +552,7 @@ impl Game {
             held_ground: None,
             valley,
             ground,
+            holds,
             effects,
             effects_art,
             stage: None,
@@ -589,6 +597,7 @@ impl Game {
         for u in units {
             let mut c = Character::load(&g.catalog, &mut g.cache, &u.look)?;
             c.set_ground(Arc::clone(&g.ground));
+            c.set_holds(Arc::clone(&g.holds));
             g.characters.insert(u.id, c);
         }
         if let Some(path) = &g.options.hud_font {
@@ -1619,6 +1628,7 @@ impl Game {
                 None => {
                     let mut c = Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?;
                     c.set_ground(Arc::clone(&self.ground));
+                    c.set_holds(Arc::clone(&self.holds));
                     self.characters.insert(u.id, c);
                 }
                 // New gear or clothes go on in place, so the motion carries on (#239).

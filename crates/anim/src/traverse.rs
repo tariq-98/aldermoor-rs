@@ -175,9 +175,10 @@ pub struct Progress {
 
 impl Progress {
     /// Follows the move that began at `start` and lasts `duration` seconds, with the body `share`
-    /// of the way along its path (`None` if the path is too short to say: then the clock
-    /// decides), `dt` seconds after the last update. Returns the share to play the clip at, never
-    /// less than before in the same move. The first frame of a move is a frame into it.
+    /// of the way along its path (`None` where the path can't say: then the clock carries the
+    /// share on from where it got to), `dt` seconds after the last update. Returns the share to
+    /// play the clip at, never less than before in the same move. The first frame of a move is a
+    /// frame into it.
     pub fn update(&mut self, start: f64, duration: f32, share: Option<f32>, dt: f32) -> f32 {
         if self.start != Some(start) {
             *self = Self {
@@ -186,7 +187,7 @@ impl Progress {
             };
         }
         self.elapsed += dt;
-        let share = share.unwrap_or(self.elapsed / duration.max(1e-3));
+        let share = share.unwrap_or(self.share + dt / duration.max(1e-3));
         self.share = self.share.max(share.clamp(0., 1.));
         self.share
     }
@@ -194,6 +195,11 @@ impl Progress {
     /// Seconds of the current move seen so far.
     pub fn elapsed(&self) -> f32 {
         self.elapsed
+    }
+
+    /// The share of the current move's path to play the clip at, as `update` last gave it.
+    pub fn share(&self) -> f32 {
+        self.share
     }
 
     /// When the move it follows began, once it has followed one.

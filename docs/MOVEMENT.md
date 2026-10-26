@@ -142,9 +142,10 @@ and monsters too (CONTRACT.md).
 
 Rolls, leaps, charges and climbs play their clips by how far the body has come through them, and
 swimmers swim (#213, ANIMATION.md, "Traversal"); hanging and the moves between holds play the
-climbing clips (#247). The climb's height comes in faster than its way across, so a climber's hands
-only grab the edge before the shoulders rise out of reach; a climb that rose more slowly, or mantle
-clips matched to this one (#108), would let them hang on.
+climbing clips (#247), by how far the body has come and slid, with the hands on the hold and the
+feet on the wall (#248). The climb's height comes in faster than its way across, so a climber's
+hands only grab the edge before the shoulders rise out of reach; a climb that rose more slowly, or
+mantle clips matched to this one (#108), would let them hang on.
 
 Not yet: free climbing anywhere (holds only, by design), mounts, and clips for leaps, ejects, wall
 runs and corners.
