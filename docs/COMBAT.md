@@ -184,7 +184,10 @@ and a field's pulses send no `Hit` at all. The numbers live in `content::combat:
 - They change targets only when someone pulls 10% ahead (in melee) or 30% ahead (at range).
 - **Taunts** put the taunter on top for 3 s.
 - **Noticing:** a monster starts a fight with a player who comes within its notice radius
-  (`aggro` in mobs.ron, 10 to 16 m) and is in sight. The radius is 1 m shorter for each level
+  (`aggro` in mobs.ron, 10 to 16 m) and is in sight: nothing solid stands between their chests,
+  neither a building, the mill or the shed, nor masonry too tall to climb standing above the
+  line between them (#311). Walls low enough to climb don't hide anyone. The same goes for
+  skills aimed at a target ("Your target isn't in sight."). The radius is 1 m shorter for each level
   the player is above the monster and 1 m longer for each level below, from 4 m to twice its
   own (`sim::notice_radius`). A monster 10 or more levels below a player never starts a fight
   with them, but fights back when attacked. Once the Wilderness scales levels to its bands

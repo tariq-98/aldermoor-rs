@@ -293,8 +293,17 @@ and hanging lamps.
 
 - **Landmarks:** every settlement and dungeon has one that shows above the trees from 300 m (the
   windmill, a tower, a barrow mound with standing stones), lit or against the sky.
-- **Climbing:** ledges at the climb heights (#65, #115) have a worn, lighter lip, so a climbable
-  edge looks climbable.
+- **Climbing:** what you can climb looks climbable, from across the valley (#249; the climbing
+  plan in MOVEMENT.md):
+  - Stone holds stand at least 5 cm proud of the wall, with a pale, worn top that catches the
+    light: capstones on broken walls, a coping you can walk up, sills, and corbelled jamb stones
+    and keystones whose shadowed undersides slope back to the wall.
+  - Timber holds (the cottages' sills, beams and eaves) are dark, with light, rubbed tops.
+  - Cliff holds are pale bands of harder stone running along the strata.
+  - Masonry too tall or too smooth to climb ends in broken, mossy rubble, and has no pale edges:
+    a pale edge is always a hold.
+  - Every hold you can see can be grabbed and every hold you can grab can be seen: the art is
+    built from `world`'s own list (ASSETS.md, "Masonry").
 - **Gathering (RuneScape):** nodes show what they give: ore veins in the ore's colour, trees by
   species, herbs by their flowers. Spent nodes look spent (a stump, bare rock) and visibly regrow
   (#143).
