@@ -555,8 +555,8 @@ fn heap_bytes(
     d: &ProtocolObject<dyn MTLDevice>,
     descs: &[Retained<MTLTextureDescriptor>],
 ) -> usize {
-    let mut bytes = 0;
-    let mut largest_align = 1;
+    let mut bytes: usize = 0;
+    let mut largest_align: usize = 1;
     for desc in descs {
         let MTLSizeAndAlign { size, align } = d.heapTextureSizeAndAlignWithDescriptor(desc);
         bytes = bytes.next_multiple_of(align.max(1)) + size;
@@ -2684,7 +2684,7 @@ mod temporal_tests {
         // A larger output grows both heaps once; later steps fit again.
         r.resize(96, 80).unwrap();
         let grown = sizes(&r);
-        assert!(grown.iter().zip(reserved).all(|(g, r)| *g > r));
+        assert!(grown.iter().zip(reserved).all(|(g, before)| *g > before));
         r.set_render_scale(0.6).unwrap();
         assert_eq!(sizes(&r), grown);
         assert!(r.reserve_render_scales(f32::NAN).is_err());
