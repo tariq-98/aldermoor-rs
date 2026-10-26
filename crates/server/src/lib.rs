@@ -88,6 +88,9 @@ const KEPT_TICKS: usize = 60 * sim::TICK_RATE as usize;
 struct Latest {
     snapshot: Mutex<Option<Arc<Snapshot>>>,
     combat: Mutex<Option<Arc<CombatView>>>,
+    /// The newest snapshot's sim time and the instant its step was due. Steps are due at exact
+    /// intervals, so a viewer can tell the sim time at any instant without arrival jitter.
+    clock: Mutex<Option<(f64, Instant)>>,
     events: Mutex<Vec<protocol::Event>>,
 }
 
@@ -221,6 +224,12 @@ impl Host {
         self.latest.combat.lock().unwrap().clone()
     }
 
+    /// The newest snapshot's sim time, and the instant its step was due on the host's
+    /// schedule. Sim time at any other instant is that time plus the instants' difference.
+    pub fn clock(&self) -> Option<(f64, Instant)> {
+        *self.latest.clock.lock().unwrap()
+    }
+
     /// Events since the last call, in order (snapshots only carry their own tick's events).
     pub fn take_events(&self) -> Vec<protocol::Event> {
         std::mem::take(&mut *self.latest.events.lock().unwrap())
@@ -307,6 +316,7 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
                 latest.events.lock().unwrap().extend(events.iter().cloned());
                 // The combat view first, so whoever sees a snapshot finds its combat detail beside it.
                 *latest.combat.lock().unwrap() = Some(Arc::new(combat));
+                *latest.clock.lock().unwrap() = Some((snapshot.time, next));
                 *latest.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
             }
         }
