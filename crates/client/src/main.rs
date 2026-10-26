@@ -660,6 +660,11 @@ impl Game {
         let Some(m) = &mut self.menu else {
             return;
         };
+        if let Some(why) = reserved(&input) {
+            // Keep waiting for a key the game will actually see.
+            m.notice = Some(why);
+            return;
+        }
         let Some(control) = m.capture.take() else {
             return;
         };
@@ -2099,6 +2104,16 @@ fn key_input(key: KeyCode) -> controls::Input {
     controls::Input(format!("{key:?}"))
 }
 
+/// Why a key can't be bound, for keys something else takes before the game sees them.
+fn reserved(input: &controls::Input) -> Option<String> {
+    (*input == key_input(KeyCode::F3)).then(|| {
+        format!(
+            "{} is the performance overlay. Press another key.",
+            input.label()
+        )
+    })
+}
+
 /// How far a blow kicks the camera, in metres, if it does: the player's own heavy, critical
 /// and parried blows, and every blow they take. Other people's fights and the player's light
 /// blows leave it still.
@@ -2130,6 +2145,15 @@ fn mouse_input(button: MouseButton) -> Option<controls::Input> {
 #[cfg(test)]
 mod catalog_defaults_tests {
     use super::*;
+    #[test]
+    fn the_overlay_key_cannot_be_bound() {
+        assert_eq!(
+            reserved(&key_input(KeyCode::F3)).as_deref(),
+            Some("F3 is the performance overlay. Press another key.")
+        );
+        assert_eq!(reserved(&key_input(KeyCode::F4)), None);
+        assert_eq!(reserved(&controls::Input::new("Mouse4")), None);
+    }
     #[test]
     fn optional_catalog_defaults_preserve_explicit_overrides() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
