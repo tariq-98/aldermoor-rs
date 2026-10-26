@@ -135,12 +135,15 @@ impl Overlay {
                     if !enabled {
                         ui.label("GPU counters disabled or unavailable");
                     }
-                    for (name, timing) in GPU_PASS_NAMES.iter().zip(frame.passes) {
+                    for (index, (name, timing)) in GPU_PASS_NAMES.iter().zip(frame.passes).enumerate() {
                         ui.label(match timing {
                             Some(t) => format!(
                                 "{name}: {:.3} ms (V {:.3}, F {:.3})",
                                 t.elapsed_ms, t.vertex_ms, t.fragment_ms
                             ),
+                            None if frame.skipped_pass_mask & (1 << index) != 0 => {
+                                format!("{name}: skipped (cached)")
+                            }
                             None => format!("{name}: unavailable / not encoded"),
                         });
                     }
@@ -174,11 +177,36 @@ fn distribution(values: impl Iterator<Item = f64>) -> Value {
 fn report(frames: &[GpuFrame], counters_enabled: bool, overlay_visible: bool) -> Value {
     let mut passes = serde_json::Map::new();
     for (index, name) in GPU_PASS_NAMES.iter().enumerate() {
+        let sampled = frames.iter().filter(|f| f.counters_sampled).count();
+        let skipped = frames
+            .iter()
+            .filter(|f| f.counters_sampled && f.skipped_pass_mask & (1 << index) != 0)
+            .count();
+        let missing = frames
+            .iter()
+            .filter(|f| {
+                f.counters_sampled
+                    && f.skipped_pass_mask & (1 << index) == 0
+                    && f.passes[index].is_none()
+            })
+            .count();
+        // Skips contribute zero work, not fabricated timestamp samples. Missing counters
+        // leave the amortised cost unknown; counter-off frames are excluded entirely.
+        let amortised_mean = (sampled > 0 && missing == 0).then(|| {
+            frames
+                .iter()
+                .filter(|f| f.counters_sampled)
+                .filter_map(|f| f.passes[index].map(|t| t.elapsed_ms))
+                .sum::<f64>()
+                / sampled as f64
+        });
         passes.insert((*name).to_owned(), json!({
             "elapsed_ms": distribution(frames.iter().filter_map(|f| f.passes[index].map(|t| t.elapsed_ms))),
             "vertex_ms": distribution(frames.iter().filter_map(|f| f.passes[index].map(|t| t.vertex_ms))),
             "fragment_ms": distribution(frames.iter().filter_map(|f| f.passes[index].map(|t| t.fragment_ms))),
-            "missing_samples": frames.iter().filter(|f| f.counters_sampled && f.passes[index].is_none()).count(),
+            "missing_samples": missing,
+            "skipped_samples": skipped,
+            "amortised_mean_ms": amortised_mean,
         }));
     }
     let start = frames.first().map_or(0., |f| f.elapsed_seconds);
@@ -280,6 +308,41 @@ mod tests {
             distribution([f64::NAN, -1., f64::INFINITY].into_iter()),
             Value::Null
         );
+    }
+    #[test]
+    fn cadence_skips_are_not_missing_and_amortise_only_sampled_frames() {
+        let mut refresh = GpuFrame {
+            counters_sampled: true,
+            ..Default::default()
+        };
+        refresh.passes[2] = Some(render::PassTiming {
+            elapsed_ms: 4.,
+            ..Default::default()
+        });
+        let reuse = GpuFrame {
+            counters_sampled: true,
+            skipped_pass_mask: 1 << 2,
+            ..Default::default()
+        };
+        let off = GpuFrame::default();
+        let r = report(&[refresh, reuse, off], true, false);
+        let far = &r["passes"]["shadow_2"];
+        assert_eq!(far["missing_samples"], 0);
+        assert_eq!(far["skipped_samples"], 1);
+        assert_eq!(far["elapsed_ms"]["samples"], 1);
+        assert_eq!(far["amortised_mean_ms"], 2.);
+        let missing = GpuFrame {
+            counters_sampled: true,
+            ..Default::default()
+        };
+        let r = report(&[refresh, reuse, missing], true, false);
+        assert_eq!(r["passes"]["shadow_2"]["missing_samples"], 1);
+        assert_eq!(r["passes"]["shadow_2"]["amortised_mean_ms"], Value::Null);
+        let r = report(&[reuse], true, false);
+        assert_eq!(r["passes"]["shadow_2"]["elapsed_ms"], Value::Null);
+        assert_eq!(r["passes"]["shadow_2"]["amortised_mean_ms"], 0.);
+        let r = report(&[off], false, false);
+        assert_eq!(r["passes"]["shadow_2"]["amortised_mean_ms"], Value::Null);
     }
     #[test]
     fn overlay_builds_real_egui_geometry_without_authored_style() {
