@@ -11,8 +11,9 @@ to the motion it is shown; nothing on the client moves a body.
 
 ## A frame
 
-`Character::update_combat` (the client calls it once a frame for each character in view) records the
-unit's combat view and calls `update`, which builds the pose in this order:
+The client calls `Character::animate` once a frame for each character in view. When the character
+is due at its level of detail (see Level of detail below), it calls `update_combat`, which records
+the unit's combat view and calls `update`, which builds the pose in this order:
 
 1. **Base clip** (`clip_for`): the action's clip if one is playing (`action_clip`), otherwise the
    pose's: idle, walk, jog or sprint by speed, jump, fall, roll, hit or death. Beasts map poses to
@@ -45,7 +46,7 @@ unit's combat view and calls `update`, which builds the pose in this order:
    carrying the old motion into the new, and while a switch settles it changes `local`, so the
    world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
    letting go of or taking a grip.
-10. **Spring bones** (capes) settle on top, under the body drawn at its yaw.
+10. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
 
 ## Locomotion
 
@@ -82,9 +83,8 @@ The clips are three loops that run straight ahead in place (`LOOPS`: walk, jog a
   on critically damped springs, with half-lives of 0.1 s and 0.08 s, and snap when the character
   starts moving.
 
-Not done yet: steps lengthened or shortened to the speed and feet pinned to the ground (#214),
-slopes, and a single loop at the furthest LOD (#215). Slow walking
-slides most: the walk clip's trailing foot slides forward as it lifts, about 4 cm a step even at
+Not done yet: steps lengthened or shortened to the speed and feet pinned to the ground (#214), and
+slopes. Slow walking slides most: the walk clip's trailing foot slides forward as it lifts, about 4 cm a step even at
 the clip's own 1 m/s, and between the walk's speed and the jog's (backing off behind a raised
 guard is 1.5 m/s) the blend can't hide it. Foot locking (#214) is the fix.
 
@@ -118,7 +118,8 @@ root yaw offset does, and the client draws each character at `Character::body_ya
 - **Moving or acting**, the body follows the aim on a spring with a half-life of 0.08 s
   (`FOLLOW_HALF_LIFE`), so a yaw that steps between snapshots, or flicks round with a roll, comes in
   over frames with no jump in the turning speed; an attack or cast turns the body to face where it
-  strikes. Beasts always follow this way, and at LOD 2 and beyond the body faces the sim's yaw.
+  strikes. Beasts always follow this way, and so does anyone below full detail (#215), whose feet
+  don't step round.
 
 ## Switches
 
@@ -165,6 +166,50 @@ switches stack without popping. Three methods, picked with the client's `--blend
   the switch barely moved take the new pose at once. Kept to compare in captures.
 - **`Method::Off`** (`--blend off`) cuts on every switch. The clip-stack tests use it.
 
+## Level of detail
+
+A crowd costs what its characters cost, so they don't all rebuild their poses every frame (#215).
+Each frame the client ranks everyone in view with `anim::Crowd` (`crates/anim/src/lod.rs`), the way
+Unreal's animation budget allocator and update rate optimisation do: the player, their target and
+whoever targets them first, then the nearest to the camera. The rank gives each a tier
+(`anim::Tier`), and `Character::animate` rebuilds the pose at that tier's rate:
+
+| Tier | Who | Rebuilds | Between rebuilds |
+| --- | --- | --- | --- |
+| `Full` | the first 8 (`FULL`) | every frame | |
+| `Half` | the next 16 (`HALF`) | every other frame | the last two rebuilds, blended |
+| `Quarter` | everyone else | every fourth frame | the last rebuild, held |
+
+- **Spread over the frames.** A character rebuilds when the frame number plus its unit id is a
+  multiple of its tier's period (`Tier::due`), so about as many rebuild on each frame and the cost
+  stays flat.
+- **Between rebuilds**, a `Half` character shows its last two rebuilds blended matrix by matrix
+  (`Between`), its body yaw with them, so it moves every frame, a rebuild (33 ms) behind. A
+  `Quarter` one holds its pose while the sim moves it. A rebuild steps everything by the time since
+  the last one, so clips, the stride, the blender and the springs keep time.
+- **Below full detail** the cape springs fade out over 0.5 s and then cost nothing
+  (`SpringBones::update`); back at full detail they start again from where the bones are and fade
+  in. The feet don't step round on the spot either: the body follows the aim on its spring, as it
+  does moving.
+- **Hysteresis.** A character keeps its tier against one up to a fifth nearer (full) or a tenth
+  nearer (half), so two at about the same distance don't trade tiers every frame. Moving up from
+  `Half`, the pose catches up the one rebuild it was behind; moving down to it, it starts blending
+  again from the pose it shows.
+- **The budget.** The client times every `animate` and gives the frame's total to
+  `Crowd::spent`. While its smoothed value (10% a frame) is over `BUDGET_MS` (1 ms, a third of the
+  crowd's 3 ms CPU in [PERFORMANCE.md](PERFORMANCE.md)), the full and half tiers shrink by 5% of
+  their size a frame, down to one full and two half; under three quarters of the budget they grow
+  back by 1% a frame.
+- **No threads yet.** At the rates above, 200 characters pose in well under the budget on one
+  core (see Cost), so spreading them over threads would add more sync than it saves. Building
+  their skinning palettes now costs more than posing them, every frame at every tier (#243).
+
+F3 shows the frame's posing and palette time and how many characters are at each tier.
+`--crowd N` adds N characters round the player, standing and looking about, walking and running
+round lanes of their own, and fighting, in five outfits, two with capes. `--anim-tiers off` poses
+everyone every frame, for comparison, and every run ends with an `ANIM` line: posing and palettes a
+frame (median and 95th percentile) and how many characters were at each tier on average.
+
 ## Tests
 
 - `cargo test -p anim` (Linux and macOS): pose and velocity stay continuous through one switch
@@ -182,7 +227,9 @@ switches stack without popping. Three methods, picked with the client's `--blend
   a second without jumping in yaw or turning speed; the feet step one at a time, the lead foot
   first, and end where they should. The IK reaches targets in reach with the bones keeping their
   lengths, bends the knee toward the pole, and gets the end as near as the chain goes to a target
-  out of reach.
+  out of reach. For level of detail: rebuilds spread evenly over the frames at every tier, the
+  involved come first and then the nearest, a character keeps its tier against one a little
+  nearer, and over budget the higher tiers shrink and come back under it.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
   bone carries on at every switch, where cuts jump by over 0.5 rad. The other clip-stack tests
@@ -197,6 +244,17 @@ switches stack without popping. Three methods, picked with the client's `--blend
   one foot in the air at a time, planted feet never slide 2 mm in a frame, each foot steps, and
   they end within 3 mm of where the idle stands them, back on the clip.
   `an_attack_turns_the_body_to_face_where_it_strikes` checks that a slash takes the twist out.
+  `half_rate_blends_the_frames_between_a_rebuild_behind_and_quarter_rate_holds` runs three knights
+  side by side at each tier: at half rate the hand moves every frame, its biggest step within a
+  quarter of the full-rate knight's, and stays within 1 cm of where that knight's was two frames
+  before; at quarter rate it holds between rebuilds. `a_new_character_shows_its_pose_on_its_first_frame_at_any_tier` checks that
+  nobody shows the rest pose. `below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step`
+  drops a caped knight to half rate: the cape eases to the pose, its tip moving no more than a
+  tenth of the way in a frame, and turning on the spot the feet stay put. The model tests check
+  that even keys are indexed and blended exactly (slerp for steps over 30°), uneven keys are
+  resampled, a constant track keeps one key and step keys hold.
+- The client's `--crowd` test checks that nobody in the crowd passes through anybody, even at 200,
+  and that walkers and runners go as fast as their speed, the way they face.
 - The client's `--gait` run (`crates/client/src/gait.rs`) is for captures: facing one way, the
   player runs ahead, strafes, backpedals, sweeps the travel round every direction, walks, sprints
   and walks; then turns round, draws a weapon and runs the pattern again; then turns on the spot
@@ -205,26 +263,28 @@ switches stack without popping. Three methods, picked with the client's `--blend
 
 ## Cost
 
-`cargo run --release -p render --example anim_bench -- [characters] [frames] [case]` times
-`update_combat` (the pose) and `draws` (the skinning palettes) for a plate knight with sword,
-shield and cape, a ranger with a bow and an elf mage with a staff, at each LOD. The cases: `idle`,
+`cargo run --release -p render --example anim_bench -- [characters] [frames] [case] [tier]` times
+`animate` (the pose) and `draws` (the skinning palettes) for a plate knight with sword, shield and
+cape, a ranger with a bow and an elf mage with a staff, at each LOD at full detail, then at half
+and quarter detail, and counts what posing allocates once it is going (nothing). The cases: `idle`,
 `walk` (2.5 m/s, between the walk and jog loops), `run` and `strafe` (running square to the facing)
 hold their pose, `turn` stands looking 80° either way and back every two seconds (the feet step
 round on every sweep), `slash` and `run + slash` start the slash over every half second, and
 `start-stop` runs and stops every half second, so those three are blending most of the time.
 
-Instructions per `update_combat`, from callgrind (6 characters, 240 frames, every LOD):
+Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
+callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 |
-| --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 |
-| turn | | | | 83,657 | 90,315 |
-| walk | | | 88,445 | 104,860 | 105,340 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 |
-| strafe | | | 88,893 | 93,947 | 95,511 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 |
+| --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 |
+| turn | | | | 83,657 | 90,315 | 48,176 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -240,14 +300,26 @@ and forth with the feet stepping most of the time is 8% dearer (mostly the leg I
 step, then twisting the spine), and strafing 1.7%, as the neck and head now take the turn the chest
 can't.
 
-Where the time goes now (callgrind, `run`): half in cape springs, about 15% each in sampling clips
-and in world matrices, and about 15% in cloning per frame (`perform` copies the weapon's item and
-the clip's metadata, and clip names are `String`s). #215 takes on both: springs only at full
-detail, and no allocations or bone lookups by name per frame.
+#215 took out 41% to 53% of what was left. A track's keys are evenly spaced, so sampling indexes
+straight into them (`Track::sample`): tracks with uneven keys are resampled at 30 a second when the
+model loads, and a track that never changes keeps one key. Clip names are interned once, and the
+bones the hands, spine and head use are found once, so posing allocates nothing. Each spring joint
+now builds only its own world matrix, from its parent's as it has just turned, where before every
+joint rebuilt the rest of its chain.
+
+With the tiers, wall clock on the cloud runner (`anim_bench 30 600`, µs per character per frame,
+averaged over the cases): posing takes 7.7 at full detail, 3.3 at half and 1.6 at quarter, and the
+skinning palettes 3.6 at every tier. So 200 characters in the default tiers (8, 16 and 176) pose in
+about 0.4 ms on one core, against about 1.5 ms all at full detail.
+
+Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
+a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are
+the next cost to take on (#243): they're rebuilt every frame at every tier, and half of them are
+copies of another part's.
 
 ## Next
 
-In the plan's order: #215 animation LOD, #214 foot IK and foot locking (after the blender, so
+In the plan's order: #214 foot IK and foot locking (after the blender, so
 planted feet stay planted while it settles; `anim::ik` and the way `step_round` hands feet back to
 the clip are its starting point), #212 aim pitch and look-at, #217 lean, landings and the idle phase, #218 hit flinches
 and hitstop (on `Event::Hit`, #191), and #213 traversal (after #192).
