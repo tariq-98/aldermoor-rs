@@ -27,6 +27,7 @@ mod rng;
 mod spatial;
 pub mod stats;
 mod vitals;
+pub mod wilderness;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
@@ -212,6 +213,7 @@ impl Sim {
                 combat::auras::refresh_control,
                 movement::move_units,
                 movement::after_moving,
+                wilderness::update,
                 rewind::record,
                 combat::abilities::land_charges,
                 combat::abilities::update,
