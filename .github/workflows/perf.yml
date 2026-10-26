@@ -140,7 +140,7 @@ jobs:
                   rows.append(f"| {scene} | | {ir:,} | | | {wire/1024:,.0f} | |")
           summary = ["## Sim instruction count", "",
                      "Measured steps and snapshots only, under callgrind. Fails on more than +5% instructions against the base branch.",
-                     f"Wire size is snapshot plus combat view per player; the budget is {budget/1024:.0f} KB/s (docs/PERFORMANCE.md).", "",
+                     f"Wire size is views as the server sends them (protocol::wire, 20 Hz deltas) per player; the budget is {budget/1024:.0f} KB/s (docs/PERFORMANCE.md).", "",
                      "| Scene | Base instructions | This PR | Change | Base wire KB/s | This PR | Change |",
                      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |", *rows]
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:

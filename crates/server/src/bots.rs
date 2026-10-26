@@ -39,8 +39,8 @@ pub fn run(addr: SocketAddr, name: &str, seed: u64, stop: Arc<AtomicBool>) -> io
         if target.is_some() {
             report.fighting += 1;
         }
-        // A real player acts a few times a second, not every step.
-        if !report.views.is_multiple_of(15) {
+        // A real player acts a few times a second, not every view.
+        if !report.views.is_multiple_of(5) {
             continue;
         }
         if snapshot.player.as_ref().is_some_and(|p| p.can_respawn) {

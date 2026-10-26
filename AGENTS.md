@@ -88,8 +88,17 @@ removing someone else's lock.
   review comments or requested changes; no `status:needs-decision` issue blocking it; and the PR is
   mergeable without conflicts. Then mark it ready for review and squash-merge. If any of those
   isn't true, leave the PR open and say in it exactly what's missing.
-- Once your PR merges, run `cargo clean` in your checkout (or delete its `target/`). Build folders
-  fill the Mac's disk quickly when several agents keep old ones around.
+- Once your PR merges, clean up everything the issue made: delete the checkout's `target/` (or run
+  `cargo clean`), remove any worktree or clone you made for the issue (`git worktree remove`), and
+  delete its captures. Keep captures in a temp folder (your scratchpad or `$TMPDIR`), never in the
+  repo or `~/code`. Build folders fill the Mac's disk quickly when several agents keep old ones
+  around; a job on the Mac also deletes idle `target/` folders when the disk runs low.
+- **On the Mac, run cargo through the build-slot wrapper:** `aldermoor-build-slot cargo build ...`
+  (and the same for `cargo test`, `clippy` and `run`). It shares the Mac between agents: it allows
+  4 builds at once when there's plenty of disk and CPU, 2 when either is short, and 1 when the disk
+  is nearly full, and it waits for a free slot. Visual and Remote Control threads and Codex lanes
+  set `ALDER_SLOT_PRIORITY=high`. `aldermoor-build-slot --status` shows who holds what, and a
+  launcher should start new work only while `aldermoor-build-slot --free` is above 0.
 - If you stop before finishing, comment `Released: <what is done, what is left>` and set the
   label back to `status:ready`.
 - A claim with no comment, push or PR activity for 3 days can be taken over: comment that you are

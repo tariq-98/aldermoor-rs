@@ -1,6 +1,7 @@
 //! Which keys and mouse buttons do what, as data the player can change. Inputs are named the
 //! way winit names them (`KeyW`, `ShiftLeft`, `Digit1`) plus `Mouse3`..`Mouse5` for the middle
-//! and thumb buttons. The left and right buttons stay fixed: they click, look and steer.
+//! and thumb buttons. The left and right buttons stay fixed: in Action they attack and guard, in
+//! Classic they click, look and steer.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
