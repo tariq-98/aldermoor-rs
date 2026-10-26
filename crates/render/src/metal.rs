@@ -2456,12 +2456,29 @@ mod temporal_tests {
             }
         }
         assert_eq!(frames.len(), 360);
+        // Hash the final framebuffer through a pipe; never create an image file.
+        use std::io::Write;
+        let mut hash = std::process::Command::new("/usr/bin/shasum")
+            .args(["-a", "256"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        hash.stdin
+            .take()
+            .unwrap()
+            .write_all(&output_bytes(&r))
+            .unwrap();
+        let hash = hash.wait_with_output().unwrap();
+        assert!(hash.status.success());
+        let hash = String::from_utf8(hash.stdout).unwrap();
+        let output_sha256 = hash.split_whitespace().next().unwrap();
         let report = serde_json::json!({
             "scene": "static authored valley at the river regression camera; no crowd or HUD",
             "quality_fixture": quality, "profile_scene": r.profile_scene,
             "output": [2560,1600], "scale": 0.75, "aa": "taa", "warmup": 120,
             "eye": camera.eye.to_array(), "target": camera.target.to_array(), "fov": camera.fov,
-            "pass_names": GPU_PASS_NAMES, "frames": frames,
+            "pass_names": GPU_PASS_NAMES, "frames": frames, "output_sha256": output_sha256,
         });
         std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     }

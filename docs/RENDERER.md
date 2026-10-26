@@ -237,11 +237,11 @@ these are offscreen diagnostic timings, not a full-scene or ten-minute budget ac
 explicit engineering test inputs, not new authored defaults. Omit it for legacy water.
 `ALDER_WATER_SPLIT=1` separates sky/opaque timings. `ALDER_WATER_REPORT` names a temporary JSON
 report. Build the test executable through `aldermoor-build-slot cargo test --release -p render
---locked --no-run`, then run that executable with `river_reference_benchmark --ignored --exact`
-(using its full module-qualified test name). Hold the shared GPU lock throughout the timed run,
+--locked --no-run`, then run that executable with `metal::temporal_tests::river_reference_benchmark --ignored --exact`. Hold the shared GPU lock throughout the timed run,
 write its owner immediately, and set `ALDER_WATER_BENCH_LOCK_OWNER` to that owner line. The test
 refuses to run without a matching owner. Release the lock on exit, including failures. The
-benchmark creates only a numeric JSON report; no image or model files.
+benchmark creates only a numeric JSON report, including a SHA-256 of the final framebuffer
+computed through a pipe; no image or model files.
 
 ## Earlier baseline measurements (24 October 2026)
 
