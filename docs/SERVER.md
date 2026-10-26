@@ -349,9 +349,15 @@ name, body and look only when they don't have it yet; after that, only what move
   changes for its neighbours too. With about 2,000 ghosts a tick in the realm example, that
   takes ghosts and handoffs from 0.21 to 0.31 ms mean a region (0.42 to 0.73 ms p99; Linux in
   a container on the M1 Air, 26 October 2026, main and this change ABAB).
-- Not yet (#208): a hit across a border doesn't build the attacker's rage or count toward
-  their XP, because the attacker is only a ghost where it lands; quiet regions still step
-  60 times a second.
+- **Fighting across a border:** a ghost carries its player's specialty, so their blows earn
+  their share of a kill where it lands. When the monster dies its region pays each share where
+  the player lives, at their own level there (`Landing::KillXp`). A blow landing across the
+  border also tells the attacker's own region it was in a fight (`Landing::Struck`), so they
+  stay in combat (and PvP combat) and remember whom they hit.
+- **Quiet regions sleep:** a region with no players inside, no player ghosts at its border and
+  nothing arriving, requested or commanded steps once a second and only moves its clock on in
+  between (`Sim::idle`), so it's on its neighbours' tick when someone comes. Its monsters wander
+  and heal at a sixtieth of the pace meanwhile. `RealmStats::asleep` counts them.
 
 ## Follow-up work
 

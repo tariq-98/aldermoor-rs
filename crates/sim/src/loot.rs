@@ -125,6 +125,12 @@ impl Loot {
     pub fn new(seed: u64) -> Loot {
         Loot { piles: Vec::new(), next: 0, rng: Rng::new(seed ^ 0x6c6f_6f74) }
     }
+
+    /// Puts a pile on the ground, giving it the next id.
+    pub(crate) fn push(&mut self, pile: Pile) {
+        self.next += 1;
+        self.piles.push(Pile { id: self.next, ..pile });
+    }
 }
 
 /// Rolls a dying monster's loot table once for each player who earned a share of it, into a
@@ -137,15 +143,20 @@ pub(crate) fn drop_loot(world: &mut World, dead: Entity) {
     let Some(at) = world.get::<Transform>(dead).map(|t| t.pos) else { return };
     let earners = world.get::<Credit>(dead).map(|c| c.earners()).unwrap_or_default();
     let t = world.resource::<Clock>().time;
+    // Deeper in the Wilderness, the table is rolled more times into the same pile.
+    let rolls = crate::wilderness::loot_rolls(world, at);
     let mut loot = world.resource_mut::<Loot>();
     for owner in earners {
-        let pile = roll(&mut loot.rng, table, at, Some(owner), t);
+        let mut pile = roll(&mut loot.rng, table, at, Some(owner), t);
+        for _ in 1..rolls {
+            let more = roll(&mut loot.rng, table, at, Some(owner), t);
+            pile.coins += more.coins;
+            pile.items.extend(more.items);
+        }
         if pile.items.is_empty() && pile.coins == 0 {
             continue;
         }
-        loot.next += 1;
-        let id = loot.next;
-        loot.piles.push(Pile { id, ..pile });
+        loot.push(pile);
     }
 }
 

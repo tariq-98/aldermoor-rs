@@ -39,6 +39,9 @@ pub(crate) struct SpringBones {
     /// length squared, and how near a tail may come. `Vec3A`, as every tail of every step checks
     /// every capsule, and four lanes do a vector's sums at once.
     placed: Vec<(Vec3A, Vec3A, f32, f32)>,
+    /// Joints that took up no swing from the springs before a change of gear (#239), whose tails
+    /// start from the pose on the next update.
+    unplaced: Vec<usize>,
 }
 impl SpringBones {
     pub fn new(c: &Character, spec: &Value, colliders: &[assets::Collider]) -> Self {
@@ -118,6 +121,35 @@ impl SpringBones {
             last_origin: Vec3::ZERO,
             weight: 1.,
             placed: Vec::new(),
+            unplaced: Vec::new(),
+        }
+    }
+    /// Takes up the swing of `old`, the springs a character wore before a change of gear (#239):
+    /// each joint on a bone that was one of theirs keeps its tail and its speed, `was` giving
+    /// where each of this skeleton's bones was in the old one. So a cape kept through the change
+    /// swings on instead of starting again from the pose; joints with nothing to take up start
+    /// from the pose.
+    pub fn carry_on(&mut self, old: &[SpringBones], was: impl Fn(usize) -> Option<usize>) {
+        let mut from = None;
+        for (k, j) in self.joints.iter_mut().enumerate() {
+            let found = was(j.bone).and_then(|bone| {
+                old.iter()
+                    .find_map(|s| Some((s, s.joints.iter().find(|o| o.bone == bone)?)))
+            });
+            match found {
+                Some((s, o)) => {
+                    (j.tail, j.previous) = (o.tail, o.previous);
+                    from = Some(s);
+                }
+                None => self.unplaced.push(k),
+            }
+        }
+        match from {
+            Some(s) => {
+                (self.ready, self.acc, self.last_origin) = (s.ready, s.acc, s.last_origin);
+                self.weight = s.weight;
+            }
+            None => self.unplaced.clear(),
         }
     }
     /// Steps the chains on by `dt` and turns their bones after them, `on` at full detail (#215).
@@ -148,6 +180,12 @@ impl SpringBones {
             }
             self.ready = true;
             self.acc = 0.;
+            self.unplaced.clear();
+        }
+        for k in self.unplaced.drain(..) {
+            let j = &mut self.joints[k];
+            j.tail = (root * c.world[j.bone]).transform_point3a((j.axis * j.length).into());
+            j.previous = j.tail;
         }
         self.last_origin = origin;
         const STEP: f32 = 1. / 120.;
