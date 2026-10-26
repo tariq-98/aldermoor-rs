@@ -503,13 +503,13 @@ impl Heights {
     }
 }
 
-/// Obstacles bucketed into 16 m cells, so a collision check looks at a handful, not all of them.
+/// Obstacles bucketed into 8 m cells, so a collision check looks at a handful, not all of them.
 #[derive(Clone)]
 struct Grid {
     cells: Vec<Vec<u16>>,
 }
 
-const CELL: f32 = 16.0;
+const CELL: f32 = 8.0;
 const SIDE: usize = ((BOUNDS * 2.0 / CELL) as usize) + 2;
 
 impl Grid {
