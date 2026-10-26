@@ -14,7 +14,7 @@ mod perf_overlay;
 mod stage;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
-use protocol::{Command, Look, Pose, UnitKind, UnitState};
+use protocol::{Command, HitWeight, Look, Pose, UnitKind, UnitState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use render::{
     Camera, Renderer,
@@ -23,6 +23,7 @@ use render::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    f32::consts::{FRAC_PI_2, PI, TAU},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -82,6 +83,8 @@ struct Options {
     direct_drawable: bool,
     legacy_cpu: bool,
     look_churn: bool,
+    /// Staged blows (#218): see `Game::hit_churn`.
+    hit_churn: bool,
     reset_on_look: bool,
     /// Overrides the settings file's scheme.
     scheme: Option<controls::Scheme>,
@@ -98,6 +101,9 @@ struct Options {
     foot_ik: bool,
     /// Whether characters lean with their acceleration (#217), or run upright, to compare.
     lean: bool,
+    /// Whether blows tip characters and hitstops hold their poses (#218), or the hit clip plays
+    /// in full, to compare.
+    flinch: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -139,6 +145,7 @@ impl Options {
             direct_drawable: true,
             legacy_cpu: false,
             look_churn: false,
+            hit_churn: false,
             reset_on_look: false,
             scheme: None,
             controls: None,
@@ -147,6 +154,7 @@ impl Options {
             anim_tiers: true,
             foot_ik: true,
             lean: true,
+            flinch: true,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -203,6 +211,7 @@ impl Options {
                 "--fps" => o.fps = Some(args.next().context("--fps needs a number")?.parse()?),
                 "--legacy-cpu" => o.legacy_cpu = true,
                 "--look-churn" => o.look_churn = true,
+                "--hit-churn" => o.hit_churn = true,
                 "--reset-on-look" => o.reset_on_look = true,
                 "--output-blit" => o.direct_drawable = false,
                 "--benchmark" => o.benchmark = true,
@@ -285,13 +294,20 @@ impl Options {
                         _ => anyhow::bail!("--lean expects on or off"),
                     }
                 }
+                "--flinch" => {
+                    o.flinch = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--flinch expects on or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -1238,6 +1254,73 @@ impl Game {
             self.last_move = Some(command);
         }
     }
+    /// `--hit-churn` (#218): staged blows, every 0.75 s, each held as `Pose::Hit` for a quarter of
+    /// a second, as the sim holds them. In the showcase the first character swings, and its blow
+    /// lands a quarter of a second in, holding the swing for the hitstop; as it lands, each of the
+    /// others takes one, from the front, behind or a side and light, heavy or big in turn. Out of
+    /// the showcase (with `--gait`, say), the player takes them on the move.
+    fn hit_churn(&mut self, units: &mut [UnitState]) {
+        // In frames, which are 1/60 s in the showcase: a round, the swing in it, when the blow
+        // lands and when those it lands on recover.
+        const ROUND: u64 = 45;
+        const SWING: u64 = 30;
+        const LANDS: u64 = 15;
+        const RECOVERS: u64 = 30;
+        // `content::combat::HITSTOP`'s, for blows struck in reach.
+        const BLOWS: [(HitWeight, f32); 3] = [
+            (HitWeight::Light, 0.04),
+            (HitWeight::Heavy, 0.08),
+            (HitWeight::Big, 0.12),
+        ];
+        // The way a blow travels, from the body's facing: from the front, from behind, and from
+        // each side.
+        const FROM: [f32; 4] = [PI, 0., -FRAC_PI_2, FRAC_PI_2];
+        let (round, f) = ((self.frame / ROUND) as usize, self.frame % ROUND);
+        let seconds = |frames: u64| frames as f32 / 60.;
+        if !self.options.showcase {
+            let Some(u) = units.iter_mut().find(|u| u.id == self.host.player) else {
+                return;
+            };
+            if (LANDS..RECOVERS).contains(&f) {
+                (u.pose, u.pose_time) = (Pose::Hit, seconds(f - LANDS));
+            }
+            if f == LANDS
+                && let Some(c) = self.characters.get_mut(&u.id)
+            {
+                let (weight, hitstop) = BLOWS[round % BLOWS.len()];
+                c.hit(u.yaw + FROM[round % FROM.len()], weight, hitstop);
+            }
+            return;
+        }
+        for (i, u) in units.iter_mut().enumerate() {
+            (u.pose, u.pose_time) = match (i, f) {
+                (0, ..SWING) => (Pose::Attack, seconds(f)),
+                (0, _) => (Pose::Idle, seconds(f - SWING)),
+                (_, ..LANDS) => (Pose::Idle, seconds(f + ROUND - RECOVERS)),
+                (_, ..RECOVERS) => (Pose::Hit, seconds(f - LANDS)),
+                _ => (Pose::Idle, seconds(f - RECOVERS)),
+            };
+        }
+        if let Some(first) = units.first_mut()
+            && !first.look.drawn
+        {
+            Arc::make_mut(&mut first.look).drawn = true;
+        }
+        if f != LANDS {
+            return;
+        }
+        for (i, u) in units.iter().enumerate() {
+            let Some(c) = self.characters.get_mut(&u.id) else {
+                continue;
+            };
+            let (weight, hitstop) = BLOWS[(round + i) % BLOWS.len()];
+            if i == 0 {
+                c.landed(hitstop);
+            } else {
+                c.hit(u.yaw + FROM[(round + i) % FROM.len()], weight, hitstop);
+            }
+        }
+    }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
         perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
         self.latency.presented(|frame| r.presented_at(frame));
@@ -1368,6 +1451,27 @@ impl Game {
             {
                 c.rallied();
             }
+            // Blows (#218): the victim tips away from the blow, and both bodies' poses hold for
+            // the hitstop. The showcase's characters aren't the sim's units.
+            if let protocol::Event::Hit {
+                attacker,
+                victim,
+                dir,
+                weight,
+                hitstop_ms,
+            } = &e
+                && !self.options.showcase
+            {
+                let hitstop = f32::from(*hitstop_ms) / 1000.;
+                if let Some(c) = self.characters.get_mut(victim) {
+                    c.hit(f32::from(*dir) * TAU / 256., *weight, hitstop);
+                }
+                if attacker != victim
+                    && let Some(c) = self.characters.get_mut(attacker)
+                {
+                    c.landed(hitstop);
+                }
+            }
             match &e {
                 protocol::Event::Jumped { unit } if *unit == self.host.player => {
                     self.smoke_checks[0] = true
@@ -1427,6 +1531,9 @@ impl Game {
                 } else {
                     vec![("main_hand".into(), "sword.great".into())]
                 };
+        }
+        if self.options.hit_churn {
+            self.hit_churn(&mut units);
         }
         if self.options.crowd > 0
             && !self.options.showcase
@@ -1591,6 +1698,7 @@ impl Game {
             c.blender.set_method(self.options.blend);
             c.foot_placement = self.options.foot_ik;
             c.leaning = self.options.lean;
+            c.flinching = self.options.flinch;
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
             let tier = tiers.get(i).copied().unwrap_or_default();
             counts[tier as usize] += 1;

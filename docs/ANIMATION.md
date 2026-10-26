@@ -19,7 +19,9 @@ the unit's combat view and calls `update`, which builds the pose in this order:
    pose's: idle (each unit at its own phase), walk, jog or sprint by speed, the jump's take-off and
    loop on one timeline, roll, hit or death. Beasts map poses to their role clips. Just before it,
    `anim::Landing` notes a touchdown, and a standing body that fell far enough to hurt plays
-   `Jump_Land` (#217, see Weight below).
+   `Jump_Land` (#217, see Weight below). A body that flinches from a blow shows the pose it would
+   have without it (`shown_pose`, #218), and while a hitstop holds, the pose clocks stand still
+   (see Hits below).
 2. **Body yaw** (`anim::Turn`, #211): the yaw the body is drawn at (`body_yaw`), which lags the
    sim's while turning on the spot, and where the upper body aims. The stride reads the travel
    against it.
@@ -56,11 +58,14 @@ the unit's combat view and calls `update`, which builds the pose in this order:
     carrying the old motion into the new, and while a switch settles it changes `local`, so the
     world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
     letting go of or taking a grip.
-13. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops (and dips on
+13. **Flinch** (`anim::Flinch`, `flinch_body`, #218): a blow tips the spine, neck and head away
+    from it, and a heavy one the pelvis too, and the world matrices are built again (see Hits
+    below). After the blender, so a switch never smooths a flinch away. Not at quarter detail.
+14. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops (and dips on
     landing, #217) and the legs reach for the ground, and planted feet hold still (see Feet on the
     ground below). After the blender, so nothing smooths the feet off the ground, and the blender
     keeps the pose from before it.
-14. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
+15. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
 
 ## Locomotion
 
@@ -282,6 +287,48 @@ body its weight (Overgrowth's approach, and Fortnite Chapter 5's procedural laye
   any five at least a seventh. The pace is up to 5% faster or slower (`SPREAD`), so none stay in
   step. The drawn idle layered over a moving upper body is offset the same way.
 
+## Hits
+
+Every blow used to play `Hit_Chest` on the whole body for the quarter second the sim holds
+`Pose::Hit`, whichever way it came from and however hard, with the legs stopped: a runner hit from
+behind skidded to a standstill mid-stride. #218 makes hits read without wrecking the movement. For
+every blow #191's `Event::Hit` says who struck whom, the way it travelled, how hard it was
+(`HitWeight`) and how long both bodies' poses may hold: `hitstop_ms`, from
+`content::combat::HITSTOP`, 40 ms for a light blow up to 120 ms for a big one, half for missiles.
+The client hands it to the victim's `Character::hit` and the attacker's `Character::landed`.
+
+- **The flinch.** `anim::Flinch` kicks a critically damped spring on the chest's tilt (half-life
+  0.085 s, `HALF_LIFE`) with the speed that takes it out as far as the blow was hard and back: it
+  peaks after about 0.06 s and is back within 0.35 s, without bouncing. How far goes with the
+  weight: 0.18 rad for a light blow, 0.28 heavy, 0.32 critical and 0.4 big (`LIGHT` to `BIG`), and
+  0.08 or 0.04 for one a guard stopped or a parry turned. Blows landing together add up to no more
+  than 0.55 (`MOST`). A heavy, critical or big blow kicks the pelvis too, by 0.3 of it (`PELVIS`).
+  The head follows chest and pelvis on a quicker spring of its own (0.06 s), so it lags behind them
+  and then whips past. The spine takes the chest's tilt 25%, 35% and 40% up its three bones
+  (`SPINE`), and the neck and head share the head's lag. A light blow tips the head about 5 cm,
+  and a heavy one from the front takes the hips back 6.5 cm.
+- **Under it, the body carries on.** The flinch goes on after the blender, each bone tipping about
+  its own axis (`tip`, which the lean shares), the pelvis about the ground beneath it so the feet
+  stay put, and the feet go on the ground after it. A blow on a body standing, walking or running
+  shows it standing, walking or running by the sim's speeds (`shown_pose`), so the stride carries
+  on, and attacks and casts play through. Carried through a move or hanging on a wall (#247), it
+  keeps the sim's pose for that, so a roll or the hang plays on under the flinch. A stagger
+  (`Hit_Knockback`, or `Idle_Shield_Break` from a guard), a knockback, a blow that catches the body
+  in the air (`Hit_Chest`) and a body that can't flinch (beasts, with their own hit clip) still play
+  their clips. At quarter detail the springs run but the body doesn't tip.
+- **The hitstop.** As a blow lands, both bodies' pose clocks hold for the hitstop: while it holds,
+  `Flinch::update` hands back no time to move them on, and the spine shakes along the blow at 17 Hz
+  by a fifth of the flinch (`SHAKE`), fading as the hold runs out. Then the clips play on from
+  where they held, at their own pace. Those the sim's clocks time (`pose_time`, `action_time`) run
+  behind them by however long they were held (`Flinch::behind`), until the next switch lets them
+  catch up, so nothing jumps either way. The sim never pauses, so whatever follows the body through
+  the world keeps going: the stride over the ground it covers, the turn, the lean, the feet, the
+  capes and the blender.
+- **To compare and capture.** `--flinch off` plays the hit clip in full on every blow, without the
+  hitstop. `--hit-churn` stages blows every 0.75 s: in the showcase the first character swings and
+  lands on the rest, from the front, behind and either side and light, heavy and big in turn; with
+  `--gait`, the running player takes them.
+
 ## Switches
 
 A switch is any change in what plays: the base clip's name, the legs' clip, the pose, the upper
@@ -443,7 +490,11 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   speed up to its most, comes back without bouncing and settles; and the legs reach for the ground
   only falling, from 0.2 s out to all the way on touching down, and without a jump when the body
   passes over the edge of a ledge it lands on. Units with ids in a row start their idles well
-  apart, neighbours don't come in step over four loops, and the pace stays within 5%.
+  apart, neighbours don't come in step over four loops, and the pace stays within 5%. For hits: a
+  blow tips the body its way, as far as it was hard, the pelvis only for a heavy one; a flinch
+  comes back within four half-lives, never moving faster than the kick; the head lags the chest,
+  then whips past it; the hitstop holds the pose clock and lets go without a jump; and blows
+  landing together tip no further than the most.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
   bone carries on at every switch, where cuts jump by over 0.5 rad (with the feet left as the
@@ -499,8 +550,19 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   knight beside one that doesn't lean: the head goes forward setting off, back stopping and to the
   inside running round, within the caps. `on_a_wall_the_body_neither_lands_nor_leans_nor_jumps`
   drops one onto a hold (#247), shimmies it along the wall and climbs it up: no dip, no lean and no
-  timeline in the air. `neighbours_spawned_together_idle_out_of_step` checks that
-  knights with ids in a row stand differently, and the same knight twice the same. The model tests
+  timeline in the air. `neighbours_spawned_together_idle_out_of_step` checks that knights with ids
+  in a row stand differently, and the same knight twice the same.
+  `blows_tip_the_body_away_while_the_legs_jog_on` jogs a man taking a light blow from each side
+  beside a twin who takes none: the legs and the stride stay the twin's, the head goes out 2 to 12
+  cm the way the blow went and is back within 5 mm by 50 frames, a heavy blow from the front takes
+  the hips back, and a big one with a hitstop doesn't hold the stride.
+  `a_blow_on_a_wall_or_mid_roll_flinches_over_what_the_body_was_doing` strikes one hanging on a
+  wall (#247) and one rolling: the hang and the roll play on, and the head still goes with the blow.
+  `staggers_knockbacks_and_blows_in_the_air_still_play_their_clips` checks the clips that stay,
+  that a wolf only holds, and that with flinching off a blow plays `Hit_Chest` and holds nothing.
+  `the_hitstop_holds_a_swing_then_lets_it_go_on_without_a_jump` lands a slash with an 80 ms
+  hitstop beside a twin's with none: the sword arm holds still through it, swings on no faster than
+  the twin's, and once the swing ends both stand alike. The model tests
   check that even keys are indexed and blended exactly (slerp for steps over 30°), uneven keys are
   resampled, a constant track keeps one key and step keys hold.
 - The client's `--crowd` test checks that nobody in the crowd passes through anybody, even at 200,
@@ -531,18 +593,19 @@ for the ground on the way down and the pelvis dipping on landing.
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 |
-| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 |
-| circle | | | | | | | | 61,546 | 63,414 |
-| jump | | | | | | | | 83,542 | 85,944 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 | After #218 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 | 53,520 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 | 62,189 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 | 67,602 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 | 61,625 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 | 62,728 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 | 72,931 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 | 80,397 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 | 82,908 |
+| circle | | | | | | | | 61,546 | 63,414 | 63,842 |
+| jump | | | | | | | | 83,542 | 85,944 | 86,151 |
+| run + hits | | | | | | | | | 93,452 | 91,832 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -598,6 +661,15 @@ runner is within the noise: the fastest of six runs of each case measured 1% to 
 detail, where runs of the same build differ by up to 15%. At quarter detail the lean and the dip
 are off, and what's left (the jump's timing, the reach and the idle's phase) costs next to nothing.
 
+#218 costs about 150 instructions a pose when nobody is being hit (0.2% to 0.3%): the flinch,
+settled, isn't worked out, and what's left is checking it and the pose the body shows. The cases
+that lean come out about 220 dearer again (`start-stop` 0.4% in all, `circle` 0.6%). A runner taking
+a blow every half second (`run + hits`, new with #218; its After #217 number is #239's code running
+it, each blow playing `Hit_Chest` in full) costs 1,620 fewer (1.7%): the flinch's springs, tipping
+six bones and building the world matrices again while it moves cost less than switching to the hit
+clip and back. The column is against #239's code measured the same way, within 60 instructions of
+the After #217 column throughout.
+
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are
 the next cost to take on (#243): they're rebuilt every frame at every tier, and half of them are
@@ -605,9 +677,9 @@ copies of another part's.
 
 ## Next
 
-#239 gear changes that keep the character moving (no restart or pop when a look changes), then
-in the plan's order #218 hit flinches and hitstop (once `Event::Hit` is in, #191), #213 traversal
-(after #192), and #244 remote players' real aim in the snapshot.
+In the plan's order: #213 traversal, fitting climbs, vaults, swimming and the forced moves to
+#192's `UnitState.traversal`, then #244 remote players' real aim in the snapshot. Directional hit
+clips (#106, picked by #111) go under the flinch when they land: it adds to whatever plays.
 
 One thing to watch: combat clips take their time from `UnitCombat::action_time` in each snapshot.
 Snapshots go out every tick today; if the send rate drops to 20–30 Hz (#73), attacks would play in
