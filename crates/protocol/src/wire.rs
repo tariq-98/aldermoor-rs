@@ -147,6 +147,7 @@ pub struct Growth {
     pub xp: u32,
     pub xp_next: u32,
     pub unassigned_xp: u32,
+    pub specialties: Vec<SpecialtyLevel>,
 }
 
 /// Combat detail that changed since the base. Timers are ticks from the anchor.
@@ -997,6 +998,7 @@ fn split(p: &PlayerState, anchor: u64) -> (Fast, Bar, Bags, Craft, Growth) {
         xp,
         xp_next,
         unassigned_xp,
+        specialties,
         coins,
         inventory,
         loot,
@@ -1035,7 +1037,14 @@ fn split(p: &PlayerState, anchor: u64) -> (Fast, Bar, Bags, Craft, Growth) {
     let bags = Bags { coins: *coins, inventory: inventory.clone(), loot: loot.clone(), shop: shop.clone() };
     let work = work.as_ref().map(|w| WorkView { elapsed: count_up(w.elapsed, anchor), ..w.clone() });
     let craft = Craft { skills: skills.clone(), work, nodes: nodes.clone(), station: station.clone() };
-    let growth = Growth { specialty: specialty.clone(), level: *level, xp: *xp, xp_next: *xp_next, unassigned_xp: *unassigned_xp };
+    let growth = Growth {
+        specialty: specialty.clone(),
+        level: *level,
+        xp: *xp,
+        xp_next: *xp_next,
+        unassigned_xp: *unassigned_xp,
+        specialties: specialties.clone(),
+    };
     (fast, bar, bags, craft, growth)
 }
 
@@ -1066,6 +1075,7 @@ fn join((f, b, bags, c, g): &(Fast, Bar, Bags, Craft, Growth), anchor: u64) -> P
         xp: g.xp,
         xp_next: g.xp_next,
         unassigned_xp: g.unassigned_xp,
+        specialties: g.specialties.clone(),
         coins: bags.coins,
         inventory: bags.inventory.clone(),
         loot: bags.loot.clone(),

@@ -26,6 +26,7 @@ pub enum Control {
     SwapWeapons,
     Revive,
     Respawn,
+    Specialties,
     Slot1,
     Slot2,
     Slot3,
@@ -40,7 +41,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the menu lists them.
-    pub const ALL: [Control; 27] = [
+    pub const ALL: [Control; 28] = [
         Self::Forward,
         Self::Back,
         Self::Left,
@@ -58,6 +59,7 @@ impl Control {
         Self::SwapWeapons,
         Self::Revive,
         Self::Respawn,
+        Self::Specialties,
         Self::Slot1,
         Self::Slot2,
         Self::Slot3,
@@ -89,6 +91,7 @@ impl Control {
             Self::SwapWeapons => "Swap weapons",
             Self::Revive => "Revive",
             Self::Respawn => "Respawn",
+            Self::Specialties => "Specialties and quest XP",
             Self::Slot1 => "Skill 1",
             Self::Slot2 => "Skill 2",
             Self::Slot3 => "Skill 3",
@@ -129,6 +132,7 @@ impl Control {
             Self::SwapWeapons => &["Backquote"],
             Self::Revive => &["KeyG"],
             Self::Respawn => &["KeyR"],
+            Self::Specialties => &["KeyK"],
             Self::Slot1 => &["Digit1"],
             Self::Slot2 => &["Digit2"],
             Self::Slot3 => &["Digit3"],

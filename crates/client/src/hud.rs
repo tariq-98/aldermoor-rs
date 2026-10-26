@@ -9,6 +9,7 @@ pub struct Keys {
     pub target: String,
     pub swap: String,
     pub respawn: String,
+    pub specialties: String,
 }
 /// White text on a solid colour, readable over any background.
 fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
@@ -56,6 +57,137 @@ pub enum Action {
     Command(Command),
     CycleTarget,
     AimSlot(u8),
+    CloseSpecialties,
+}
+
+/// "warrior" as "Warrior".
+fn title(key: &str) -> String {
+    let mut c = key.chars();
+    c.next()
+        .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+}
+
+/// XP into the equipped specialty's level, or that it has reached the cap.
+fn xp_bar(ui: &mut egui::Ui, player: &protocol::PlayerState) {
+    let (fraction, text) = if player.xp_next == 0 {
+        (
+            1.,
+            format!("{} {} · max level", title(&player.specialty), player.level),
+        )
+    } else {
+        (
+            player.xp as f32 / player.xp_next as f32,
+            format!(
+                "{} {} · XP {}/{}",
+                title(&player.specialty),
+                player.level,
+                player.xp,
+                player.xp_next
+            ),
+        )
+    };
+    ui.add(
+        egui::ProgressBar::new(fraction.clamp(0., 1.))
+            .desired_height(10.)
+            .fill(egui::Color32::from_rgb(150, 110, 40))
+            .text(egui::RichText::new(text).size(11.)),
+    );
+}
+
+/// The banner for the local player's last level up, with the seconds it has left; it fades
+/// over its last second.
+pub fn level_up(ctx: &egui::Context, banner: &(String, u8, f32)) {
+    let (specialty, level, left) = banner;
+    let a = left.clamp(0., 1.);
+    egui::Area::new(egui::Id::new("level-up"))
+        .anchor(egui::Align2::CENTER_CENTER, [0., -180.])
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha((170. * a) as u8))
+                .stroke(egui::Stroke::new(
+                    1_f32,
+                    egui::Color32::from_rgba_unmultiplied(230, 190, 90, (255. * a) as u8),
+                ))
+                .corner_radius(6.)
+                .inner_margin(egui::Margin::symmetric(24, 10))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new("Level up").size(15.).color(
+                            egui::Color32::from_rgba_unmultiplied(230, 190, 90, (255. * a) as u8),
+                        ));
+                        ui.label(
+                            egui::RichText::new(format!("{} {level}", title(specialty)))
+                                .size(28.)
+                                .strong()
+                                .color(egui::Color32::from_white_alpha((255. * a) as u8)),
+                        );
+                    });
+                });
+        });
+}
+
+/// The Specialties screen: every specialty's level, and quest XP to give one of them.
+/// `amount` is how much the next Give sends; it stays within the pool.
+pub fn specialties(ctx: &egui::Context, snapshot: &Snapshot, amount: &mut u32) -> Vec<Action> {
+    let mut actions = Vec::new();
+    let Some(player) = snapshot.player.as_ref() else {
+        return actions;
+    };
+    let pool = player.unassigned_xp;
+    *amount = (*amount).min(pool);
+    let mut open = true;
+    egui::Window::new("Specialties")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::RIGHT_CENTER, [-24., 0.])
+        .default_width(360.)
+        .show(ctx, |ui| {
+            ui.label("Each specialty levels on its own. The equipped one fights at its level.");
+            ui.separator();
+            egui::Grid::new("specialty-levels")
+                .num_columns(3)
+                .striped(true)
+                .show(ui, |ui| {
+                    for s in &player.specialties {
+                        let equipped = s.specialty == player.specialty;
+                        let name = egui::RichText::new(title(&s.specialty));
+                        ui.label(if equipped { name.strong() } else { name });
+                        ui.label(if equipped {
+                            format!("Level {} · equipped", s.level)
+                        } else {
+                            format!("Level {}", s.level)
+                        });
+                        if ui
+                            .add_enabled(*amount > 0, egui::Button::new(format!("Give {amount}")))
+                            .clicked()
+                        {
+                            actions.push(Action::Command(Command::AssignXp {
+                                specialty: s.specialty.clone(),
+                                amount: *amount,
+                            }));
+                        }
+                        ui.end_row();
+                    }
+                });
+            ui.separator();
+            if pool == 0 {
+                ui.label("No quest XP to give. Quests reward XP you can give to any specialty.");
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Quest XP: {pool} · give"));
+                    ui.add(egui::Slider::new(amount, 0..=pool));
+                    if ui.button("All").clicked() {
+                        *amount = pool;
+                    }
+                });
+            }
+        });
+    if !open {
+        actions.push(Action::CloseSpecialties);
+    }
+    actions
 }
 fn cast(ui: &mut egui::Ui, c: &protocol::CastBar) {
     ui.add(
@@ -110,6 +242,19 @@ pub fn draw(
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.set_width(240.);
                 ui.label(format!("{} · Level {}", me.name, me.level));
+                if !player.specialty.is_empty() {
+                    xp_bar(ui, player);
+                }
+                if player.unassigned_xp > 0 {
+                    badge(
+                        ui,
+                        &format!(
+                            "{} quest XP to give · {} Specialties",
+                            player.unassigned_xp, keys.specialties
+                        ),
+                        egui::Color32::from_rgb(140, 100, 30),
+                    );
+                }
                 ui.add(
                     egui::ProgressBar::new(me.health / me.max_health.max(1.)).text(format!(
                         "{} {:.0}/{:.0}",
@@ -286,5 +431,35 @@ mod tests {
         snapshot.player.as_mut().unwrap().bar[0].cooldown = 2.;
         run(&snapshot, vec![click(true)]);
         assert!(run(&snapshot, vec![click(false)]).is_empty());
+    }
+    #[test]
+    fn xp_bar_and_specialties_screen_follow_state() {
+        let mut host = server::Host::start(42, "XP test");
+        let mut snapshot = (*host.snapshot().unwrap()).clone();
+        host.stop();
+        let player = snapshot.player.as_mut().unwrap();
+        assert_eq!(player.specialties.len(), 6);
+        player.unassigned_xp = 300;
+        let ctx = egui::Context::default();
+        let mut amount = 500;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            draw(
+                ctx,
+                &snapshot,
+                &CombatView::default(),
+                None,
+                &Keys::default(),
+            );
+            level_up(ctx, &("warrior".into(), 2, 3.));
+            assert!(specialties(ctx, &snapshot, &mut amount).is_empty());
+        });
+        // Give never offers more than the pool holds.
+        assert_eq!(amount, 300);
+        snapshot.player.as_mut().unwrap().unassigned_xp = 0;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            specialties(ctx, &snapshot, &mut amount);
+        });
+        assert_eq!(amount, 0);
+        assert_eq!(title("necromancer"), "Necromancer");
     }
 }

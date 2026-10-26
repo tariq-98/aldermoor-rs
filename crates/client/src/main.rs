@@ -293,6 +293,11 @@ struct Game {
     orbiting: bool,
     /// Ctrl held in the Action scheme: the pointer is out for the HUD and the mouse doesn't look.
     pointer_free: bool,
+    /// The Specialties screen is open, and how much quest XP its Give buttons send.
+    specialties: bool,
+    assign_xp: u32,
+    /// The local player's last level up (specialty, level, seconds left on its banner).
+    level_up: Option<(String, u8, f32)>,
     /// The left button held in the Action scheme: keep swinging, and when the next press of the
     /// basic attack goes out.
     attacking: Option<f32>,
@@ -381,6 +386,9 @@ impl Game {
             mouse_look: false,
             orbiting: false,
             pointer_free: false,
+            specialties: false,
+            assign_xp: 0,
+            level_up: None,
             attacking: None,
             guard_button: false,
             last_move: None,
@@ -514,6 +522,10 @@ impl Game {
                 .revive_target()
                 .map(|target| Command::Revive { target }),
             C::Respawn => Some(Command::Respawn),
+            C::Specialties => {
+                self.specialties = !self.specialties;
+                None
+            }
             c => c.slot().map(|slot| self.use_slot(slot)),
         };
         if let Some(c) = command {
@@ -701,6 +713,7 @@ impl Game {
             target: l(C::Target),
             swap: l(C::SwapWeapons),
             respawn: l(C::Respawn),
+            specialties: l(C::Specialties),
         }
     }
     fn direction(&self) -> Vec2 {
@@ -811,7 +824,9 @@ impl Game {
     fn aiming(&self) -> bool {
         self.menu.is_none()
             && (self.mouse_look
-                || (self.pilot.scheme == controls::Scheme::Action && !self.pointer_free))
+                || (self.pilot.scheme == controls::Scheme::Action
+                    && !self.pointer_free
+                    && !self.specialties))
     }
     fn aim_point(&self) -> Option<Vec3> {
         let me = self.snaps.current.unit(self.host.player)?;
@@ -937,6 +952,10 @@ impl Game {
             m.1 -= dt;
         }
         self.messages.retain(|m| m.1 > 0.);
+        if let Some(b) = &mut self.level_up {
+            b.2 -= dt;
+        }
+        self.level_up.take_if(|b| b.2 <= 0.);
         if self.options.smoke {
             self.smoke()
         } else {
@@ -996,6 +1015,13 @@ impl Game {
                 }
                 protocol::Event::WeaponsSwapped { unit } if *unit == self.host.player => {
                     self.smoke_checks[3] = true;
+                }
+                protocol::Event::LevelUp {
+                    unit,
+                    specialty,
+                    level,
+                } if *unit == self.host.player => {
+                    self.level_up = Some((specialty.clone(), *level, 4.));
                 }
                 protocol::Event::Damage { source, .. } if *source == self.host.player => {
                     self.smoke_checks[2] = true
@@ -1244,6 +1270,16 @@ impl Game {
             } else {
                 actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
                 hud::messages(ctx, &self.messages);
+                if let Some(banner) = &self.level_up {
+                    hud::level_up(ctx, banner);
+                }
+                if self.specialties {
+                    actions.extend(hud::specialties(
+                        ctx,
+                        &self.snaps.current,
+                        &mut self.assign_xp,
+                    ));
+                }
             }
             if crosshair {
                 paint_crosshair(ctx);
@@ -1264,6 +1300,7 @@ impl Game {
                 }
                 hud::Action::AimSlot(slot) => self.aim_slot = Some(slot),
                 hud::Action::CycleTarget => self.host.send(Command::SetTarget(self.target(true))),
+                hud::Action::CloseSpecialties => self.specialties = false,
             }
         }
         r.hud = Some(render::gui::HudFrame {
@@ -1568,9 +1605,11 @@ impl App {
         }
         self.sync_pointer(self.focused);
     }
-    /// Esc closes the menu (or stops it waiting for a key), and opens it otherwise.
+    /// Esc closes the menu (or stops it waiting for a key) or the Specialties screen, and opens
+    /// the menu otherwise.
     fn escape(&mut self) {
         match &mut self.game.menu {
+            None if self.game.specialties => self.game.specialties = false,
             Some(m) if m.capture.is_some() => {
                 m.capture = None;
                 m.notice = None;
@@ -1652,6 +1691,7 @@ impl App {
         let want = focused
             && self.game.pilot.scheme == controls::Scheme::Action
             && !self.game.pointer_free
+            && !self.game.specialties
             && self.game.menu.is_none()
             && !self.game.options.showcase;
         if want == self.pointer_held {

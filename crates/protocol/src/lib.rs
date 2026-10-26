@@ -333,6 +333,9 @@ pub struct PlayerState {
     pub xp: u32,
     pub xp_next: u32,
     pub unassigned_xp: u32,
+    /// Every specialty's own level, in the sim's order (warrior, archer, mage, necromancer,
+    /// rogue, healer).
+    pub specialties: Vec<SpecialtyLevel>,
     pub coins: u32,
     /// Every inventory slot in order; an empty one has an empty `item`. Each `price` is what
     /// the shop you stand at pays for it (0 if none, or it doesn't buy that).
@@ -413,6 +416,14 @@ pub struct RecipeView {
     pub output: ItemView,
     /// How many you could make now from what you carry (0 below the level).
     pub can_make: u16,
+}
+
+/// One specialty and the level it has reached.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpecialtyLevel {
+    /// "warrior", "mage", …: what `Command::AssignXp` takes.
+    pub specialty: String,
+    pub level: u8,
 }
 
 /// Some of one item: in a slot, a pile or a shop.
