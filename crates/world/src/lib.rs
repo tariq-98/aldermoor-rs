@@ -168,6 +168,9 @@ pub struct Valley {
     pub holds: Holds,
     /// `solids`, each with its turn worked out.
     turned: Vec<Turned>,
+    /// The solids that stand together, which the grids look up together: each cottage's blocks.
+    /// Every other solid stands alone.
+    groups: Vec<std::ops::Range<usize>>,
     grid: Grid,
     /// The solids with a top, for [`Valley::ground`], and the box round them all (most of the
     /// valley has none, and `ground` is called a lot).
@@ -202,8 +205,11 @@ impl Valley {
             HOUSES.iter().enumerate().map(|(variant, &(x, z, yaw, scale))| Placement { position: Vec2::new(x, z), yaw, scale, variant }).collect();
         // Each house a cottage whose roof you can climb onto and walk (#249): the roof's slopes come
         // down to the ground round the walls, so the house is masonry, not an obstacle.
+        let mut groups = Vec::new();
         for h in &houses {
+            let first = solids.len();
             solids.extend(cottage::solids(h));
+            groups.push(first..solids.len());
         }
         // Where the houses stand, plinth and all, for keeping trees away from them.
         let footprints: Vec<Solid> = houses.iter().map(|h| Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 }).collect();
@@ -260,10 +266,12 @@ impl Valley {
         let mut masonry = masonry::field_walls(|x, z| heights.at(x, z));
         masonry.push(masonry::ruin(|x, z| heights.at(x, z)));
         solids.extend(masonry.iter().flat_map(Masonry::solids));
-        let (grid, tops) = Grid::split(&solids);
+        let grouped = groups.last().map_or(0, |r: &std::ops::Range<usize>| r.end);
+        groups.extend((grouped..solids.len()).map(|i| i..i + 1));
+        let (grid, tops) = Grid::split(&solids, &groups);
         let tops_box = tops_box(&solids);
         let turned = solids.iter().copied().map(Turned::new).collect();
-        let mut valley = Valley { solids, houses, trees, masonry, holds: Holds::default(), turned, grid, tops, tops_box, heights };
+        let mut valley = Valley { solids, houses, trees, masonry, holds: Holds::default(), turned, groups, grid, tops, tops_box, heights };
         valley.holds = Holds::build(&valley);
         valley
     }
@@ -272,7 +280,8 @@ impl Valley {
     pub fn add_solid(&mut self, s: Solid) {
         self.solids.push(s);
         self.turned.push(Turned::new(s));
-        (self.grid, self.tops) = Grid::split(&self.solids);
+        self.groups.push(self.solids.len() - 1..self.solids.len());
+        (self.grid, self.tops) = Grid::split(&self.solids, &self.groups);
         self.tops_box = tops_box(&self.solids);
         self.holds = Holds::build(self);
     }
@@ -591,10 +600,24 @@ impl Heights {
     }
 }
 
-/// Obstacles bucketed into 8 m cells, so a collision check looks at a handful, not all of them.
+/// Solids bucketed into 8 m cells, so a lookup looks at a handful, not all of them. Solids that
+/// stand together (a cottage's blocks) go in as one group with a circle round them all, so a
+/// lookup in the cell but away from the cottage passes all its blocks over at once.
 #[derive(Clone)]
 struct Grid {
+    /// The groups in each cell.
     cells: Vec<Vec<u16>>,
+    groups: Vec<Group>,
+    /// The solids of each group, one group after another.
+    members: Vec<u16>,
+}
+
+#[derive(Clone, Copy)]
+struct Group {
+    center: Vec2,
+    reach: f32,
+    start: u32,
+    len: u32,
 }
 
 const CELL: f32 = 8.0;
@@ -602,23 +625,38 @@ const SIDE: usize = ((BOUNDS * 2.0 / CELL) as usize) + 2;
 
 impl Grid {
     /// One grid of the solids that block, and one of those with a top.
-    fn split(solids: &[Solid]) -> (Grid, Grid) {
-        (Grid::build(solids, false), Grid::build(solids, true))
+    fn split(solids: &[Solid], groups: &[std::ops::Range<usize>]) -> (Grid, Grid) {
+        (Grid::build(solids, groups, false), Grid::build(solids, groups, true))
     }
 
-    fn build(solids: &[Solid], tops: bool) -> Grid {
-        let mut cells = vec![Vec::new(); SIDE * SIDE];
-        for (i, s) in solids.iter().enumerate().filter(|(_, s)| s.top.is_some() == tops) {
-            let r = s.reach() + 1.5;
-            let (x0, z0) = Self::cell(s.center - Vec2::splat(r));
-            let (x1, z1) = Self::cell(s.center + Vec2::splat(r));
+    fn build(solids: &[Solid], groups: &[std::ops::Range<usize>], tops: bool) -> Grid {
+        let mut grid = Grid { cells: vec![Vec::new(); SIDE * SIDE], groups: Vec::new(), members: Vec::new() };
+        for range in groups {
+            let start = grid.members.len();
+            grid.members.extend(range.clone().filter(|&i| solids[i].top.is_some() == tops).map(|i| i as u16));
+            let members = &grid.members[start..];
+            if members.is_empty() {
+                continue;
+            }
+            // A circle round them all.
+            let (lo, hi) = members.iter().fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(lo, hi), &i| {
+                let s = &solids[i as usize];
+                (lo.min(s.center - Vec2::splat(s.reach())), hi.max(s.center + Vec2::splat(s.reach())))
+            });
+            let center = (lo + hi) / 2.0;
+            let reach = members.iter().map(|&i| (solids[i as usize].center - center).length() + solids[i as usize].reach()).fold(0.0, f32::max);
+            let id = grid.groups.len() as u16;
+            grid.groups.push(Group { center, reach, start: start as u32, len: members.len() as u32 });
+            let r = reach + 1.5;
+            let (x0, z0) = Self::cell(center - Vec2::splat(r));
+            let (x1, z1) = Self::cell(center + Vec2::splat(r));
             for z in z0..=z1 {
                 for x in x0..=x1 {
-                    cells[z * SIDE + x].push(i as u16);
+                    grid.cells[z * SIDE + x].push(id);
                 }
             }
         }
-        Grid { cells }
+        grid
     }
 
     #[inline]
@@ -627,11 +665,16 @@ impl Grid {
         (f(p.x), f(p.y))
     }
 
-    /// Obstacles that could touch a circle at `p` (radius up to 1.5 m).
+    /// The solids that could touch a circle at `p` (radius up to 1.5 m): those of the groups in its
+    /// cell whose circle it comes within `radius` of.
     fn near(&self, p: Vec2, radius: f32) -> impl Iterator<Item = u16> + '_ {
         debug_assert!(radius <= 1.5);
         let (x, z) = Self::cell(p);
-        self.cells[z * SIDE + x].iter().copied()
+        self.cells[z * SIDE + x].iter().flat_map(move |&g| {
+            let g = self.groups[g as usize];
+            let len = if (p - g.center).length_squared() < (g.reach + radius) * (g.reach + radius) { g.len as usize } else { 0 };
+            self.members[g.start as usize..g.start as usize + len].iter().copied()
+        })
     }
 }
 
