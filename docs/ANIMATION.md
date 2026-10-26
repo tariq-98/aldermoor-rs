@@ -285,9 +285,9 @@ body its weight (Overgrowth's approach, and Fortnite Chapter 5's procedural laye
 ## Switches
 
 A switch is any change in what plays: the base clip's name, the legs' clip, the pose, the upper
-layer, an action starting over (`update_combat` sees a new action, even with the same clip) or a
-LOD swap (`set_lod`). Each is given a kind (`switch_kind`), and each kind has its half-life in one
-table, `anim::Switch::half_life`:
+layer, an action starting over (`update_combat` sees a new action, even with the same clip), a
+LOD swap (`set_lod`) or a change of gear (`set_look`). Each is given a kind (`switch_kind`), and
+each kind has its half-life in one table, `anim::Switch::half_life`:
 
 | Kind | Half-life | When |
 | --- | --- | --- |
@@ -297,6 +297,7 @@ table, `anim::Switch::half_life`:
 | `Layer` | 0.07 s | the guard, ready, stow or a drawn idle coming or going |
 | `Land` | 0.06 s | touching down from a jump or fall |
 | `Detail` | 0.05 s | a LOD swap |
+| `Gear` | 0.07 s | new gear or clothes going on (see Changing gear) |
 
 The half-life is the spring's, in Holden's sense: a difference with no speed of its own is down to
 60% after one, 8% after three and under 1% after five.
@@ -326,6 +327,32 @@ switches stack without popping. Three methods, picked with the client's `--blend
   the new pose and quickly otherwise, and cross-fades into the new pose over 2.5 half-lives. Bones
   the switch barely moved take the new pose at once. Kept to compare in captures.
 - **`Method::Off`** (`--blend off`) cuts on every switch. The clip-stack tests use it.
+
+## Changing gear
+
+Someone in view who changes weapon, armour or cape puts the new look on in place
+(`Character::set_look`, #239). Building them again, as the client used to, started everything
+over: the clips and the stride from their first frame, the blender with no old motion to carry on,
+so the body cut to the new pose, and the cape back at its rest. Now:
+
+- **Bones carry over by name.** Gear can bring bones of its own (a cape has 28) or take them away,
+  so the new skeleton's bones are matched to the old ones by name. A matched bone keeps its pose,
+  and the blender keeps its motion and any offset still settling (`Blender::remap`). A new bone
+  starts from its rest, and so does one of the same name that rests somewhere else now (another
+  cape on bones named alike).
+- **The change is a switch** (`Gear`), so the new weapon's clips and grips blend in: the hands
+  take a greatsword's two-handed hold over a few frames.
+- **Capes swing on.** Each spring joint on a bone of the same name takes up the old joint's tail
+  and speed (`SpringBones::carry_on`), so a cape kept through the change swings on, and another
+  cape on bones named alike takes up its swing. A cape just put on starts from the pose.
+- **The rest carries on untouched**: the stride, the feet, the turn, the gaze, the lean and the
+  tier. The other levels of detail kept for swapping back held the old look, so they go.
+- **Another body** (another art id) has nothing to carry on, so it is built again, keeping the
+  client's settings.
+
+The client puts on any new look this way, drawing or sheathing a weapon aside, which isn't a change
+of look. `--showcase --look-churn` swaps the first character between sword and shield and a
+greatsword every second, to compare in captures.
 
 ## Level of detail
 
@@ -377,7 +404,9 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   and through three inside 100 ms (velocity changes from frame to frame shrink in step with the
   frame time, which a pop or a velocity jump can't do), a 90° offset is under 10% after three
   half-lives and under 1° after five, bones a switch leaves alone carry on untouched, and a
-  settled blender shows the clips exactly. For locomotion: measuring finds synthetic feet's
+  settled blender shows the clips exactly. Following a change of skeleton, the old bones carry on
+  through the switch under their new places and a new one starts as posed, where without the remap
+  the arm pops. For locomotion: measuring finds synthetic feet's
   touchdowns and speed (and refuses feet that never lift), every loop plants its feet on the same
   phases, a loop plays alone near its own speed and the blend between moves steadily with the
   speed, the hips turn toward the travel and change to backward only past 100° (80° coming back),
@@ -439,7 +468,16 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   quarter of the full-rate knight's, and stays within 1 cm of where that knight's was two frames
   before; at quarter rate it holds between rebuilds.
   `a_new_character_shows_its_pose_on_its_first_frame_at_any_tier` checks that nobody shows the rest
-  pose. `below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step`
+  pose. `gear_changes_carry_the_motion_on_instead_of_popping` jogs a man through four changes of
+  gear and cape (a greatsword for sword and shield, another cape on the same bones, the cape off and
+  back on) beside a twin who keeps the first look and one built again at each change: the body and
+  the stride carry on at every change, where building again pops by over 0.5 rad; a cape kept
+  through a change hangs within 0.02 rad of the twin's, where built again it is over 0.1 rad off;
+  and another cape takes up the swing.
+  `a_new_look_survives_detail_swaps_and_a_new_body_starts_afresh` checks that a cape taken off
+  doesn't come back from a level of detail kept for swapping, and that another body is built
+  afresh with the settings kept.
+  `below_full_detail_the_cape_fades_to_its_pose_and_the_feet_dont_step`
   drops a caped knight to half rate: the cape eases to the pose, its tip moving no more than a
   tenth of the way in a frame, and turning on the spot the feet stay put.
   `a_drawn_bow_pitches_the_spine_with_the_aim_and_a_look_mostly_the_head` has an archer look 30° up
