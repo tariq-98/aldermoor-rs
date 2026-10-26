@@ -124,13 +124,13 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
     float visibility=shadow_visibility(i.world,i.current_clip.w,nl,f,shadow);float3 spec=D*G*F/max(4.*nv*nl,0.001);float3 diffuse=(1.-F)*(1.-metal)*albedo.rgb/M_PI_F;
     float3 ray=reflect(-v,n);
     float3 environment=mix(f.ambient.rgb,f.sky.rgb,saturate(ray.y*0.5+0.5));
-    if(surfaces.flags.z>0){constexpr sampler env(coord::normalized,s_address::repeat,t_address::clamp_to_edge,filter::linear,mip_filter::linear);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);environment=sky_reflection.sample(env,uv,level(rough*float(sky_reflection.get_num_mip_levels()-1))).rgb*surfaces.sky.y;}
+    if(surfaces.flags.z>0){constexpr sampler env(coord::normalized,s_address::repeat,t_address::clamp_to_edge,filter::linear,mip_filter::linear);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);environment=sky_reflection.sample(env,uv,level(rough*float(sky_reflection.get_num_mip_levels()-1))).rgb*f.sky.w;}
     // Analytic split-sum BRDF fit (Lazarov), paired with GGX-prefiltered radiance.
     float4 r=rough*float4(-1.,-0.0275,-0.572,0.022)+float4(1.,0.0425,1.04,-0.04);
     float a004=min(r.x*r.x,exp2(-9.28*nv))*r.x+r.y;float2 ab=float2(-1.04,1.04)*a004+r.zw;
     float3 indirect=environment*(F0*ab.x+ab.y)*ao;
     float3 colour=(diffuse+spec)*f.sun_colour.rgb*f.sun.w*nl*visibility+albedo.rgb*(1.-metal)*f.ambient.rgb*ao+indirect+emission.sample(s,i.uv,bias(f.params.z)).rgb*d.emission.rgb;
-    if(d.flags.w==2&&surfaces.flags.y>0){float3 reflection=f.sky.rgb;if(surfaces.flags.z>0){float3 ray=reflect(-v,n);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);reflection=sky_map.sample(s,uv).rgb*surfaces.sky.y;}float f0=pow((surfaces.sky.z-1.)/(surfaces.sky.z+1.),2.);float fresnel=f0+(1.-f0)*pow(1.-nv,5.);colour=mix(colour,reflection,saturate(fresnel*surfaces.water_absorption.w));}
+    if(d.flags.w==2&&surfaces.flags.y>0){float3 reflection=f.sky.rgb;if(surfaces.flags.z>0){float3 ray=reflect(-v,n);float2 uv=float2(atan2(ray.z,ray.x)/(2.*M_PI_F)+0.5+surfaces.sky.x,acos(clamp(ray.y,-1.,1.))/M_PI_F);reflection=sky_map.sample(s,uv).rgb*f.sky.w;}float f0=pow((surfaces.sky.z-1.)/(surfaces.sky.z+1.),2.);float fresnel=f0+(1.-f0)*pow(1.-nv,5.);colour=mix(colour,reflection,saturate(fresnel*surfaces.water_absorption.w));}
     float fog=f.params.w>0.5
         ?height_fog_amount(f.eye.xyz,i.world,f.fog.w,f.grade[0].w,f.grade[1].w)
         :1.-exp(-length(i.world-f.eye.xyz)*f.fog.w);
@@ -184,7 +184,7 @@ fragment SceneOutput sky_fragment(Full i [[stage_in]],constant Frame& f [[buffer
     gy.x-=round(gy.x);
     float4 previous=f.previous_vp*float4(ray,0);
     float2 old_uv=previous.xy/max(previous.w,0.001)*float2(0.5,-0.5)+0.5;
-    float3 colour=sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*surfaces.sky.y;
+    float3 colour=sky_map.sample(s,uv,gradient2d(gx,gy)).rgb*f.sky.w;
     if(f.params.w>0.5&&f.grade[2].w>0.){
         float fog=height_fog_amount(f.eye.xyz,f.eye.xyz+ray*f.grade[2].w,f.fog.w,f.grade[0].w,f.grade[1].w);
         colour=mix(colour,f.fog.rgb,fog);
