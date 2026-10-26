@@ -128,7 +128,7 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
 
 /// One unit's combat detail.
 #[inline]
-fn unit_combat(u: &Unit, v: &Vitals, f: &Fighter, a: Option<&Auras>, t: f64) -> UnitCombat {
+pub(crate) fn unit_combat(u: &Unit, v: &Vitals, f: &Fighter, a: Option<&Auras>, t: f64) -> UnitCombat {
     UnitCombat {
         id: u.id,
         action: f.action,
@@ -195,6 +195,10 @@ pub fn combat_view(world: &World, viewer: Option<UnitId>) -> CombatView {
             view.areas.push(AreaView { hostile: u.faction.is_enemy(side), ..area });
         }
     }
+    if !units.ghosts.is_empty() {
+        view.units.extend(ghost_combat(world, t).filter(|(p, _)| near(*p)).map(|(_, c)| c));
+        view.units.sort_unstable_by_key(|c| c.id);
+    }
     let (projectiles, areas) = in_flight(world, near, side, t);
     view.projectiles = projectiles;
     view.areas.extend(areas);
@@ -253,7 +257,19 @@ pub(crate) fn combat_all(world: &World) -> (Vec<(Vec3, UnitCombat)>, Vec<Warning
             warnings.push((tr.pos, u.faction, area));
         }
     }
+    if !units.ghosts.is_empty() {
+        list.extend(ghost_combat(world, t));
+        list.sort_unstable_by_key(|(_, c)| c.id);
+    }
     (list, warnings)
+}
+
+/// The neighbours' units at the border, as their regions published them (#208).
+fn ghost_combat(world: &World, t: f64) -> impl Iterator<Item = (Vec3, UnitCombat)> + '_ {
+    world.resource::<Units>().ghosts.values().filter_map(move |&e| {
+        let (tr, g) = (world.get::<Transform>(e)?, world.get::<crate::region::GhostCombat>(e)?);
+        Some((tr.pos, g.at(t)))
+    })
 }
 
 /// What a viewer at `center` on `side` sees in flight and on the ground, with `warnings` from
