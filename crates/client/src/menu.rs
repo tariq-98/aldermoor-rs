@@ -1,5 +1,6 @@
 //! The controls menu on Esc: pick the scheme, rebind keys, reset them, or quit. Every change
 //! is saved to the settings file straight away.
+use controls::camera::ScreenShake;
 use controls::{Control, Input, Scheme, Settings};
 use std::path::Path;
 
@@ -16,6 +17,7 @@ pub enum Change {
     Unbind(Control, Input),
     Reset,
     Scheme(Scheme),
+    ScreenShake(ScreenShake),
     Close,
     Quit,
 }
@@ -38,6 +40,20 @@ pub fn draw(ctx: &egui::Context, menu: &Menu, settings: &Settings, path: &Path) 
                         && settings.scheme != scheme
                     {
                         changes.push(Change::Scheme(scheme));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Screen shake:");
+                for (shake, name) in [
+                    (ScreenShake::Full, "Full"),
+                    (ScreenShake::Low, "Low"),
+                    (ScreenShake::Off, "Off"),
+                ] {
+                    if ui.radio(settings.screen_shake == shake, name).clicked()
+                        && settings.screen_shake != shake
+                    {
+                        changes.push(Change::ScreenShake(shake));
                     }
                 }
             });
