@@ -887,8 +887,9 @@ fn the_terrace_cliffs_climb_ledge_by_ledge_from_the_valley_onto_the_terraces() {
         let into = -out;
         let terrace = m.origin.y + m.blocks.iter().map(|b| b.top.unwrap()).fold(f32::MIN, f32::max);
         // At the foot of the cliff, halfway along, facing it.
-        let first = m.blocks.iter().filter(|b| b.top == m.blocks[0].top).nth(1).unwrap();
-        let front = m.place(Vec3::new(first.center.x, 0.0, first.center.y + first.half.y));
+        let first = &m.blocks[0];
+        let (s, c) = first.yaw.sin_cos();
+        let front = m.place(Vec3::new(first.center.x + s * first.half.y, 0.0, first.center.y + c * first.half.y));
         let id = sim.spawn_player("Hero", level(front) + out * 0.9, into.x.atan2(into.y));
         sim.step();
         let mut heights = vec![pos(&sim, id).y];

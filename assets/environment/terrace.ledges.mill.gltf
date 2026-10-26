@@ -8,7 +8,8 @@
 		{
 			"name":"Scene",
 			"nodes":[
-				0
+				0,
+				1
 			]
 		}
 	],
@@ -16,6 +17,10 @@
 		{
 			"mesh":0,
 			"name":"ledges"
+		},
+		{
+			"mesh":1,
+			"name":"grass"
 		}
 	],
 	"materials":[
@@ -35,6 +40,20 @@
 				"metallicFactor":0,
 				"roughnessFactor":0.800000011920929
 			}
+		},
+		{
+			"doubleSided":true,
+			"name":"env.grass",
+			"pbrMetallicRoughness":{
+				"baseColorFactor":[
+					0.36000001430511475,
+					0.5199999809265137,
+					0.1599999964237213,
+					1
+				],
+				"metallicFactor":0,
+				"roughnessFactor":0.8500000238418579
+			}
 		}
 	],
 	"meshes":[
@@ -50,6 +69,22 @@
 					},
 					"indices":4,
 					"material":0
+				}
+			]
+		},
+		{
+			"name":"grass",
+			"primitives":[
+				{
+					"attributes":{
+						"_WIND":5,
+						"POSITION":6,
+						"NORMAL":7,
+						"TEXCOORD_0":8,
+						"COLOR_0":9
+					},
+					"indices":10,
+					"material":1
 				}
 			]
 		}
@@ -80,73 +115,155 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":13912,
+			"count":30782,
 			"max":[
-				5,
-				25.728200912475586,
-				-0.4482152760028839
+				5.407930374145508,
+				25.734878540039062,
+				-0.10305250436067581
 			],
 			"min":[
-				-5,
-				2.7310705184936523,
-				-10.331299781799316
+				-4.995455265045166,
+				2.6899285316467285,
+				-11.269342422485352
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":13912,
+			"count":30782,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":13912,
+			"count":30782,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":13912,
+			"count":30782,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":4,
 			"componentType":5123,
-			"count":23940,
+			"count":49128,
+			"type":"SCALAR"
+		},
+		{
+			"bufferView":5,
+			"componentType":5126,
+			"count":8832,
+			"type":"SCALAR"
+		},
+		{
+			"bufferView":6,
+			"componentType":5126,
+			"count":8832,
+			"max":[
+				4.781778335571289,
+				26.215940475463867,
+				-2.2103118896484375
+			],
+			"min":[
+				-3.999133825302124,
+				3.0715999603271484,
+				-9.047811508178711
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":7,
+			"componentType":5126,
+			"count":8832,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":8,
+			"componentType":5126,
+			"count":8832,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":9,
+			"componentType":5126,
+			"count":8832,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":10,
+			"componentType":5123,
+			"count":13248,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":166944,
+			"byteLength":369384,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":166944,
-			"byteOffset":166944,
+			"byteLength":369384,
+			"byteOffset":369384,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":111296,
-			"byteOffset":333888,
+			"byteLength":246256,
+			"byteOffset":738768,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":166944,
-			"byteOffset":445184,
+			"byteLength":369384,
+			"byteOffset":985024,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":47880,
-			"byteOffset":612128,
+			"byteLength":98256,
+			"byteOffset":1354408,
+			"target":34963
+		},
+		{
+			"buffer":0,
+			"byteLength":35328,
+			"byteOffset":1452664,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":105984,
+			"byteOffset":1487992,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":105984,
+			"byteOffset":1593976,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":70656,
+			"byteOffset":1699960,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":105984,
+			"byteOffset":1770616,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":26496,
+			"byteOffset":1876600,
 			"target":34963
 		}
 	],
@@ -158,7 +275,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":660008,
+			"byteLength":1903096,
 			"uri":"terrace.ledges.mill.bin"
 		}
 	]

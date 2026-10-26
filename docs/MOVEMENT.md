@@ -84,16 +84,17 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   the bell's sill in the bellcote (a climb leap), from which a last climb leap reaches the
   bellcote's coping. The cottages add their eaves and verges and the timbers up their gable ends
   (above), and two cliffs their ledges:
-  - **Cliff ledges** (#249; `crates/world/src/ledges.rs`): bands of pale, harder stone along the
+  - **Cliff ledges** (#249; `crates/world/src/ledges.rs`): beds of pale, harder stone along the
     strata of two cliffs, 1.7 to 1.8 m apart, so each front is a hold: the west terrace's face
     behind the village (16 m) and the east terrace's below the windmill (26 m). The rest of the
-    cliffs stay sheer. Each ledge runs back into the rock, and its front stands right above where
-    the cliff meets the ledge below, so the next ledge up overhangs it. A jump catches the first
-    from the foot of the cliff. Where a ledge is deep enough to stand on (about half a metre),
-    you climb onto it, and a jump at the cliff pulls you onto the next or catches it. Where the
-    cliff is steeper and the ledges are narrower, you hang, and a climb leap reaches the next
-    ledge. The last is a course of capstones along the edge of the terrace, which you climb onto
-    and walk off onto the terrace.
+    cliffs stay sheer. Each ledge is one straight block, so its front is one hold from end to end
+    and you shimmy the whole way along it. It runs back into the rock, and its front runs just
+    out from where the cliff meets the ledge below, so the next ledge up overhangs it. A jump
+    catches the first from the foot of the cliff. Where a ledge is deep enough to stand on (about
+    half a metre), you climb onto it, and a jump at the cliff pulls you onto the next or catches
+    it. Where the cliff is steeper and the ledges are narrower, you hang, and a climb leap reaches
+    the next ledge. The last is a course of capstones along the edge of the terrace, which you
+    climb onto and walk off onto the terrace.
   - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
     higher, the body out from the wall by its radius and facing it. Pose `Hang`.
   - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at
@@ -106,7 +107,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     Away from the wall climbs down to a hold up to 1 m lower, and does nothing if there isn't
     one, so you never fall by accident.
   - **Leaps and ejects:** Space while hanging, by the direction pressed (#246). Into the wall or
-    none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, or in or out (a ledge set back up a sloping cliff), in 0.5 s
+    none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, or in or out
+    (a ledge set back up a sloping cliff), in 0.5 s
     (`LEAP_REACH`, `LEAP_SIDE`, `LEAP_TIME`); with none in reach, Space adds nothing to the
     direction. Along the wall: a side eject to a hold 0.8 to 2.5 m that way and up to 1 m up or
     down (`EJECT_REACH`, `EJECT_RISE`), in 0.55 s with a hop, or, with none there, a jump off the

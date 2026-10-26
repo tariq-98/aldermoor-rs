@@ -80,73 +80,73 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":812,
+			"count":626,
 			"max":[
-				6,
+				6.3647966384887695,
 				15.369000434875488,
-				-0.14350000023841858
+				0.05717885494232178
 			],
 			"min":[
-				-6,
-				2.996299982070923,
-				-8.30739974975586
+				-5.990726470947266,
+				2.8690967559814453,
+				-9.098306655883789
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":812,
+			"count":626,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":812,
+			"count":626,
 			"type":"VEC2"
 		},
 		{
 			"bufferView":3,
 			"componentType":5126,
-			"count":812,
+			"count":626,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":4,
 			"componentType":5123,
-			"count":1632,
+			"count":1056,
 			"type":"SCALAR"
 		}
 	],
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":9744,
+			"byteLength":7512,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":9744,
-			"byteOffset":9744,
+			"byteLength":7512,
+			"byteOffset":7512,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":6496,
-			"byteOffset":19488,
+			"byteLength":5008,
+			"byteOffset":15024,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":9744,
-			"byteOffset":25984,
+			"byteLength":7512,
+			"byteOffset":20032,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":3264,
-			"byteOffset":35728,
+			"byteLength":2112,
+			"byteOffset":27544,
 			"target":34963
 		}
 	],
@@ -158,7 +158,7 @@
 	],
 	"buffers":[
 		{
-			"byteLength":38992,
+			"byteLength":29656,
 			"uri":"terrace.ledges.west.lod2.bin"
 		}
 	]

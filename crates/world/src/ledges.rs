@@ -3,10 +3,13 @@
 //! rest of the cliffs stay sheer.
 //!
 //! Each stretch of cliff is a piece of masonry ([`Masonry`]) whose blocks are its ledges, built
-//! from the drawn ground. A ledge runs back into the rock, and its front stands right above where
+//! from the drawn ground. A ledge runs back into the rock, and its front runs just out from where
 //! the ground meets the ledge below: you stand on a ledge with the rock rising behind you, and the
 //! ledge above overhangs it. At the top, a ledge of capstones along the edge of the terrace is the
 //! last hold, and you climb onto it from below or step off it onto the terrace.
+//!
+//! Each ledge is one straight block, as a bed of rock runs straight across a cliff: its front is
+//! one hold from end to end, so a climber shimmies the whole way along it.
 
 use glam::{Vec2, Vec3};
 
@@ -31,8 +34,8 @@ const CLIFFS: [Cliff; 2] = [
 
 /// The ledges' tops are this far apart at most, and at least [`crate::HANG_MIN_DROP`] so each
 /// front is a hold. Hanging from one, a climb leap reaches the next (1 to 1.8 m up, and its
-/// front within 0.5 m: true where the cliff is steeper than 3.6:1, and where it isn't, the
-/// ledge is deep enough to stand on and jump from).
+/// front up to 0.8 m further in); where the next is further in than that, the ledge is deep
+/// enough to stand on and jump from.
 pub const LEDGE_STEP: f32 = 1.8;
 /// The first ledge is this far above the ground at the foot of the cliff (a jump catches it).
 pub const FIRST_LEDGE: f32 = 2.8;
@@ -40,8 +43,11 @@ pub const FIRST_LEDGE: f32 = 2.8;
 const SET_IN: f32 = 0.5;
 /// The capstones along the top run this far back onto the terrace.
 const LIP_DEPTH: f32 = 1.5;
-/// Each block of ledge covers about this much of the cliff's length.
-const SEGMENT: f32 = 3.0;
+/// Each end of a ledge stops up to this far short of the stretch's end, each by its own amount,
+/// so the ledges up a cliff don't all end in one line. The capstones run the whole way.
+const RAGGED: f32 = 1.2;
+/// The ground is sampled going into the cliff every this many metres along it.
+const STATION: f32 = 0.5;
 
 /// The ground going into the cliff from a point at its foot: heights every 5 cm out to 20 m in.
 struct Profile(Vec<f32>);
@@ -84,7 +90,7 @@ fn cliff(c: &Cliff, ground: &impl Fn(f32, f32) -> f32) -> Masonry {
     let along = (c.to - c.from).normalize();
     let out = Vec2::new(-along.y, along.x);
     let length = (c.to - c.from).length();
-    let n = (length / SEGMENT).round().max(1.0) as usize;
+    let n = (length / STATION).round().max(1.0) as usize;
     let stations: Vec<Vec2> = (0..=n).map(|j| c.from + along * (length * j as f32 / n as f32)).collect();
     let profiles: Vec<Profile> = stations.iter().map(|&p| Profile::new(p, -out, ground)).collect();
     // The ledges' heights: the first in a jump's reach of the ground at the foot wherever along
@@ -110,23 +116,46 @@ fn cliff(c: &Cliff, ground: &impl Fn(f32, f32) -> f32) -> Masonry {
         // The ground the ledge's front stands over: the ledge below's top, or the foot.
         let below = if i == 0 { top - FIRST_LEDGE } else { tops[i - 1] };
         let lip_ledge = i == tops.len() - 1;
-        for j in 0..n {
-            let (a, b) = (&profiles[j], &profiles[j + 1]);
-            let front = (a.reach(below) + b.reach(below)) / 2.0;
-            let back = (a.reach(top) + b.reach(top)) / 2.0 + if lip_ledge { LIP_DEPTH } else { SET_IN };
-            let (p0, p1) = (stations[j], stations[j + 1]);
-            let center = (p0 + p1) / 2.0 - out * ((front + back) / 2.0);
-            blocks.push(Block {
-                center: local(center),
-                half: Vec2::new((p1 - p0).length() / 2.0, (back - front) / 2.0),
-                yaw: 0.0,
-                top: Some(top - origin.y),
-                rise: 0.0,
-                part: if lip_ledge { "lip" } else { "ledge" },
-            });
-        }
+        let set_in = if lip_ledge { LIP_DEPTH } else { SET_IN };
+        // Where the ground reaches the ledge below's top all along the cliff, and where it reaches
+        // this one's (from the cliff's end, `from`). The front runs straight along the first, just
+        // out from all of them, so none of the cliff shows between this ledge and the one below;
+        // the back runs into the rock behind the second.
+        let feet: Vec<Vec2> = (0..=n).map(|j| stations[j] - c.from - out * profiles[j].reach(below)).collect();
+        let heads: Vec<Vec2> = (0..=n).map(|j| stations[j] - c.from - out * (profiles[j].reach(top) + set_in)).collect();
+        let dir = fit(&feet, along);
+        let normal = Vec2::new(-dir.y, dir.x);
+        let front = feet.iter().map(|p| p.dot(normal)).fold(f32::MIN, f32::max);
+        let back = heads.iter().map(|p| p.dot(normal)).fold(f32::MAX, f32::min);
+        let short = |k: i64| if lip_ledge { 0.0 } else { RAGGED * crate::hash(i as i64, k, c.from.x as i64) };
+        let (start, end) = (feet[0].dot(dir) + short(0), feet[n].dot(dir) - short(1));
+        let center = c.from + dir * ((start + end) / 2.0) + normal * ((front + back) / 2.0);
+        blocks.push(Block {
+            center: local(center),
+            half: Vec2::new((end - start) / 2.0, (front - back) / 2.0),
+            // Turned to run along the cliff; its own +y is out of it.
+            yaw: (-dir.y).atan2(dir.x) - yaw,
+            top: Some(top - origin.y),
+            rise: 0.0,
+            part: if lip_ledge { "lip" } else { "ledge" },
+        });
     }
     Masonry { prop: c.prop.to_string(), origin, yaw, blocks, grips: Vec::new(), line: Vec::new() }
+}
+
+/// The way along a straight line through the points `p`, fitted by least squares: `along`
+/// turned as far as they slant across it.
+fn fit(p: &[Vec2], along: Vec2) -> Vec2 {
+    let out = Vec2::new(-along.y, along.x);
+    let k = p.len() as f32;
+    let (t0, o0) = (p.iter().map(|q| q.dot(along)).sum::<f32>() / k, p.iter().map(|q| q.dot(out)).sum::<f32>() / k);
+    let (mut tt, mut to) = (0.0, 0.0);
+    for q in p {
+        let (t, o) = (q.dot(along) - t0, q.dot(out) - o0);
+        tt += t * t;
+        to += t * o;
+    }
+    (along + out * (to / tt)).normalize()
 }
 
 #[cfg(test)]
@@ -153,15 +182,11 @@ mod tests {
                 let step = w[1] - w[0];
                 assert!((crate::HANG_MIN_DROP..=LEDGE_STEP + 1e-3).contains(&step), "{}: ledges {step} m apart", m.prop);
             }
-            let out = m.turn(Vec2::Y);
             for b in &m.blocks {
                 let top = m.origin.y + b.top.unwrap();
-                // Room to stand on every ledge with the rock behind: its top reaches 0.45 m or more
-                // in front of where the ground rises above it.
-                let front = |x: f32| m.place(Vec3::new(b.center.x + x, 0.0, b.center.y + b.half.y));
-                for x in [-0.8, 0.0, 0.8].map(|k| k * b.half.x) {
-                    let p = front(x);
-                    let edge = Vec2::new(p.x, p.z);
+                let (front, out) = front_of(m, b);
+                for x in (-10..=10).map(|k| k as f32 / 10.0 * 0.95 * b.half.x) {
+                    let edge = front(x);
                     // A ledge, not a crack: its top reaches 0.15 m or more in front of where the
                     // ground rises above it (where the cliff is nearly sheer). Deep enough (half a
                     // metre), you stand on it.
@@ -179,15 +204,18 @@ mod tests {
             for lip in m.blocks.iter().filter(|b| b.part == "lip") {
                 // Walking in from the capstones' front, onto the terrace: never a step up too steep
                 // to walk (2:1), nor down.
+                let (front, out) = front_of(m, lip);
                 let mut last = highest;
                 for k in 1..=12 {
-                    let p = m.place(Vec3::new(lip.center.x, 0.0, lip.center.y + lip.half.y - k as f32 * 0.25));
-                    let g = v.ground(p.x, p.z);
+                    let p = front(0.0) - out * (k as f32 * 0.25);
+                    let g = v.ground(p.x, p.y);
                     assert!(g - last <= 2.0 * 0.25 + 1e-3 && g >= highest - 1e-3, "{}: off the capstones at {highest} m, the ground goes from {last} to {g} m", m.prop);
                     last = g;
                 }
             }
-            let foot = m.place(Vec3::new(m.blocks[0].center.x, 0.0, m.blocks[0].center.y + m.blocks[0].half.y + 0.5));
+            let (front, out) = front_of(m, &m.blocks[0]);
+            let foot = front(0.0) + out * 0.5;
+            let foot = Vec3::new(foot.x, 0.0, foot.y);
             // (3.5 m at most: the hands 2.1 m above the feet at the top of a 1.1 m jump, and 0.3 m to catch.)
             assert!(lowest - v.surface(foot.x, foot.z) <= 3.4, "{}: the first ledge is {} m up", m.prop, lowest - v.surface(foot.x, foot.z));
         }
@@ -197,13 +225,28 @@ mod tests {
     fn every_ledge_front_is_a_hold() {
         let v = Valley::new();
         for m in pieces(&v) {
-            let out = m.turn(Vec2::Y);
             for b in &m.blocks {
                 let top = m.origin.y + b.top.unwrap();
-                let mid = m.place(Vec3::new(b.center.x, b.top.unwrap(), b.center.y + b.half.y));
-                let held = v.holds.iter().any(|h| (h.a.y - top).abs() < 1e-3 && h.out.dot(out) > 0.99 && h.distance(Vec2::new(mid.x, mid.z)) < 0.05);
-                assert!(held, "{}: no hold along the ledge at {top} m, {mid}", m.prop);
+                let (front, out) = front_of(m, b);
+                for x in (-4..=4).map(|k| k as f32 / 4.0 * 0.9 * b.half.x) {
+                    let edge = front(x);
+                    let held = v.holds.iter().any(|h| (h.a.y - top).abs() < 1e-3 && h.out.dot(out) > 0.999 && h.distance(edge) < 0.01);
+                    assert!(held, "{}: no hold along the ledge at {top} m, at {edge}", m.prop);
+                }
             }
         }
+    }
+
+    /// A ledge block's front in the valley, `x` metres along it from its middle, and the way out
+    /// of the cliff there.
+    fn front_of<'a>(m: &'a Masonry, b: &'a Block) -> (impl Fn(f32) -> Vec2 + 'a, Vec2) {
+        let (s, c) = b.yaw.sin_cos();
+        let (along, out) = (Vec2::new(c, -s), Vec2::new(s, c));
+        let front = move |x: f32| {
+            let p = b.center + along * x + out * b.half.y;
+            let w = m.place(Vec3::new(p.x, 0.0, p.y));
+            Vec2::new(w.x, w.z)
+        };
+        (front, m.turn(out))
     }
 }
