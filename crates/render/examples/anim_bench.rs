@@ -138,7 +138,10 @@ fn main() -> anyhow::Result<()> {
     // chest turned back. "turn" stands looking 80° either way and back every two seconds, as a
     // player sweeping the camera round, so the chest twists and the feet step round on every
     // sweep. "slash" and "run + slash" start the slash over every half second, and "start-stop"
-    // runs and stops every half second, so those three are blending clips most of the time.
+    // runs and stops every half second, so those three are blending clips most of the time, and
+    // the body leans setting off and stopping (#217). "circle" runs round, leaning into the turn,
+    // and "jump" runs and jumps every second, the legs reaching for the ground on the way down
+    // and the pelvis dipping on landing.
     for (label, pose, speed, action) in [
         ("idle", Pose::Idle, 0., Action::None),
         ("turn", Pose::Idle, 0., Action::None),
@@ -148,6 +151,8 @@ fn main() -> anyhow::Result<()> {
         ("slash", Pose::Attack, 0., Action::Slash),
         ("run + slash", Pose::Attack, 6., Action::Slash),
         ("start-stop", Pose::Run, 6., Action::None),
+        ("circle", Pose::Run, 6., Action::None),
+        ("jump", Pose::Run, 6., Action::None),
     ] {
         if only.as_ref().is_some_and(|o| o != label) {
             continue;
@@ -206,15 +211,35 @@ fn main() -> anyhow::Result<()> {
                     if label == "turn" {
                         u.yaw = 1.4 * (std::f32::consts::PI * t).sin();
                     }
+                    if label == "circle" {
+                        u.yaw = 1.2 * t + u.id as f32;
+                        u.velocity = Vec3::new(u.yaw.sin(), 0., u.yaw.cos()) * speed;
+                    }
                     let cycle = t % 0.5;
                     u.pose_time = if matches!(label, "idle" | "turn" | "walk" | "run" | "strafe") {
                         t
                     } else {
                         cycle
                     };
+                    // Up at 6.6 m/s under the sim's gravity, then running till the next second.
+                    let (mut up, rise) = (0., 6.6 / anim::land::GRAVITY);
+                    if label == "jump" {
+                        let at = t % 1.;
+                        up = (6.6 * at - 0.5 * anim::land::GRAVITY * at * at).max(0.);
+                        (u.pose, u.pose_time) = match at {
+                            at if at < rise => (Pose::Jump, at),
+                            at if up > 0. => (Pose::Fall, at - rise),
+                            at => (Pose::Run, at - 2. * rise),
+                        };
+                        u.velocity.y = if up > 0. {
+                            6.6 - anim::land::GRAVITY * at
+                        } else {
+                            0.
+                        };
+                    }
                     let f = fight(u.id, if action == Action::None { t } else { cycle });
-                    u.position += u.velocity / 60.;
-                    u.position.y = valley.ground(u.position.x, u.position.z);
+                    u.position += u.velocity.with_y(0.) / 60.;
+                    u.position.y = valley.ground(u.position.x, u.position.z) + up;
                     let phase = t + u.id as f32;
                     let round = u.yaw + 1.2 * (0.7 * phase).sin();
                     c.look_at(Some(

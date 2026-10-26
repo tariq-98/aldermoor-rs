@@ -1,7 +1,7 @@
 //! Catalogue assembly and animation. The workshop is the reference, not filenames or rig order.
 use crate::model::*;
 use anyhow::{Context, Result, ensure};
-use glam::{Mat4, Quat, Vec3, Vec3Swizzles};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec3Swizzles};
 use protocol::{Action, ForcedKind, Look, Pose, Traversal, UnitCombat, UnitState};
 use std::{collections::HashMap, sync::Arc};
 
@@ -42,6 +42,8 @@ pub struct Character {
     /// Whether full-detail feet go on the ground (#214); off to compare with the clips as they
     /// are.
     pub foot_placement: bool,
+    /// Whether the body leans with its acceleration (#217); off to compare.
+    pub leaning: bool,
     pub parts: Vec<Part>,
     pub nodes: Vec<Node>,
     pub local: Vec<Transform>,
@@ -115,6 +117,15 @@ pub struct Character {
     /// neck and head following it.
     gaze_at: Option<Vec3>,
     gaze: anim::Gaze,
+    /// How the body leans with its acceleration (#217), and the tilt it took this frame.
+    lean: anim::Lean,
+    leaned: Vec2,
+    /// Its flights and touchdowns, and the pelvis's dip on landing (#217).
+    landing: anim::Landing,
+    /// Seconds into `Jump_Start`, and on into `Jump_Loop`, while in the air (#217).
+    air: Option<f32>,
+    /// Seconds into `Jump_Land` after a fall that hurt, played in full while standing (#217).
+    hard_landing: Option<f32>,
     /// Each arm's upper arm, forearm, hand and hand socket, by `Side`, which reach for the
     /// weapon.
     arm_bones: [Option<[usize; 4]>; 2],
@@ -252,6 +263,14 @@ const HEAD_TWIST: f32 = std::f32::consts::FRAC_PI_6;
 /// A point closer to the head than this, in metres, isn't looked at (#212): it would swing the
 /// head about for nothing.
 const NEAREST_GAZE: f32 = 0.5;
+/// The humanoid jump (#217). `Jump_Start` crouches for its first two frames and pushes off, but
+/// the sim's body leaves the ground at once, so the clip starts here, the legs straight...
+const TAKEOFF: f32 = 0.07;
+/// ...and the legs tuck up highest here, which comes at the top of the jump.
+const TUCK: f32 = 0.3;
+/// How much of a lean the pelvis takes, tipping the whole body about the ground beneath it; the
+/// spine bends the rest of the way (#217).
+const LEAN_BODY: f32 = 0.6;
 /// The humanoid locomotion loops, slowest first, which blend by speed (#110).
 const LOOPS: [&str; 3] = ["Walk_Loop", "Jog_Fwd_Loop", "Sprint_Loop"];
 /// The humanoid loop for walking or running at `speed`, which the clip stack's switches and
@@ -410,6 +429,7 @@ impl Character {
             lod,
             partial_updates: true,
             foot_placement: true,
+            leaning: true,
             parts: Vec::new(),
             world: world_matrices(&nodes, &local),
             nodes,
@@ -475,6 +495,11 @@ impl Character {
             head_bones,
             gaze_at: None,
             gaze: anim::Gaze::default(),
+            lean: anim::Lean::default(),
+            leaned: Vec2::ZERO,
+            landing: anim::Landing::default(),
+            air: None,
+            hard_landing: None,
             arm_bones,
             main_sockets: None,
             drawn_now: look.drawn,
@@ -732,6 +757,12 @@ impl Character {
                     &body.unwrap().colliders,
                 ));
             }
+        }
+        // Listed now, so that the first landing (#217) or slope, where the feet first reach for
+        // the ground and the pelvis first drops, allocates nothing.
+        c.find_children();
+        if let Some([pelvis, ..]) = c.spine_bones {
+            c.list_on(pelvis);
         }
         Ok(c)
     }
@@ -1021,12 +1052,17 @@ impl Character {
             return self.role_clips.get(role).copied().unwrap_or_default();
         }
         match u.pose {
+            Pose::Idle if self.hard_landing.is_some() => "Jump_Land",
             Pose::Idle if u.look.drawn => self.main_clips.get("idle").unwrap_or(self.idle),
             Pose::Idle => self.idle,
             Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()),
-            Pose::Jump => "Jump_Start",
+            // One timeline through the air (#217): the take-off, then the loop.
+            Pose::Jump | Pose::Fall => match self.air {
+                Some(t) if t < self.clip_duration("Jump_Start") => "Jump_Start",
+                _ => "Jump_Loop",
+            },
             // Hanging borrows the falling loop until the climbing clips land (#247).
-            Pose::Fall | Pose::Hang => "Jump_Loop",
+            Pose::Hang => "Jump_Loop",
             Pose::Dodge => "Roll",
             Pose::Attack | Pose::Cast => {
                 let attacks = self.main_clips.list("attacks");
@@ -1138,6 +1174,10 @@ impl Character {
         }
         let speed = u.velocity.xz().length();
         (speed > 0.3).then_some(if speed > 3.2 { Pose::Run } else { Pose::Walk })
+    }
+    /// How long clip `name` lasts, in seconds; 0 if there's no such clip.
+    fn clip_duration(&self, name: &str) -> f32 {
+        self.clips.clips.get(name).map_or(0., |a| a.duration)
     }
     /// How fast the walk or run cycle plays at `speed`.
     fn stride_rate(&self, pose: Pose, speed: f32) -> f32 {
@@ -1254,7 +1294,8 @@ impl Character {
                 } else {
                     0.
                 },
-                pitch: to.y.atan2(flat),
+                // Less however far the body leans forward (#217), so the aim holds.
+                pitch: to.y.atan2(flat) + self.leaned.dot(Vec2::new(facing.sin(), facing.cos())),
                 aiming: u.look.drawn,
             })
         });
@@ -1275,6 +1316,43 @@ impl Character {
             let across = Quat::from_rotation_y(yaw) * Vec3::X;
             let turn = Quat::from_axis_angle(across, -turns.pitch[i])
                 * Quat::from_rotation_y(turns.yaw[i]);
+            let local = &mut self.local[b];
+            local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
+            above *= local.rotation;
+        }
+    }
+    /// Leans the body by `tilt` (#217), toward +x and +z in the model's frame, in radians: the
+    /// pelvis tips about the ground beneath it, taking the whole body with it, and the spine bends
+    /// the rest of the way, a third at each bone.
+    fn lean_body(&mut self, tilt: Vec2) {
+        let Some(bones) = self.spine_bones else {
+            return;
+        };
+        let angle = tilt.length();
+        if angle < 1e-6 {
+            return;
+        }
+        let axis = Vec3::new(tilt.y, 0., -tilt.x) / angle;
+        let mut above = Quat::IDENTITY;
+        for (i, b) in bones.into_iter().enumerate() {
+            if i == 0 || self.nodes[b].parent != Some(bones[i - 1]) {
+                above = self.nodes[b]
+                    .parent
+                    .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+            }
+            let share = if i == 0 {
+                LEAN_BODY
+            } else {
+                (1. - LEAN_BODY) / 3.
+            };
+            let turn = Quat::from_axis_angle(axis, share * angle);
+            if i == 0 {
+                // Round the point on the ground beneath the pelvis, so the feet stay about where
+                // they were.
+                let [at] = self.chain([b]);
+                let moved = turn * Vec3::Y * at.y - Vec3::Y * at.y;
+                self.local[b].translation += above.inverse() * moved;
+            }
             let local = &mut self.local[b];
             local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
             above *= local.rotation;
@@ -1362,8 +1440,9 @@ impl Character {
         let Some(placed) = placed else {
             return;
         };
-        let drop = Vec3::Y * placed.drop;
-        if placed.drop != 0. {
+        // The pelvis dips on landing too (#217), the legs bending to keep the feet down.
+        let drop = Vec3::Y * (placed.drop + self.landing.dip());
+        if drop.y != 0. {
             let above = self.nodes[pelvis]
                 .parent
                 .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
@@ -1386,29 +1465,34 @@ impl Character {
             self.pose_world();
             return;
         }
-        let (count, on) = &mut self.dropped;
-        if *count != self.nodes.len() || on.first() != Some(&i) {
-            // Listed once (again if a piece brings bones): a flat list is quicker to go through
-            // than the tree, and the pelvis carries nearly the whole skeleton.
-            let mut under = vec![false; self.nodes.len()];
-            under[i] = true;
-            on.clear();
-            on.push(i);
-            for &n in &self.order {
-                if let Some(p) = self.nodes[n].parent
-                    && under[p]
-                    && !under[n]
-                {
-                    under[n] = true;
-                    on.push(n);
-                }
-            }
-            *count = self.nodes.len();
-        }
+        self.list_on(i);
         let by = by.extend(0.);
-        for &n in on.iter() {
+        for &n in &self.dropped.1 {
             self.world[n].w_axis += by;
         }
+    }
+    /// Lists bone `i` and everything on it, parents first, for [`Character::shift`]: once (again
+    /// if a piece brings bones), since a flat list is quicker to go through than the tree, and the
+    /// pelvis carries nearly the whole skeleton.
+    fn list_on(&mut self, i: usize) {
+        let (count, on) = &mut self.dropped;
+        if *count == self.nodes.len() && on.first() == Some(&i) {
+            return;
+        }
+        let mut under = vec![false; self.nodes.len()];
+        under[i] = true;
+        on.clear();
+        on.push(i);
+        for &n in &self.order {
+            if let Some(p) = self.nodes[n].parent
+                && under[p]
+                && !under[n]
+            {
+                under[n] = true;
+                on.push(n);
+            }
+        }
+        *count = self.nodes.len();
     }
     /// Bends a leg (hip, knee and ankle bones, its `joints` where `chain` has them) with two-bone
     /// IK so that the ankle is at `target` in the model's frame. The knee points as the clip has
@@ -1627,11 +1711,57 @@ impl Character {
                 self.transition = None;
             }
         }
+        // Weight (#217). A landing that hurt plays through standing still, and ends on moving.
+        if let Some(t) = &mut self.hard_landing {
+            *t += dt;
+            if *t >= self.clips.clips.get("Jump_Land").map_or(0., |a| a.duration)
+                || u.pose != Pose::Idle
+            {
+                self.hard_landing = None;
+            }
+        }
+        // On a wall (#247), the climbing clips play: the hang, or the sim's move onto, between or
+        // off holds. A climb up from a hang isn't in the air.
         let climbing = if self.humanoid {
             self.climbing(u, dt)
         } else {
             None
         };
+        // In the air, one timeline runs from take-off through `Jump_Start` and on into
+        // `Jump_Loop`: the push-off's crouch left out, and the legs tucked highest at the top of
+        // the jump. Off an edge, it falls straight into the loop.
+        let airborne = matches!(u.pose, Pose::Jump | Pose::Fall) && climbing.is_none();
+        let took_off = airborne && u.pose == Pose::Jump && self.last_pose != Pose::Jump;
+        self.air = match self.air.filter(|_| airborne && !took_off) {
+            Some(t) => {
+                let rate = if u.velocity.y > 0. && t < TUCK {
+                    ((TUCK - t) * anim::land::GRAVITY / u.velocity.y).clamp(0.25, 2.)
+                } else {
+                    1.
+                };
+                Some(t + dt * rate)
+            }
+            None if took_off => Some(TAKEOFF),
+            None if airborne => Some(self.clip_duration("Jump_Start")),
+            None => None,
+        };
+        // Touching down, the pelvis dips as far as the fall was fast, or after a fall that hurt,
+        // a body standing still plays its landing in full. Catching a hold isn't touching down.
+        if let Some(down) = self
+            .landing
+            .update(airborne, u.position.y, u.velocity.y, dt)
+            && climbing.is_none()
+        {
+            if self.humanoid
+                && down.fell > anim::land::SAFE_FALL
+                && u.pose == Pose::Idle
+                && self.clips.clips.contains_key("Jump_Land")
+            {
+                self.hard_landing = Some(0.);
+            } else {
+                self.landing.dip_for(down.speed);
+            }
+        }
         let name = match climbing {
             Some((clip, _, _)) => clip,
             None => self.clip_for(u),
@@ -1659,11 +1789,15 @@ impl Character {
         }
         let locomotion = matches!(u.pose, Pose::Walk | Pose::Run);
         let walking = locomotion && !acting;
-        let looping = matches!(u.pose, Pose::Idle | Pose::Walk | Pose::Run | Pose::Fall)
-            || self.combat.as_ref().is_some_and(|c| {
-                matches!(c.action, Action::Channel | Action::Revive)
-                    || c.action == Action::Spin && c.cast.is_some_and(|(_, channel)| channel)
-            });
+        let looping = match u.pose {
+            Pose::Idle => name != "Jump_Land",
+            Pose::Walk | Pose::Run => true,
+            Pose::Fall => name != "Jump_Start",
+            _ => name == "Jump_Loop",
+        } || self.combat.as_ref().is_some_and(|c| {
+            matches!(c.action, Action::Channel | Action::Revive)
+                || c.action == Action::Spin && c.cast.is_some_and(|(_, channel)| channel)
+        });
         let rate = match u.pose {
             Pose::Walk | Pose::Run => self.stride_rate(u.pose, speed),
             Pose::Dodge => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.45),
@@ -1711,6 +1845,17 @@ impl Character {
                 (Some(_), Some(gaits), Some(i)) => gaits[i].time_at(self.stride.phase),
                 _ => self.stride.phase * self.clips.clips.get(name).map_or(1., |a| a.duration),
             }
+        } else if let (Some(t), "Jump_Start" | "Jump_Loop") = (self.air, name) {
+            if name == "Jump_Loop" {
+                t - self.clip_duration("Jump_Start")
+            } else {
+                t
+            }
+        } else if let (Some(t), "Jump_Land") = (self.hard_landing, name) {
+            t
+        } else if u.pose == Pose::Idle && !acting {
+            // Crowds out of step (#217): each unit's idle starts at its own phase and pace.
+            anim::idle::time(u.id, u.pose_time, self.clip_duration(name))
         } else {
             u.pose_time * rate
         };
@@ -1744,6 +1889,19 @@ impl Character {
             Some(step) => self.apply_step(step, Bones::All),
             None => self.apply_clip(name, clip_time, looping, Bones::All),
         }
+        // Falling, the legs reach for the ground by when the body will touch down (#217): into
+        // `Jump_Land`'s first frame, its feet just meeting the ground.
+        if airborne
+            && self.humanoid
+            && !acting
+            && let Some(ground) = &self.ground
+        {
+            let height = u.position.y - ground(u.position.x, u.position.z);
+            let reach = self.landing.reach(height, u.velocity.y, dt);
+            if reach > 0. {
+                self.mix_clip("Jump_Land", 0., false, Bones::All, reach);
+            }
+        }
         let aim = legs.and_then(|legs| self.walk_under(legs, step));
         let mut upper = None;
         if locomotion
@@ -1751,7 +1909,8 @@ impl Character {
             && self.humanoid
             && let Some(idle) = self.main_clips.get("idle")
         {
-            self.apply_clip(idle, u.pose_time, true, Bones::Upper);
+            let t = anim::idle::time(u.id, u.pose_time, self.clip_duration(idle));
+            self.apply_clip(idle, t, true, Bones::Upper);
             upper = Some(idle);
         }
         if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
@@ -1789,6 +1948,18 @@ impl Character {
         if self.step_round(stance == anim::Stance::Standing, u.position, body, dt) {
             switch = switch.or(Some(anim::Switch::Layer));
         }
+        // The body leans with its acceleration (#217): forward setting off, back stopping, and
+        // into turns. Not in the air, on a wall, rolling or down, nor below half detail.
+        let down = self.combat.as_ref().is_some_and(|c| c.downed);
+        let upright = airborne
+            || climbing.is_some()
+            || matches!(u.pose, Pose::Dodge | Pose::Dead)
+            || down
+            || self.rally_time.is_some()
+            || self.tier == anim::Tier::Quarter;
+        let free = if upright || !self.leaning { 0. } else { 1. };
+        self.leaned = self.lean.update(u.velocity.xz(), body, free, dt);
+        self.lean_body(self.leaned);
         // The spine, neck and head follow where it looks (#212). A swing's clip keeps the head,
         // but a shot or a bolt is aimed, and below half detail nobody looks about.
         let shooting = matches!(u.pose, Pose::Attack | Pose::Cast)
@@ -2897,6 +3068,269 @@ mod combat_tests {
             (yaw - 45.).abs() < 3. && (pitch - 20.).abs() < 3.,
             "loosing, the archer's head turned {yaw}° and pitched {pitch}°"
         );
+    }
+    /// The sim's jump on the flat (#217): up at 6.6 m/s under its gravity, `Jump` rising and
+    /// `Fall` after, between a second standing before and a second standing after. Each frame's
+    /// unit, and the frame it touches down on.
+    fn jumping(u: &UnitState) -> (Vec<UnitState>, usize) {
+        let mut u = u.clone();
+        let mut frames = vec![];
+        let mut since = 0;
+        let mut pose = |u: &mut UnitState, now: Pose, frames: &Vec<UnitState>| {
+            if now != u.pose {
+                (u.pose, since) = (now, frames.len());
+            }
+            u.pose_time = (frames.len() - since) as f32 / 60.;
+        };
+        for _ in 0..60 {
+            pose(&mut u, Pose::Idle, &frames);
+            frames.push(u.clone());
+        }
+        for f in 1.. {
+            let t = f as f32 / 60.;
+            let y = 6.6 * t - 0.5 * anim::land::GRAVITY * t * t;
+            if y <= 0. {
+                break;
+            }
+            u.position.y = y;
+            u.velocity.y = 6.6 - anim::land::GRAVITY * t;
+            let now = if u.velocity.y > 0. {
+                Pose::Jump
+            } else {
+                Pose::Fall
+            };
+            pose(&mut u, now, &frames);
+            frames.push(u.clone());
+        }
+        let down = frames.len();
+        (u.position.y, u.velocity.y) = (0., 0.);
+        for _ in 0..60 {
+            pose(&mut u, Pose::Idle, &frames);
+            frames.push(u.clone());
+        }
+        (frames, down)
+    }
+    #[test]
+    fn a_jump_takes_off_straight_tucks_at_the_top_and_lands_with_a_dip() {
+        // On flat ground with the feet on it: the legs are straight leaving the ground (not in
+        // Jump_Start's crouch), tuck highest at the top of the arc and reach the ground as it
+        // comes; touching down at 6.6 m/s, the pelvis dips about 6.6 cm with the feet kept down.
+        let (mut c, u, _) = fighter(0.);
+        c.set_ground(Arc::new(|_, _| 0.));
+        let [pelvis, ball_l, ball_r] = ["pelvis", "ball_l", "ball_r"].map(|n| c.names[n]);
+        let (frames, down) = jumping(&u);
+        let mut seen = vec![];
+        for u in &frames {
+            c.update(u, 1. / 60.);
+            let at = |i: usize| c.world[i].w_axis.truncate() + u.position;
+            seen.push([at(pelvis), at(ball_l), at(ball_r)].map(|p| p.y - u.position.y));
+        }
+        let first = seen[60][0];
+        assert!(first > 0.8, "the pelvis took off {first} m up, crouched");
+        let feet = |f: usize| seen[f][1].max(seen[f][2]);
+        let tuck = (60..down)
+            .max_by(|a, b| feet(*a).total_cmp(&feet(*b)))
+            .unwrap();
+        let top = 60 + 20;
+        assert!(
+            tuck.abs_diff(top) <= 3,
+            "the feet tucked highest {tuck}, the top at {top}"
+        );
+        assert!(
+            feet(down - 1) < 0.05,
+            "the feet were {} up touching down",
+            feet(down - 1)
+        );
+        // The pelvis in the world: down and back up without bouncing, the feet on the ground.
+        let height = |f: usize| seen[f][0] + frames[f].position.y;
+        let standing = height(frames.len() - 1);
+        let low = (down..down + 30).map(height).fold(f32::MAX, f32::min);
+        let dip = standing - low;
+        assert!((0.045..0.085).contains(&dip), "dipped {dip} m");
+        for (f, at) in seen.iter().enumerate().skip(down) {
+            for foot in [1, 2] {
+                assert!(at[foot] > -0.01, "frame {f}: a foot sank {}", at[foot]);
+            }
+        }
+    }
+    #[test]
+    fn a_fall_that_hurts_lands_in_full_standing_and_dips_on_the_run() {
+        // Off a 6 m ledge onto flat ground: standing, Jump_Land plays through (the pelvis down to
+        // a squat); running, the stride goes on, the pelvis dipping the most it does below a twin
+        // that ran on without falling.
+        for speed in [0f32, 6.] {
+            let (mut c, mut u, _) = fighter(speed);
+            let (mut twin, mut v, _) = fighter(speed);
+            for c in [&mut c, &mut twin] {
+                c.set_ground(Arc::new(|_, _| 0.));
+            }
+            let pelvis = c.names["pelvis"];
+            u.position.y = 6.;
+            c.update(&u, 1. / 60.);
+            twin.update(&v, 1. / 60.);
+            u.pose = Pose::Fall;
+            let mut frame = 0;
+            while u.position.y > 0. {
+                u.velocity.y -= anim::land::GRAVITY / 60.;
+                u.position += u.velocity / 60.;
+                u.pose_time = frame as f32 / 60.;
+                c.update(&u, 1. / 60.);
+                frame += 1;
+            }
+            (u.position, u.velocity.y) = (v.position, 0.);
+            u.pose = v.pose;
+            let mut below = vec![];
+            for f in 0..60 {
+                for (c, u) in [(&mut c, &mut u), (&mut twin, &mut v)] {
+                    u.pose_time = f as f32 / 60.;
+                    c.update(u, 1. / 60.);
+                    u.position += u.velocity / 60.;
+                }
+                below.push(twin.world[pelvis].w_axis.y - c.world[pelvis].w_axis.y);
+                if f == 5 {
+                    let landing = c.last_clip == "Jump_Land";
+                    assert_eq!(landing, speed == 0., "{speed} m/s: playing {}", c.last_clip);
+                }
+            }
+            let most = below[..30].iter().copied().fold(0., f32::max);
+            if speed == 0. {
+                assert!(most > 0.25, "standing, the pelvis only went {most} m down");
+            } else {
+                let want = anim::land::MAX_DIP;
+                assert!((most - want).abs() < 0.03, "running, it dipped {most} m");
+                assert!(below[45..].iter().all(|d| d.abs() < 0.02), "{below:?}");
+            }
+        }
+    }
+    #[test]
+    fn runners_lean_forward_setting_off_back_stopping_and_into_turns() {
+        // Against a twin that doesn't lean: the head goes forward setting off and back stopping
+        // (about 1.2 m for each radian of lean, within the caps), and to the inside of a turn.
+        let (mut c, mut u, _) = fighter(0.);
+        let (mut twin, ..) = fighter(0.);
+        twin.leaning = false;
+        let head = c.names["Head"];
+        let mut ahead = vec![];
+        for frame in 0..120 {
+            let running = (30..75).contains(&frame);
+            u.velocity.z = if running { 6. } else { 0. };
+            u.pose = if running { Pose::Run } else { Pose::Idle };
+            c.update(&u, 1. / 60.);
+            twin.update(&u, 1. / 60.);
+            u.position += u.velocity / 60.;
+            ahead.push(c.world[head].w_axis.z - twin.world[head].w_axis.z);
+        }
+        let most = |r: std::ops::Range<usize>| {
+            ahead[r]
+                .iter()
+                .copied()
+                .fold(0f32, |a, b| if b.abs() > a.abs() { b } else { a })
+        };
+        let (off, stop) = (most(30..60), most(75..110));
+        assert!(most(0..30) == 0., "it leaned standing");
+        assert!(
+            off > 0.08 && off < 1.3 * anim::lean::MAX_PITCH,
+            "set off {off} m forward"
+        );
+        assert!(stop < -0.05, "stopped {stop} m back");
+        // Round to the right (toward +x) at 6 m/s, 1.2 radians a second.
+        let (mut c, mut u, _) = fighter(6.);
+        let (mut twin, ..) = fighter(6.);
+        twin.leaning = false;
+        let mut inside = vec![];
+        for frame in 0..120 {
+            u.yaw = 1.2 * frame as f32 / 60.;
+            u.velocity = Vec3::new(u.yaw.sin(), 0., u.yaw.cos()) * 6.;
+            c.update(&u, 1. / 60.);
+            twin.update(&u, 1. / 60.);
+            u.position += u.velocity / 60.;
+            inside.push(c.world[head].w_axis.x - twin.world[head].w_axis.x);
+        }
+        let banked = inside[60..].iter().sum::<f32>() / 60.;
+        assert!(
+            banked > 0.12 && banked < 1.3 * anim::lean::MAX_BANK,
+            "leaned {banked} m into the turn"
+        );
+    }
+    #[test]
+    fn on_a_wall_the_body_neither_lands_nor_leans_nor_jumps() {
+        // Falling onto a hold 2 m up (#247), shimmying along the wall and climbing up from it:
+        // catching the hold dips nothing, the shimmy leans nothing, and the climb up isn't a jump
+        // (no timeline in the air).
+        let (mut c, mut u, _) = fighter(0.);
+        c.set_ground(Arc::new(|_, _| 0.));
+        let dt = 1. / 60.;
+        (u.position.y, u.pose) = (3., Pose::Fall);
+        for frame in 0..20 {
+            u.velocity.y = -anim::land::GRAVITY * frame as f32 * dt;
+            u.position.y += u.velocity.y * dt;
+            c.update(&u, dt);
+        }
+        let caught = u.position;
+        let hold = protocol::ForcedMove {
+            kind: ForcedKind::Hold,
+            from: caught,
+            to: caught + Vec3::new(0., 0.2, 0.2),
+            start: 1.,
+            duration: 0.3,
+        };
+        (u.pose, u.traversal, u.velocity) = (Pose::Hang, Traversal::Forced(hold), Vec3::ZERO);
+        for frame in 0..18 {
+            u.position = caught.lerp(hold.to, frame as f32 / 18.);
+            u.pose_time = frame as f32 * dt;
+            c.update(&u, dt);
+            assert_eq!(c.last_clip, "Hang_Catch");
+            assert_eq!(
+                c.landing.dip(),
+                0.,
+                "frame {frame}: catching the hold dipped"
+            );
+        }
+        u.traversal = Traversal::Hanging;
+        for frame in 0..60 {
+            // Shimmying right (toward -x, facing +z), then stopping.
+            u.velocity = Vec3::X * if frame < 30 { -1. } else { 0. };
+            u.position += u.velocity * dt;
+            c.update(&u, dt);
+            assert_eq!(c.leaned, Vec2::ZERO, "frame {frame}: leaned on the wall");
+        }
+        assert_eq!(c.last_clip, "Hang_Idle_Loop");
+        let up = protocol::ForcedMove {
+            kind: ForcedKind::Climb,
+            from: u.position,
+            to: u.position + Vec3::new(0., 1.5, 0.6),
+            start: 3.,
+            duration: 0.6,
+        };
+        (u.pose, u.traversal, u.velocity) = (Pose::Jump, Traversal::Forced(up), Vec3::ZERO);
+        for frame in 0..36 {
+            u.pose_time = frame as f32 * dt;
+            c.update(&u, dt);
+            assert_eq!(c.last_clip, "Hang_ClimbUp");
+            assert!(c.air.is_none(), "frame {frame}: the climb up took off");
+        }
+    }
+    #[test]
+    fn neighbours_spawned_together_idle_out_of_step() {
+        // Two knights with ids in a row, idling from the same moment, stand differently; the same
+        // knight twice stands the same.
+        let (mut a, u, _) = fighter(0.);
+        let (mut b, ..) = fighter(0.);
+        let (mut again, ..) = fighter(0.);
+        let next = UnitState {
+            id: u.id + 1,
+            ..u.clone()
+        };
+        a.update(&u, 1. / 60.);
+        b.update(&next, 1. / 60.);
+        again.update(&u, 1. / 60.);
+        let apart = |x: &Character, y: &Character| {
+            (0..x.local.len())
+                .map(|i| x.local[i].rotation.angle_between(y.local[i].rotation))
+                .fold(0., f32::max)
+        };
+        assert!(apart(&a, &b) > 1f32.to_radians(), "{}", apart(&a, &b));
+        assert!((0..a.local.len()).all(|i| a.local[i].rotation == again.local[i].rotation));
     }
     #[test]
     fn on_a_wall_the_feet_leave_the_ground_even_taking_a_blow() {

@@ -182,9 +182,12 @@ impl Feet {
             .map(|(last, s)| (root - last, s));
         let jumped = moved.is_some_and(|(by, _)| by.length() > JUMP);
         let contact = contact.filter(|_| root.y - under < AIRBORNE);
-        if let (Some((by, s)), Some(_), false) = (moved, contact, jumped) {
+        if self.weight > 0.
+            && let (Some((by, s)), Some(_), false) = (moved, contact, jumped)
+        {
             // The body stepped up or down: the pelvis stays where it was in the world and
-            // settles from there, rather than dipping twice.
+            // settles from there, rather than dipping twice. (Touching down from the air, the
+            // placement was showing nothing to keep, and the landing has a dip of its own.)
             let step = by.y - s.dot(by.xz());
             if step.abs() > STEP {
                 self.drop.value -= step;
