@@ -155,6 +155,7 @@ mod tests {
             target: None,
             look: Default::default(),
             traversal: Default::default(),
+            aim_pitch: 0,
         };
         // At any time: nobody passes through anybody, even at 200.
         for time in [0., 3., 17.5, 60.] {
