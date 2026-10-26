@@ -356,3 +356,40 @@ fn ghosts_bring_their_combat_detail_and_side_across() {
     run(&mut realm, 0.1);
     assert_eq!(hostile(&realm), Some(true), "the ghost kept its old side");
 }
+
+#[test]
+fn a_kill_across_the_border_pays_and_puts_the_hero_in_combat() {
+    let (mut a, mut b) = two_regions(8);
+    let hero = a.spawn_hero("Hero", Specialty::Warrior, 3, Vec2::new(BORDER - 1.0, 10.0), std::f32::consts::FRAC_PI_2);
+    let skeleton = b.spawn_mob("skeleton", Vec2::new(BORDER + 1.0, 10.0)).unwrap();
+    // One good blow fells it.
+    b.get_mut::<Vitals>(skeleton).unwrap().health = 1.0;
+    let mut realm = Realm::new(vec![a, b]);
+    run(&mut realm, 0.1);
+    let xp = |realm: &Realm| realm.with(0, move |sim| sim.get::<Progress>(hero).unwrap().xp[Specialty::Warrior.index()]);
+    let before = xp(&realm);
+    let fought = |realm: &Realm| realm.with(0, move |sim| sim.get::<Vitals>(hero).unwrap().last_combat);
+    let calm = fought(&realm);
+
+    realm.command(hero, Command::SetTarget(Some(skeleton)));
+    realm.command(hero, Command::UseSlot { slot: 0, ground: None });
+    run(&mut realm, 1.0);
+    assert!(realm.with(1, move |sim| sim.get::<Vitals>(skeleton).is_none_or(|v| v.dead)), "the skeleton didn't die");
+    assert!(xp(&realm) > before, "no XP for a kill across the border");
+    assert!(fought(&realm) > calm, "the hero's own region didn't see it fight");
+}
+
+#[test]
+fn a_region_with_nobody_near_sleeps_and_wakes_when_someone_comes() {
+    let (mut a, b) = two_regions(10);
+    let hero = a.spawn_player("Hero", Vec2::new(BORDER - 80.0, 10.0), 0.0);
+    let mut realm = Realm::new(vec![a, b]);
+    // Not on a whole second, when a sleeping region takes its one step.
+    run(&mut realm, 1.25);
+    assert_eq!(realm.stats().asleep, 1, "the empty east should be asleep");
+    assert_eq!(realm.with(1, |sim| sim.tick()), realm.tick(), "a sleeping region keeps time");
+    walk(&mut realm, hero, Vec2::X);
+    run(&mut realm, 14.0);
+    assert_eq!(realm.region_of(hero), 1, "the hero crossed");
+    assert_eq!(realm.stats().asleep, 0, "the east woke when the hero came");
+}
