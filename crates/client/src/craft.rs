@@ -247,6 +247,7 @@ pub fn station(ctx: &egui::Context, player: &PlayerState) -> Vec<Action> {
                             .map(|i| format!("{} {}", i.count, i.name))
                             .collect();
                         ui.vertical(|ui| {
+                            ui.set_min_width(200.);
                             ui.label(egui::RichText::new(&r.output.name).strong());
                             ui.small(format!(
                                 "{} · {} {}",
