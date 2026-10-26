@@ -1,6 +1,7 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
 mod bag;
 mod combat;
+mod craft;
 mod effects;
 mod hud;
 mod interpolate;
@@ -300,6 +301,8 @@ struct Game {
     assign_xp: u32,
     /// The bag is open (it also opens at a shop's counter).
     bag: bool,
+    /// The gathering and crafting skills panel is open.
+    skills_panel: bool,
     /// The local player's last level up (specialty, level, seconds left on its banner).
     level_up: Option<(String, u8, f32)>,
     /// The left button held in the Action scheme: keep swinging, and when the next press of the
@@ -407,6 +410,7 @@ impl Game {
             specialties: false,
             assign_xp: 0,
             bag: false,
+            skills_panel: false,
             level_up: None,
             attacking: None,
             guard_button: false,
@@ -556,6 +560,26 @@ impl Game {
             C::Bag => {
                 self.bag = !self.bag;
                 None
+            }
+            C::Skills => {
+                self.skills_panel = !self.skills_panel;
+                None
+            }
+            C::Interact => {
+                let snapshot = &self.snaps.current;
+                let player = snapshot.player.as_ref();
+                if player
+                    .and_then(|p| p.work.as_ref())
+                    .is_some_and(|w| w.sweet_to > w.sweet_from)
+                {
+                    Some(Command::Strike)
+                } else {
+                    snapshot
+                        .unit(self.host.player)
+                        .zip(player)
+                        .and_then(|(me, p)| craft::interact(snapshot, p, me.position))
+                        .map(|i| i.command())
+                }
             }
             C::Loot => self
                 .snaps
@@ -818,6 +842,7 @@ impl Game {
             respawn: l(C::Respawn),
             specialties: l(C::Specialties),
             loot: l(C::Loot),
+            interact: l(C::Interact),
         }
     }
     fn direction(&self) -> Vec2 {
@@ -928,12 +953,13 @@ impl Game {
     fn screen_open(&self) -> bool {
         self.specialties
             || self.bag
+            || self.skills_panel
             || self
                 .snaps
                 .current
                 .player
                 .as_ref()
-                .is_some_and(|p| p.shop.is_some())
+                .is_some_and(|p| p.shop.is_some() || p.station.is_some())
     }
     /// Aiming at the crosshair in the middle of the screen, rather than at the pointer.
     fn aiming(&self) -> bool {
@@ -1170,6 +1196,9 @@ impl Game {
                 } if *unit == self.host.player => {
                     self.level_up = Some((specialty.clone(), *level, 4.));
                 }
+                protocol::Event::SkillUp { unit, skill, level } if *unit == self.host.player => {
+                    self.level_up = Some((skill.clone(), *level, 4.));
+                }
                 protocol::Event::Damage { source, .. } if *source == self.host.player => {
                     self.smoke_checks[2] = true
                 }
@@ -1404,6 +1433,7 @@ impl Game {
         let keys = self.key_labels();
         let mut changes = Vec::new();
         let mut bag_actions = Vec::new();
+        let mut craft_actions = Vec::new();
         let output = ctx.run(raw, |ctx| {
             if !self.options.showcase {
                 combat::paint(
@@ -1443,6 +1473,22 @@ impl Game {
                     bag_actions.extend(bag::bag(ctx, player));
                 }
                 bag_actions.extend(bag::shop(ctx, player));
+                let interact = craft::interact(&self.snaps.current, player, me.position);
+                craft::world(
+                    ctx,
+                    &projection,
+                    &player.nodes,
+                    me.position,
+                    interact.as_ref(),
+                    &keys.interact,
+                );
+                if let Some(w) = &player.work {
+                    craft_actions.extend(craft::work(ctx, w, &keys.interact));
+                }
+                craft_actions.extend(craft::station(ctx, player));
+                if self.skills_panel {
+                    craft_actions.extend(craft::skills(ctx, player));
+                }
             }
             if crosshair {
                 paint_crosshair(ctx, reticle);
@@ -1474,6 +1520,12 @@ impl Game {
             match action {
                 bag::Action::Command(c) => self.host.send(c),
                 bag::Action::Close => self.bag = false,
+            }
+        }
+        for action in craft_actions {
+            match action {
+                craft::Action::Command(c) => self.host.send(c),
+                craft::Action::CloseSkills => self.skills_panel = false,
             }
         }
         r.hud = Some(render::gui::HudFrame {
@@ -1839,6 +1891,7 @@ impl App {
             None if self.game.held_ground.is_some() => self.game.held_ground = None,
             None if self.game.specialties => self.game.specialties = false,
             None if self.game.bag => self.game.bag = false,
+            None if self.game.skills_panel => self.game.skills_panel = false,
             Some(m) if m.capture.is_some() => {
                 m.capture = None;
                 m.notice = None;
