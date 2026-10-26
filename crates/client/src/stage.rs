@@ -14,14 +14,14 @@ use std::f32::consts::FRAC_PI_2;
 /// Missiles crossing in front of the lineup: look, school, speed (m/s), height above the
 /// ground and lane (z). Speeds are the content's.
 const LANES: [(&str, School, f32, f32, f32); 8] = [
-    ("fire_bolt", School::Fire, 26., 1.5, 25.),
-    ("frost_lance", School::Frost, 30., 1.9, 24.4),
-    ("shadow_bolt", School::Shadow, 24., 1.2, 25.6),
-    ("holy_bolt", School::Holy, 28., 2.2, 24.),
-    ("arcane_missile", School::Arcane, 32., 1.7, 26.2),
-    ("arcane_spark", School::Arcane, 34., 1., 24.8),
-    ("arrow", School::Physical, 40., 1.4, 23.6),
-    ("axe", School::Physical, 22., 1.3, 26.8),
+    ("fire_bolt", School::Fire, 26., 1.5, 26.5),
+    ("frost_lance", School::Frost, 30., 1.9, 25.9),
+    ("shadow_bolt", School::Shadow, 24., 1.2, 27.1),
+    ("holy_bolt", School::Holy, 28., 2.2, 25.5),
+    ("arcane_missile", School::Arcane, 32., 1.7, 27.7),
+    ("arcane_spark", School::Arcane, 34., 1., 26.3),
+    ("arrow", School::Physical, 40., 1.4, 25.1),
+    ("axe", School::Physical, 22., 1.3, 28.3),
 ];
 /// Where missiles leave and land (x), and the pause before a lane fires again.
 const FROM: f32 = -7.;
@@ -59,7 +59,7 @@ const WARNINGS: [Warning; 3] = [
     Warning {
         id: 1,
         shape: Shape::Circle { radius: 2. },
-        at: (-2.5, 25.6),
+        at: (-2.5, 27.1),
         yaw: 0.,
         hostile: true,
         period: 2.4,
@@ -72,7 +72,7 @@ const WARNINGS: [Warning; 3] = [
             range: 4.5,
             angle: 1.,
         },
-        at: (8., 24.),
+        at: (8., 25.5),
         yaw: -0.64,
         hostile: true,
         period: 1.6,
@@ -85,7 +85,7 @@ const WARNINGS: [Warning; 3] = [
             length: 6.,
             width: 1.2,
         },
-        at: (-3., 28.5),
+        at: (-3., 30.),
         yaw: FRAC_PI_2,
         hostile: false,
         period: 2.,
@@ -105,7 +105,7 @@ const FIELDS: [Field; 2] = [
     Field {
         id: 4,
         radius: 1.8,
-        at: (2.5, 26.5),
+        at: (2.5, 28.),
         field: "fire",
         school: School::Fire,
         hostile: true,
@@ -113,16 +113,16 @@ const FIELDS: [Field; 2] = [
     Field {
         id: 5,
         radius: 1.5,
-        at: (6.5, 28.),
+        at: (6.5, 29.5),
         field: "ice",
         school: School::Frost,
         hostile: false,
     },
 ];
-const COMBO_AT: (f32, f32) = (0.3, 29.5);
+const COMBO_AT: (f32, f32) = (0.3, 31.);
 const COMBO_EVERY: f32 = 3.;
 /// The ground skill being aimed: where and its radius.
-const AIM: ((f32, f32), f32) = ((-5.5, 25.), 1.5);
+const AIM: ((f32, f32), f32) = ((-5.5, 26.5), 1.5);
 
 /// How fast a reel shot's slow replay runs.
 const SLOW: f32 = 0.25;
@@ -168,16 +168,16 @@ impl Shot {
 }
 
 /// Side on to the missiles' lane, close.
-const LANE_VIEW: (f32, f32, f32, [f32; 3]) = (0., 25., 1.35, [0.25, 0.2, 2.5]);
+const LANE_VIEW: (f32, f32, f32, [f32; 3]) = (0., 26.5, 1.35, [0.25, 0.2, 2.5]);
 /// Where the reel's missiles fly: from and to (x) along z, this high over the ground.
-const LANE: (f32, f32, f32, f32) = (-6., 0.9, 25., 1.4);
+const LANE: (f32, f32, f32, f32) = (-6., 0.9, 26.5, 1.4);
 /// The first of the lineup, close.
-const ONE_VIEW: (f32, f32, f32, [f32; 3]) = (-4., 22., 1., [0.9, 0.35, 3.9]);
+const ONE_VIEW: (f32, f32, f32, [f32; 3]) = (-4., 23.5, 1., [0.9, 0.35, 3.9]);
 /// The first three of the lineup.
-const THREE_VIEW: (f32, f32, f32, [f32; 3]) = (-1.2, 22., 1., [0.4, 0.55, 5.6]);
+const THREE_VIEW: (f32, f32, f32, [f32; 3]) = (-1.2, 23.5, 1., [0.4, 0.55, 5.6]);
 /// The ground in front of the lineup, from above, and the middle of what lies on it.
-const GROUND_VIEW: (f32, f32, f32, [f32; 3]) = (0.5, 25.6, 0.3, [0., 3.4, 5.4]);
-const GROUND_AT: (f32, f32) = (0.5, 25.6);
+const GROUND_VIEW: (f32, f32, f32, [f32; 3]) = (0.5, 27.1, 0.3, [0., 3.4, 5.4]);
+const GROUND_AT: (f32, f32) = (0.5, 27.1);
 
 const fn missile(caption: &'static str, visual: &'static str, school: School, speed: f32) -> Shot {
     Shot {
@@ -737,7 +737,7 @@ mod tests {
                 body: "player".into(),
                 name: "Review".into(),
                 level: 1,
-                position: Vec3::new(-4. + i as f32 * 2.8, 0., 22.),
+                position: Vec3::new(-4. + i as f32 * 2.8, 0., 23.5),
                 velocity: Vec3::ZERO,
                 yaw: 0.25,
                 pose: protocol::Pose::Idle,
