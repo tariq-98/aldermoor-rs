@@ -272,3 +272,31 @@ fn views_from_the_frame_match_views_from_snapshots() {
     // Detail that changed and changed back between views may go again from the frame, no more.
     assert!(sizes.1 <= sizes.0 + sizes.0 / 20, "{} bytes from the frame against {}", sizes.1, sizes.0);
 }
+
+#[test]
+fn players_get_only_the_events_they_can_see() {
+    // A fight at one end of the valley, and a player too far away to see it (#292).
+    let (mut sim, hero) = fight(6);
+    let far = sim.spawn_player("Far", Vec2::new(6.0, -160.0), 0.0);
+    let frame = sim.net_frame(None);
+    let (mut near_view, mut far_view) = (Encoder::new(), Encoder::new());
+    let _ = sim.encode_view(&frame, hero, &mut near_view, &[]);
+    let _ = sim.encode_view(&frame, far, &mut far_view, &[]);
+    let (mut frame, mut fought) = (frame, false);
+    for step in 0..300 {
+        act(&mut sim, hero, step);
+        sim.step();
+        let events = sim.take_events();
+        frame = sim.net_frame(Some(&frame));
+        let (a, b) = (sim.encode_view(&frame, hero, &mut near_view, &events), sim.encode_view(&frame, far, &mut far_view, &events));
+        // The fighter sees all of it.
+        assert_eq!(a.events, events);
+        fought |= events.iter().any(|e| matches!(e, protocol::Event::Damage { .. }));
+        // The other sees nothing but what's about themselves, or messages.
+        for e in &b.events {
+            let about = e.units();
+            assert!(about.contains(&Some(far)) || (about == [None, None] && e.at().is_none()), "{e:?} reached a player 180 m away");
+        }
+    }
+    assert!(fought, "the fight never got going");
+}

@@ -271,8 +271,24 @@ row, 26 October 2026):
 grows with the tick rate the server keeps (it's about the same per tick). "Build views" is now the
 frame (about 1 ms) and handing each view to its connection's thread; here those threads and the
 200 bots' own share the server's 4 cores, so the next measure wants the bots on another machine.
-Encoding is one core's work for every player in turn, and players' views of one frame are
-independent, so they can go across cores when one isn't enough. The `players` scene in
+
+Since #292 each player gets only the events about units in their view (or, for those with a place
+and no unit, within sight), and a step's views are encoded across up to `server::MAX_ENCODERS`
+threads (the cores left beside the sim's). The load test can't show that, because the bots already
+fill this box: 200 of them kept 37 ticks a second with 3.4 of its 4 cores busy. Without bots,
+`cargo run -p server --release --example crowd_bench` steps the perf gate's `players` scene and
+encodes each player's view every third step, as the server does (same box, 26 October 2026):
+
+| Players | Encoding on | Step ms | Frame ms | Views ms | Tick ms | Out per player |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 200 | 1 thread | 1.26 | 0.91 | 14.69 | 16.87 | 65 KB/s |
+| 200 | 3 threads | 1.10 | 0.74 | 6.00 | 7.84 | 65 KB/s |
+| 500 | 1 thread | 1.98 | 1.38 | 46.61 | 49.97 | 115 KB/s |
+| 500 | 3 threads | 1.78 | 1.17 | 19.76 | 22.71 | 115 KB/s |
+
+So 200 players fighting in one area fit a 60 Hz tick with room to spare, and about 400 would on
+these 4 cores. Here everyone is in everyone's view, so it's the worst case: about 0.22 ms a view.
+The `players` scene in
 `crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
 the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
 

@@ -456,6 +456,8 @@ pub struct Sight<'a> {
     pub player: Option<&'a PlayerState>,
     pub projectiles: &'a [ProjectileView],
     pub areas: &'a [AreaView],
+    /// What happened since their last view. With a `range`, only events about units in view, or
+    /// within it, go.
     pub events: &'a [Event],
 }
 
@@ -609,12 +611,29 @@ impl Encoder {
         delta.areas_gone = was.areas.gone(&state.areas);
         delta.areas.sort_unstable_by_key(|a| a.id);
 
-        let view = WireView { tick, time, base: base.map(|b| b.tick), intros, units: packed, gone, player, combat: delta, events: sight.events.to_vec() };
+        // Only what happened to units in view or within sight (#292); messages go to everyone.
+        let events = match (sight.at, sight.range) {
+            (Some(at), Some(r)) => sight.events.iter().filter(|e| seen(e, &state.units, at, r)).cloned().collect(),
+            _ => sight.events.to_vec(),
+        };
+        let view = WireView { tick, time, base: base.map(|b| b.tick), intros, units: packed, gone, player, combat: delta, events };
         self.sent.push_back(state);
         while self.sent.len() > KEPT {
             self.retire();
         }
         view
+    }
+}
+
+/// Whether a player with `units` in view, standing at `at` and seeing `range` metres, sees `e`.
+fn seen<V>(e: &Event, units: &Sorted<V>, at: Vec3, range: f32) -> bool {
+    let about = e.units();
+    if about.iter().flatten().any(|&id| units.get(id).is_some()) {
+        return true;
+    }
+    match e.at() {
+        Some(p) => (p - at).length_squared() <= range * range,
+        None => about.iter().all(Option::is_none),
     }
 }
 
