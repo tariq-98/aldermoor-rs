@@ -20,7 +20,7 @@ fn act(sim: &mut Sim, hero: u32, step: u64) {
     sim.command(hero, Command::Move { direction: Vec2::new(a.cos(), a.sin()), walk: false, sprint: false, face_yaw: None });
     // The hero looks up and down: others see its aim pitch (#244).
     if step % 15 == 0 {
-        sim.command(hero, Command::Aim { pitch: ((step / 15) % 200) as i8 - 100 });
+        sim.command(hero, Command::Aim { pitch: ((step / 15 % 200) as i32 - 100) as i8 });
     }
     if step % 40 == 0 {
         sim.command(hero, Command::UseSlot { slot: (step / 40 % 5) as u8, ground: None });
