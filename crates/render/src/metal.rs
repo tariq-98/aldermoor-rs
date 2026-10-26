@@ -489,8 +489,12 @@ fn target(
     if let Some(texture) = heap.and_then(|heap| heap.newTextureWithDescriptor(desc)) {
         return Ok(texture);
     }
-    if heap.is_some() {
-        eprintln!("render target heap full; allocating from the device");
+    if let Some(heap) = heap {
+        eprintln!(
+            "render target heap full ({} of {} bytes used); allocating from the device",
+            heap.usedSize(),
+            heap.size()
+        );
     }
     d.newTextureWithDescriptor(desc)
         .context("Metal texture allocation")
@@ -2660,7 +2664,9 @@ mod temporal_tests {
         let mut previous = None;
         for scale in [0.75, 0.725, 0.7, 0.725, 0.75, 0.55] {
             r.set_render_scale(scale).unwrap();
-            r.draw(camera, &[], None).unwrap();
+            // As in the client, each frame drains its autorelease pool, which releases the
+            // passes' last references to the previous targets.
+            objc2::rc::autoreleasepool(|_| r.draw(camera, &[], None)).unwrap();
             // Steps are a second apart, so frames that used the other heap have finished.
             r.wait().unwrap();
             let heaps = r.target_heaps.as_ref().unwrap();
