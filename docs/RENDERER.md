@@ -133,7 +133,8 @@ otherwise use the laptop panel even with an ultrawide attached. Capture reads ou
 - Repeated opaque rigid meshes are instanced in both scene and shadow passes; each instance
   retains current/previous transforms and its supplied material. Transparent objects remain
   individually sorted.
-- Two frames in flight is the measured client default. `--in-flight 1..3` is diagnostic.
+- One frame in flight is the client default (#219): a frame less input latency, and on the M1 Air at
+  2560×1600/75% it held the same frame rate as two with a lower GPU p95. `--in-flight 1..3` is diagnostic.
   Shared render targets/history are ordered on one Metal command queue; CPU bone/draw/HUD buffers
   are fenced before reuse. Skin palettes are shared across a skin's primitives. Bone and draw
   rings grow to the frame's requirement, including packed instance constants, instead of imposing
