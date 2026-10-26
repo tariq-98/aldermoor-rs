@@ -231,7 +231,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nClick target under the crosshair · right-click attack · 1–9/0 skills · F guard · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 (fixed; interactive default adapts 0.55..0.75, captures/scripted runs use 0.75) --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 (fixed; interactive default adapts 0.55..0.75, captures/scripted runs use 0.75) --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
                     );
                     std::process::exit(0)
                 }
@@ -315,6 +315,11 @@ struct Game {
     orbiting: bool,
     /// Ctrl held in the Action scheme: the pointer is out for the HUD and the mouse doesn't look.
     pointer_free: bool,
+    /// The left button held in the Action scheme: keep swinging, and when the next press of the
+    /// basic attack goes out.
+    attacking: Option<f32>,
+    /// The right button holds the guard in the Action scheme.
+    guard_button: bool,
     last_move: Option<Command>,
     last: Instant,
     start: Instant,
@@ -401,6 +406,8 @@ impl Game {
             mouse_look: false,
             orbiting: false,
             pointer_free: false,
+            attacking: None,
+            guard_button: false,
             last_move: None,
             last: Instant::now(),
             start: Instant::now(),
@@ -540,7 +547,7 @@ impl Game {
     /// Lets go of a held control once none of its inputs is down any more.
     fn release(&mut self, control: controls::Control) {
         match control {
-            controls::Control::Guard if !self.down(control) => {
+            controls::Control::Guard if !self.down(control) && !self.guard_button => {
                 self.host.send(Command::Guard(false))
             }
             controls::Control::FreePointer => self.pointer_free = self.down(control),
@@ -554,7 +561,50 @@ impl Game {
         self.mouse_look = false;
         self.orbiting = false;
         self.pointer_free = false;
+        self.attacking = None;
+        self.guard_button = false;
         self.controls(0.);
+    }
+    /// The Action scheme's left button: swing while it's held (the basic attack, toward a
+    /// target or wherever you aim), and stop when it's let go.
+    fn attack_button(&mut self, pressed: bool) {
+        if pressed {
+            self.attacking = Some(0.);
+            self.keep_swinging(0.);
+        } else if self.attacking.take().is_some() {
+            self.host.send(Command::SetAutoAttack(false));
+        }
+    }
+    /// Presses the basic attack again every tenth of a second while the button is held, so it
+    /// swings at nothing in particular too. Presses mid-swing are ignored by the sim.
+    fn keep_swinging(&mut self, dt: f32) {
+        let Some(wait) = self.attacking.as_mut() else {
+            return;
+        };
+        *wait -= dt;
+        if *wait > 0. {
+            return;
+        }
+        *wait = SWING_REPEAT;
+        let basic = self
+            .snaps
+            .current
+            .player
+            .as_ref()
+            .and_then(|p| p.bar.iter().position(|s| s.auto));
+        if let Some(slot) = basic {
+            let c = self.use_slot(slot as u8);
+            self.host.send(c);
+        }
+    }
+    /// The Action scheme's right button holds the guard, like the guard key.
+    fn guard_button(&mut self, pressed: bool) {
+        self.guard_button = pressed;
+        if pressed {
+            self.host.send(Command::Guard(true));
+        } else if !self.down(controls::Control::Guard) {
+            self.host.send(Command::Guard(false));
+        }
     }
     fn open_menu(&mut self) {
         self.release_all();
@@ -683,6 +733,7 @@ impl Game {
             self.host.send(c.clone());
             self.last_move = Some(c);
         }
+        self.keep_swinging(dt);
     }
     fn camera(&self, p: Vec3) -> Camera {
         if self.options.inspect.is_some() {
@@ -1497,6 +1548,8 @@ fn paint_caption(ctx: &egui::Context, text: &str) {
 }
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
+/// How often a held attack button presses the basic attack again, in seconds.
+const SWING_REPEAT: f32 = 0.1;
 /// A press of the left or right button, until both are up again.
 struct Drag {
     from: (f64, f64),
@@ -1553,8 +1606,9 @@ impl App {
         }
         self.sync_pointer(self.focused);
     }
-    /// Left drags the camera, right steers; a press that barely moves is a click instead,
-    /// which targets (and with the right button, attacks) the unit under the cursor.
+    /// Action: left attacks (targeting what's under the crosshair) and right holds the guard.
+    /// Classic: left drags the camera, right steers; a press that barely moves is a click
+    /// instead, which targets (and with the right button, attacks) the unit under the cursor.
     /// The middle and thumb buttons are bindable inputs like keys.
     fn button(&mut self, button: MouseButton, pressed: bool) {
         match button {
@@ -1571,17 +1625,19 @@ impl App {
             }
         }
         if self.pointer_held {
-            // Action: every press is a click on whatever is under the crosshair.
+            if button == MouseButton::Right {
+                self.game.guard_button(pressed);
+                return;
+            }
+            // A swing takes whatever is under the crosshair as its target.
             if pressed && let Some(w) = &self.window {
                 let s = w.inner_size();
                 let (x, y) = (s.width as f64 / 2., s.height as f64 / 2.);
                 if let Some(id) = self.game.pick(x, y, s.width, s.height) {
                     self.game.host.send(Command::SetTarget(Some(id)));
-                    if button == MouseButton::Right {
-                        self.game.host.send(Command::SetAutoAttack(true));
-                    }
                 }
             }
+            self.game.attack_button(pressed);
             return;
         }
         if pressed {
@@ -1625,6 +1681,11 @@ impl App {
             return;
         }
         self.end_drag();
+        // The buttons' releases would land in the other scheme's handling.
+        self.game.attack_button(false);
+        if self.game.guard_button {
+            self.game.guard_button(false);
+        }
         if let Some(w) = &self.window {
             if want {
                 let _ = w

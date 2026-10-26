@@ -3,14 +3,27 @@
 //! Run under `valgrind --tool=callgrind --toggle-collect='*perf_gate::measured*'` to count only the
 //! steps and snapshots. The sim is deterministic, so the count is the same on every run of the same
 //! code, which makes it a fair comparison between two commits on a noisy shared runner. Each scene
-//! also prints its wire size: postcard-encoded snapshot plus combat view, per player per second.
+//! also prints its wire size: views as the server sends them (`protocol::wire`, every third step,
+//! deltas against the last), per player per second.
 //! The `players` scene gives 200 players a view each step, as the server does (#74).
 
 use glam::Vec2;
-use protocol::{CombatView, Command, Snapshot, UnitId};
+use protocol::wire::Encoder;
+use protocol::{CombatView, Command, Event, Snapshot, UnitId};
 use sim::{Sim, Specialty};
 
 const SCENES: [&str; 4] = ["wander", "fight", "dense", "players"];
+
+/// The server sends a view every third step (`server::SEND_EVERY`).
+const SEND_EVERY: usize = 3;
+
+/// Bytes on the wire for one view, with the events since the last one sent.
+fn wire(encoder: &mut Encoder, snapshot: &Snapshot, combat: &CombatView, events: Vec<Event>) -> usize {
+    let snapshot = Snapshot { events, ..snapshot.clone() };
+    let view = encoder.encode(&snapshot, combat);
+    encoder.ack(view.tick);
+    postcard::to_allocvec(&view).unwrap().len()
+}
 
 fn main() {
     let only = std::env::args().nth(1);
@@ -19,16 +32,23 @@ fn main() {
             players();
             continue;
         }
-        let (mut sim, viewer, steps) = setup(scene);
+        let (mut sim, viewer, steps, mut encoder) = setup(scene);
         let views = measured(&mut sim, viewer, steps);
-        let bytes: usize = views.iter().map(|(s, c)| postcard::to_allocvec(s).unwrap().len() + postcard::to_allocvec(c).unwrap().len()).sum();
+        let (mut bytes, mut events) = (0, Vec::new());
+        for (i, (s, c)) in views.iter().enumerate() {
+            events.extend(s.events.iter().cloned());
+            if i % SEND_EVERY == SEND_EVERY - 1 {
+                bytes += wire(&mut encoder, s, c, std::mem::take(&mut events));
+            }
+        }
         let per_second = bytes as f64 / steps as f64 * sim::TICK_RATE as f64;
         println!("{scene}: {steps} steps, wire {:.0} B/s per player", per_second);
     }
 }
 
-/// A scene ready to measure, its viewer, and how many steps to measure.
-fn setup(scene: &str) -> (Sim, UnitId, u32) {
+/// A scene ready to measure, its viewer, how many steps to measure, and the viewer's wire encoder
+/// with a view already sent.
+fn setup(scene: &str) -> (Sim, UnitId, u32, Encoder) {
     let mut sim = Sim::brambleford(42);
     let steps = match scene {
         // 2,000 monsters wandering the valley while the hero runs circles through them.
@@ -59,7 +79,9 @@ fn setup(scene: &str) -> (Sim, UnitId, u32) {
         sim.step();
         let _ = sim.snapshot(Some(hero));
     }
-    (sim, hero, steps)
+    let mut encoder = Encoder::new();
+    wire(&mut encoder, &sim.snapshot(Some(hero)), &sim.combat_view(Some(hero)), Vec::new());
+    (sim, hero, steps, encoder)
 }
 
 fn run_circle(sim: &mut Sim, hero: UnitId, step: u32) {
@@ -83,8 +105,48 @@ fn measured(sim: &mut Sim, viewer: UnitId, steps: u32) -> Vec<(Snapshot, CombatV
 /// 200 players of every specialty among 2,000 monsters, each needing their own view every step:
 /// the MMO load (#74). Few steps, because a step here costs about a hundred times the others.
 fn players() {
-    const PLAYERS: usize = 200;
     const STEPS: u32 = 10;
+    let (mut sim, ids) = players_scene();
+    // One measured call a step, so 2,000 views aren't held at once.
+    for step in 0..STEPS {
+        move_players(&mut sim, &ids, 20 + step);
+        drop(measured_players(&mut sim, &ids));
+    }
+    drop(sim);
+    // The wire size from a second run of the same scene, so the encoders' memory doesn't change
+    // what the measured part costs. A view every third step for the first 20 players, each on
+    // its own third of the steps, as the server sends them.
+    const WIRED: usize = 20;
+    let (mut sim, ids) = players_scene();
+    let mut encoders: Vec<Encoder> = ids[..WIRED]
+        .iter()
+        .map(|&id| {
+            let mut e = Encoder::new();
+            wire(&mut e, &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), Vec::new());
+            e
+        })
+        .collect();
+    let (mut bytes, mut recent) = (0, std::collections::VecDeque::new());
+    for step in 0..STEPS {
+        move_players(&mut sim, &ids, 20 + step);
+        sim.step();
+        recent.push_back(sim.take_events());
+        if recent.len() > SEND_EVERY {
+            recent.pop_front();
+        }
+        for (i, &id) in ids[..WIRED].iter().enumerate() {
+            if (step as usize + i) % SEND_EVERY == 0 {
+                bytes += wire(&mut encoders[i], &sim.snapshot(Some(id)), &sim.combat_view(Some(id)), recent.iter().flatten().cloned().collect());
+            }
+        }
+    }
+    let per_second = bytes as f64 / (STEPS as usize * WIRED) as f64 * sim::TICK_RATE as f64;
+    println!("players: {STEPS} steps, wire {per_second:.0} B/s per player");
+}
+
+/// 200 heroes in a block among 2,000 monsters, settled for 20 steps.
+fn players_scene() -> (Sim, Vec<UnitId>) {
+    const PLAYERS: usize = 200;
     let mut sim = Sim::brambleford(42);
     sim.spawn_crowd(2000);
     let ids: Vec<UnitId> = (0..PLAYERS)
@@ -100,15 +162,7 @@ fn players() {
         sim.step();
         let _ = sim.take_events();
     }
-    // One measured call a step, encoding outside it, so 2,000 views aren't held at once.
-    let mut bytes = 0;
-    for step in 0..STEPS {
-        move_players(&mut sim, &ids, 20 + step);
-        let views = measured_players(&mut sim, &ids);
-        bytes += views.iter().map(|(s, c)| postcard::to_allocvec(s).unwrap().len() + postcard::to_allocvec(c).unwrap().len()).sum::<usize>();
-    }
-    let per_second = bytes as f64 / (STEPS as usize * PLAYERS) as f64 * sim::TICK_RATE as f64;
-    println!("players: {STEPS} steps, wire {per_second:.0} B/s per player");
+    (sim, ids)
 }
 
 /// Every player walks its own circle, so they spread, meet monsters and fight.

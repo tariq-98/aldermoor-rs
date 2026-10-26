@@ -17,6 +17,7 @@ Cloud x86 (4 vCPU Xeon at 2.1 GHz, shared), release build, 25 October 2026:
 | Interest: bucket every unit into a 32 m grid | 0.065 ms a step |
 | Interest: every one of the 200 players finds its neighbours within 60 m | 0.91 ms for all, 0.0046 ms each, 229 units each |
 | Lag compensation: record everyone's position and facing | 0.015 ms a step, 2.9 MB for one second |
+| Layers: 600 players in a town capped at 200, so three layers of 1,000 monsters each, beside open country (`cargo run -p server --release --example layers`, four regions on four cores) | 2.29 ms mean, 4.86 ms p99 tick; 1.43 ms mean, 3.38 ms p99 slowest step; 0.28 ms ghosts and handoffs |
 | Match instance (10 players, 30 monsters): create | 0.24 ms on the shared land (12.7 ms before #167, which built the land each time) |
 | Match instance: memory | 0.24 MB (0.63 MB before #167) |
 | The shared land, built once per map | about 10–12 ms and 0.39 MB |
@@ -64,11 +65,21 @@ in exactly one region at a time, and only that region changes it.
   turn back, the way they give up a chase today.
 - **Quiet regions sleep.** With no players inside or in their ghost band, a region steps once a
   second (wandering, respawns) instead of 60 times (#33).
-- **Layers:** when a region passes its player cap (a capital on launch night), the world opens a
-  second copy of it, a layer, and new arrivals go there; groups and companies are kept together.
-  Layers merge back when both are quiet. The Wilderness is never layered, so a fight with real
-  death stakes can't be dodged by changing layer; instead its entrances stop letting players in
-  at its cap (#170).
+- **Layers** (#170): when a region passes its player cap (a capital on launch night), the world
+  opens another copy of its ground, a layer, and new arrivals go there. A layer is a region like
+  any other: its own thread, its own monsters, its own region ID and block of unit IDs (never
+  reused, so a unit's ID still never changes). Players in different layers of a ground don't see
+  each other. Next door, layer *n* pairs with the neighbour's layer *n*, and the last layer of
+  the ground with fewer pairs with all the rest, so open country beside a layered town sees every
+  layer's side of the border. Crossing over, a player goes to the layer paired with the one they
+  left while it has room, so people walking in together stay together, and otherwise to the
+  first layer below the cap. Once a second the host looks at each ground's last layer, and when
+  it and the one before it hold no more than half a cap together, its players move into the one
+  before where they stand and it closes. Groups and companies aren't built yet; when they are,
+  placing a player should go to a layer with their group in it first.
+- **The Wilderness is never layered**, so a fight with real death stakes can't be dodged by
+  changing layer. At its cap a player stepping over its border is put back just inside the
+  ground they came from, and joining inside it is refused, until someone leaves.
 
 ### Machines
 
@@ -175,18 +186,30 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
 
 - **Transport:** plain TCP, each message a 4-byte little-endian length then postcard
   (`server::net`). A client says `Hello` with its name and `protocol::VERSION`, gets `Welcome`
-  (or `Refused` for another version), sends `Command`s and gets a `View` (snapshot and combat
-  view) every step. QUIC (#86) replaces the transport and keeps the messages.
+  (or `Refused` for another version), sends `Command`s and gets a `View` every third step (20 a
+  second, each player on their own third of the steps), which it answers with `Ack`. QUIC (#86)
+  replaces the transport and keeps the messages.
+- **Views on the wire** (`protocol::wire`, #34): a unit's kind, body, name and look go once, in an
+  intro, when it comes into view or changes (and are remembered for ten seconds after it leaves,
+  so a unit wandering along the edge of view doesn't send them again). After that a view carries
+  only what changed since the last view the client acknowledged: per unit, one byte saying which
+  parts follow, then positions as centimetre deltas, velocity to 5 cm/s, yaw to 1/65536 of a
+  turn, health to a tenth. Timers (cooldowns, auras, casts, poses) go as the tick they end or
+  began, so they don't change while they run. The player's own state goes in five parts that
+  each go only when they change. `server::net::Client` rebuilds whole `Snapshot`s and
+  `CombatView`s (`protocol::wire::Decoder`), so bots and later the client see what they saw
+  before. `cargo run -p server --release --example wire_bench` times one player's views.
 - **Players:** joining with a name already in the world takes that character back; a player who
   leaves stays standing where they were (until accounts, #88). A connection more than two
   seconds of views behind is dropped.
 - **Solo play** is the same server in-process: the client's `server::Host` joins it as a local
   player, and others could join it over the network.
 - **Measured** (cloud Linux box, release, 2,000 wandering monsters, 25 October 2026): the step
-  takes 1.1 to 1.4 ms, inside the 2 ms budget. Each player's view costs about 1.1 ms to build
-  and encode and is about 10 MB/s, because every view is a full snapshot of everything in range
-  every step. Views from the interest grid, deltas and a 20 to 30 Hz send rate (#34) are what
-  bring that down before more than a handful of players join.
+  takes 1.1 to 1.4 ms, inside the 2 ms budget. Before #34 each player's view cost about 1.1 ms
+  to build and encode and was about 10 MB/s, a full snapshot every step. With wire views at 20 Hz
+  one player among the 2,000 monsters (1,037 in view) costs 0.28 ms to build, 0.18 ms to encode
+  and 0.24 ms to decode a view, at 166 bytes a view (3.2 KB/s) standing still. Building still
+  scans the whole world; taking views from the grid is #278.
 
 ## Load test
 
@@ -207,8 +230,19 @@ Since #189 a snapshot shares each unit's look instead of copying it, which took 
 
 The step itself stays under 2 ms even at 500 players; the ticks are slow because of the views.
 A full snapshot and combat view for every player, every tick, is nearly all of it. Out per player
-falls only because the server manages fewer ticks a second. #34 (views from the interest grid,
-deltas, 20 to 30 Hz) is the fix, and this table is the before. The `players` scene in
+falls only because the server manages fewer ticks a second. That table is the before. With wire
+views at 20 Hz (#34; same box, 10 s a row, 25 October 2026):
+
+| Players | Ticks/s | Step p50 / p99 ms | Build views p50 / p99 | Encode p50 / p99 | Tick p50 / p99 | Out per player | Out total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 51.5 | 0.94 / 1.63 | 8.92 / 16.12 | 8.73 / 13.03 | 18.68 / 28.95 | 30 KB/s | 1.5 MB/s |
+| 200 | 9.1 | 1.40 / 2.17 | 53.90 / 83.94 | 54.88 / 72.01 | 109.05 / 155.71 | 29 KB/s | 5.8 MB/s |
+| 500 | 2.9 | 1.43 / 7.51 | 152.24 / 244.58 | 177.48 / 560.19 | 371.72 / 762.91 | 27 KB/s | 13.7 MB/s |
+
+Out per player is now about 30 KB/s whatever the tick rate (a hundred times less at 200 players),
+and 50 players nearly keep 60 ticks a second. What's left is building views by scanning the whole
+world and encoding a thousand units in view per player, on cores the bots share; #278 takes
+views from the grid and sends far units less often. The `players` scene in
 `crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
 the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
 

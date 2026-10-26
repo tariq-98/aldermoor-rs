@@ -31,10 +31,10 @@ fn the_headless_server_takes_a_client() {
     let p0 = first.unit(client.player).expect("the player is in its own view").position;
     client.send(Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, sprint: false, face_yaw: None }).unwrap();
     let mut last = first.clone();
-    for _ in 0..60 {
+    for _ in 0..20 {
         last = client.next_view().unwrap().0;
     }
-    assert!(last.tick >= first.tick + 60, "a view a step: {} to {}", first.tick, last.tick);
+    assert!(last.tick >= first.tick + 20 * server::SEND_EVERY, "a view every {} steps: {} to {}", server::SEND_EVERY, first.tick, last.tick);
     let moved = (last.unit(client.player).unwrap().position - p0).length();
     assert!(moved > 3.0, "moved {moved} m in a second");
 }

@@ -16,13 +16,15 @@ scripts/run_client.sh --fullscreen --size 5120x1440 --scale 0.65   # ultrawide, 
 
 Controls default to always-on action aiming (`controls::Scheme::Action`, like New World): the
 pointer is locked and hidden, the mouse always turns the character, and a crosshair marks the
-centre of the screen, where clicks target and aimed skills go. WASD runs and strafes relative to
+centre of the screen, where aimed skills go. Left click attacks (hold to keep swinging) and takes
+what's under the crosshair as the target; right click holds the guard (raise it just in time to
+parry). WASD runs and strafes relative to
 it, and S backpedals. Hold Ctrl to get the pointer back for the HUD. `--scheme classic` is
 WoW-style instead: W runs, S backpedals, A/D turn the character and camera, Q/E strafe (A/D strafe
 too while the right button is held), left-drag looks around without turning, right-drag steers and
 both buttons run forward. Drags there hide and hold the pointer; a press that moves under 4 px is a
 click. In both, T or Num Lock toggles autorun. Shift sprints (out of combat), / toggles walking, Space jumps, and
-Alt (Option), V or mouse button 4 rolls the way the keys point. Action looks over the right shoulder. Tab cycles enemies; click selects, right-click starts auto-attacks.
+Alt (Option), V or mouse button 4 rolls the way the keys point. Action looks over the right shoulder. Tab cycles enemies; in Classic, click selects and right-click starts auto-attacks.
 1–9 and 0 send slots 0–9 with a point raycast onto `Valley::ground` under the cursor
 (screen centre while mouse-looking). Hovering/selecting a ground skill previews its actual radius.
 Hold F (or mouse button 5) to guard; ` swaps weapon sets; G revives a selected or nearby downed/defeated friend;
