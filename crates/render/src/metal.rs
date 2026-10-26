@@ -2461,6 +2461,18 @@ mod temporal_tests {
             r.draw(camera, &draws, None).unwrap();
         }
         r.wait().unwrap();
+        r.temporal = true;
+        r.reset_temporal_history();
+        for _ in 0..3 {
+            r.draw(camera, &draws, None).unwrap();
+        }
+        r.wait().unwrap();
+        if r.enable_metalfx(true).unwrap() {
+            for _ in 0..3 {
+                r.draw(camera, &draws, None).unwrap();
+            }
+            r.wait().unwrap();
+        }
         r.surface_uniform.water_features[0] = 0;
         r.resize_water_inputs().unwrap();
         assert!(r.water_inputs.is_none());
