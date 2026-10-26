@@ -24,6 +24,29 @@ const STEP: Duration = Duration::from_nanos(1_000_000_000 / sim::TICK_RATE as u6
 /// the views to build are spread over every step.
 pub const SEND_EVERY: u64 = 3;
 
+/// At most this many threads encode one step's views...
+pub const MAX_ENCODERS: usize = 4;
+/// ...each given at least this many, so a handful of players doesn't pay for starting threads.
+const PER_ENCODER: usize = 8;
+
+/// `work` on `items` in up to `threads` runs at once (this thread one of them), each of at
+/// least [`PER_ENCODER`] items, with their results in order: how the server encodes a step's
+/// views (#292).
+pub fn across<T: Send, R: Send>(items: &mut [T], threads: usize, work: impl Fn(&mut [T]) -> R + Sync) -> Vec<R> {
+    let per = items.len().div_ceil(threads.max(1)).max(PER_ENCODER);
+    if items.len() <= per {
+        return vec![work(items)];
+    }
+    std::thread::scope(|s| {
+        let mut chunks = items.chunks_mut(per);
+        let first = chunks.next().unwrap();
+        let others: Vec<_> = chunks.map(|c| s.spawn(|| work(c))).collect();
+        let mut results = vec![work(first)];
+        results.extend(others.into_iter().map(|h| h.join().expect("an encoder panicked")));
+        results
+    })
+}
+
 /// Where new players appear: the path into Brambleford, facing the village.
 const SPAWN: glam::Vec2 = glam::Vec2::new(6.0, 28.0);
 
@@ -224,6 +247,8 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
     let mut joined = 0u64;
     // The last frame built, to lend the next what hasn't changed.
     let mut frame: Option<sim::NetFrame> = None;
+    // Threads encoding views at once, this one among them: the cores left beside the sim's.
+    let encoders = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1)).clamp(1, MAX_ENCODERS);
     while shared.running.load(Ordering::Acquire) {
         let now = Instant::now();
         if now < next {
@@ -274,40 +299,52 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
         if due {
             frame = Some(world.net_frame(frame.as_ref()));
         }
-        viewers.retain_mut(|(id, viewer)| {
-            let kept = match viewer {
-                Viewer::Local(latest) => {
-                    let mut snapshot = world.snapshot(Some(*id));
-                    snapshot.events = events.clone();
-                    let combat = world.combat_view(Some(*id));
-                    latest.events.lock().unwrap().extend(events.iter().cloned());
-                    // The combat view first, so whoever sees a snapshot finds its combat detail beside it.
-                    *latest.combat.lock().unwrap() = Some(Arc::new(combat));
-                    *latest.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
-                    true
-                }
-                Viewer::Remote(remote) if tick % SEND_EVERY == remote.phase => {
-                    let t = Instant::now();
+        for (id, viewer) in &viewers {
+            if let Viewer::Local(latest) = viewer {
+                let mut snapshot = world.snapshot(Some(*id));
+                snapshot.events = events.clone();
+                let combat = world.combat_view(Some(*id));
+                latest.events.lock().unwrap().extend(events.iter().cloned());
+                // The combat view first, so whoever sees a snapshot finds its combat detail beside it.
+                *latest.combat.lock().unwrap() = Some(Arc::new(combat));
+                *latest.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
+            }
+        }
+        if let Some(frame) = frame.as_ref().filter(|_| due) {
+            let t = Instant::now();
+            let mut sending: Vec<(UnitId, &mut Remote)> = viewers
+                .iter_mut()
+                .filter_map(|(id, v)| match v {
+                    Viewer::Remote(r) if tick % SEND_EVERY == r.phase => Some((*id, r)),
+                    _ => None,
+                })
+                .collect();
+            let world = &world;
+            // Views of one frame don't depend on each other, so a crowd's go across cores (#292).
+            let send = |chunk: &mut [(UnitId, &mut Remote)]| {
+                let (mut dropped, mut bytes) = (Vec::new(), 0);
+                for (id, remote) in chunk {
                     let acked = remote.acked.load(Ordering::Acquire);
                     if acked > 0 {
                         remote.encoder.ack(acked - 1);
                     }
-                    let view = world.encode_view(frame.as_ref().expect("built for whoever's due"), *id, &mut remote.encoder, &since);
-                    let frame = net::encode(&net::ServerMsg::View(view));
-                    encoding += t.elapsed();
-                    bytes += frame.len();
-                    match remote.frames.try_send(frame) {
-                        Ok(()) => true,
-                        Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
+                    let view = world.encode_view(frame, *id, &mut remote.encoder, &since);
+                    let out = net::encode(&net::ServerMsg::View(view));
+                    bytes += out.len();
+                    if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = remote.frames.try_send(out) {
+                        dropped.push(*id);
                     }
                 }
-                Viewer::Remote(_) => true,
+                (dropped, bytes)
             };
-            if !kept {
-                gone.push(*id);
+            let results = across(&mut sending, encoders, send);
+            for (dropped, b) in results {
+                gone.extend(dropped);
+                bytes += b;
             }
-            kept
-        });
+            encoding = t.elapsed();
+        }
+        viewers.retain(|(id, _)| !gone.contains(id));
         // Whoever left stops where they stand.
         for id in gone {
             world.command(id, Command::Move { direction: glam::Vec2::ZERO, walk: false, sprint: false, face_yaw: None });

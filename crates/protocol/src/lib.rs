@@ -589,6 +589,46 @@ pub enum Event {
     WeaponsSwapped { unit: UnitId },
 }
 
+impl Event {
+    /// The units it's about, for sending it only to those who can see them.
+    pub fn units(&self) -> [Option<UnitId>; 2] {
+        use Event::*;
+        match self {
+            Damage { target, source, .. } | Heal { target, source, .. } | Avoided { target, source, .. } => [Some(*target), Some(*source)],
+            Hit { attacker, victim, .. } => [Some(*victim), Some(*attacker)],
+            Died { unit, killer } => [Some(*unit), *killer],
+            Staggered { unit, by } => [Some(*unit), Some(*by)],
+            AbilityUsed { unit, target, .. } => [Some(*unit), *target],
+            ProjectileLaunched { from, .. } => [Some(*from), None],
+            ProjectileEnded { hit, .. } => [*hit, None],
+            LevelUp { unit, .. }
+            | SkillUp { unit, .. }
+            | Respawned { unit }
+            | Jumped { unit }
+            | Dodged { unit }
+            | CastStarted { unit, .. }
+            | CastInterrupted { unit }
+            | AuraApplied { unit, .. }
+            | AuraRemoved { unit, .. }
+            | Downed { unit }
+            | Rallied { unit }
+            | Revived { unit }
+            | DefianceBroken { unit }
+            | Combo { unit, .. }
+            | WeaponsSwapped { unit } => [Some(*unit), None],
+            AreaImpact { .. } | Message { .. } => [None, None],
+        }
+    }
+
+    /// Where it happened, for those it names no unit for, or that can see the place.
+    pub fn at(&self) -> Option<Vec3> {
+        match self {
+            Event::ProjectileEnded { at, .. } | Event::AreaImpact { at, .. } | Event::Combo { at, .. } => Some(*at),
+            _ => None,
+        }
+    }
+}
+
 /// Everything a client needs for one tick.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
