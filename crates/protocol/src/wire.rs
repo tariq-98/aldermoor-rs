@@ -6,7 +6,9 @@
 //! - **Deltas.** Each view says only what changed since a *base*: the last view the player
 //!   acknowledged (`Ack`), so the same scheme works over a transport that drops messages.
 //! - **Quantised.** Positions to the centimetre, velocity to 5 cm/s, yaw to 1/65536 of a turn,
-//!   health to a tenth of a point, endurance and resources to whole points.
+//!   health to a tenth of a point, endurance and resources to whole points, areas to 10 cm.
+//! - **Far units less often** (#278): those within 30 m of the player go out in every view they
+//!   change, then every second view out to 60 m, every fourth to 100 m, every eighth beyond.
 //! - **Timers as ticks.** A cooldown, aura, cast or pose goes out as the tick it ends or began,
 //!   so it doesn't change from view to view while it runs.
 //!
@@ -23,6 +25,13 @@ const TICKS: f32 = 60.0;
 const MINUTE: u64 = 3600;
 /// Views kept waiting for an ack, about a second and a half at 20 Hz.
 const KEPT: usize = 32;
+/// Units within this many metres of the player go out in every view that they change...
+const NEAR: f32 = 30.0;
+/// ...within this many in every second view...
+const MIDDLE: f32 = 60.0;
+/// ...within this many in every fourth, and further out in every eighth (#278).
+const FAR: f32 = 100.0;
+
 /// How long both sides remember a unit's intro after it leaves view, so one wandering along the
 /// edge of view doesn't send its look again each time it comes back. Ten seconds.
 const REMEMBER: u64 = 600;
@@ -32,6 +41,8 @@ const CM: f32 = 100.0;
 const VEL: f32 = 20.0;
 const YAW: f32 = 65536.0 / std::f32::consts::TAU;
 const HEALTH: f32 = 10.0;
+/// Areas to the 10 cm.
+const AREA: f32 = 10.0;
 
 /// One view on the wire.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -268,6 +279,8 @@ struct State {
 pub struct Encoder {
     sent: VecDeque<State>,
     acked: Option<u64>,
+    /// Views encoded, to take turns at sending far units.
+    views: u64,
 }
 
 impl Encoder {
@@ -293,13 +306,29 @@ impl Encoder {
         let mut intros = Vec::new();
         let mut changed = Vec::new();
         let mut units = Vec::with_capacity(snapshot.units.len());
+        let me = snapshot.player.as_ref().and_then(|p| snapshot.units.iter().find(|u| u.id == p.unit)).map(|u| u.position);
+        let latest = if base.is_some() { self.sent.back() } else { None };
+        let turn = self.views;
+        self.views += 1;
         for u in &snapshot.units {
             let before = was.units.get(u.id);
             let mut q = quantise(u, now_ms);
-            if let Some((b, _)) = before
-                && (q.since - b.since).abs() <= SINCE_SLACK
-            {
-                q.since = b.since;
+            if let Some((b, _)) = before {
+                if (q.since - b.since).abs() <= SINCE_SLACK {
+                    q.since = b.since;
+                }
+                // A far unit that changed waits its turn, as it was in the base.
+                let every = match me.map(|m| m.distance(u.position)) {
+                    Some(d) if d >= FAR => 8,
+                    Some(d) if d >= MIDDLE => 4,
+                    Some(d) if d >= NEAR => 2,
+                    _ => 1,
+                };
+                // Off its turn, it stays as the last view had it: what the base has, or a newer
+                // turn's value the player hasn't acked yet (resent, so it doesn't jump back).
+                if (turn + u.id as u64) % every != 0 {
+                    q = latest.and_then(|l| l.units.get(u.id)).map_or(*b, |(l, _)| *l);
+                }
             }
             let intro = match before.map(|(_, i)| i).or_else(|| was.left.get(u.id).map(|(i, _)| i)) {
                 Some(i) if i.kind == u.kind && i.body == u.body && i.name == u.name && (Arc::ptr_eq(&i.look, &u.look) || i.look == u.look) => i.clone(),
@@ -357,7 +386,8 @@ impl Encoder {
         delta.gone = was.combat.gone(&state.combat);
         let mut list = Vec::with_capacity(combat.areas.len());
         for a in &combat.areas {
-            let a = AreaView { elapsed: count_up(a.elapsed, anchor), ..a.clone() };
+            // A warning follows its caster by centimetres a step: to the 10 cm, it mostly stays put.
+            let a = AreaView { elapsed: count_up(a.elapsed, anchor), center: (a.center * AREA).round() / AREA, ..a.clone() };
             if was.areas.get(a.id) != Some(&a) {
                 delta.areas.push(a.clone());
             }
