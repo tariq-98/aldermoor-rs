@@ -99,7 +99,9 @@ pub(crate) fn earner(world: &World, e: Entity) -> Option<(UnitId, Specialty)> {
         None => e,
     };
     world.get::<PlayerControl>(p)?;
-    Some((world.get::<Unit>(p)?.id, world.get::<Fighter>(p)?.specialty?))
+    // A neighbour's player, fighting across the border, is a ghost here without a Fighter.
+    let spec = world.get::<Fighter>(p).and_then(|f| f.specialty).or_else(|| world.get::<crate::region::Ghost>(p)?.specialty)?;
+    Some((world.get::<Unit>(p)?.id, spec))
 }
 
 /// Counts `amount` toward `who`'s share of `monster`, if one is a player (or a player's summon)
@@ -125,14 +127,35 @@ pub(crate) fn pay_out(world: &mut World, dead: Entity) {
     let Some(rank) = world.get::<Brain>(dead).and_then(|b| catalog().mob(b.mob)).map(|m| m.rank) else { return };
     let mob_level = world.get::<Unit>(dead).map_or(1, |u| u.level);
     for id in credit.earners() {
-        let Some(p) = world.resource::<Units>().entity(id) else { continue };
         let total = credit.of(id);
+        // Someone who lives in another region now (fighting across the border, or gone over
+        // it since) is paid there, at their level there.
+        let here = world.resource::<Units>().entity(id).filter(|&p| world.get::<crate::region::Ghost>(p).is_none());
         for &(_, spec, n) in credit.0.iter().filter(|c| c.0 == id) {
-            let level = world.get::<Progress>(p).map_or(1, |pr| pr.level(spec));
-            let amount = (kill_xp(mob_level, rank, level) as f64 * (n / total) as f64).round() as u32;
-            give(world, p, spec, amount);
+            let share = n / total;
+            match here {
+                Some(p) => {
+                    let level = world.get::<Progress>(p).map_or(1, |pr| pr.level(spec));
+                    give(world, p, spec, kill_xp_share(mob_level, rank, level, share));
+                }
+                None => {
+                    let region = world.resource::<Units>().entity(id).and_then(|p| crate::region::ghost_region(world, p)).unwrap_or(id / crate::region::BLOCK);
+                    crate::region::send_to(world, region, id, crate::region::Landing::KillXp { spec, mob_level, rank, share });
+                }
+            }
         }
     }
+}
+
+/// A `share` of what a `rank` monster of `mob_level` pays someone at `level`.
+pub(crate) fn kill_xp_share(mob_level: u8, rank: crate::content::Rank, level: u8, share: f32) -> u32 {
+    (kill_xp(mob_level, rank, level) as f64 * share as f64).round() as u32
+}
+
+/// Pays a share of a kill made in another region (`Landing::KillXp`) to `e`, which lives here.
+pub(crate) fn pay_share(world: &mut World, e: Entity, spec: Specialty, mob_level: u8, rank: crate::content::Rank, share: f32) {
+    let level = world.get::<Progress>(e).map_or(1, |pr| pr.level(spec));
+    give(world, e, spec, kill_xp_share(mob_level, rank, level, share));
 }
 
 /// Adds XP to a specialty, levelling it up (and the player's numbers, if it's equipped).
