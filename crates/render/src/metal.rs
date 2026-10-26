@@ -58,6 +58,38 @@ struct DrawUniform {
     dyes: [[f32; 4]; 2],
     references: [[f32; 4]; 2],
 }
+// Word-packed shadow inputs. Offsets are shared with shadow_vertex in shaders.metal.
+// Positions are always present; unclassified rigid meshes use exactly 12 bytes/vertex.
+// Optional data retains full precision, including uint joints and vertex alpha.
+fn shadow_stream(p: &crate::model::Primitive) -> (Vec<u32>, [u32; 2]) {
+    let region = p.vertices.iter().any(|v| v.position[3] != -1.);
+    let wind = p.vertices.iter().any(|v| v.normal[3].to_bits() != 0);
+    let skin = p.skin.is_some()
+        || p.vertices.iter().any(|v| {
+            v.joints != [0; 4] || v.weights.map(f32::to_bits) != [1f32.to_bits(), 0, 0, 0]
+        });
+    let mask = p.material.alpha_mode == 1;
+    let flags = region as u32 | (wind as u32) << 1 | (skin as u32) << 2 | (mask as u32) << 3;
+    let stride = 3 + region as usize + wind as usize + 8 * skin as usize + 3 * mask as usize;
+    let mut words = Vec::with_capacity(p.vertices.len() * stride);
+    for v in &p.vertices {
+        words.extend(v.position[..3].iter().map(|x| x.to_bits()));
+        if region {
+            words.push(v.position[3].to_bits());
+        }
+        if wind {
+            words.push(v.normal[3].to_bits());
+        }
+        if skin {
+            words.extend(v.joints);
+            words.extend(v.weights.map(f32::to_bits));
+        }
+        if mask {
+            words.extend([v.uv[0].to_bits(), v.uv[1].to_bits(), v.color[3].to_bits()]);
+        }
+    }
+    (words, [stride as u32, flags])
+}
 struct GpuMesh {
     vertices: Obj<dyn MTLBuffer>,
     indices: Obj<dyn MTLBuffer>,
@@ -65,6 +97,8 @@ struct GpuMesh {
     count: usize,
     maps: [Obj<dyn MTLTexture>; 5],
     material: Material,
+    shadow_vertices: Obj<dyn MTLBuffer>,
+    shadow_layout: [u32; 2],
 }
 pub const GPU_PASS_NAMES: [&str; 10] = [
     "shadow_0",
@@ -1118,6 +1152,7 @@ impl Renderer {
             return Ok(());
         }
         let p = &draw.model.primitives[draw.primitive];
+        let (shadow_words, shadow_layout) = shadow_stream(p);
         let mut maps = self.fallbacks.clone();
         for (i, map) in p.material.maps.iter().enumerate() {
             if let Some(t) = map {
@@ -1141,6 +1176,8 @@ impl Renderer {
                 count: p.indices.len(),
                 maps,
                 material: p.material.clone(),
+                shadow_vertices: buffer(&self.device, &shadow_words)?,
+                shadow_layout,
             },
         );
         Ok(())
@@ -1898,7 +1935,19 @@ impl Renderer {
                 p.uniform
             };
             unsafe {
-                enc.setVertexBuffer_offset_atIndex(Some(&g.vertices), 0, 0);
+                let compact_shadow = cascade.is_some();
+                enc.setVertexBuffer_offset_atIndex(
+                    Some(if compact_shadow {
+                        &g.shadow_vertices
+                    } else {
+                        &g.vertices
+                    }),
+                    0,
+                    0,
+                );
+                if compact_shadow {
+                    enc.setVertexBytes_length_atIndex(ptr(&g.shadow_layout), 8, 7);
+                }
                 if self.inline_constants && !instanced {
                     enc.setVertexBytes_length_atIndex(
                         NonNull::new(
@@ -2404,5 +2453,310 @@ mod temporal_tests {
             }
         }
         assert!(covered > 100, "the test must actually rasterise geometry");
+    }
+    // The original interleaved vertex entry point is compiled only by this regression test.
+    const SHADOW_REFERENCE: &str = r#"vertex Vary shadow_vertex_reference(uint id [[vertex_id]],uint instance [[instance_id]],device const Vertex* v [[buffer(0)]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],device const float4x4* bones [[buffer(3)]],device const float4* morphs [[buffer(4)]],constant uint& cascade [[buffer(5)]],device const float4x4* old_bones [[buffer(6)]]){
+    constant Draw& d=instances[instance];Vary o=deform(id,v,f,d,bones,morphs,old_bones);o.instance=instance;o.position=f.shadows[cascade]*float4(o.world,1);int region=int(round(o.region));if(region>=0&&region<31&&(d.flags.x&(1u<<region)))o.position=float4(2,2,2,1);return o;
+}
+"#;
+
+    fn reference_shadow_pipeline(r: &Renderer, masked: bool) -> Obj<dyn MTLRenderPipelineState> {
+        let source = format!("{}\n{}", include_str!("shaders.metal"), SHADOW_REFERENCE);
+        let library = r
+            .device
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+            .unwrap();
+        let desc = MTLRenderPipelineDescriptor::new();
+        desc.setVertexFunction(
+            library
+                .newFunctionWithName(&NSString::from_str("shadow_vertex_reference"))
+                .as_deref(),
+        );
+        if masked {
+            desc.setFragmentFunction(
+                library
+                    .newFunctionWithName(&NSString::from_str("shadow_fragment"))
+                    .as_deref(),
+            );
+        }
+        desc.setDepthAttachmentPixelFormat(MTLPixelFormat::Depth32Float);
+        r.device
+            .newRenderPipelineStateWithDescriptor_error(&desc)
+            .unwrap()
+    }
+
+    // Exercise the real upload and pipelines with instanced draws, with a small depth array read into memory.
+    // Each cascade has a different transform; no image files or authored assets are produced.
+    fn shadow_depth_bytes(
+        r: &mut Renderer,
+        draws: &[Draw],
+        time: f32,
+        reference: bool,
+    ) -> Vec<u32> {
+        for d in draws {
+            r.upload(d).unwrap();
+        }
+        let uniforms = buffer(&r.device, &[0u8; 4096]).unwrap();
+        let bones = buffer(
+            &r.device,
+            &[
+                Mat4::from_rotation_z(0.12),
+                Mat4::from_translation(Vec3::new(0.1, 0.03, 0.02)),
+                Mat4::from_rotation_y(-0.09),
+                Mat4::IDENTITY,
+            ]
+            .map(|m| m.to_cols_array_2d()),
+        )
+        .unwrap();
+        for (i, d) in draws.iter().enumerate() {
+            let p = &d.model.primitives[d.primitive];
+            let mut u: DrawUniform = bytemuck::Zeroable::zeroed();
+            u.model = d.transform.to_cols_array_2d();
+            u.previous_model = u.model;
+            u.base = d.base;
+            u.params[3] = p.material.alpha_cutoff;
+            u.flags = [
+                d.hidden,
+                (!d.palette.is_empty()) as u32,
+                p.material.alpha_mode,
+                0,
+            ];
+            u.morph = [
+                d.morph[0],
+                d.morph[1],
+                (!p.morphs.is_empty()) as u32 as f32,
+                0.,
+            ];
+            u.previous_morph = u.morph;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr(&u).as_ptr().cast::<u8>(),
+                    uniforms
+                        .contents()
+                        .as_ptr()
+                        .cast::<u8>()
+                        .add(i * std::mem::size_of::<DrawUniform>()),
+                    std::mem::size_of::<DrawUniform>(),
+                );
+            }
+        }
+        let mut f: Frame = bytemuck::Zeroable::zeroed();
+        f.vp = Mat4::IDENTITY.to_cols_array_2d();
+        f.previous_vp = f.vp;
+        f.clock = [time, time - 0.1, 1.3, 0.];
+        for c in 0..3 {
+            f.shadows[c] = (Mat4::from_translation(Vec3::new(c as f32 * 0.07, 0., 0.))
+                * Mat4::from_scale(Vec3::splat(1. - c as f32 * 0.1)))
+            .to_cols_array_2d();
+        }
+        let desc = MTLTextureDescriptor::new();
+        unsafe {
+            desc.setWidth(64);
+            desc.setHeight(64);
+            desc.setArrayLength(3);
+        }
+        desc.setTextureType(MTLTextureType::Type2DArray);
+        desc.setPixelFormat(MTLPixelFormat::Depth32Float);
+        desc.setStorageMode(MTLStorageMode::Private);
+        desc.setUsage(MTLTextureUsage::RenderTarget);
+        let depth = r.device.newTextureWithDescriptor(&desc).unwrap();
+        let read = buffer(&r.device, &[0u32; 64 * 64 * 3]).unwrap();
+        let cb = r.queue.commandBuffer().unwrap();
+        for cascade in 0..3 {
+            let pass = MTLRenderPassDescriptor::new();
+            let a = pass.depthAttachment();
+            a.setTexture(Some(&depth));
+            a.setSlice(cascade);
+            a.setLoadAction(MTLLoadAction::Clear);
+            a.setStoreAction(MTLStoreAction::Store);
+            a.setClearDepth(1.);
+            let enc = cb.renderCommandEncoderWithDescriptor(&pass).unwrap();
+            enc.setDepthStencilState(Some(&r.depth_state));
+            enc.setDepthBias_slopeScale_clamp(0.001, 1.25, 0.01);
+            let g = &r.meshes[&(draws[0].model.id, draws[0].primitive)];
+            enc.setRenderPipelineState(if g.material.alpha_mode == 1 {
+                &r.shadow_mask_pipeline
+            } else {
+                &r.shadow_pipeline
+            });
+            enc.setCullMode(MTLCullMode::None);
+            unsafe {
+                enc.setVertexBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
+                enc.setVertexBytes_length_atIndex(ptr(&(cascade as u32)), 4, 5);
+                enc.setVertexBytes_length_atIndex(ptr(&g.shadow_layout), 8, 7);
+                enc.setVertexBuffer_offset_atIndex(
+                    Some(if reference {
+                        &g.vertices
+                    } else {
+                        &g.shadow_vertices
+                    }),
+                    0,
+                    0,
+                );
+                enc.setVertexBuffer_offset_atIndex(Some(&uniforms), 0, 2);
+                enc.setVertexBuffer_offset_atIndex(Some(&bones), 0, 3);
+                enc.setVertexBuffer_offset_atIndex(Some(&g.morphs), 0, 4);
+                enc.setVertexBuffer_offset_atIndex(Some(&bones), 0, 6);
+                enc.setFragmentBuffer_offset_atIndex(Some(&uniforms), 0, 2);
+                enc.setFragmentTexture_atIndex(Some(&g.maps[0]), 0);
+                enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
+                    MTLPrimitiveType::Triangle,g.count,MTLIndexType::UInt32,&g.indices,0,draws.len());
+            }
+            enc.endEncoding();
+        }
+        let enc = cb.blitCommandEncoder().unwrap();
+        for c in 0..3 {
+            unsafe {
+                enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                &depth,c,0,MTLOrigin{x:0,y:0,z:0},MTLSize{width:64,height:64,depth:1},&read,c*64*64*4,256,64*64*4);
+            }
+        }
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        assert!(cb.error().is_none());
+        unsafe {
+            std::slice::from_raw_parts(read.contents().as_ptr().cast::<u32>(), 64 * 64 * 3).to_vec()
+        }
+    }
+
+    #[test]
+    fn compact_shadow_streams_match_interleaved_depth_in_every_cascade() {
+        use crate::model::{Model, Primitive, Vertex};
+        let mut r = Renderer::with_samples(64, 64, 1., 1).unwrap();
+        let compact = (r.shadow_pipeline.clone(), r.shadow_mask_pipeline.clone());
+        let reference = (
+            reference_shadow_pipeline(&r, false),
+            reference_shadow_pipeline(&r, true),
+        );
+        // Independent and combined skin/morph/wind/mask inputs, plus hidden-region clipping.
+        for bits in 0..32 {
+            let skinned = bits & 1 != 0;
+            let morphed = bits & 2 != 0;
+            let windy = bits & 4 != 0;
+            let masked = bits & 8 != 0;
+            let hidden = bits & 16 != 0;
+            let mut vertices: Vec<_> = [
+                Vec3::new(-0.7, -0.6, 0.5),
+                Vec3::new(0.7, -0.6, 0.5),
+                Vec3::new(0., 0.7, 0.5),
+            ]
+            .into_iter()
+            .map(|p| Vertex::plain(p, Vec3::Z, [1.; 4]))
+            .collect();
+            for (i, v) in vertices.iter_mut().enumerate() {
+                if skinned {
+                    v.joints = [0, 1, 2, 3];
+                    v.weights = [0.4, 0.3, 0.2, 0.1];
+                }
+                if windy {
+                    v.normal[3] = 0.2 + i as f32 * 0.3;
+                }
+                if hidden {
+                    v.position[3] = 2.;
+                }
+                v.uv = [i as f32 * 0.4, 0.7, 0., 0.];
+                v.color[3] = if i == 0 { 0.05 } else { 1. };
+            }
+            let mut material = Material {
+                alpha_mode: if masked { 1 } else { 0 },
+                double_sided: true,
+                ..Default::default()
+            };
+            if masked {
+                material.maps[0] = Some(Arc::new(Texture {
+                    key: format!("test-shadow-mask:{bits}"),
+                    width: 2,
+                    height: 2,
+                    rgba: Mutex::new(Some(vec![
+                        255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                        255,
+                    ])),
+                    compressed: None,
+                }));
+            }
+            let p = Primitive {
+                bounds: Bounds::from_points(
+                    vertices.iter().map(|v| Vec3::from_slice(&v.position[..3])),
+                ),
+                vertices,
+                indices: vec![0, 1, 2],
+                material,
+                node: 0,
+                skin: skinned.then_some(0),
+                morphs: if morphed {
+                    vec![vec![[0.04, 0.03, 0.01]; 3], vec![[-0.01, 0.06, -0.02]; 3]]
+                } else {
+                    vec![]
+                },
+                morph_names: if morphed {
+                    vec!["arrow".into(), "draw".into()]
+                } else {
+                    vec![]
+                },
+            };
+            let (words, layout) = shadow_stream(&p);
+            assert_eq!(words.len(), p.vertices.len() * layout[0] as usize);
+            assert_eq!(
+                layout[0],
+                3 + hidden as u32 + windy as u32 + 8 * skinned as u32 + 3 * masked as u32
+            );
+            let model = Arc::new(Model {
+                id: 10000 + bits,
+                key: format!("test:{bits}"),
+                nodes: vec![],
+                rest_world: vec![],
+                skins: vec![],
+                primitives: vec![p],
+                clips: HashMap::new(),
+            });
+            let draws: Vec<_> = (0..2)
+                .map(|i| Draw {
+                    model: model.clone(),
+                    primitive: 0,
+                    instance: i,
+                    transform: Mat4::from_translation(Vec3::new(i as f32 * 0.15, 0., 0.))
+                        * Mat4::from_rotation_y(0.07),
+                    palette: if skinned {
+                        Arc::from([Mat4::IDENTITY; 4])
+                    } else {
+                        Arc::from([])
+                    },
+                    hidden: if hidden { 1 << 2 } else { 0 },
+                    base: [1.; 4],
+                    morph: [0.6, 0.3],
+                    dye: None,
+                    base_map: None,
+                })
+                .collect();
+            for time in [0., 1.75] {
+                r.shadow_pipeline = reference.0.clone();
+                r.shadow_mask_pipeline = reference.1.clone();
+                let before = shadow_depth_bytes(&mut r, &draws, time, true);
+                r.shadow_pipeline = compact.0.clone();
+                r.shadow_mask_pipeline = compact.1.clone();
+                let after = shadow_depth_bytes(&mut r, &draws, time, false);
+                for c in 0..3 {
+                    let range = c * 4096..(c + 1) * 4096;
+                    assert_eq!(
+                        before[range.clone()],
+                        after[range.clone()],
+                        "bits={bits},time={time},cascade={c}"
+                    );
+                    let covered = after[range]
+                        .iter()
+                        .filter(|&&z| z != 1f32.to_bits())
+                        .count();
+                    if hidden {
+                        assert_eq!(covered, 0);
+                    } else {
+                        assert!(
+                            covered > 100,
+                            "test must rasterise, bits={bits},cascade={c}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

@@ -25,8 +25,22 @@ Vary deform(uint id,device const Vertex* vertices,constant Frame& f,constant Dra
     o.normal=normalize((d.model*skin*float4(a.normal.xyz,0)).xyz);o.tangent=float4((d.model*skin*float4(a.tangent.xyz,0)).xyz,a.tangent.w);o.color=a.color;o.uv=a.uv.xy;o.surface=a.uv.zw;return o;
 }
 vertex Vary scene_vertex(uint id [[vertex_id]],uint instance [[instance_id]],device const Vertex* v [[buffer(0)]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],device const float4x4* bones [[buffer(3)]],device const float4* morphs [[buffer(4)]],device const float4x4* old_bones [[buffer(6)]]){Vary o=deform(id,v,f,instances[instance],bones,morphs,old_bones);o.instance=instance;return o;}
-vertex Vary shadow_vertex(uint id [[vertex_id]],uint instance [[instance_id]],device const Vertex* v [[buffer(0)]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],device const float4x4* bones [[buffer(3)]],device const float4* morphs [[buffer(4)]],constant uint& cascade [[buffer(5)]],device const float4x4* old_bones [[buffer(6)]]){
-    constant Draw& d=instances[instance];Vary o=deform(id,v,f,d,bones,morphs,old_bones);o.instance=instance;o.position=f.shadows[cascade]*float4(o.world,1);int region=int(round(o.region));if(region>=0&&region<31&&(d.flags.x&(1u<<region)))o.position=float4(2,2,2,1);return o;
+// Only shadow inputs are fetched. The scene's interleaved Vertex and deform stay unchanged.
+vertex Vary shadow_vertex(uint id [[vertex_id]],uint instance [[instance_id]],device const uint* words [[buffer(0)]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],device const float4x4* bones [[buffer(3)]],device const float4* morphs [[buffer(4)]],constant uint& cascade [[buffer(5)]],constant uint2& layout [[buffer(7)]]){
+    device const uint* v=words+id*layout.x;uint at=3,flags=layout.y;
+    float3 p=float3(as_type<float>(v[0]),as_type<float>(v[1]),as_type<float>(v[2]));
+    float region=(flags&1)?as_type<float>(v[at++]):-1.;
+    float weight=(flags&2)?as_type<float>(v[at++]):0.;
+    uint4 joints=uint4(0);float4 weights=float4(1,0,0,0);
+    if(flags&4){joints=uint4(v[at],v[at+1],v[at+2],v[at+3]);at+=4;weights=float4(as_type<float>(v[at]),as_type<float>(v[at+1]),as_type<float>(v[at+2]),as_type<float>(v[at+3]));at+=4;}
+    constant Draw& d=instances[instance];
+    if(d.morph.z>0.)p+=morphs[id*2].xyz*d.morph.x+morphs[id*2+1].xyz*d.morph.y;
+    float4x4 skin=d.flags.y!=0?bones[joints.x]*weights.x+bones[joints.y]*weights.y+bones[joints.z]*weights.z+bones[joints.w]*weights.w:float4x4(1.);
+    float3 world=wind((d.model*skin*float4(p,1)).xyz,weight,f.clock.x,f.clock.z);
+    Vary o={};o.instance=instance;o.position=f.shadows[cascade]*float4(world,1);
+    int hidden_region=int(round(region));if(hidden_region>=0&&hidden_region<31&&(d.flags.x&(1u<<hidden_region)))o.position=float4(2,2,2,1);
+    if(flags&8){o.uv=float2(as_type<float>(v[at]),as_type<float>(v[at+1]));o.color.a=as_type<float>(v[at+2]);}
+    return o;
 }
 fragment void shadow_fragment(Vary i [[stage_in]],constant Draw* instances [[buffer(2)]],texture2d<float> base [[texture(0)]]){constant Draw& d=instances[i.instance];if(d.flags.z==1){constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear);if(base.sample(s,i.uv).a*d.base.a*i.color.a<d.params.w)discard_fragment();}}
 float sample_cascade(float3 world,uint layer,float bias,constant Frame& f,depth2d_array<float> shadow){float4 clip=f.shadows[layer]*float4(world,1);float3 p=clip.xyz/clip.w;float2 uv=p.xy*float2(0.5,-0.5)+0.5;if(any(uv<0.)||any(uv>1.)||p.z<0.||p.z>1.)return 1.;constexpr sampler cmp(coord::normalized,address::clamp_to_edge,filter::linear,compare_func::less_equal);float v=0.;for(int y=-1;y<=1;y+=2)for(int x=-1;x<=1;x+=2)v+=shadow.sample_compare(cmp,uv+float2(x,y)*0.5*f.splits.w,layer,p.z-bias);return v*0.25;}
