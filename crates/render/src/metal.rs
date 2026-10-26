@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, stable_cascades},
+    visibility::{Bounds, Frustum, near_character_shadows, stable_cascades},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -244,6 +244,30 @@ struct Prepared {
     scene: bool,
     shadows: [bool; 3],
 }
+/// Shader resources shared by an instanced draw. Appearance values, hidden regions,
+/// transforms and morph weights are already per-instance DrawUniform fields.
+#[derive(Hash, Eq, PartialEq, Debug)]
+struct BatchKey<'a> {
+    model: u64,
+    primitive: usize,
+    current: usize,
+    previous: usize,
+    base_map: Option<&'a str>,
+    dye_mask: Option<&'a str>,
+}
+impl Prepared {
+    fn batch_key<'a>(&self, draw: &'a Draw) -> BatchKey<'a> {
+        BatchKey {
+            model: draw.model.id,
+            primitive: draw.primitive,
+            current: self.current,
+            previous: self.previous,
+            base_map: draw.base_map.as_ref().map(|t| t.key.as_str()),
+            dye_mask: draw.dye.as_ref().map(|d| d.mask.key.as_str()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Stats {
     pub gpu_ms: f64,
@@ -1240,12 +1264,19 @@ impl Renderer {
             .fx_pass
             .prepare(&self.device, slot, effects.as_ref(), camera.eye)?;
         // Size before writing, after this slot's fence. Buffers only grow and remain alive
-        // until their submitted command buffer completes. Count each shared skin once.
+        // until their submitted command buffer completes. Count each current/previous pair once.
         let mut unique = std::collections::HashSet::new();
         let bone_need = 256
             + draws
                 .iter()
-                .filter(|d| !d.palette.is_empty() && unique.insert(d.palette.as_ptr() as usize))
+                .filter(|d| {
+                    let old = self.previous.get(&d.instance).filter(|old| {
+                        valid && old.model_key == d.model.id && old.palette.len() == d.palette.len()
+                    });
+                    let previous = old.map_or(&d.palette, |old| &old.palette);
+                    !d.palette.is_empty()
+                        && unique.insert((d.palette.as_ptr() as usize, previous.as_ptr() as usize))
+                })
                 .map(|d| ((std::mem::size_of_val(&*d.palette) + 255) & !255) * 2)
                 .sum::<usize>();
         let stride = (std::mem::size_of::<DrawUniform>() + 255) & !255;
@@ -1284,6 +1315,36 @@ impl Renderer {
         let mut calls = 0;
         let mut triangles = 0;
         let mut culled = 0;
+        // Character::draws uses low 32 bits for parts/primitives; the caller adds
+        // the entity in the upper bits. Scenery/terrain reserve the top two bits.
+        // Seed from skinned draws, then apply the decision to every part, including
+        // rigid weapons. This leaves non-character scenery shadows unchanged.
+        let mut character_bounds: HashMap<u32, Bounds> = HashMap::new();
+        for d in draws
+            .iter()
+            .filter(|d| !d.palette.is_empty() && d.instance >> 62 == 0)
+        {
+            let b = d.model.primitives[d.primitive]
+                .bounds
+                .transformed(d.transform);
+            character_bounds
+                .entry((d.instance >> 32) as u32)
+                .and_modify(|old| {
+                    let lo = (old.center - old.half).min(b.center - b.half);
+                    let hi = (old.center + old.half).max(b.center + b.half);
+                    *old = Bounds {
+                        center: (lo + hi) * 0.5,
+                        half: (hi - lo) * 0.5,
+                    };
+                })
+                .or_insert(b);
+        }
+        let shadow_characters = near_character_shadows(
+            character_bounds.iter().map(|(&id, &bounds)| (id, bounds)),
+            camera.eye,
+            camera.fov,
+            self.height,
+        );
         for (i, d) in draws.iter().enumerate() {
             let p = &d.model.primitives[d.primitive];
             let mut bounds = p.bounds.transformed(d.transform);
@@ -1297,9 +1358,12 @@ impl Renderer {
                 center: bounds.center - sun * 50.,
                 half: bounds.half + sun.abs() * 50.,
             };
+            let character = (d.instance >> 32) as u32;
+            let casts_shadow = !character_bounds.contains_key(&character)
+                || shadow_characters.contains(&character);
             let shadows = shadow_views
                 .each_ref()
-                .map(|v| v.intersects(bounds) && view.intersects(swept));
+                .map(|v| casts_shadow && v.intersects(bounds) && view.intersects(swept));
             if !scene && !shadows.iter().any(|v| *v) {
                 culled += 1;
                 continue;
@@ -1311,11 +1375,11 @@ impl Renderer {
             let (current, previous) = if d.palette.is_empty() {
                 (0, 0)
             } else {
+                let current = &*d.palette;
+                let prev = old.map_or(current, |o| &*o.palette);
                 *palette_offsets
-                    .entry(d.palette.as_ptr() as usize)
+                    .entry((current.as_ptr() as usize, prev.as_ptr() as usize))
                     .or_insert_with(|| {
-                        let current = &*d.palette;
-                        let prev = old.map_or(current, |o| &*o.palette);
                         let mut put = |data: &[Mat4]| {
                             let size = std::mem::size_of_val(data);
                             let at = used;
@@ -1786,16 +1850,15 @@ impl Renderer {
                 _ => true,
             })
             .collect();
-        // Repeated opaque rigid meshes share an instanced draw. Each instance keeps its
-        // own current/previous transforms (including spinning scenery) in packed constants.
+        // Merge opaque draws only when geometry, textures and BOTH bone bindings match.
+        // Different dyes, hidden regions, transforms and morphs remain per-instance.
+        // Distinct animated poses stay separate until the shader supports palette offsets.
         let mut groups: Vec<Vec<&Prepared>> = Vec::new();
-        let mut rigid = HashMap::new();
+        let mut batches = HashMap::new();
         for p in visible.drain(..) {
             let d = &draws[p.draw];
-            let batchable =
-                d.palette.is_empty() && !self.blended(d) && d.dye.is_none() && d.base_map.is_none();
-            if batchable {
-                let index = *rigid.entry((d.model.id, d.primitive)).or_insert_with(|| {
+            if !self.blended(d) {
+                let index = *batches.entry(p.batch_key(d)).or_insert_with(|| {
                     groups.push(Vec::new());
                     groups.len() - 1
                 });
@@ -2132,6 +2195,176 @@ mod temporal_tests {
             r.device.name()
         );
         false
+    }
+
+    fn copy_draw(d: &Draw) -> Draw {
+        Draw {
+            dye: d.dye.clone(),
+            base_map: d.base_map.clone(),
+            instance: d.instance,
+            model: d.model.clone(),
+            primitive: d.primitive,
+            transform: d.transform,
+            palette: d.palette.clone(),
+            hidden: d.hidden,
+            base: d.base,
+            morph: d.morph,
+        }
+    }
+
+    fn crowd_character(dyed: bool) -> crate::character::Character {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let catalog = assets::Catalog::load(root).unwrap();
+        let mut look = protocol::Look {
+            art: "male".into(),
+            pieces: [
+                "peasant.top",
+                "peasant.trousers",
+                "peasant.shoes",
+                "plate.cuirass",
+                "plate.legs",
+                "plate.gauntlets",
+                "plate.pauldrons",
+            ]
+            .map(str::to_owned)
+            .into(),
+            gear: vec![
+                ("main_hand".into(), "sword.arming".into()),
+                ("off_hand".into(), "shield.round".into()),
+            ],
+            drawn: true,
+            ..Default::default()
+        };
+        if dyed {
+            look.pieces = vec!["robe.healer".into()];
+            look.dyes = vec![(
+                "robe.healer".into(),
+                Some(catalog.humanoid.dyes[0].id.clone()),
+                None,
+            )];
+        }
+        crate::character::Character::load(&catalog, &mut crate::model::ModelCache::default(), &look)
+            .unwrap()
+    }
+
+    #[test]
+    fn compatible_skinned_and_dyed_instances_match_separate_draw_pixels() {
+        let character = crowd_character(true);
+        let source = character.draws(Vec3::ZERO, 0.);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let catalog = assets::Catalog::load(&root).unwrap();
+        let mut draws = Vec::new();
+        for (id, x) in [(1u64, -1.2), (2, 1.2)] {
+            for d in &source {
+                let mut d = copy_draw(d);
+                d.instance |= id << 32;
+                d.transform = Mat4::from_translation(Vec3::X * x) * d.transform;
+                if id == 2
+                    && let Some(dye) = &d.dye
+                {
+                    let mut dye = (**dye).clone();
+                    let colour = catalog.humanoid.dyes[1].linear;
+                    dye.colours[0] = [colour[0], colour[1], colour[2], 1.];
+                    d.dye = Some(Arc::new(dye));
+                }
+                draws.push(d);
+            }
+        }
+        assert!(
+            draws
+                .iter()
+                .any(|d| d.dye.is_some() && !d.palette.is_empty())
+        );
+        let mut r = Renderer::with_samples(256, 256, 1., 1).unwrap();
+        r.scene_time = Some(0.);
+        r.look = LookSettings::load(&root.join("catalog/look.json")).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 2., 6.),
+            target: Vec3::Y,
+            fov: 1.,
+        };
+        let batched = r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let before = output_bytes(&r);
+        // Reload identical supplied meshes for the second character to force separate
+        // geometry bindings. The visual input stays identical; no files are generated.
+        let mut separate = crate::model::ModelCache::default();
+        for d in draws.iter_mut().filter(|d| d.instance >> 32 == 2) {
+            d.model = separate.get(Path::new(&d.model.key)).unwrap();
+        }
+        let unbatched = r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert!(batched.draw_calls < unbatched.draw_calls);
+        assert_eq!(batched.triangles, unbatched.triangles);
+        assert!(batched.triangles > 1000);
+        assert_eq!(
+            before,
+            output_bytes(&r),
+            "instancing must preserve authored dyes and skinning"
+        );
+    }
+
+    #[test]
+    fn converged_current_palettes_keep_each_instances_previous_pose() {
+        let character = crowd_character(false);
+        let source = character.draws(Vec3::ZERO, 0.);
+        let source = source.iter().find(|d| !d.palette.is_empty()).unwrap();
+        let mut a = copy_draw(source);
+        a.instance = 1 << 32;
+        let mut b = copy_draw(source);
+        b.instance = 2 << 32;
+        b.palette = source
+            .palette
+            .iter()
+            .map(|m| Mat4::from_translation(Vec3::X * 0.1) * *m)
+            .collect();
+        let mut r = Renderer::new(64, 64, 1.).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 2., 6.),
+            target: Vec3::Y,
+            fov: 1.,
+        };
+        r.draw(camera, &[copy_draw(&a), copy_draw(&b)], None)
+            .unwrap();
+        r.wait().unwrap();
+        b.palette = a.palette.clone();
+        let stats = r.draw(camera, &[a, b], None).unwrap();
+        r.wait().unwrap();
+        let aligned = (std::mem::size_of_val(&*source.palette) + 255) & !255;
+        assert_eq!(
+            stats.bone_bytes,
+            256 + aligned * 4,
+            "shared current pose with different histories needs two palette pairs"
+        );
+    }
+
+    #[test]
+    fn renderer_accepts_two_hundred_armoured_characters() {
+        let character = crowd_character(false);
+        let mut draws = Vec::new();
+        for i in 0..200 {
+            let position = Vec3::new((i % 20) as f32 * 1.5 - 14.25, 0., (i / 20) as f32 * 1.5);
+            draws.extend(character.draws(position, 0.).into_iter().map(|mut d| {
+                d.instance |= ((i + 1) as u64) << 32;
+                d
+            }));
+        }
+        let mut r = Renderer::new(640, 360, 0.65).unwrap();
+        let stats = r
+            .draw(
+                Camera {
+                    eye: Vec3::new(0., 18., 42.),
+                    target: Vec3::new(0., 1., 7.),
+                    fov: 1.1,
+                },
+                &draws,
+                None,
+            )
+            .unwrap();
+        r.wait().unwrap();
+        assert!(stats.triangles > 1_000_000);
+        assert!(stats.bone_bytes > 64 * 1024);
+        assert!(stats.bone_capacity >= stats.bone_bytes);
     }
 
     #[test]

@@ -78,6 +78,30 @@ pub fn lod_for_height(pixels: f32, previous: Option<usize>) -> usize {
         }
     }
 }
+/// Bound real character shadows to the nearest 24 near-detail characters (#75).
+/// Uses the existing LOD1 screen-size boundary; no new authored look threshold.
+/// Distance rather than signed view depth retains nearby offscreen shadow casters.
+pub(crate) fn near_character_shadows(
+    characters: impl Iterator<Item = (u32, Bounds)>,
+    eye: Vec3,
+    fov: f32,
+    pixels: u32,
+) -> std::collections::HashSet<u32> {
+    let mut near: Vec<_> = characters
+        .filter_map(|(id, bounds)| {
+            let distance = bounds.center.distance_squared(eye);
+            let height = bounds.half.y * 2.;
+            (distance.is_finite()
+                && height.is_finite()
+                && height > 0.
+                && lod_for_height(screen_height(height, distance.sqrt(), fov, pixels), None) < 2)
+                .then_some((id, distance))
+        })
+        .collect();
+    near.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    near.into_iter().take(24).map(|(id, _)| id).collect()
+}
+
 pub fn stable_cascades(
     eye: Vec3,
     target: Vec3,
@@ -145,6 +169,31 @@ mod tests {
         assert_eq!(lod_for_height(310., Some(1)), 1);
         assert_eq!(lod_for_height(105., Some(2)), 2);
     }
+    #[test]
+    fn crowd_shadows_choose_nearest_characters_independent_of_input_order() {
+        let bounds = |distance| Bounds {
+            center: Vec3::Z * distance,
+            half: Vec3::new(0.4, 0.9, 0.4),
+        };
+        let input: Vec<_> = (0..40)
+            .map(|id| (id, bounds(1. + id as f32 * 0.1)))
+            .collect();
+        let a = near_character_shadows(input.iter().copied(), Vec3::ZERO, 1., 1200);
+        let b = near_character_shadows(input.iter().rev().copied(), Vec3::ZERO, 1., 1200);
+        assert_eq!(a, b);
+        assert_eq!(a, (0..24).collect());
+        let same_distance = (0..40).rev().map(|id| (id, bounds(2.)));
+        assert_eq!(
+            near_character_shadows(same_distance, Vec3::ZERO, 1., 1200),
+            (0..24).collect()
+        );
+        let outside = [(0, bounds(100.)), (1, bounds(f32::NAN)), (2, bounds(-2.))];
+        assert_eq!(
+            near_character_shadows(outside.into_iter(), Vec3::ZERO, 1., 1200),
+            [2].into_iter().collect()
+        );
+    }
+
     #[test]
     fn cascade_xy_stays_still_for_subtexel_translation() {
         let eye = Vec3::new(0., 3., 8.);
