@@ -78,6 +78,31 @@ pub fn lod_for_height(pixels: f32, previous: Option<usize>) -> usize {
         }
     }
 }
+
+/// Terrain detail follows distance to the closest horizontal point of the chunk,
+/// keeping the ground under the camera full resolution. Ten-percent bands avoid
+/// toggling around the 64 m / 160 m mesh-density thresholds.
+pub(crate) fn terrain_lod(bounds: Bounds, eye: Vec3, previous: Option<usize>) -> usize {
+    let delta = ((eye - bounds.center).abs() - bounds.half).max(Vec3::ZERO);
+    let distance = Vec3::new(delta.x, 0., delta.z).length();
+    if !distance.is_finite() {
+        return 0;
+    }
+    match previous {
+        Some(0) if distance <= 70.4 => 0,
+        Some(1) if (57.6..=176.).contains(&distance) => 1,
+        Some(2) if distance >= 144. => 2,
+        _ if distance <= 64. => 0,
+        _ if distance <= 160. => 1,
+        _ => 2,
+    }
+}
+
+/// Near matches the scene, mid is at least half detail, far is quarter detail.
+pub(crate) fn terrain_shadow_lod(scene: usize, cascade: usize) -> usize {
+    scene.max(cascade)
+}
+
 pub fn stable_cascades(
     eye: Vec3,
     target: Vec3,
@@ -118,6 +143,49 @@ pub fn stable_cascades(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn terrain_lod_retains_levels_around_both_boundaries() {
+        let bounds = Bounds {
+            center: Vec3::ZERO,
+            half: Vec3::new(32., 10., 32.),
+        };
+        let select =
+            |distance, previous| terrain_lod(bounds, Vec3::new(32. + distance, 20., 0.), previous);
+        assert_eq!(terrain_lod(bounds, Vec3::new(0., 100., 0.), None), 0);
+        assert_eq!(select(80., None), 1);
+        assert_eq!(select(200., None), 2);
+        let mut level = 0;
+        for d in [63., 65., 64., 70.] {
+            level = select(d, Some(level));
+            assert_eq!(level, 0);
+        }
+        level = select(71., Some(level));
+        assert_eq!(level, 1);
+        for d in [63., 65., 58., 159., 161., 175.] {
+            level = select(d, Some(level));
+            assert_eq!(level, 1);
+        }
+        level = select(177., Some(level));
+        assert_eq!(level, 2);
+        for d in [159., 161., 145.] {
+            level = select(d, Some(level));
+            assert_eq!(level, 2);
+        }
+        assert_eq!(select(143., Some(level)), 1);
+        assert_eq!(select(57., Some(1)), 0);
+        assert_eq!(select(300., Some(0)), 2); // camera teleport
+        assert_eq!(select(0., Some(2)), 0);
+        for scene in 0..=2 {
+            for cascade in 0..3 {
+                let shadow = terrain_shadow_lod(scene, cascade);
+                assert!(shadow >= scene && shadow <= 2);
+                if cascade == 2 {
+                    assert_eq!(shadow, 2);
+                }
+            }
+        }
+    }
+
     #[test]
     fn frustum_checks_near_far_and_side_planes() {
         let f = Frustum::new(Mat4::IDENTITY);

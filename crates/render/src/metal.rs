@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, stable_cascades},
+    visibility::{Bounds, Frustum, stable_cascades, terrain_lod, terrain_shadow_lod},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -59,12 +59,24 @@ struct DrawUniform {
     references: [[f32; 4]; 2],
 }
 struct GpuMesh {
+    terrain_indices: Vec<(Obj<dyn MTLBuffer>, usize)>,
     vertices: Obj<dyn MTLBuffer>,
     indices: Obj<dyn MTLBuffer>,
     morphs: Obj<dyn MTLBuffer>,
     count: usize,
     maps: [Obj<dyn MTLTexture>; 5],
     material: Material,
+}
+impl GpuMesh {
+    fn indices_at(&self, level: usize) -> (&Obj<dyn MTLBuffer>, usize) {
+        match level
+            .checked_sub(1)
+            .and_then(|i| self.terrain_indices.get(i))
+        {
+            Some((indices, count)) => (indices, *count),
+            None => (&self.indices, self.count),
+        }
+    }
 }
 pub const GPU_PASS_NAMES: [&str; 10] = [
     "shadow_0",
@@ -223,6 +235,7 @@ struct Slot {
     clock_start: (u64, u64),
 }
 struct Previous {
+    terrain_lod: Option<(usize, usize)>,
     model_key: u64,
     transform: Mat4,
     palette: Arc<[Mat4]>,
@@ -236,6 +249,7 @@ enum DrawPass {
     Transparent,
 }
 struct Prepared {
+    terrain_lod: usize,
     uniform: usize,
     draw: usize,
     current: usize,
@@ -1128,9 +1142,18 @@ impl Renderer {
                 }
             }
         }
+        let mut terrain_indices = Vec::new();
+        if draw.model.key == "world:neutral-topology" && p.material.name == "__terrain_placeholder"
+        {
+            for level in 1..=2 {
+                let indices = crate::terrain::lod_indices(draw.primitive, level);
+                terrain_indices.push((buffer(&self.device, &indices)?, indices.len()));
+            }
+        }
         self.meshes.insert(
             key,
             GpuMesh {
+                terrain_indices,
                 vertices: buffer(&self.device, &p.vertices)?,
                 indices: buffer(&self.device, &p.indices)?,
                 morphs: buffer(&self.device, &morphs)?,
@@ -1308,6 +1331,16 @@ impl Renderer {
             let old = self.previous.get(&d.instance).filter(|old| {
                 valid && old.model_key == d.model.id && old.palette.len() == d.palette.len()
             });
+            let mesh = &self.meshes[&(d.model.id, d.primitive)];
+            let terrain_level = (!mesh.terrain_indices.is_empty()).then(|| {
+                terrain_lod(
+                    p.bounds.transformed(d.transform),
+                    camera.eye,
+                    old.and_then(|o| o.terrain_lod)
+                        .filter(|(primitive, _)| *primitive == d.primitive)
+                        .map(|(_, level)| level),
+                )
+            });
             let (current, previous) = if d.palette.is_empty() {
                 (0, 0)
             } else {
@@ -1386,6 +1419,7 @@ impl Renderer {
                 );
             }
             prepared.push(Prepared {
+                terrain_lod: terrain_level.unwrap_or(0),
                 uniform: uniform_used,
                 draw: i,
                 current,
@@ -1398,6 +1432,7 @@ impl Renderer {
             new_previous.insert(
                 d.instance,
                 Previous {
+                    terrain_lod: terrain_level.map(|level| (d.primitive, level)),
                     model_key: d.model.id,
                     transform: d.transform,
                     palette: d.palette.clone(),
@@ -1405,7 +1440,7 @@ impl Renderer {
                 },
             );
             if scene {
-                triangles += p.indices.len() / 3;
+                triangles += mesh.indices_at(terrain_level.unwrap_or(0)).1 / 3;
             }
         }
         let cb = self.queue.commandBuffer().context("frame command buffer")?;
@@ -1795,10 +1830,12 @@ impl Renderer {
             let batchable =
                 d.palette.is_empty() && !self.blended(d) && d.dye.is_none() && d.base_map.is_none();
             if batchable {
-                let index = *rigid.entry((d.model.id, d.primitive)).or_insert_with(|| {
-                    groups.push(Vec::new());
-                    groups.len() - 1
-                });
+                let index = *rigid
+                    .entry((d.model.id, d.primitive, p.terrain_lod))
+                    .or_insert_with(|| {
+                        groups.push(Vec::new());
+                        groups.len() - 1
+                    });
                 groups[index].push(p);
             } else {
                 groups.push(vec![p]);
@@ -1829,6 +1866,12 @@ impl Renderer {
             let p = group[0];
             let d = &draws[p.draw];
             let g = &self.meshes[&(d.model.id, d.primitive)];
+            let level = if g.terrain_indices.is_empty() {
+                0
+            } else {
+                cascade.map_or(p.terrain_lod, |c| terrain_shadow_lod(p.terrain_lod, c))
+            };
+            let (indices, index_count) = g.indices_at(level);
             let m = &g.material;
             let blended = self.blended(d);
             if cascade.is_some() && (blended || m.name == "__water_placeholder") {
@@ -1939,9 +1982,9 @@ impl Renderer {
                 }
                 enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
                     MTLPrimitiveType::Triangle,
-                    g.count,
+                    index_count,
                     MTLIndexType::UInt32,
-                    &g.indices,
+                    indices,
                     0,
                     group.len(),
                 );
@@ -2145,6 +2188,93 @@ mod temporal_tests {
         assert_eq!(timing.vertex_ms, 0.02);
         assert_eq!(timing.fragment_ms, 0.03);
     }
+
+    #[test]
+    fn terrain_lods_upload_once_and_report_selected_scene_triangles() {
+        let mut renderer = Renderer::new(128, 80, 1.).unwrap();
+        let terrain = crate::terrain::valley();
+        let draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(primitive, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: primitive as u64,
+                model: terrain.clone(),
+                primitive,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let camera = Camera {
+            eye: Vec3::new(0., 30., 100.),
+            target: Vec3::new(0., 0., -180.),
+            fov: 1.,
+        };
+        let stats = renderer.draw(camera, &draws, None).unwrap();
+        renderer.wait().unwrap();
+        let view = Frustum::new(camera.matrix(128. / 80.));
+        let mut expected = 0;
+        let mut full = 0;
+        let mut levels = [false; 3];
+        for (primitive, p) in terrain.primitives.iter().enumerate() {
+            let bounds = p.bounds.padded(0.2 + renderer.look.wind_strength * 0.12);
+            if !view.intersects(bounds) {
+                continue;
+            }
+            let mesh = &renderer.meshes[&(terrain.id, primitive)];
+            let level = if p.material.name == "__terrain_placeholder" {
+                let level = terrain_lod(p.bounds, camera.eye, None);
+                levels[level] = true;
+                assert_eq!(
+                    renderer.previous[&(primitive as u64)].terrain_lod,
+                    Some((primitive, level))
+                );
+                assert_eq!(mesh.terrain_indices.len(), 2);
+                for lod in 1..=2 {
+                    assert_eq!(
+                        mesh.indices_at(lod).1,
+                        crate::terrain::lod_indices(primitive, lod).len()
+                    );
+                }
+                level
+            } else {
+                assert!(mesh.terrain_indices.is_empty());
+                0
+            };
+            expected += mesh.indices_at(level).1 / 3;
+            full += p.indices.len() / 3;
+        }
+        assert!(levels.into_iter().all(|used| used));
+        assert_eq!(stats.triangles, expected);
+        assert!(expected < full);
+        let allocations: Vec<_> = renderer
+            .meshes
+            .iter()
+            .flat_map(|(key, mesh)| {
+                mesh.terrain_indices
+                    .iter()
+                    .map(move |(buffer, _)| (*key, buffer.contents().as_ptr() as usize))
+            })
+            .collect();
+        renderer.draw(camera, &draws, None).unwrap();
+        renderer.wait().unwrap();
+        let repeated: Vec<_> = renderer
+            .meshes
+            .iter()
+            .flat_map(|(key, mesh)| {
+                mesh.terrain_indices
+                    .iter()
+                    .map(move |(buffer, _)| (*key, buffer.contents().as_ptr() as usize))
+            })
+            .collect();
+        assert_eq!(allocations, repeated);
+    }
+
     #[test]
     fn gpu_counters_follow_completed_slots_and_never_reuse_missing_passes() {
         let mut r = Renderer::new(64, 64, 1.).unwrap();
