@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, ShadowCasterVolume, stable_cascades},
+    visibility::{Bounds, FarShadowCache, Frustum, ShadowCasterVolume, stable_cascades},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -176,6 +176,8 @@ pub struct PassTiming {
 pub struct GpuFrame {
     pub frame: usize,
     pub counters_sampled: bool,
+    /// Passes deliberately omitted by scheduling, independent of counter availability.
+    pub skipped_pass_mask: u16,
     /// Seconds since renderer creation, at command-buffer submission (not completion).
     pub elapsed_seconds: f64,
     pub gpu_ms: f64,
@@ -385,6 +387,7 @@ pub struct Renderer {
     motion_msaa: Obj<dyn MTLTexture>,
     depth: Obj<dyn MTLTexture>,
     shadow: Obj<dyn MTLTexture>,
+    far_shadow_cache: FarShadowCache,
     history: [Obj<dyn MTLTexture>; 2],
     output: Obj<dyn MTLTexture>,
     pub width: u32,
@@ -862,6 +865,7 @@ impl Renderer {
             motion_msaa,
             depth,
             shadow,
+            far_shadow_cache: FarShadowCache::default(),
             history,
             output,
             width,
@@ -1370,7 +1374,7 @@ impl Renderer {
             .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
         let lighting = self.look.lighting_at(f64::from(time));
         let sun = Vec3::from_array(lighting.sun_direction).normalize();
-        let cascades = stable_cascades(
+        let mut cascades = stable_cascades(
             camera.eye,
             camera.target,
             camera.fov,
@@ -1378,6 +1382,11 @@ impl Renderer {
             sun,
             SHADOW_SIZE as u32,
         );
+        let (far_matrix, refresh_far) =
+            self.far_shadow_cache
+                .plan(self.frame, cascades[2], SHADOW_SIZE as u32, !valid);
+        // Sampling and caster culling must use the matrix that produced the stored layer.
+        cascades[2] = far_matrix;
         let view = Frustum::new(unjittered);
         let f = Frame {
             vp: unjittered.to_cols_array_2d(),
@@ -1606,7 +1615,13 @@ impl Renderer {
             .unwrap_or_default();
         let submitted_at = self.started.elapsed().as_secs_f64();
         let mut pass_mask = 0u16;
+        let mut skipped_pass_mask = 0u16;
         for cascade in 0..3 {
+            if cascade == 2 && !refresh_far {
+                skipped_pass_mask |= 1 << cascade;
+                // Preserve the layer without an encoder, clear, or stale timestamp samples.
+                continue;
+            }
             let pass = MTLRenderPassDescriptor::new();
             if let Some(c) = counters {
                 c.attach(&pass, cascade);
@@ -1632,6 +1647,9 @@ impl Renderer {
                 DrawPass::Shadow(cascade),
             )?;
             enc.endEncoding();
+            if cascade == 2 {
+                self.far_shadow_cache.encoded(self.frame, far_matrix);
+            }
         }
         let split_scene = self.profile_scene && counters.is_some();
         // MSAA depth cannot be stored/reloaded as a resolved depth texture here.
@@ -1915,6 +1933,7 @@ impl Renderer {
         self.slots[slot].measured = GpuFrame {
             frame: self.frame,
             counters_sampled: pass_mask != 0,
+            skipped_pass_mask,
             elapsed_seconds: submitted_at,
             draw_calls: calls,
             visible_triangles: triangles,
@@ -2508,6 +2527,11 @@ mod temporal_tests {
             (0..7).collect::<Vec<_>>()
         );
         for f in &frames {
+            assert_eq!(
+                f.skipped_pass_mask,
+                if f.frame % 2 == 1 { 1 << 2 } else { 0 }
+            );
+            assert_eq!(f.passes[2].is_none(), f.frame % 2 == 1);
             assert!(f.gpu_ms > 0.);
             assert!(f.allocated_gpu_bytes > 0);
             for i in [3, 4, 5] {
@@ -2825,6 +2849,17 @@ mod temporal_tests {
         let normal = r.draw(camera, &draws, None).unwrap();
         r.wait().unwrap();
         let before = output_bytes(&r);
+        assert_eq!(r.stats.completed.unwrap().frame, 0);
+        assert_eq!(r.stats.completed.unwrap().skipped_pass_mask, 0);
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let reuse = r.stats.completed.unwrap();
+        assert_eq!(reuse.frame, 1);
+        assert_eq!(reuse.skipped_pass_mask, 1 << 2);
+        assert!(
+            reuse.passes[2].is_none(),
+            "reused far layer has no timestamp"
+        );
         r.set_gpu_counters(true).unwrap();
         r.profile_scene = true;
         let split = r.draw(camera, &draws, None).unwrap();
@@ -2837,6 +2872,9 @@ mod temporal_tests {
             "profiling must not change the rendered pixels"
         );
         let frame = r.stats.completed.unwrap();
+        assert_eq!(frame.frame, 2);
+        assert_eq!(frame.skipped_pass_mask, 0);
+        assert!(frame.passes[2].is_some());
         for i in [7, 8, 9] {
             assert!(frame.passes[i].is_some(), "missing split pass {i}");
         }

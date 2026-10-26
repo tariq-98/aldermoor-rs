@@ -94,7 +94,9 @@ if perf:
         if a.aa == 'taa': expected_passes.append('taa')
         for name in expected_passes:
             timing = details['passes'][name]['elapsed_ms']
-            if details['passes'][name]['missing_samples'] or not timing or timing['samples'] != sampled:
+            skipped = details['passes'][name].get('skipped_samples', 0)
+            executed = timing['samples'] if timing else 0
+            if details['passes'][name]['missing_samples'] or skipped < 0 or executed + skipped != sampled:
                 sys.exit(f'Missing timestamp samples for {name}; refusing incomplete pass timings')
 if not perf and (a.counter_overhead or a.gpu_profile_scene or a.perf_overlay or a.no_gpu_counters):
     sys.exit('Missing PERF report for requested diagnostics')
