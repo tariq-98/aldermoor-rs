@@ -8,6 +8,7 @@
 pub mod bots;
 pub mod net;
 pub mod regions;
+mod world;
 
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TrySendError};
 use protocol::{CombatView, Command, Snapshot, UnitId};
@@ -140,8 +141,22 @@ impl Server {
         let s = shared.clone();
         let thread = std::thread::Builder::new()
             .name("Aldermoor simulation".into())
-            .spawn(move || run(world, command_rx, control_rx, s))
+            .spawn(move || run(world::World::one(world), command_rx, control_rx, s))
             .expect("simulation thread starts");
+        Server { commands, control, shared, thread: Some(thread) }
+    }
+
+    /// Starts stepping a world of several regions (#208), with nobody in it yet. Players join
+    /// the region at the spawn point and their commands and views follow them across borders.
+    pub fn start_realm(realm: regions::Realm) -> Server {
+        let (commands, command_rx) = unbounded();
+        let (control, control_rx) = unbounded();
+        let shared = Arc::new(Shared { stats: Mutex::new(HostStats::default()), times: Mutex::new(Vec::new()), running: AtomicBool::new(true) });
+        let s = shared.clone();
+        let thread = std::thread::Builder::new()
+            .name("Aldermoor realm".into())
+            .spawn(move || run(world::World::many(realm), command_rx, control_rx, s))
+            .expect("realm thread starts");
         Server { commands, control, shared, thread: Some(thread) }
     }
 
@@ -328,15 +343,13 @@ impl Drop for Host {
     }
 }
 
-fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<Control>, shared: Arc<Shared>) {
+fn run(mut world: world::World, commands: Receiver<(UnitId, Command)>, control: Receiver<Control>, shared: Arc<Shared>) {
     let mut viewers: Vec<(UnitId, Viewer)> = Vec::new();
     // Characters stay in the world when their player leaves, and joining with the same name
     // takes them back (until accounts, #88).
     let mut names: HashMap<String, UnitId> = HashMap::new();
     let mut next = Instant::now();
     let mut window = (0u32, 0.0f64, 0.0f64);
-    // The last few steps' events, for network players who get a view every few steps.
-    let mut recent: std::collections::VecDeque<Vec<protocol::Event>> = std::collections::VecDeque::new();
     let mut joined = 0u64;
     // The last frame built, to lend the next what hasn't changed.
     let mut frame: Option<sim::NetFrame> = None;
@@ -358,7 +371,8 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
                 Some(&id) => id,
                 None => {
                     let at = SPAWN + glam::Vec2::new((names.len() % 8) as f32 * 1.5, (names.len() / 8 % 8) as f32 * 1.5);
-                    let id = world.spawn_player(&name, at, std::f32::consts::PI);
+                    // A realm with no room at the spawn point turns the player away.
+                    let Some(id) = world.spawn_player(&name, at, std::f32::consts::PI) else { continue };
                     names.insert(name, id);
                     id
                 }
@@ -378,33 +392,54 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
         let t0 = Instant::now();
         world.step();
         let t1 = Instant::now();
-        let events = world.take_events();
-        recent.push_back(events.clone());
-        while recent.len() > SEND_EVERY as usize {
-            recent.pop_front();
-        }
         let tick = world.tick();
         let mut gone = Vec::new();
         let (mut encoding, mut bytes) = (Duration::ZERO, 0);
         // Everyone, once, for the network players whose turn it is (#286).
         let due = viewers.iter().any(|(_, v)| matches!(v, Viewer::Remote(r) if tick % SEND_EVERY == r.phase));
-        let since: Vec<protocol::Event> = if due { recent.iter().flatten().cloned().collect() } else { Vec::new() };
-        if due {
-            frame = Some(world.net_frame(frame.as_ref()));
-        }
         for (id, viewer) in &viewers {
             if let Viewer::Local(latest) = viewer {
-                let mut snapshot = world.snapshot(Some(*id));
-                snapshot.events = events.clone();
-                let combat = world.combat_view(Some(*id));
-                latest.events.lock().unwrap().extend(events.iter().cloned());
+                let snapshot = world.snapshot(*id);
+                let combat = world.combat_view(*id);
+                latest.events.lock().unwrap().extend(snapshot.events.iter().cloned());
                 // The combat view first, so whoever sees a snapshot finds its combat detail beside it.
                 *latest.combat.lock().unwrap() = Some(Arc::new(combat));
                 *latest.clock.lock().unwrap() = Some((snapshot.time, next));
                 *latest.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
             }
         }
-        if let Some(frame) = frame.as_ref().filter(|_| due) {
+        if let (true, world::World::Many(_)) = (due, &world) {
+            // A realm's views come from each player's own region, built on its thread.
+            let t = Instant::now();
+            let mut due_now: Vec<(UnitId, protocol::wire::Encoder)> = Vec::new();
+            for (id, v) in &mut viewers {
+                if let Viewer::Remote(r) = v
+                    && tick % SEND_EVERY == r.phase
+                {
+                    let acked = r.acked.load(Ordering::Acquire);
+                    if acked > 0 {
+                        r.encoder.ack(acked - 1);
+                    }
+                    due_now.push((*id, std::mem::take(&mut r.encoder)));
+                }
+            }
+            for (id, encoder, view) in world.encode_views(due_now) {
+                let Some(Viewer::Remote(r)) = viewers.iter_mut().find(|(v, _)| *v == id).map(|(_, v)| v) else { continue };
+                r.encoder = encoder;
+                let out = net::encode(&net::ServerMsg::View(view));
+                bytes += out.len();
+                if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = r.frames.try_send(out) {
+                    gone.push(id);
+                }
+            }
+            encoding = t.elapsed();
+        }
+        if let (true, world::World::One(one)) = (due, &mut world) {
+            frame = Some(one.sim.net_frame(frame.as_ref()));
+        }
+        if let (Some(frame), world::World::One(one)) = (frame.as_ref().filter(|_| due), &world) {
+            let since = one.since();
+            let world = &one.sim;
             let t = Instant::now();
             let mut sending: Vec<(UnitId, &mut Remote)> = viewers
                 .iter_mut()
@@ -413,7 +448,6 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
                     _ => None,
                 })
                 .collect();
-            let world = &world;
             // Views of one frame don't depend on each other, so a crowd's go across cores (#292).
             let send = |chunk: &mut [(UnitId, &mut Remote)]| {
                 let (mut dropped, mut bytes) = (Vec::new(), 0);
