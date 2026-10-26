@@ -56,6 +56,7 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
     let progress = world.get::<crate::Progress>(e);
     let (coins, inventory, loot, shop) = crate::loot::player_view(world, e);
     let (skills, work, nodes, station) = crate::crafting::player_view(world, e);
+    let (quests, quests_done, people, board) = crate::quests::player_view(world, e);
     let t = now(world);
     let cat = catalog();
     let bar_ids = current_bar(world, e);
@@ -117,6 +118,10 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         nodes,
         station,
         potion_ready: crate::consumables::potion_ready(world, e, t),
+        quests,
+        quests_done,
+        people,
+        board,
     })
 }
 

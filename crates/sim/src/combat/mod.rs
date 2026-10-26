@@ -212,7 +212,16 @@ pub fn apply_commands(world: &mut World, mut waiting: Local<Vec<Entity>>) {
             Command::Strike => crate::crafting::strike(world, e),
             Command::Craft { recipe, count } => crate::crafting::craft(world, e, &recipe, count),
             Command::StopWork => crate::crafting::stop(world, e),
-            Command::UseItem { slot } => crate::consumables::use_item(world, e, slot),
+            Command::UseItem { slot } => {
+                if !crate::quests::use_item(world, e, slot) {
+                    crate::consumables::use_item(world, e, slot);
+                }
+            }
+            Command::Talk { person } => crate::quests::talk(world, e, &person),
+            Command::StartQuest { quest } => crate::quests::start(world, e, &quest),
+            Command::TakeJob { offer } => crate::quests::take_job(world, e, offer),
+            Command::HandIn { offer } => crate::quests::hand_in(world, e, offer),
+            Command::DropJob { offer } => crate::quests::drop_job(world, e, offer),
             Command::Viewing { tick } => crate::rewind::viewing(world, e, tick),
             Command::AssignXp { specialty, amount } => {
                 if let Some(s) = crate::Specialty::from_key(&specialty) {

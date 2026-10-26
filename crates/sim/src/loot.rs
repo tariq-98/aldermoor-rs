@@ -149,6 +149,15 @@ pub(crate) fn drop_loot(world: &mut World, dead: Entity) {
     }
 }
 
+/// Leaves `items` in a pile at `at` that only `owner` may take: what didn't fit in their pack.
+pub(crate) fn drop_for(world: &mut World, owner: UnitId, at: Vec3, items: Vec<Stack>) {
+    let t = world.resource::<Clock>().time;
+    let mut loot = world.resource_mut::<Loot>();
+    loot.next += 1;
+    let id = loot.next;
+    loot.piles.push(Pile { id, at, owner: Some(owner), items, coins: 0, dropped: t });
+}
+
 /// One roll of a loot table: each line on its own, gear sometimes fine.
 pub fn roll(rng: &mut Rng, table: &content::items::LootTable, at: Vec3, owner: Option<UnitId>, now: f64) -> Pile {
     let eco = economy();

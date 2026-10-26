@@ -66,5 +66,8 @@
         // Junk.
         (key: "goblin_trinket", name: "Goblin Trinket", kind: Junk, value: 10, stack: 20, tags: ["junk"]),
         (key: "message_bottle", name: "Message in a Bottle", kind: Junk, value: 25, stack: 20, tags: ["junk"]),
+
+        // Quest items (content::quests).
+        (key: "marigold_smoke", name: "Bundle of Marigold Smoke", kind: Junk, value: 1, tags: ["quest"]),
     ],
 )

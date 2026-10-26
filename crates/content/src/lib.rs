@@ -3,3 +3,4 @@
 pub mod combat;
 pub mod crafts;
 pub mod items;
+pub mod quests;

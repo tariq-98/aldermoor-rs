@@ -87,6 +87,7 @@ pub struct PlayerDelta {
     pub bags: Option<Bags>,
     pub craft: Option<Craft>,
     pub growth: Option<Growth>,
+    pub journal: Option<Journal>,
 }
 
 /// What changes most: the bars and flags.
@@ -147,6 +148,15 @@ pub struct Growth {
     pub xp: u32,
     pub xp_next: u32,
     pub unassigned_xp: u32,
+}
+
+/// Quests, jobs, and the people and board at hand.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Journal {
+    pub quests: Vec<QuestView>,
+    pub done: Vec<String>,
+    pub people: Vec<PersonView>,
+    pub board: Option<BoardView>,
 }
 
 /// Combat detail that changed since the base. Timers are ticks from the anchor.
@@ -299,7 +309,7 @@ struct State<I, C> {
     units: Sorted<(Quantised, I)>,
     /// Intros of units that left view lately, and the tick each was last seen.
     left: Sorted<(I, u64)>,
-    player: Option<(Fast, Bar, Bags, Craft, Growth)>,
+    player: Option<Parts>,
     combat: Sorted<C>,
     areas: Sorted<AreaView>,
 }
@@ -309,6 +319,9 @@ impl<I, C> Default for State<I, C> {
         State { tick: 0, units: Sorted::default(), left: Sorted::default(), player: None, combat: Sorted::default(), areas: Sorted::default() }
     }
 }
+
+/// The player's state in the parts that go separately.
+type Parts = (Fast, Bar, Bags, Craft, Growth, Journal);
 
 /// What the server keeps of a view: versions of intros and combat entries ([`Frame`]).
 type Sent = State<u64, u64>;
@@ -580,6 +593,7 @@ impl Encoder {
                 player.bags = old.is_none_or(|o| o.2 != parts.2).then(|| parts.2.clone());
                 player.craft = old.is_none_or(|o| o.3 != parts.3).then(|| parts.3.clone());
                 player.growth = old.is_none_or(|o| o.4 != parts.4).then(|| parts.4.clone());
+                player.journal = old.is_none_or(|o| o.5 != parts.5).then(|| parts.5.clone());
                 state.player = Some(parts);
             }
         }
@@ -685,6 +699,7 @@ impl Decoder {
                 p.bags.or_else(|| old.map(|o| o.2.clone())).ok_or_else(missing)?,
                 p.craft.or_else(|| old.map(|o| o.3.clone())).ok_or_else(missing)?,
                 p.growth.or_else(|| old.map(|o| o.4.clone())).ok_or_else(missing)?,
+                p.journal.or_else(|| old.map(|o| o.5.clone())).ok_or_else(missing)?,
             );
             let player = join(&parts, anchor);
             state.player = Some(parts);
@@ -970,7 +985,7 @@ fn combat_in(c: &UnitCombat, anchor: u64) -> UnitCombat {
     UnitCombat { action_time: from_count_up(c.action_time, anchor), cast: cast_in(&c.cast, anchor), auras: auras_in(&c.auras, anchor), ..c.clone() }
 }
 
-fn split(p: &PlayerState, anchor: u64) -> (Fast, Bar, Bags, Craft, Growth) {
+fn split(p: &PlayerState, anchor: u64) -> Parts {
     let PlayerState {
         unit,
         endurance,
@@ -1006,6 +1021,10 @@ fn split(p: &PlayerState, anchor: u64) -> (Fast, Bar, Bags, Craft, Growth) {
         nodes,
         station,
         potion_ready,
+        quests,
+        quests_done,
+        people,
+        board,
     } = p;
     let fast = Fast {
         unit: *unit,
@@ -1036,10 +1055,11 @@ fn split(p: &PlayerState, anchor: u64) -> (Fast, Bar, Bags, Craft, Growth) {
     let work = work.as_ref().map(|w| WorkView { elapsed: count_up(w.elapsed, anchor), ..w.clone() });
     let craft = Craft { skills: skills.clone(), work, nodes: nodes.clone(), station: station.clone() };
     let growth = Growth { specialty: specialty.clone(), level: *level, xp: *xp, xp_next: *xp_next, unassigned_xp: *unassigned_xp };
-    (fast, bar, bags, craft, growth)
+    let journal = Journal { quests: quests.clone(), done: quests_done.clone(), people: people.clone(), board: board.clone() };
+    (fast, bar, bags, craft, growth, journal)
 }
 
-fn join((f, b, bags, c, g): &(Fast, Bar, Bags, Craft, Growth), anchor: u64) -> PlayerState {
+fn join((f, b, bags, c, g, j): &Parts, anchor: u64) -> PlayerState {
     PlayerState {
         unit: f.unit,
         endurance: f.endurance as f32,
@@ -1075,5 +1095,9 @@ fn join((f, b, bags, c, g): &(Fast, Bar, Bags, Craft, Growth), anchor: u64) -> P
         nodes: c.nodes.clone(),
         station: c.station.clone(),
         potion_ready: from_countdown(b.potion_ready, anchor),
+        quests: j.quests.clone(),
+        quests_done: j.done.clone(),
+        people: j.people.clone(),
+        board: j.board.clone(),
     }
 }

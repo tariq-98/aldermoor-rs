@@ -1,0 +1,93 @@
+// Brambleford's quests and jobs (#70). Names, lines and numbers are provisional (DESIGN.md).
+// People stand by the shops and stations until the townsfolk and their routines exist (#128);
+// the notice board stands in the square until its art does.
+(
+    people: [
+        (key: "maren", name: "Elder Maren", town: "brambleford", at: (4.0, -16.0),
+            greeting: "Brambleford's quiet, for now. Mind the meadow road."),
+        (key: "tobin", name: "Tobin the Tanner", town: "brambleford", at: (-27.0, -16.5),
+            greeting: "Good pelts make good leather. Bring me some sometime."),
+        (key: "hilde", name: "Hilde the Smith", town: "brambleford", at: (-9.5, -8.5),
+            greeting: "Mind the sparks."),
+    ],
+    boards: [
+        (key: "brambleford_board", name: "Brambleford Notice Board", town: "brambleford", at: (8.0, -20.0), offers: 3),
+    ],
+    quests: [
+        (
+            key: "smoke_over_the_meadow",
+            name: "Smoke over the Meadow",
+            giver: "maren",
+            level: 2,
+            offer: "Wolves have been taking sheep from the north meadow, more every week. Will you find out why?",
+            steps: [
+                (
+                    text: "Search the north meadow for where the wolves come from.",
+                    say: "Go up the north road to the meadow, and be careful.",
+                    objectives: [Reach(place: "the north meadow", at: (-38.0, 30.0), radius: 12.0)],
+                ),
+                (
+                    text: "The pack is bold and hungry. Thin it out.",
+                    objectives: [Kill(mob: "wolf", count: 3)],
+                ),
+                (
+                    text: "Bring Tobin the Tanner two wolf pelts, to show what's out there.",
+                    objectives: [Deliver(item: "wolf_pelt", count: 2, to: "tobin")],
+                ),
+                (
+                    text: "Burn Tobin's marigold smoke at the old cairn above the meadow. Wolves hate the smell.",
+                    say: "Marigold smoke: the old shepherds' trick. Burn it at the cairn and they'll keep off.",
+                    objectives: [Use(item: "marigold_smoke", place: "the old cairn", at: (-46.0, 42.0), radius: 4.0)],
+                    gives: [("marigold_smoke", 1)],
+                ),
+                (
+                    text: "Tell Elder Maren the meadow is safe again.",
+                    objectives: [Talk(person: "maren")],
+                ),
+            ],
+            reward: (coins: 120, xp: 1200, items: [("leather_jerkin", 1)]),
+        ),
+        (
+            key: "the_smiths_ore",
+            name: "The Smith's Ore",
+            giver: "hilde",
+            level: 4,
+            needs: ["smoke_over_the_meadow"],
+            offer: "Goblins raided my ore cart on the east road. I've an order to fill and nothing to fill it with.",
+            steps: [
+                (
+                    text: "Drive the goblins off from the eastern ridge.",
+                    say: "They camp by the ridge. Take their archer down too, or they'll be back.",
+                    objectives: [Kill(mob: "goblin", count: 2), Kill(mob: "goblin_archer", count: 1)],
+                ),
+                (
+                    text: "Mine copper ore to make up what was stolen.",
+                    say: "The veins south-west of the village are the closest.",
+                    objectives: [Gather(item: "copper_ore", count: 4)],
+                ),
+                (
+                    text: "Bring Hilde the Smith four copper ore.",
+                    objectives: [Deliver(item: "copper_ore", count: 4, to: "hilde")],
+                ),
+            ],
+            reward: (coins: 80, xp: 1500, items: [("shield.kite", 1)]),
+        ),
+    ],
+    jobs: [
+        (key: "wolf_cull", board: "brambleford_board", name: "Wolf cull",
+            text: "Wolves in the north meadow. Kill {n} and the shepherds will pay.",
+            kind: Kill(mob: "wolf"), count: (2, 5), level: 1, pay: (6, 60)),
+        (key: "goblin_bounty", board: "brambleford_board", name: "Goblin bounty",
+            text: "A bounty on the ridge goblins: {n} of them.",
+            kind: Kill(mob: "goblin"), count: (2, 3), level: 3, pay: (10, 90)),
+        (key: "firewood", board: "brambleford_board", name: "Firewood",
+            text: "The inn wants {n} oak logs cut before the cold comes.",
+            kind: Gather(item: "oak_log"), count: (3, 6), level: 1, pay: (3, 25)),
+        (key: "marigolds", board: "brambleford_board", name: "Marigolds for the healer",
+            text: "Bring {n} marigolds for poultices.",
+            kind: Bring(item: "marigold"), count: (3, 6), level: 1, pay: (4, 20)),
+        (key: "pelts", board: "brambleford_board", name: "Pelts wanted",
+            text: "Tobin needs {n} wolf pelts. Bring them here.",
+            kind: Bring(item: "wolf_pelt"), count: (2, 4), level: 2, pay: (9, 45)),
+    ],
+)

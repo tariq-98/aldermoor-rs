@@ -206,6 +206,7 @@ record! {
     credit: Credit,
     inventory: Inventory,
     skills: crate::crafting::Skills,
+    quests: crate::quests::Quests,
     skinned: crate::crafting::Skinned,
     potion_cooldown: crate::consumables::PotionCooldown,
     trail: crate::rewind::Trail,
@@ -321,6 +322,7 @@ impl Sim {
             }
             let e = r.spawn(&mut self.world);
             self.world.resource_mut::<Units>().put(id, e);
+            crate::quests::arrived(&mut self.world, e);
         }
     }
 

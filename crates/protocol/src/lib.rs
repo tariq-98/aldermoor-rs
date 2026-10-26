@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub mod wire;
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -68,6 +68,17 @@ pub enum Command {
     /// the newest). Send it with each batch of commands: a player's shots and blows at other
     /// players are tested where the sender saw them, up to 250 ms back.
     Viewing { tick: u64 },
+    /// Talk to someone within reach (see `PlayerState::people`): hands over what a quest asks
+    /// you to deliver to them, and counts as talking to them.
+    Talk { person: String },
+    /// Start a quest offered by someone within reach.
+    StartQuest { quest: String },
+    /// Take a job offered on the notice board you stand at.
+    TakeJob { offer: u32 },
+    /// Hand in a finished job at the board it came from, with anything it asks you to bring.
+    HandIn { offer: u32 },
+    /// Give up a job.
+    DropJob { offer: u32 },
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -353,6 +364,86 @@ pub struct PlayerState {
     pub station: Option<StationView>,
     /// Seconds until you can drink another potion (they share one cooldown).
     pub potion_ready: f32,
+    /// Quests and jobs under way: the quest log and tracker.
+    pub quests: Vec<QuestView>,
+    /// The quests finished, by key.
+    pub quests_done: Vec<String>,
+    /// People nearby, with the quests they'd give you.
+    pub people: Vec<PersonView>,
+    /// The notice board you stand at, with its jobs.
+    pub board: Option<BoardView>,
+}
+
+/// A quest or job under way.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct QuestView {
+    /// The quest's key, or the job template's.
+    pub quest: String,
+    pub name: String,
+    /// For a job, its offer (to hand it in or drop it); `None` for a quest.
+    pub job: Option<u32>,
+    /// The step under way (from 0), and how many there are (1 for a job).
+    pub step: u8,
+    pub steps: u8,
+    /// The quest log's line for the step, or the job's notice.
+    pub text: String,
+    pub objectives: Vec<ObjectiveView>,
+    /// A job with everything done, to hand in at its board.
+    pub ready: bool,
+}
+
+/// One thing a step asks for, and how far along it is.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ObjectiveView {
+    /// What to do, e.g. "Kill Grey wolf" or "Go to the north meadow".
+    pub text: String,
+    pub have: u16,
+    pub need: u16,
+    /// Where to go, for the map and the tracker: the place or the person.
+    pub at: Option<Vec3>,
+}
+
+/// Someone who gives quests or has a part in one.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonView {
+    pub person: String,
+    pub name: String,
+    pub position: Vec3,
+    /// The quests they'd give you now.
+    pub offers: Vec<QuestOffer>,
+    /// A quest under way asks you to talk to them or bring them something.
+    pub wanted: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct QuestOffer {
+    pub quest: String,
+    pub name: String,
+    /// What they ask.
+    pub text: String,
+    /// The level it's meant for.
+    pub level: u8,
+}
+
+/// A notice board's jobs.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BoardView {
+    pub board: String,
+    pub name: String,
+    pub jobs: Vec<JobOffer>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JobOffer {
+    pub offer: u32,
+    pub name: String,
+    pub text: String,
+    pub level: u8,
+    /// What it pays in all: coins and quest XP.
+    pub coins: u32,
+    pub xp: u32,
+    /// You've taken it already.
+    pub taken: bool,
 }
 
 /// A gathering or crafting skill's level, XP into it and what the next level takes (0 at the cap).
@@ -587,6 +678,12 @@ pub enum Event {
     /// A finisher went through a combo field.
     Combo { unit: UnitId, name: String, at: Vec3 },
     WeaponsSwapped { unit: UnitId },
+    QuestStarted { unit: UnitId, quest: String },
+    /// A quest moved on to step `step` (from 0).
+    QuestStep { unit: UnitId, quest: String, step: u8 },
+    QuestDone { unit: UnitId, quest: String },
+    /// A job was handed in (`job` is its template's key).
+    JobDone { unit: UnitId, job: String },
 }
 
 impl Event {
@@ -615,7 +712,11 @@ impl Event {
             | Revived { unit }
             | DefianceBroken { unit }
             | Combo { unit, .. }
-            | WeaponsSwapped { unit } => [Some(*unit), None],
+            | WeaponsSwapped { unit }
+            | QuestStarted { unit, .. }
+            | QuestStep { unit, .. }
+            | QuestDone { unit, .. }
+            | JobDone { unit, .. } => [Some(*unit), None],
             AreaImpact { .. } | Message { .. } => [None, None],
         }
     }

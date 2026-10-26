@@ -477,6 +477,7 @@ fn yield_from(world: &mut World, e: Entity, def: &NodeDef, sweet: bool, level: u
         tell(world, e, &format!("You found a {}!", r.name));
     }
     give(world, e, def.skill, action_xp(def.xp, def.level, level));
+    crate::quests::gathered(world, e, def.item, count - over);
     true
 }
 

@@ -96,6 +96,7 @@ pub fn die(world: &mut World, e: Entity, killer: Option<UnitId>) {
     }
     emit(world, Event::Died { unit: id, killer });
     crate::loot::drop_loot(world, e);
+    crate::quests::killed(world, e);
     crate::progress::pay_out(world, e);
 
     // Everyone fighting it lets it go, now or when the blow that felled it has landed on

@@ -21,6 +21,7 @@ mod movement;
 mod net_view;
 mod progress;
 mod queries;
+pub mod quests;
 pub mod region;
 mod rewind;
 mod rng;
@@ -193,6 +194,8 @@ impl Sim {
         world.insert_resource(region::Outgoing::default());
         world.insert_resource(crafting::Nodes::new(seed, &land));
         world.insert_resource(crafting::Workers::default());
+        world.insert_resource(quests::Boards::new(seed));
+        world.insert_resource(quests::Seekers::default());
         world.insert_resource(Land(land));
         world.insert_resource(Inbox::default());
         world.insert_resource(Outbox::default());
@@ -221,6 +224,7 @@ impl Sim {
                 vitals::update,
                 loot::expire,
                 crafting::update,
+                quests::update,
                 spatial::rebuild,
                 movement::update_poses,
             )
@@ -322,7 +326,7 @@ impl Sim {
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
-        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default(), rewind::Trail::default()));
+        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default(), quests::Quests::default(), rewind::Trail::default()));
         self.world.entity_mut(e).insert(Unit {
             id,
             kind: UnitKind::Player,
