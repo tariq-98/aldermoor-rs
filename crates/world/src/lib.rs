@@ -64,6 +64,19 @@ impl Solid {
         Vec2::new(c * v.x + s * v.y, -s * v.x + c * v.y)
     }
 
+    /// The highest its top goes, if it has one.
+    #[inline]
+    fn top_max(&self) -> Option<f32> {
+        Some(self.top? + self.rise.abs() * self.half.x)
+    }
+
+    /// Whether a circle of `radius` at `p` might touch the box: a cheap test before
+    /// [`Solid::overlaps`].
+    #[inline]
+    fn near(&self, p: Vec2, radius: f32) -> bool {
+        (p - self.center).length_squared() < (self.reach() + radius).powi(2)
+    }
+
     /// The height of the top where the box comes nearest `p`, if it has one.
     #[inline]
     fn top_nearest(&self, p: Vec2) -> Option<f32> {
@@ -262,6 +275,11 @@ impl Valley {
             let mut moved = false;
             for i in self.tops.near(p, radius) {
                 let s = &self.solids[i as usize];
+                // Most solids near are low walls, or not that near: ruled out before turning `p`
+                // into their frame.
+                if s.top_max().is_none_or(|top| top <= above) || !s.near(p, radius) {
+                    continue;
+                }
                 if s.overlaps(p, radius) && s.top_nearest(p).is_some_and(|top| top > above) {
                     p = s.push_out(p, radius);
                     moved = true;
@@ -283,7 +301,7 @@ impl Valley {
         let mut best: Option<(f32, Vec2)> = None;
         for i in self.grid.near(probe, radius).chain(self.tops.near(probe, radius)) {
             let s = &self.solids[i as usize];
-            if !s.overlaps(probe, radius) || s.top_nearest(p).is_some_and(|top| top <= above) {
+            if s.top_max().is_some_and(|top| top <= above) || !s.near(probe, radius) || !s.overlaps(probe, radius) || s.top_nearest(p).is_some_and(|top| top <= above) {
                 continue;
             }
             // The side the body is in front of, and how far short of it.
