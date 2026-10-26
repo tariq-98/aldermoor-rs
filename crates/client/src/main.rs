@@ -601,7 +601,10 @@ impl Game {
             g.stage = Some(stage::Stage::default());
         }
         if g.options.showcase {
-            g.review = showcase(g.snaps.current.unit(g.host.player).unwrap().clone());
+            g.review = showcase(
+                g.snaps.current.unit(g.host.player).unwrap().clone(),
+                &g.valley,
+            );
             if let Some(goblin) = g
                 .snaps
                 .current
@@ -1037,10 +1040,10 @@ impl Game {
                     let (x, z, up, from) = stage::shot(self.reel_time).camera;
                     (x, z, up, Vec3::from(from))
                 }
-                1 => (-1.5, 24.2, 1.0, Vec3::new(3.2, 1.7, 6.8)),
-                2 => (5.6, 23.6, 1.0, Vec3::new(2.6, 1.8, 6.6)),
-                3 => (0.5, 25., 1.5, Vec3::new(1.6, 0.9, 7.5)),
-                _ => (2., 22., 1.25, Vec3::new(8., 3.5, 14.)),
+                1 => (-1.5, 25.7, 1.0, Vec3::new(3.2, 1.7, 6.8)),
+                2 => (5.6, 25.1, 1.0, Vec3::new(2.6, 1.8, 6.6)),
+                3 => (0.5, 26.5, 1.5, Vec3::new(1.6, 0.9, 7.5)),
+                _ => (2., LINEUP_Z, 1.25, Vec3::new(8., 3.5, 14.)),
             };
             let target = Vec3::new(x, world::height(x, z) + up, z);
             return Camera {
@@ -2147,7 +2150,10 @@ impl Game {
         Ok(done)
     }
 }
-fn showcase(mut base: UnitState) -> Vec<UnitState> {
+/// Where the showcase lineup stands (z), north of the field wall along z = 21.6.
+const LINEUP_Z: f32 = 23.5;
+
+fn showcase(mut base: UnitState, valley: &world::Valley) -> Vec<UnitState> {
     let outfits = [
         (
             "male",
@@ -2197,8 +2203,8 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     let mut units = Vec::new();
     for (i, (art, pieces, weapon, shield, drawn)) in outfits.into_iter().enumerate() {
         base.id = first + i as u32;
-        base.position = Vec3::new(-4. + i as f32 * 2.8, 0., 22.);
-        base.position.y = world::height(base.position.x, base.position.z);
+        base.position = Vec3::new(-4. + i as f32 * 2.8, 0., LINEUP_Z);
+        base.position.y = valley.ground(base.position.x, base.position.z);
         base.yaw = 0.25;
         let mut look = Look {
             art: art.into(),
@@ -2232,7 +2238,7 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
         ..Default::default()
     }
     .into();
-    base.position = Vec3::new(8., world::height(8., 24.), 24.);
+    base.position = Vec3::new(8., valley.ground(8., LINEUP_Z + 2.), LINEUP_Z + 2.);
     units.push(base);
     units
 }
@@ -2932,6 +2938,23 @@ fn mouse_input(button: MouseButton) -> Option<controls::Input> {
 #[cfg(test)]
 mod catalog_defaults_tests {
     use super::*;
+    #[test]
+    fn the_showcase_lineup_stands_clear_of_the_valleys_solids() {
+        let valley = world::Valley::new();
+        // Any unit will do: the lineup takes its looks and places from showcase().
+        let mut host = server::Host::start(1, "Review");
+        let base = host.snapshot().unwrap().unit(host.player).unwrap().clone();
+        host.stop();
+        for u in showcase(base, &valley) {
+            let p = u.position;
+            assert!(
+                !valley.blocked(Vec2::new(p.x, p.z), 0.45),
+                "unit {} stands in a solid at {p}",
+                u.id
+            );
+            assert_eq!(p.y, valley.ground(p.x, p.z));
+        }
+    }
     #[test]
     fn reticle_follows_target_and_reach() {
         assert_eq!(reticle(None, None, 3.), Reticle::Free);

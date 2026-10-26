@@ -52,6 +52,23 @@ class ReportTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, change)
             self.assertIsNone(report)
 
+    def test_cadence_skips_account_for_coverage_without_hiding_missing_counters(self):
+        for skipped in (16, 32):
+            data = fixture()
+            far = data['passes']['shadow_2']
+            far['skipped_samples'] = skipped
+            if skipped == 32: far['elapsed_ms'] = None
+            else: far['elapsed_ms']['samples'] = 32 - skipped
+            result, _ = self.run_report(data)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            far['missing_samples'] = 1
+            result, _ = self.run_report(data)
+            self.assertNotEqual(result.returncode, 0)
+            far['missing_samples'] = 0
+            far['skipped_samples'] -= 1
+            result, _ = self.run_report(data)
+            self.assertNotEqual(result.returncode, 0)
+
     def test_unavailable_counters_require_explicit_opt_out(self):
         data = fixture()
         data['counters_enabled'] = False
