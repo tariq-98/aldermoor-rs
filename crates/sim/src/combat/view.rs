@@ -130,12 +130,16 @@ pub fn combat_view(world: &World, viewer: Option<UnitId>) -> CombatView {
     let side = me.and_then(|e| world.get::<Unit>(e)).map_or(Faction::Player, |u| u.faction);
     let near = |p: Vec3| center.is_none_or(|c| (p - c).length_squared() <= VIEW_RANGE * VIEW_RANGE);
 
-    let mut view = CombatView { tick: world.resource::<crate::Clock>().tick, ..Default::default() };
+    // Room for everyone up front: a view's units are big, and growing the list a step at a time
+    // copies them over and over.
+    let mut view = CombatView { tick: world.resource::<crate::Clock>().tick, units: Vec::with_capacity(units.entities.len() + units.foreign.len()), ..Default::default() };
     for e in units.all() {
-        let (Some(u), Some(tr), Some(v), Some(f)) = (world.get::<Unit>(e), world.get::<Transform>(e), world.get::<Vitals>(e), world.get::<Fighter>(e)) else {
+        // Where it is first: most of a big world is out of sight, and needn't be looked at further.
+        let Some(tr) = world.get::<Transform>(e).filter(|tr| near(tr.pos)) else { continue };
+        let (Some(u), Some(v), Some(f)) = (world.get::<Unit>(e), world.get::<Vitals>(e), world.get::<Fighter>(e)) else {
             continue;
         };
-        if !near(tr.pos) || (v.dead && t - v.died_at > 8.0 && world.get::<crate::PlayerControl>(e).is_none()) {
+        if v.dead && t - v.died_at > 8.0 && world.get::<crate::PlayerControl>(e).is_none() {
             continue;
         }
         let a = world.get::<Auras>(e);

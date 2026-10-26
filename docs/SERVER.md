@@ -196,7 +196,10 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
   parts follow, then positions as centimetre deltas, velocity to 5 cm/s, yaw to 1/65536 of a
   turn, health to a tenth. Timers (cooldowns, auras, casts, poses) go as the tick they end or
   began, so they don't change while they run. The player's own state goes in five parts that
-  each go only when they change. `server::net::Client` rebuilds whole `Snapshot`s and
+  each go only when they change. Units further from the player go out less often (#278): every
+  view they change within 30 m, every second view out to 60 m, every fourth to 100 m and every
+  eighth beyond, taking turns by ID so each view carries a share. One that's off its turn stays as
+  the last view had it, so a late ack never makes it jump back. `server::net::Client` rebuilds whole `Snapshot`s and
   `CombatView`s (`protocol::wire::Decoder`), so bots and later the client see what they saw
   before. `cargo run -p server --release --example wire_bench` times one player's views.
 - **Players:** joining with a name already in the world takes that character back; a player who
@@ -240,9 +243,15 @@ views at 20 Hz (#34; same box, 10 s a row, 25 October 2026):
 | 500 | 2.9 | 1.43 / 7.51 | 152.24 / 244.58 | 177.48 / 560.19 | 371.72 / 762.91 | 27 KB/s | 13.7 MB/s |
 
 Out per player is now about 30 KB/s whatever the tick rate (a hundred times less at 200 players),
-and 50 players nearly keep 60 ticks a second. What's left is building views by scanning the whole
-world and encoding a thousand units in view per player, on cores the bots share; #278 takes
-views from the grid and sends far units less often. The `players` scene in
+and 50 players nearly keep 60 ticks a second. Sending far units less often (#278) took out per
+player to about 20 KB/s (19, 21 and 21 KB/s at 50, 200 and 500 bots; ticks a second unchanged).
+
+What's left is CPU per view, not finding who's in it. Scanning the whole valley's 3,000 units
+costs a snapshot 0.008 ms and a combat view 0.015 ms (a viewer with nobody near), so taking views
+from the spatial grid would save almost nothing at region sizes and isn't done. The cost is in the
+units actually in view: with 1,000 of them, about 0.3 ms to build the snapshot and combat view
+and 0.2 ms to encode, on cores the bots share here. #286 builds views straight into the wire
+form. The `players` scene in
 `crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
 the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
 
