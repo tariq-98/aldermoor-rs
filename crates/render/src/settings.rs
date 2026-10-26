@@ -21,11 +21,12 @@ pub struct LookSettings {
     pub ao_radius: f32,
     pub ao_bias: f32,
     pub ao_strength: f32,
-    /// Linear-HDR bloom; radius is measured in half-resolution texels.
+    /// Linear-HDR bloom, disabled by default.
     pub bloom_enabled: bool,
     pub bloom_threshold: f32,
     /// Soft-knee width as a fraction of threshold; zero gives a hard threshold.
     pub bloom_knee: f32,
+    /// Wider-level weight, 0..1: zero keeps the tight half-resolution core; one weights all levels equally.
     pub bloom_radius: f32,
     pub bloom_strength: f32,
     /// Optional art-authored cycle, evaluated against simulation seconds. None preserves
@@ -71,7 +72,7 @@ impl LookSettings {
         self.ao_enabled && self.ao_strength > 0. && self.ao_radius > 0.
     }
     pub fn bloom_active(&self) -> bool {
-        self.bloom_enabled && self.bloom_strength > 0. && self.bloom_radius > 0.
+        self.bloom_enabled && self.bloom_strength > 0.
     }
     pub fn load(path: &Path) -> Result<Self> {
         let s: Self = serde_json::from_slice(&std::fs::read(path)?)?;
@@ -122,17 +123,13 @@ impl LookSettings {
                 && (0. ..=1.).contains(&self.ao_strength)
                 && self.bloom_threshold >= 0.
                 && (0. ..=1.).contains(&self.bloom_knee)
-                && self.bloom_radius >= 0.
+                && (0. ..=1.).contains(&self.bloom_radius)
                 && self.bloom_strength >= 0.,
             "invalid AO/bloom settings"
         );
         ensure!(
             !self.ao_enabled || self.ao_strength == 0. || self.ao_radius > 0.,
             "enabled AO with nonzero strength needs a positive radius"
-        );
-        ensure!(
-            !self.bloom_enabled || self.bloom_strength == 0. || self.bloom_radius > 0.,
-            "enabled bloom with nonzero strength needs a positive radius"
         );
         if let Some(cycle) = &self.time_of_day {
             cycle.validate(self)?;
@@ -539,7 +536,16 @@ mod post_tests {
         look.ao_strength = 0.;
         look.bloom_enabled = true;
         look.bloom_strength = 1.;
-        assert!(look.validate().is_err());
+        look.validate().unwrap();
+        assert!(look.bloom_active(), "zero radius retains the tight core");
+        for radius in [0., 0.5, 1.] {
+            look.bloom_radius = radius;
+            look.validate().unwrap();
+        }
+        for radius in [-0.01, 1.01, f32::NAN, f32::INFINITY] {
+            look.bloom_radius = radius;
+            assert!(look.validate().is_err());
+        }
         look.bloom_radius = 1.;
         look.validate().unwrap();
         assert!(look.bloom_active());

@@ -80,9 +80,23 @@ impl PostUniform {
         self.ao[3] > 0. || self.bloom[3] > 0.
     }
 }
+// Six levels at the reference resolution; tiny targets retain just their half-size core.
+fn bloom_dimensions(w: usize, h: usize) -> Vec<(usize, usize)> {
+    let mut levels = vec![(w.div_ceil(2), h.div_ceil(2))];
+    while levels.len() < 6 {
+        let &(w, h) = levels.last().unwrap();
+        let next = (w.div_ceil(2), h.div_ceil(2));
+        if next.0.min(next.1) < 8 {
+            break;
+        }
+        levels.push(next);
+    }
+    levels
+}
 struct PostTargets {
     ao: Obj<dyn MTLTexture>,
-    bloom: [Obj<dyn MTLTexture>; 3],
+    bloom_down: Vec<Obj<dyn MTLTexture>>,
+    bloom_up: Vec<Obj<dyn MTLTexture>>,
     colour: Obj<dyn MTLTexture>,
 }
 impl PostTargets {
@@ -91,16 +105,16 @@ impl PostTargets {
         w: usize,
         h: usize,
         colour_usage: MTLTextureUsage,
+        bloom: bool,
     ) -> Result<Self> {
         let usage = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
-        let half = |format| texture(device, w.div_ceil(2), h.div_ceil(2), format, 1, usage);
+        let sizes = if bloom { bloom_dimensions(w, h) } else { Vec::new() };
+        let bloom_target = |&(w, h)| texture(device, w, h, MTLPixelFormat::RGBA16Float, 1, usage);
         Ok(Self {
-            ao: half(MTLPixelFormat::RG16Float)?,
-            bloom: [
-                half(MTLPixelFormat::RGBA16Float)?,
-                half(MTLPixelFormat::RGBA16Float)?,
-                half(MTLPixelFormat::RGBA16Float)?,
-            ],
+            ao: texture(device, w.div_ceil(2), h.div_ceil(2), MTLPixelFormat::RG16Float, 1, usage)?,
+            bloom_down: sizes.iter().map(bloom_target).collect::<Result<_>>()?,
+            // A separate target per upsample avoids sampling a render attachment.
+            bloom_up: sizes[..sizes.len().saturating_sub(1)].iter().map(bloom_target).collect::<Result<_>>()?,
             colour: texture(
                 device,
                 w,
@@ -110,6 +124,13 @@ impl PostTargets {
                 usage | colour_usage,
             )?,
         })
+    }
+    fn bloom_result(&self, radius: f32) -> &Obj<dyn MTLTexture> {
+        if radius > 0. && !self.bloom_up.is_empty() {
+            &self.bloom_up[0]
+        } else {
+            &self.bloom_down[0]
+        }
     }
 }
 #[repr(C)]
@@ -147,8 +168,8 @@ pub const GPU_PASS_NAMES: [&str; 15] = [
     "water_transparent",
     "ao_half",
     "bloom_extract_half",
-    "bloom_horizontal_half",
-    "bloom_vertical_half",
+    "bloom_downsample_chain",
+    "bloom_upsample_chain",
     "post_apply",
 ];
 const PASS_COUNT: usize = GPU_PASS_NAMES.len();
@@ -677,7 +698,7 @@ impl Renderer {
             )?,
             pipeline(
                 "fullscreen",
-                Some("post_bloom_extract"),
+                Some("post_bloom_downsample"),
                 1,
                 &[MTLPixelFormat::RGBA16Float],
                 false,
@@ -685,7 +706,7 @@ impl Renderer {
             )?,
             pipeline(
                 "fullscreen",
-                Some("post_bloom_blur"),
+                Some("post_bloom_upsample"),
                 1,
                 &[MTLPixelFormat::RGBA16Float],
                 false,
@@ -1316,6 +1337,7 @@ impl Renderer {
                 p.colour.width() != self.hdr.width()
                     || p.colour.height() != self.hdr.height()
                     || !p.colour.usage().contains(self.hdr.usage())
+                    || (post.bloom[3] > 0. && p.bloom_down.is_empty())
             })
         {
             self.wait()?;
@@ -1324,6 +1346,7 @@ impl Renderer {
                 self.hdr.width(),
                 self.hdr.height(),
                 self.hdr.usage(),
+                post.bloom[3] > 0.,
             )?);
         }
         let unjittered = camera.matrix(aspect);
@@ -1923,8 +1946,9 @@ impl Renderer {
         self.stats.bone_capacity = bones.length();
         Ok(self.stats)
     }
-    /// Each post pass has its own stage counters. The final application is full internal
-    /// resolution; only AO evaluation and bloom filtering use the half-resolution targets.
+    /// Bloom uses the existing three counter slots: extraction, remaining downsampling,
+    /// and upsampling. Chain counters span first start to last end (including inter-pass gaps),
+    /// not summed busy times. AO and final application still describe individual passes.
     fn encode_post(
         &self,
         cb: &ProtocolObject<dyn MTLCommandBuffer>,
@@ -1935,15 +1959,31 @@ impl Renderer {
     ) -> Result<usize> {
         let targets = self.post_targets.as_ref().expect("active post targets");
         let mut calls = 0;
-        let mut run = |index: usize,
+        let mut run = |(index, first, last): (usize, bool, bool),
                        pipeline: usize,
                        target: &Obj<dyn MTLTexture>,
                        source: &Obj<dyn MTLTexture>,
+                       detail: Option<&Obj<dyn MTLTexture>>,
                        uniforms: &PostUniform|
          -> Result<()> {
             let pass = MTLRenderPassDescriptor::new();
-            if let Some(c) = counters {
+            if let Some(c) = counters
+                && (first || last)
+            {
                 c.attach(&pass, index);
+                // Write each endpoint once; do not overwrite the group's first timestamps
+                // or read an intermediate level's stale samples as a completed chain.
+                unsafe {
+                    let a = pass.sampleBufferAttachments().objectAtIndexedSubscript(0);
+                    if !first {
+                        a.setStartOfVertexSampleIndex(MTLCounterDontSample);
+                        a.setStartOfFragmentSampleIndex(MTLCounterDontSample);
+                    }
+                    if !last {
+                        a.setEndOfVertexSampleIndex(MTLCounterDontSample);
+                        a.setEndOfFragmentSampleIndex(MTLCounterDontSample);
+                    }
+                }
                 *mask |= 1 << index;
             }
             let colour = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
@@ -1964,6 +2004,9 @@ impl Renderer {
                 enc.setFragmentBytes_length_atIndex(ptr(frame), std::mem::size_of::<Frame>(), 1);
                 enc.setFragmentTexture_atIndex(Some(source), 0);
                 enc.setFragmentTexture_atIndex(Some(&self.depth), 1);
+                if let Some(detail) = detail {
+                    enc.setFragmentTexture_atIndex(Some(detail), 4);
+                }
                 // Bind the effect targets only when applying, never while rendering into them.
                 if pipeline == 3 {
                     enc.setFragmentTexture_atIndex(
@@ -1976,7 +2019,7 @@ impl Renderer {
                     );
                     enc.setFragmentTexture_atIndex(
                         Some(if post.bloom[3] > 0. {
-                            &targets.bloom[2]
+                            targets.bloom_result(post.bloom[1])
                         } else {
                             &self.fallbacks[0]
                         }),
@@ -1990,17 +2033,38 @@ impl Renderer {
             Ok(())
         };
         if post.ao[3] > 0. {
-            run(10, 0, &targets.ao, &self.hdr, post)?;
+            run((10, true, true), 0, &targets.ao, &self.hdr, None, post)?;
         }
         if post.bloom[3] > 0. {
-            run(11, 1, &targets.bloom[0], &self.hdr, post)?;
-            let mut blur = *post;
-            blur.blur = [1., 0., 0., 0.];
-            run(12, 2, &targets.bloom[1], &targets.bloom[0], &blur)?;
-            blur.blur = [0., 1., 0., 0.];
-            run(13, 2, &targets.bloom[2], &targets.bloom[1], &blur)?;
+            let mut bloom = *post;
+            bloom.blur = [0., 0., 1., 0.];
+            run((11, true, true), 1, &targets.bloom_down[0], &self.hdr, None, &bloom)?;
+            let levels = targets.bloom_down.len();
+            let radius = post.bloom[1];
+            if radius > 0. && levels > 1 {
+                bloom.blur = [0.; 4];
+                for level in 1..levels {
+                    run((12, level == 1, level + 1 == levels), 1,
+                        &targets.bloom_down[level], &targets.bloom_down[level - 1], None, &bloom)?;
+                }
+                // D0 + radius*D1 + radius^2*D2 + ... normalised by the same weights.
+                // All weights are nonnegative and sum to one, bounding energy as levels grow.
+                let mut weight = 1.;
+                for level in (0..levels - 1).rev() {
+                    let lower = radius * weight;
+                    weight = 1. + lower;
+                    bloom.blur = [1. / weight, lower / weight, 0., 0.];
+                    let source = if level + 2 == levels {
+                        &targets.bloom_down[level + 1]
+                    } else {
+                        &targets.bloom_up[level + 1]
+                    };
+                    run((13, level + 2 == levels, level == 0), 2,
+                        &targets.bloom_up[level], source, Some(&targets.bloom_down[level]), &bloom)?;
+                }
+            }
         }
-        run(14, 3, &targets.colour, &self.hdr, post)?;
+        run((14, true, true), 3, &targets.colour, &self.hdr, None, post)?;
         Ok(calls)
     }
     fn encode(
@@ -2531,6 +2595,197 @@ mod temporal_tests {
         }
     }
     #[test]
+    fn bloom_pyramid_stops_at_six_levels_or_the_small_edge() {
+        assert_eq!(bloom_dimensions(1920, 1200), vec![(960, 600), (480, 300), (240, 150), (120, 75), (60, 38), (30, 19)]);
+        assert_eq!(bloom_dimensions(65, 47), vec![(33, 24), (17, 12)]);
+        assert_eq!(bloom_dimensions(1, 1), vec![(1, 1)]);
+        assert_eq!(bloom_dimensions(17, 9), vec![(9, 5)]);
+    }
+
+    // Exercise the actual post encoder and shaders using numeric FP16 buffers, never image files.
+    fn bloom_fixture(r: &Renderer, radius: f32, pixel: impl Fn(usize, usize) -> u16) -> Vec<f32> {
+        let (w, h) = (r.hdr.width(), r.hdr.height());
+        let mut pixels = vec![0_u16; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let p = (y * w + x) * 4;
+                pixels[p..p + 3].fill(pixel(x, y));
+                pixels[p + 3] = 0x3c00; // FP16 one, alpha.
+            }
+        }
+        let size = pixels.len() * 2;
+        let upload = r.device.newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(pixels.as_ptr().cast::<u8>(), upload.contents().as_ptr().cast::<u8>(), size);
+        }
+        let cb = r.queue.commandBuffer().unwrap();
+        let blit = cb.blitCommandEncoder().unwrap();
+        unsafe {
+            blit.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                &upload, 0, w * 8, size, MTLSize { width: w, height: h, depth: 1 },
+                &r.hdr, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 });
+        }
+        blit.endEncoding();
+        let look = LookSettings { bloom_enabled: true, bloom_strength: 1., bloom_radius: radius, ..Default::default() };
+        let post = PostUniform::new(&look, Camera { eye: Vec3::Z, target: Vec3::ZERO, fov: 1. }, 1.);
+        let frame = bytemuck::Zeroable::zeroed();
+        let mut mask = 0;
+        r.encode_post(&cb, &frame, &post, None, &mut mask).unwrap();
+        cb.commit();
+        cb.waitUntilCompleted();
+        assert!(cb.error().is_none());
+
+        let texture = r.post_targets.as_ref().unwrap().bloom_result(radius);
+        let (w, h) = (texture.width(), texture.height());
+        let size = w * h * 8;
+        let readback = r.device.newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared).unwrap();
+        let cb = r.queue.commandBuffer().unwrap();
+        let blit = cb.blitCommandEncoder().unwrap();
+        unsafe {
+            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                texture, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 }, MTLSize { width: w, height: h, depth: 1 },
+                &readback, 0, w * 8, size);
+        }
+        blit.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        assert!(cb.error().is_none());
+        let half = unsafe { std::slice::from_raw_parts(readback.contents().as_ptr().cast::<u16>(), w * h * 4) };
+        half.chunks_exact(4).map(|pixel| {
+            for &v in &pixel[..3] {
+                assert_eq!(v & 0x8000, 0, "bloom must stay nonnegative");
+                assert_ne!(v & 0x7c00, 0x7c00, "bloom must stay finite");
+                assert_eq!(v, pixel[0], "an achromatic input must stay achromatic");
+            }
+            let bits = pixel[0];
+            let exponent = ((bits >> 10) & 31) as i32;
+            if exponent == 0 {
+                f32::from(bits & 1023) * 2_f32.powi(-24)
+            } else {
+                (f32::from(bits & 1023) + 1024.) * 2_f32.powi(exponent - 25)
+            }
+        }).collect()
+    }
+
+    #[test]
+    fn bloom_preserves_constant_fields_and_spreads_an_impulse_without_rings() {
+        for (w, h) in [(1, 1), (63, 47), (512, 512)] {
+            let mut r = Renderer::with_samples(w, h, 1., 1).unwrap();
+            r.post_targets = Some(PostTargets::new(&r.device, w as usize, h as usize, r.hdr.usage(), true).unwrap());
+            for (half, expected) in [(0, 0_f32), (0x3c00, 1.), (0x4c00, 16.), (0x7bff, 65504.)] {
+                let values = bloom_fixture(&r, 1., |_, _| half);
+                assert!(values.iter().all(|&v| (v - expected).abs() <= (expected * 0.002).max(0.00001)), "constant field {expected} at {w}x{h}");
+            }
+            if w != 512 {
+                continue;
+            }
+            let mut core_energy = 0.;
+            for radius in [0., 0.5, 1.] {
+                let values = bloom_fixture(&r, radius, |x, y| if x == 256 && y == 256 { 0x4c00 } else { 0 });
+                let energy = values.iter().sum::<f32>() * 4.; // Each half-size texel covers four input pixels.
+                assert!(energy > 0. && energy <= 16.01, "bounded impulse energy: {energy}");
+                if radius == 0. {
+                    core_energy = energy;
+                }
+                assert!((energy - core_energy).abs() < core_energy * 0.04, "mips must not multiply energy: {core_energy} -> {energy}");
+                let mut rings = [0_f32; 100];
+                let mut count = [0_u32; 100];
+                let mut outside = 0.;
+                for y in 0..256 {
+                    for x in 0..256 {
+                        let distance = (x as f32 - 127.75).hypot(y as f32 - 127.75);
+                        let value = values[y * 256 + x];
+                        if distance >= 16. {
+                            outside += value * 4.;
+                        }
+                        let ring = distance as usize;
+                        if ring < rings.len() {
+                            rings[ring] += value;
+                            count[ring] += 1;
+                        }
+                    }
+                }
+                for (value, count) in rings.iter_mut().zip(count) {
+                    if count > 0 {
+                        *value /= count as f32;
+                    }
+                }
+                assert!(rings.windows(2).all(|v| v[1] <= v[0] + 0.000002), "no secondary radial peak");
+                for (dx, dy) in [(1, 0), (0, 1), (1, 1), (-1, 0), (0, -1), (-1, -1)] {
+                    let mut previous = values[128 * 256 + 128];
+                    for step in 1..96 {
+                        let index = ((128 + dy * step) * 256 + 128 + dx * step) as usize;
+                        let next = values[index];
+                        assert!(next <= previous + 0.000002, "no ringing along a ray");
+                        previous = next;
+                    }
+                }
+                if radius == 1. {
+                    assert!(outside > energy * 0.05, "wide halo must extend beyond 32 input pixels");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bloom_chain_counters_expire_for_core_only_small_targets_and_off() {
+        let mut r = Renderer::with_samples(512, 512, 1., 1).unwrap();
+        let sampled = counter_device_or_verify_fallback(&mut r);
+        if sampled {
+            r.set_gpu_counters(true).unwrap();
+        }
+        r.scene_time = Some(0.);
+        let camera = Camera { eye: Vec3::new(0., 30., 30.), target: Vec3::ZERO, fov: 1. };
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        let original = output_bytes(&r);
+        let base_calls = r.stats.draw_calls;
+        r.look.bloom_enabled = true;
+        r.look.bloom_radius = 1.;
+        r.look.bloom_strength = 0.5;
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(r.stats.draw_calls, base_calls + 12, "six downsamples, five upsamples and application");
+        if sampled {
+            let f = r.stats.completed.unwrap();
+            for timing in &f.passes[11..15] {
+                let timing = timing.expect("all bloom group endpoints must be present");
+                assert!(timing.elapsed_ms > 0. && timing.elapsed_ms <= f.gpu_ms + 1.);
+            }
+        }
+        r.look.bloom_radius = 0.;
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(r.stats.draw_calls, base_calls + 2, "zero radius executes only the tight core and application");
+        if sampled {
+            let f = r.stats.completed.unwrap();
+            assert!(f.passes[11].is_some() && f.passes[14].is_some());
+            assert!(f.passes[12].is_none() && f.passes[13].is_none());
+        }
+        r.look.bloom_enabled = false;
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(r.stats.draw_calls, base_calls, "off encodes no bloom or application");
+        assert_eq!(output_bytes(&r), original, "off is bit-identical after toggling");
+        if sampled {
+            assert!(r.stats.completed.unwrap().passes[11..15].iter().all(Option::is_none));
+        }
+        r.resize(7, 7).unwrap();
+        r.look.bloom_enabled = true;
+        r.look.bloom_radius = 1.;
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        let targets = r.post_targets.as_ref().unwrap();
+        assert_eq!(targets.bloom_down.len(), 1);
+        assert!(targets.bloom_up.is_empty());
+        assert_eq!(r.stats.draw_calls, base_calls + 2);
+        if sampled {
+            let f = r.stats.completed.unwrap();
+            assert!(f.passes[11].is_some() && f.passes[14].is_some());
+            assert!(f.passes[12].is_none() && f.passes[13].is_none());
+        }
+    }
+    #[test]
     fn post_toggles_skip_work_and_half_targets_resize_for_each_aa_mode() {
         let camera = Camera {
             eye: Vec3::new(0., 30., 30.),
@@ -2566,6 +2821,7 @@ mod temporal_tests {
             assert_eq!(r.stats.draw_calls, base_calls + 2);
             let targets = r.post_targets.as_ref().unwrap();
             assert_eq!((targets.ao.width(), targets.ao.height()), (33, 24));
+            assert!(targets.bloom_down.is_empty() && targets.bloom_up.is_empty(), "AO alone allocates no bloom pyramid");
             if sampled {
                 let f = r.stats.completed.unwrap();
                 assert!(f.passes[10].is_some() && f.passes[14].is_some());

@@ -252,39 +252,79 @@ fragment float2 post_ao(Full i [[stage_in]], constant PostUniform& post [[buffer
 fragment float2 post_ao_msaa(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], constant Frame& f [[buffer(1)]], depth2d_ms<float> depth [[texture(1)]]) {
     return post_ao_value(i, f, post, depth);
 }
-fragment float4 post_bloom_extract(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]]) {
-    int2 size = int2(source.get_width(), source.get_height());
-    int2 base = int2(i.position.xy) * 2;
-    float3 sum = 0.;
-    float weights = 0.;
-    // projection.w is the authored knee/threshold ratio; zero retains a hard threshold.
+// A normalised 13-tap downsample: four overlapping outer 2x2 groups and
+// one inner 2x2 group. Only the first level thresholds and applies Karis.
+float4 bloom_first_sample(float3 c, constant PostUniform& post) {
+    c = max(c, 0.);
+    float peak = max(c.r, max(c.g, c.b));
+    float excess = max(peak - post.bloom.x, 0.);
     float knee = post.bloom.x * post.projection.w;
-    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
-        float3 c = max(source.read(uint2(min(base + int2(x, y), size - 1))).rgb, 0.);
-        float peak = max(c.r, max(c.g, c.b));
-        float excess = max(peak - post.bloom.x, 0.);
-        if (knee > 0.) {
-            float soft = clamp(peak - post.bloom.x + knee, 0., 2. * knee);
-            excess = max(excess, soft * soft / (4. * knee));
-        }
-        // Karis weighting suppresses isolated HDR fireflies before downsampling.
-        // These are linear Rec.709 luminance coefficients, not look tuning.
-        float weight = 1. / (1. + dot(c, float3(0.2126, 0.7152, 0.0722)));
-        sum += c * (excess / max(peak, 1e-6)) * weight;
-        weights += weight;
+    if (knee > 0.) {
+        float soft = clamp(peak - post.bloom.x + knee, 0., 2. * knee);
+        excess = max(excess, soft * soft / (4. * knee));
     }
-    return float4(min(sum / weights, 65504.), 1);
+    // Linear Rec.709 luminance is a filter definition, not authored look tuning.
+    float weight = 1. / (1. + dot(c, float3(0.2126, 0.7152, 0.0722)));
+    return float4(c * (excess / max(peak, 1e-6)) * weight, weight);
 }
-fragment float4 post_bloom_blur(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]]) {
+float3 bloom_karis_group(float4 a, float4 b, float4 c, float4 d) {
+    float4 sum = a + b + c + d;
+    return sum.rgb / sum.w;
+}
+fragment float4 post_bloom_downsample(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]]) {
     constexpr sampler linear(coord::normalized, address::clamp_to_edge, filter::linear);
-    // Bilinear pairs implement the normalised [1,4,6,4,1]/16 binomial kernel.
-    // A radius above roughly two texels spreads these taps apart and can ring;
-    // wide bloom needs a mip chain, not a larger authored radius on this one level.
-    float2 offset = post.blur.xy * post.bloom.y * 1.2 / float2(source.get_width(), source.get_height());
-    float3 c = source.sample(linear, i.uv).rgb * 0.375;
-    c += (source.sample(linear, i.uv - offset).rgb + source.sample(linear, i.uv + offset).rgb) * 0.3125;
-    return float4(c, 1);
+    float2 texel = 1. / float2(source.get_width(), source.get_height());
+    float3 a = source.sample(linear, i.uv + texel * float2(-2, -2)).rgb;
+    float3 b = source.sample(linear, i.uv + texel * float2( 0, -2)).rgb;
+    float3 c = source.sample(linear, i.uv + texel * float2( 2, -2)).rgb;
+    float3 d = source.sample(linear, i.uv + texel * float2(-2,  0)).rgb;
+    float3 e = source.sample(linear, i.uv).rgb;
+    float3 f = source.sample(linear, i.uv + texel * float2( 2,  0)).rgb;
+    float3 g = source.sample(linear, i.uv + texel * float2(-2,  2)).rgb;
+    float3 h = source.sample(linear, i.uv + texel * float2( 0,  2)).rgb;
+    float3 j = source.sample(linear, i.uv + texel * float2( 2,  2)).rgb;
+    float3 k = source.sample(linear, i.uv + texel * float2(-1, -1)).rgb;
+    float3 l = source.sample(linear, i.uv + texel * float2( 1, -1)).rgb;
+    float3 m = source.sample(linear, i.uv + texel * float2(-1,  1)).rgb;
+    float3 n = source.sample(linear, i.uv + texel * float2( 1,  1)).rgb;
+    float3 result;
+    if (post.blur.z > 0.5) {
+        float4 ka = bloom_first_sample(a, post), kb = bloom_first_sample(b, post);
+        float4 kc = bloom_first_sample(c, post), kd = bloom_first_sample(d, post);
+        float4 ke = bloom_first_sample(e, post), kf = bloom_first_sample(f, post);
+        float4 kg = bloom_first_sample(g, post), kh = bloom_first_sample(h, post);
+        float4 kj = bloom_first_sample(j, post);
+        result = (bloom_karis_group(ka, kb, kd, ke)
+                + bloom_karis_group(kb, kc, ke, kf)
+                + bloom_karis_group(kd, ke, kg, kh)
+                + bloom_karis_group(ke, kf, kh, kj)) * 0.125;
+        result += bloom_karis_group(bloom_first_sample(k, post), bloom_first_sample(l, post),
+                                   bloom_first_sample(m, post), bloom_first_sample(n, post)) * 0.5;
+    } else {
+        result = (a + c + g + j) * 0.03125 + (b + d + f + h) * 0.0625
+               + e * 0.125 + (k + l + m + n) * 0.125;
+    }
+    return float4(min(result, 65504.), 1);
 }
+fragment float4 post_bloom_upsample(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]], texture2d<float> detail [[texture(4)]]) {
+    constexpr sampler linear(coord::normalized, address::clamp_to_edge, filter::linear);
+    // Fixed one-source-texel 3x3 tent. Width comes from the pyramid, not sparse taps.
+    float2 texel = 1. / float2(source.get_width(), source.get_height());
+    float3 sum = source.sample(linear, i.uv).rgb * 4.;
+    sum += (source.sample(linear, i.uv + texel * float2(-1, 0)).rgb
+          + source.sample(linear, i.uv + texel * float2( 1, 0)).rgb
+          + source.sample(linear, i.uv + texel * float2( 0,-1)).rgb
+          + source.sample(linear, i.uv + texel * float2( 0, 1)).rgb) * 2.;
+    sum += source.sample(linear, i.uv + texel * float2(-1,-1)).rgb
+         + source.sample(linear, i.uv + texel * float2( 1,-1)).rgb
+         + source.sample(linear, i.uv + texel * float2(-1, 1)).rgb
+         + source.sample(linear, i.uv + texel * float2( 1, 1)).rgb;
+    // The CPU supplies weights whose sum is one. This is additive accumulation
+    // normalised by the geometric level weights, so a constant field stays constant.
+    float3 result = detail.sample(linear, i.uv).rgb * post.blur.x + sum * (post.blur.y / 16.);
+    return float4(min(result, 65504.), 1);
+}
+
 template<typename Depth>
 float4 post_apply_value(Full i, constant Frame& f, constant PostUniform& post, texture2d<float> source, Depth depth, texture2d<float> ao, texture2d<float> bloom) {
     constexpr sampler linear(coord::normalized, address::clamp_to_edge, filter::linear);
