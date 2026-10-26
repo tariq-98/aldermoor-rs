@@ -193,15 +193,20 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
   intro, when it comes into view or changes (and are remembered for ten seconds after it leaves,
   so a unit wandering along the edge of view doesn't send them again). After that a view carries
   only what changed since the last view the client acknowledged: per unit, one byte saying which
-  parts follow, then positions as centimetre deltas, velocity to 5 cm/s, yaw to 1/65536 of a
-  turn, health to a tenth. Timers (cooldowns, auras, casts, poses) go as the tick they end or
+  parts follow, then the position as centimetres from where the base's velocity was taking it,
+  the change in velocity (to 5 cm/s) and in yaw (to 1/65536 of a turn), health to a tenth. Timers (cooldowns, auras, casts, poses) go as the tick they end or
   began, so they don't change while they run. The player's own state goes in five parts that
   each go only when they change. Units further from the player go out less often (#278): every
   view they change within 30 m, every second view out to 60 m, every fourth to 100 m and every
   eighth beyond, taking turns by ID so each view carries a share. One that's off its turn stays as
   the last view had it, so a late ack never makes it jump back. `server::net::Client` rebuilds whole `Snapshot`s and
   `CombatView`s (`protocol::wire::Decoder`), so bots and later the client see what they saw
-  before. `cargo run -p server --release --example wire_bench` times one player's views.
+  before. Each step that some player is due a view, the server puts everyone into one
+  `protocol::wire::Frame` (`Sim::net_frame`), quantised once, and each player's encoder picks
+  their view out of it (`Sim::encode_view`, #286): nothing is built twice, no unit's strings are
+  copied unless its look or name changed, and an unchanged unit's look and combat detail are known
+  by a version number. `cargo run -p server --release --example wire_bench` times one player's
+  views both ways and checks they're the same.
 - **Players:** joining with a name already in the world takes that character back; a player who
   leaves stays standing where they were (until accounts, #88). A connection more than two
   seconds of views behind is dropped.
@@ -211,8 +216,9 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
   takes 1.1 to 1.4 ms, inside the 2 ms budget. Before #34 each player's view cost about 1.1 ms
   to build and encode and was about 10 MB/s, a full snapshot every step. With wire views at 20 Hz
   one player among the 2,000 monsters (1,037 in view) costs 0.28 ms to build, 0.18 ms to encode
-  and 0.24 ms to decode a view, at 166 bytes a view (3.2 KB/s) standing still. Building still
-  scans the whole world; taking views from the grid is #278.
+  and 0.24 ms to decode a view, at 166 bytes a view (3.2 KB/s) standing still. Picked from the
+  step's frame (#286), a view costs 0.1 ms, and the frame 0.6 ms a step however many players
+  share it; 116 bytes a view.
 
 ## Load test
 
@@ -250,8 +256,23 @@ What's left is CPU per view, not finding who's in it. Scanning the whole valley'
 costs a snapshot 0.008 ms and a combat view 0.015 ms (a viewer with nobody near), so taking views
 from the spatial grid would save almost nothing at region sizes and isn't done. The cost is in the
 units actually in view: with 1,000 of them, about 0.3 ms to build the snapshot and combat view
-and 0.2 ms to encode, on cores the bots share here. #286 builds views straight into the wire
-form. The `players` scene in
+and 0.2 ms to encode, on cores the bots share here.
+
+Building views straight into the wire form from one shared frame a step (#286; same box, 10 s a
+row, 26 October 2026):
+
+| Players | Ticks/s | Step p50 / p99 ms | Build views p50 / p99 | Encode p50 / p99 | Tick p50 / p99 | Out per player | Out total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 60.0 | 1.08 / 2.66 | 1.18 / 3.36 | 2.68 / 7.05 | 5.12 / 10.65 | 23 KB/s | 1.1 MB/s |
+| 200 | 36.7 | 1.46 / 5.39 | 7.78 / 18.82 | 16.62 / 26.56 | 26.65 / 38.64 | 42 KB/s | 8.3 MB/s |
+| 500 | 9.0 | 1.83 / 4.88 | 22.13 / 64.12 | 80.55 / 136.16 | 107.85 / 161.29 | 64 KB/s | 31.8 MB/s |
+
+50 players keep the full 60 ticks a second and 200 four times the rate before. Out per player
+grows with the tick rate the server keeps (it's about the same per tick). "Build views" is now the
+frame (about 1 ms) and handing each view to its connection's thread; here those threads and the
+200 bots' own share the server's 4 cores, so the next measure wants the bots on another machine.
+Encoding is one core's work for every player in turn, and players' views of one frame are
+independent, so they can go across cores when one isn't enough. The `players` scene in
 `crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
 the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
 

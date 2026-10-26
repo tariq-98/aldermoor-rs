@@ -238,3 +238,37 @@ fn a_view_against_a_base_the_client_lost_is_refused() {
     assert_eq!(encoder.encode(&sim.snapshot(Some(hero)), &sim.combat_view(Some(hero))).base, Some(first.tick));
 }
 
+
+#[test]
+fn views_from_the_frame_match_views_from_snapshots() {
+    // The server picks views out of a frame a step (#286): the player must end up with what their
+    // own snapshot and combat view would have given them, view after view, with late acks.
+    let (mut sim, hero) = fight(5);
+    let (mut whole, mut picked) = (Encoder::new(), Encoder::new());
+    let (mut from_whole, mut from_frame) = (Decoder::new(), Decoder::new());
+    let (mut frame, mut events, mut sizes) = (None, Vec::new(), (0, 0));
+    for step in 0..600u64 {
+        act(&mut sim, hero, step);
+        sim.step();
+        events.extend(sim.take_events());
+        // A frame every step, as the server builds them, though this player's view is every third.
+        frame = Some(sim.net_frame(frame.as_ref()));
+        if step % 3 != 0 {
+            continue;
+        }
+        let mut snapshot = sim.snapshot(Some(hero));
+        snapshot.events = std::mem::take(&mut events);
+        let a = whole.encode(&snapshot, &sim.combat_view(Some(hero)));
+        let b = sim.encode_view(frame.as_ref().unwrap(), hero, &mut picked, &snapshot.events);
+        sizes.0 += postcard::to_stdvec(&a).unwrap().len();
+        sizes.1 += postcard::to_stdvec(&b).unwrap().len();
+        let tick = a.tick;
+        assert_eq!(from_whole.decode(a).unwrap(), from_frame.decode(b).unwrap(), "view {tick}");
+        if step / 3 % 2 == 0 {
+            whole.ack(tick);
+            picked.ack(tick);
+        }
+    }
+    // Detail that changed and changed back between views may go again from the frame, no more.
+    assert!(sizes.1 <= sizes.0 + sizes.0 / 20, "{} bytes from the frame against {}", sizes.1, sizes.0);
+}

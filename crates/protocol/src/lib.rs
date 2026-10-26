@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub mod wire;
 
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;

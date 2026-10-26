@@ -45,8 +45,8 @@ instances and fit inside these numbers.
 | Area | Budget | Last measured |
 | --- | --- | --- |
 | Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.14 ms step (#33) plus 92 ms building views at 200 bots (#189, load test) |
-| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | 0.3 ms to build and 0.2 ms to encode at 20 Hz with 1,000 units in view; 0.023 ms with nobody near, so the scan isn't the cost (#278, #286) |
-| Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | about 20 KB/s per bot in the load test; the perf gate's `players` scene (200 players and 2,000 monsters, all in view) 83 KB/s (#278, #286) |
+| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | 0.1 ms with 1,000 units in view, picked from a frame a step shared by every player (0.6 ms a step at 2,000 units); was 0.3 ms to build and 0.2 ms to encode (#286) |
+| Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | 23 KB/s per bot at 50 bots and 60 ticks a second in the load test, 42 KB/s at 200; the perf gate's `players` scene (200 players and 2,000 monsters, all in view) 61 KB/s, measured over 5 s (#278, #286) |
 | Server out, one region | 4 MB/s at 200 players | 2.8 GB/s at 200 players (#73) |
 | Client: crowd of 200 characters | 4 ms GPU and 3 ms CPU together, inside the frame budgets above | not built (#75) |
 
