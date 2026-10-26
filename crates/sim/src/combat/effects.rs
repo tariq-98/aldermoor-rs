@@ -615,6 +615,15 @@ pub fn knock(world: &mut World, te: Entity, dir: Vec2, distance: f32, src: &HitS
 pub fn leap(world: &mut World, e: Entity, delta: Vec2, seconds: f64, arc: f32, kind: ForcedKind) {
     let t = now(world);
     let Some(tr) = world.get::<Transform>(e).copied() else { return };
+    // On a wall, a blow knocks you off it rather than along the ground.
+    if world.get::<Motion>(e).is_some_and(|m| m.hang.is_some() || matches!(m.forced, Some(f) if matches!(f.kind, ForcedKind::ToHold { .. }))) {
+        let land = world.resource::<Land>().0.clone();
+        if let Some(mut m) = world.get_mut::<Motion>(e) {
+            m.forced = None;
+            crate::climbing::knock_off(&land, t, &mut m, delta, seconds);
+        }
+        return;
+    }
     let radius = world.get::<Body>(e).map_or(0.4, |b| b.radius);
     let end = world.resource::<Land>().0.slide(tr.xz(), delta, radius);
     if let Some(mut m) = world.get_mut::<Motion>(e) {

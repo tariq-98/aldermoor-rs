@@ -80,6 +80,17 @@ pub enum ForcedKind {
     /// Hopping a low wall in stride, at the speed it was run at (`speed`, m/s), which it keeps
     /// on landing. `Forced::arc` is how high above the start the hop clears.
     Vault { speed: f32 },
+    /// Onto a hold to hang from it: caught in the air, lowered from the edge above, or climbing
+    /// to the next hold (docs/MOVEMENT.md, "Climbing").
+    ToHold { hold: u32, at: f32 },
+}
+
+/// Hanging from a hold (`world::Hold`, by its index in the valley's holds), with the hands `at`
+/// metres along it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hang {
+    pub hold: u32,
+    pub at: f32,
 }
 
 /// A move the body is carried through (a roll, a leap, being thrown), ignoring the controls.
@@ -121,6 +132,10 @@ pub struct Motion {
     /// The highest the feet have been since they last touched the ground or the water, for fall
     /// damage.
     pub fall_from: f32,
+    /// Hanging from a hold, between moves.
+    pub hang: Option<Hang>,
+    /// The hold just let go of, which can't be caught again until the time given.
+    pub released: Option<(u32, f64)>,
 }
 
 impl Motion {
@@ -139,6 +154,8 @@ impl Motion {
             wading: false,
             sprinting: false,
             fall_from: f32::NEG_INFINITY,
+            hang: None,
+            released: None,
         }
     }
 

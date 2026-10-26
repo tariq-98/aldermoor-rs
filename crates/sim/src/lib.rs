@@ -10,6 +10,7 @@
 //! and warned blows, guarding and parrying, threat, and being downed (docs/DESIGN.md).
 
 mod brain;
+pub mod climbing;
 pub mod combat;
 mod components;
 mod consumables;

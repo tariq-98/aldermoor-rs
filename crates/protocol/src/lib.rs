@@ -191,6 +191,8 @@ pub enum Pose {
     Cast,
     Hit,
     Dead,
+    /// Hanging from a hold by the hands, still or shimmying, or moving onto one.
+    Hang,
 }
 
 /// How a body is getting about, beyond its pose: what animation needs to show swimmers,
@@ -205,6 +207,9 @@ pub enum Traversal {
     Swimming,
     /// Carried through a move that ignores the controls.
     Forced(ForcedMove),
+    /// Hanging from a hold by the hands, still or shimmying along it (docs/MOVEMENT.md,
+    /// "Climbing").
+    Hanging,
 }
 
 /// A roll, leap, charge, climb or throw: where it began and ends, and when.
@@ -233,6 +238,9 @@ pub enum ForcedKind {
     Mantle,
     /// Hopping a low wall in stride.
     Vault,
+    /// Onto a hold to hang from it: caught in the air, lowered over the edge above, or climbing
+    /// or hopping to the next hold.
+    Hold,
 }
 
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it

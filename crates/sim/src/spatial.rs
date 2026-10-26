@@ -118,7 +118,7 @@ pub fn rebuild(
     for (e, u, t, v, m, body, player) in &q {
         let p = Vec2::new(t.pos.x, t.pos.z);
         if separating {
-            crowd.add(e, p, body.map_or(0.4, |b| b.radius), !v.dead && m.is_some_and(|m| m.forced.is_none()), player.then_some(u.faction));
+            crowd.add(e, p, body.map_or(0.4, |b| b.radius), !v.dead && m.is_some_and(|m| m.forced.is_none() && m.hang.is_none()), player.then_some(u.faction));
         }
         if v.dead {
             continue;

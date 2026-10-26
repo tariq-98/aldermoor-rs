@@ -3,7 +3,7 @@ use glam::{Vec2, Vec3};
 use protocol::{Event, Pose};
 
 use crate::combat::abilities::Arrivals;
-use crate::{Anim, Body, Clock, Control, Faction, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, Vitals, DT};
+use crate::{climbing, Anim, Body, Clock, Control, Faction, Fighter, Forced, ForcedKind, Land, Motion, Outbox, Transform, Unit, UnitKind, Vitals, DT};
 
 pub const GRAVITY: f32 = 20.0;
 /// About a 1.1 m jump, landing after 0.66 s.
@@ -101,10 +101,13 @@ pub fn traversal(m: &Motion) -> protocol::Traversal {
             ForcedKind::Climb => protocol::ForcedKind::Climb,
             ForcedKind::Mantle => protocol::ForcedKind::Mantle,
             ForcedKind::Vault { .. } => protocol::ForcedKind::Vault,
+            ForcedKind::ToHold { .. } => protocol::ForcedKind::Hold,
         };
         return Traversal::Forced(ForcedMove { kind, from: f.from, to: f.to, start: f.start, duration: f.duration as f32 });
     }
-    if m.swimming {
+    if m.hang.is_some() {
+        Traversal::Hanging
+    } else if m.swimming {
         Traversal::Swimming
     } else if m.wading {
         Traversal::Wading
@@ -138,6 +141,14 @@ fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, radius: f32, r
             return Some(Vec3::new(stand.x, top, stand.y));
         }
         prev = h;
+    }
+    // A wall too thin for those samples to land on its top (#238): stand on it.
+    if let Some((p, h)) = land.top_ahead(from, dir, 0.6)
+        && h > y + 0.2
+        && h - y <= reach
+        && !land.blocked(p, radius)
+    {
+        return Some(Vec3::new(p.x, h, p.y));
     }
     None
 }
@@ -216,7 +227,17 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.swimming = false;
             m.wading = false;
             m.sprinting = false;
+            m.hang = None;
             continue;
+        }
+        // Hanging from a hold: the climb moves the body, unless it's been downed off the wall.
+        if m.hang.is_some() && m.forced.is_none() {
+            if v.downed {
+                climbing::let_go(land, clock.time, &mut m);
+            } else {
+                climbing::hang_step(land, clock.time, &mut t, &mut m, body.radius, ctl.is_none_or(|c| c.can_move()));
+                continue;
+            }
         }
         if let Some(f) = m.forced {
             // Carried through a roll, leap or throw: ease out, with a hop in the middle.
@@ -231,6 +252,8 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 let p = f.from.lerp(f.to, k);
                 let rise = (f.arc - (f.to.y - f.from.y) * 0.5).max(0.0);
                 t.pos = Vec3::new(p.x, p.y + (k * std::f32::consts::PI).sin() * rise, p.z);
+            } else if let ForcedKind::ToHold { .. } = f.kind {
+                t.pos = climbing::carry(&f, k);
             } else {
                 let eased = 1.0 - (1.0 - k) * (1.0 - k);
                 let p = f.from.lerp(f.to, eased);
@@ -250,6 +273,10 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 }
                 if let ForcedKind::Charge { target, ability } = f.kind {
                     arrivals.0.push((e, target, ability));
+                }
+                if let ForcedKind::ToHold { hold, at } = f.kind {
+                    m.hang = Some(crate::Hang { hold, at });
+                    m.grounded = false;
                 }
             }
             m.observed = (t.pos - start) / DT;
@@ -400,9 +427,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 }
             }
             if !m.grounded {
+                let before = t.pos.y;
                 m.vel.y -= GRAVITY * DT;
                 t.pos.y += m.vel.y * DT;
                 m.fall_from = m.fall_from.max(t.pos.y);
+                // Shift held out of combat (parkour up) catches the holds the hands pass.
+                let catching = u.kind == UnitKind::Player && m.intent.sprint && !in_combat && ctl.can_move() && !v.downed;
+                if catching && climbing::catch(land, clock.time, &mut t, &mut m, body.radius, before) {
+                    m.observed = (t.pos - start) / DT;
+                    continue;
+                }
                 if depth > SWIM_DEPTH && t.pos.y <= float {
                     // A splash: water breaks the fall.
                     t.pos.y = float;
@@ -648,7 +682,10 @@ pub fn update_poses(clock: Res<Clock>, mut q: Query<(&Motion, &Vitals, &mut Anim
                 ForcedKind::Leap => Pose::Jump,
                 ForcedKind::Charge { .. } => Pose::Run,
                 ForcedKind::Climb | ForcedKind::Mantle | ForcedKind::Vault { .. } => Pose::Jump,
+                ForcedKind::ToHold { .. } => Pose::Hang,
             }
+        } else if m.hang.is_some() {
+            Pose::Hang
         } else if let Some(c) = f.and_then(|f| f.cast) {
             if crate::content::catalog().ability(c.ability).is_swing() { Pose::Attack } else { Pose::Cast }
         } else if !m.grounded {
