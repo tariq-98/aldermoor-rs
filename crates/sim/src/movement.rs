@@ -533,7 +533,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
 fn landing_roll(land: &world::Valley, now: f64, t: &mut Transform, m: &mut Motion, radius: f32) {
     let going = Vec2::new(m.vel.x, m.vel.z);
     let dir = if going.length_squared() > 0.25 { going.normalize() } else { t.forward() };
-    let end = land.slide(Vec2::new(t.pos.x, t.pos.z), dir * LANDING_ROLL_DISTANCE, radius);
+    let end = land.slide_below(Vec2::new(t.pos.x, t.pos.z), dir * LANDING_ROLL_DISTANCE, radius, t.pos.y + CLIMB_HEIGHT);
     m.forced = Some(Forced { kind: ForcedKind::Dodge, from: t.pos, to: Vec3::new(end.x, t.pos.y, end.y), start: now, duration: DODGE_DURATION, arc: 0.15 });
     m.vel = Vec3::ZERO;
     t.yaw = heading(dir);
@@ -780,7 +780,8 @@ pub fn start_dodge(land: &world::Valley, now: f64, t: &mut Transform, m: &mut Mo
     }
     let dir = if direction.length_squared() > 0.01 { direction.normalize() } else { -t.forward() };
     v.endurance -= DODGE_COST;
-    let end = land.slide(Vec2::new(t.pos.x, t.pos.z), dir * DODGE_DISTANCE, body.radius);
+    // Stopped by masonry too tall to step onto, as a walker is (#311).
+    let end = land.slide_below(Vec2::new(t.pos.x, t.pos.z), dir * DODGE_DISTANCE, body.radius, t.pos.y + CLIMB_HEIGHT);
     m.forced = Some(crate::Forced {
         kind: ForcedKind::Dodge,
         from: t.pos,
