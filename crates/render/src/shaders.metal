@@ -251,3 +251,136 @@ fragment float4 prefilter_sky(Full i [[stage_in]],constant float& rough [[buffer
     }
     return float4(sum/max(weight,0.001),1);
 }
+
+// AO and bloom operate on half-internal-resolution targets, before temporal reconstruction.
+// All effect magnitudes come from LookSettings; these constants define the sampling kernels.
+struct PostUniform { float4 ao, bloom, projection, blur; };
+float post_depth(depth2d<float> depth, uint2 p) { return depth.read(p); }
+float post_depth(depth2d_ms<float> depth, uint2 p) {
+    float z = 1.;
+    for (uint k = 0; k < depth.get_num_samples(); ++k) z = min(z, depth.read(p, k));
+    return z;
+}
+template<typename Depth>
+float4 post_position(Depth depth, int2 pixel, constant Frame& f) {
+    uint2 size = uint2(depth.get_width(), depth.get_height());
+    uint2 p = uint2(clamp(pixel, int2(0), int2(size) - 1));
+    float z = post_depth(depth, p);
+    float2 uv = (float2(p) + 0.5) / float2(size);
+    float4 world = f.inverse_vp * float4(uv * float2(2, -2) + float2(-1, 1), z, 1);
+    // The inverse perspective transform's w is reciprocal view depth.
+    return float4(world.xyz / world.w, z < 1. ? 1. / world.w : 0.);
+}
+template<typename Depth>
+float2 post_ao_value(Full i, constant Frame& f, constant PostUniform& post, Depth depth) {
+    int2 size = int2(depth.get_width(), depth.get_height());
+    int2 pixel = min(int2(i.uv * float2(size)), size - 1);
+    float4 center = post_position(depth, pixel, f);
+    if (center.w <= 0.) return float2(1, 0);
+    float3 left = center.xyz - post_position(depth, pixel - int2(1, 0), f).xyz;
+    float3 right = post_position(depth, pixel + int2(1, 0), f).xyz - center.xyz;
+    float3 up = center.xyz - post_position(depth, pixel - int2(0, 1), f).xyz;
+    float3 down = post_position(depth, pixel + int2(0, 1), f).xyz - center.xyz;
+    float3 dx = dot(left, left) < dot(right, right) ? left : right;
+    float3 dy = dot(up, up) < dot(down, down) ? up : down;
+    float3 normal = cross(dx, dy);
+    float norm2 = dot(normal, normal);
+    if (norm2 < 1e-12) return float2(1, center.w);
+    normal *= rsqrt(norm2);
+    if (dot(normal, f.eye.xyz - center.xyz) < 0.) normal = -normal;
+    float2 radius = post.ao.x * post.projection.xy * 0.5 * float2(size) / center.w;
+    // Interleaved gradient noise breaks up the fixed ring. The post pass supplies
+    // a frame phase only when temporal reconstruction can integrate the samples.
+    float2 noise_pixel = floor(i.position.xy) + post.projection.z * 5.588238;
+    float noise = fract(52.9829189 * fract(dot(noise_pixel, float2(0.06711056, 0.00583715))));
+    float obscurance = 0.;
+    for (uint k = 0; k < 8; ++k) {
+        float angle = (float(k) / 8. + noise) * (2. * M_PI_F);
+        float radial = sqrt((float(k) + noise) / 8.);
+        float2 offset = float2(cos(angle), sin(angle)) * radius * radial;
+        int2 q = pixel + int2(round(offset));
+        // No repeated clamped border samples: off-screen occluders are unknown.
+        if (any(q < 0) || any(q >= size)) continue;
+        float4 sample = post_position(depth, q, f);
+        if (sample.w <= 0.) continue;
+        float3 delta = sample.xyz - center.xyz;
+        float distance2 = dot(delta, delta);
+        if (distance2 <= 1e-12) continue;
+        float distance = sqrt(distance2);
+        float horizon = max(dot(normal, delta) - post.ao.y, 0.) / distance;
+        obscurance += horizon * saturate(1. - distance2 / (post.ao.x * post.ao.x));
+    }
+    return float2(saturate(1. - post.ao.z * obscurance / 8.), center.w);
+}
+fragment float2 post_ao(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], constant Frame& f [[buffer(1)]], depth2d<float> depth [[texture(1)]]) {
+    return post_ao_value(i, f, post, depth);
+}
+fragment float2 post_ao_msaa(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], constant Frame& f [[buffer(1)]], depth2d_ms<float> depth [[texture(1)]]) {
+    return post_ao_value(i, f, post, depth);
+}
+fragment float4 post_bloom_extract(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]]) {
+    int2 size = int2(source.get_width(), source.get_height());
+    int2 base = int2(i.position.xy) * 2;
+    float3 sum = 0.;
+    float weights = 0.;
+    // projection.w is the authored knee/threshold ratio; zero retains a hard threshold.
+    float knee = post.bloom.x * post.projection.w;
+    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+        float3 c = max(source.read(uint2(min(base + int2(x, y), size - 1))).rgb, 0.);
+        float peak = max(c.r, max(c.g, c.b));
+        float excess = max(peak - post.bloom.x, 0.);
+        if (knee > 0.) {
+            float soft = clamp(peak - post.bloom.x + knee, 0., 2. * knee);
+            excess = max(excess, soft * soft / (4. * knee));
+        }
+        // Karis weighting suppresses isolated HDR fireflies before downsampling.
+        // These are linear Rec.709 luminance coefficients, not look tuning.
+        float weight = 1. / (1. + dot(c, float3(0.2126, 0.7152, 0.0722)));
+        sum += c * (excess / max(peak, 1e-6)) * weight;
+        weights += weight;
+    }
+    return float4(min(sum / weights, 65504.), 1);
+}
+fragment float4 post_bloom_blur(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], texture2d<float> source [[texture(0)]]) {
+    constexpr sampler linear(coord::normalized, address::clamp_to_edge, filter::linear);
+    // Bilinear pairs implement the normalised [1,4,6,4,1]/16 binomial kernel.
+    // A radius above roughly two texels spreads these taps apart and can ring;
+    // wide bloom needs a mip chain, not a larger authored radius on this one level.
+    float2 offset = post.blur.xy * post.bloom.y * 1.2 / float2(source.get_width(), source.get_height());
+    float3 c = source.sample(linear, i.uv).rgb * 0.375;
+    c += (source.sample(linear, i.uv - offset).rgb + source.sample(linear, i.uv + offset).rgb) * 0.3125;
+    return float4(c, 1);
+}
+template<typename Depth>
+float4 post_apply_value(Full i, constant Frame& f, constant PostUniform& post, texture2d<float> source, Depth depth, texture2d<float> ao, texture2d<float> bloom) {
+    constexpr sampler linear(coord::normalized, address::clamp_to_edge, filter::linear);
+    float4 c = source.sample(linear, i.uv);
+    if (post.ao.w > 0.5) {
+        float z = post_position(depth, int2(i.position.xy), f).w;
+        if (z > 0.) {
+            int2 size = int2(ao.get_width(), ao.get_height());
+            float2 p = i.uv * float2(size) - 0.5;
+            int2 base = int2(floor(p));
+            float2 blend = fract(p);
+            float weighted = 0., weights = 0.;
+            for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+                float2 tap = ao.read(uint2(clamp(base + int2(x, y), int2(0), size - 1))).rg;
+                float weight = (x ? blend.x : 1. - blend.x) * (y ? blend.y : 1. - blend.y);
+                weight *= tap.y > 0. ? saturate(1. - abs(tap.y - z) / post.ao.x) : 0.;
+                weighted += tap.x * weight;
+                weights += weight;
+            }
+            // This forward post pass can only attenuate the complete lit colour,
+            // including direct/emissive light. Ambient-only AO needs scene-pass integration.
+            c.rgb *= weights > 1e-6 ? weighted / weights : 1.;
+        }
+    }
+    if (post.bloom.w > 0.5) c.rgb += bloom.sample(linear, i.uv).rgb * post.bloom.z;
+    return float4(min(c.rgb, 65504.), c.a);
+}
+fragment float4 post_apply(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], constant Frame& f [[buffer(1)]], texture2d<float> source [[texture(0)]], depth2d<float> depth [[texture(1)]], texture2d<float> ao [[texture(2)]], texture2d<float> bloom [[texture(3)]]) {
+    return post_apply_value(i, f, post, source, depth, ao, bloom);
+}
+fragment float4 post_apply_msaa(Full i [[stage_in]], constant PostUniform& post [[buffer(0)]], constant Frame& f [[buffer(1)]], texture2d<float> source [[texture(0)]], depth2d_ms<float> depth [[texture(1)]], texture2d<float> ao [[texture(2)]], texture2d<float> bloom [[texture(3)]]) {
+    return post_apply_value(i, f, post, source, depth, ao, bloom);
+}

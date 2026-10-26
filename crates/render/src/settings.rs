@@ -17,6 +17,18 @@ pub struct LookSettings {
     pub grade: [[f32; 3]; 3],
     pub tone_map: ToneMap,
     pub wind_strength: f32,
+    /// Screen-space obscurance; radius and bias are world metres. Disabled by default.
+    pub ao_enabled: bool,
+    pub ao_radius: f32,
+    pub ao_bias: f32,
+    pub ao_strength: f32,
+    /// Linear-HDR bloom; radius is measured in half-resolution texels.
+    pub bloom_enabled: bool,
+    pub bloom_threshold: f32,
+    /// Soft-knee width as a fraction of threshold; zero gives a hard threshold.
+    pub bloom_knee: f32,
+    pub bloom_radius: f32,
+    pub bloom_strength: f32,
     /// Optional art-authored cycle, evaluated against simulation seconds. None preserves
     /// the static look; omitted keyframe channels inherit that look without new art values.
     pub time_of_day: Option<TimeOfDay>,
@@ -82,11 +94,26 @@ impl Default for LookSettings {
             grade: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
             tone_map: ToneMap::Linear,
             wind_strength: 1.,
+            ao_enabled: false,
+            ao_radius: 0.,
+            ao_bias: 0.,
+            ao_strength: 0.,
+            bloom_enabled: false,
+            bloom_threshold: 0.,
+            bloom_knee: 0.5,
+            bloom_radius: 0.,
+            bloom_strength: 0.,
             time_of_day: None,
         }
     }
 }
 impl LookSettings {
+    pub fn ao_active(&self) -> bool {
+        self.ao_enabled && self.ao_strength > 0. && self.ao_radius > 0.
+    }
+    pub fn bloom_active(&self) -> bool {
+        self.bloom_enabled && self.bloom_strength > 0. && self.bloom_radius > 0.
+    }
     pub fn load(path: &Path) -> Result<Self> {
         let s: Self = serde_json::from_slice(&std::fs::read(path)?)?;
         s.validate()?;
@@ -108,6 +135,13 @@ impl LookSettings {
                 self.fog_density,
                 self.exposure,
                 self.wind_strength,
+                self.ao_radius,
+                self.ao_bias,
+                self.ao_strength,
+                self.bloom_threshold,
+                self.bloom_knee,
+                self.bloom_radius,
+                self.bloom_strength,
             ]);
         ensure!(
             numbers.into_iter().all(f32::is_finite),
@@ -123,6 +157,24 @@ impl LookSettings {
                 && self.exposure > 0.
                 && self.wind_strength >= 0.,
             "invalid light/fog/exposure/wind settings"
+        );
+        ensure!(
+            self.ao_radius >= 0.
+                && self.ao_bias >= 0.
+                && (0. ..=1.).contains(&self.ao_strength)
+                && self.bloom_threshold >= 0.
+                && (0. ..=1.).contains(&self.bloom_knee)
+                && self.bloom_radius >= 0.
+                && self.bloom_strength >= 0.,
+            "invalid AO/bloom settings"
+        );
+        ensure!(
+            !self.ao_enabled || self.ao_strength == 0. || self.ao_radius > 0.,
+            "enabled AO with nonzero strength needs a positive radius"
+        );
+        ensure!(
+            !self.bloom_enabled || self.bloom_strength == 0. || self.bloom_radius > 0.,
+            "enabled bloom with nonzero strength needs a positive radius"
         );
         if let Some(cycle) = &self.time_of_day {
             cycle.validate(self)?;
@@ -561,5 +613,50 @@ mod time_of_day_tests {
         let mut s = look(json!([{"phase": 0.}]));
         s.time_of_day.as_mut().unwrap().keyframes[0].sun_colour = Some([f32::NAN, 0., 0.]);
         assert!(s.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod post_tests {
+    use super::*;
+
+    #[test]
+    fn older_looks_keep_post_disabled_and_invalid_inputs_fail() {
+        let mut look: LookSettings = serde_json::from_str("{}").unwrap();
+        assert!(!look.ao_active() && !look.bloom_active());
+        look.validate().unwrap();
+        look.ao_enabled = true;
+        look.ao_strength = 1.;
+        assert!(look.validate().is_err());
+        look.ao_radius = 1.;
+        look.validate().unwrap();
+        assert!(look.ao_active());
+        look.ao_bias = f32::NAN;
+        assert!(look.validate().is_err());
+        look.ao_bias = 0.;
+        look.ao_strength = 1.01;
+        assert!(look.validate().is_err());
+        look.ao_strength = 0.;
+        look.bloom_enabled = true;
+        look.bloom_strength = 1.;
+        assert!(look.validate().is_err());
+        look.bloom_radius = 1.;
+        look.validate().unwrap();
+        assert!(look.bloom_active());
+        look.bloom_threshold = -1.;
+        assert!(look.validate().is_err());
+        look.bloom_threshold = 0.;
+        assert_eq!(look.bloom_knee, 0.5);
+        for knee in [0., 0.5, 1.] {
+            look.bloom_knee = knee;
+            look.validate().unwrap();
+        }
+        for knee in [-0.01, 1.01, f32::NAN, f32::INFINITY] {
+            look.bloom_knee = knee;
+            assert!(look.validate().is_err());
+        }
+        look.bloom_knee = 0.5;
+        look.bloom_strength = f32::INFINITY;
+        assert!(look.validate().is_err());
     }
 }
