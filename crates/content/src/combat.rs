@@ -306,6 +306,38 @@ fn yes() -> bool {
     true
 }
 
+/// Numbers for fights between players (a player or their summon on each side), as multiples of
+/// the PvE ones, so duels and the Wilderness are balanced apart from monsters. Left out, they're
+/// all 1.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Pvp {
+    /// Damage dealt to a player (an aura's: its ticks).
+    pub damage: f32,
+    /// Healing on a player fighting players.
+    pub healing: f32,
+    /// How long auras last on a player (an ability's: the auras it puts on them).
+    pub duration: f32,
+}
+
+impl Default for Pvp {
+    fn default() -> Pvp {
+        Pvp {
+            damage: 1.0,
+            healing: 1.0,
+            duration: 1.0,
+        }
+    }
+}
+
+impl Pvp {
+    fn problem(&self) -> Option<String> {
+        let ok = |x: f32| x > 0.0 && x <= 2.0;
+        (!ok(self.damage) || !ok(self.healing) || !ok(self.duration))
+            .then(|| format!("PvP numbers outside 0 to 2 times PvE: {self:?}"))
+    }
+}
+
 /// An ability. Fields left out of a table take the values in [`AbilityDef::base`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -352,6 +384,7 @@ pub struct AbilityDef {
     pub impact_delay: f64,
     /// Channel ticks loose the missile instead of striking directly.
     pub channel_missile: bool,
+    pub pvp: Pvp,
 }
 
 impl Default for AbilityDef {
@@ -395,6 +428,7 @@ impl AbilityDef {
             allies: false,
             impact_delay: 0.0,
             channel_missile: false,
+            pvp: Pvp::default(),
         }
     }
 
@@ -469,6 +503,7 @@ pub struct AuraDef {
     pub invulnerable: bool,
     /// Threat times this.
     pub threat: f32,
+    pub pvp: Pvp,
 }
 
 impl Default for AuraDef {
@@ -503,6 +538,7 @@ impl AuraDef {
             cc_immune: false,
             invulnerable: false,
             threat: 1.0,
+            pvp: Pvp::default(),
         }
     }
 }
@@ -943,8 +979,14 @@ impl Catalog {
             if a.name.is_empty() {
                 out.push(format!("{}: no name", a.key));
             }
+            if let Some(p) = a.pvp.problem() {
+                out.push(format!("{}: {p}", a.key));
+            }
         }
         for a in &self.auras {
+            if let Some(p) = a.pvp.problem() {
+                out.push(format!("{}: {p}", a.key));
+            }
             if let Some((every, e)) = &a.tick {
                 check_effects(a.key, std::slice::from_ref(e), &mut out);
                 if *every < 0.1 {

@@ -6,11 +6,11 @@ use glam::{Vec2, Vec3};
 use protocol::{Avoid, Event, HitWeight, Pose, School, Shape};
 
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
-use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, HITSTOP, WINDUP};
+use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, Pvp, HITSTOP, WINDUP};
 use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
 use crate::region::Landing;
 use crate::spatial::Spatial;
-use crate::stats::{armor_reduction, scale, CRIT_MULTIPLIER};
+use crate::stats::{armor_reduction, scale, CRIT_MULTIPLIER, PVP_COMBAT};
 use crate::{Anim, Auras, Body, Brain, Faction, Fighter, Forced, ForcedKind, Land, Mode, Motion, Rng, Stats, Threat, Transform, Unit, Vitals};
 
 /// Blows from behind land 10% harder and can't be blocked.
@@ -76,6 +76,10 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
         emit(world, Event::Damage { target, source: src.unit, amount: dealt, crit, school: src.school, periodic });
         auras::remove_where(world, te, |d| d.breaks_on_damage);
     }
+    let pvp = super::pvp(world, src, te);
+    if pvp && let Some(mut f) = world.get_mut::<Fighter>(te) {
+        f.pvp_until = t + PVP_COMBAT;
+    }
     let (lethal, finished, counted) = {
         let mut v = world.get_mut::<Vitals>(te).unwrap();
         v.last_combat = t;
@@ -98,6 +102,9 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
             v.last_combat = t;
         }
         if let Some(mut f) = world.get_mut::<Fighter>(a) {
+            if pvp {
+                f.pvp_until = t + PVP_COMBAT;
+            }
             match f.recent_victims.iter_mut().find(|(id, _)| *id == target) {
                 Some(r) => r.1 = t,
                 None => f.recent_victims.push((target, t)),
@@ -369,7 +376,8 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
                 }
             }
             Effect::SelfHeal { base, coeff } => {
-                heal(world, src, u, base * scale(src.level) + coeff * src.power, false);
+                let amount = (base * scale(src.level) + coeff * src.power) * healing(world, split(def, src), u);
+                heal(world, src, u, amount, false);
             }
             Effect::Field { field, radius, duration, interval, enemies, allies } => {
                 super::missiles::spawn_field(world, src, *field, *radius, *duration, *interval, enemies.clone(), allies.clone(), center);
@@ -497,10 +505,15 @@ fn apply(world: &mut World, e: &Effect, te: Entity, src: &HitSource, def: Option
             if let Some((below, times)) = def.and_then(|d| d.execute) && world.get::<Vitals>(te).is_some_and(|v| v.fraction() < below) {
                 amount *= times;
             }
+            let pvp = split(def, src).damage;
+            if pvp != 1.0 && super::pvp(world, src, te) {
+                amount *= pvp;
+            }
             deal_damage(world, src, te, amount, crit, false) > 0.0
         }
         Effect::Heal { base, coeff } => {
-            heal(world, src, te, base * scale(src.level) + coeff * src.power, crit);
+            let amount = (base * scale(src.level) + coeff * src.power) * healing(world, split(def, src), te);
+            heal(world, src, te, amount, crit);
             false
         }
         Effect::Aura { key, .. } => {
@@ -565,6 +578,17 @@ fn apply(world: &mut World, e: &Effect, te: Entity, src: &HitSource, def: Option
         }
         _ => false,
     }
+}
+
+/// An ability's PvP numbers: `def`'s, or (for fields and combos) those of the ability `src`
+/// came from.
+fn split(def: Option<&AbilityDef>, src: &HitSource) -> Pvp {
+    def.map(|d| d.pvp).or_else(|| src.ability.map(|a| catalog().ability(a).pvp)).unwrap_or_default()
+}
+
+/// Healing on `te` times this: the PvP number if it's fighting players.
+pub(crate) fn healing(world: &World, pvp: Pvp, te: Entity) -> f32 {
+    if pvp.healing != 1.0 && super::in_pvp(world, te) { pvp.healing } else { 1.0 }
 }
 
 /// Throws a unit: it can't act until it lands. Elites soak it into their defiance.
