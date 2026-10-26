@@ -17,29 +17,35 @@ unit's combat view and calls `update`, which builds the pose in this order:
 1. **Base clip** (`clip_for`): the action's clip if one is playing (`action_clip`), otherwise the
    pose's: idle, walk, jog or sprint by speed, jump, fall, roll, hit or death. Beasts map poses to
    their role clips.
-2. **Sample it** into `local`, starting from the rest pose (`apply_clip` with `Bones::All`). A
+2. **Body yaw** (`anim::Turn`, #211): the yaw the body is drawn at (`body_yaw`), which lags the
+   sim's while turning on the spot, and where the upper body aims. The stride reads the travel
+   against it.
+3. **Sample it** into `local`, starting from the rest pose (`apply_clip` with `Bones::All`). A
    moving humanoid plays two of its walk, jog and sprint loops blended (`apply_step`), picked and
    timed by its stride (see Locomotion below). Each clip's tracks are bound to the skeleton's bones
    once (`ClipSet`, #204), and every character with the same skeleton and clips shares it through
    `ModelCache::clip_set`. A clip samples only the tracks the body uses: humanoid clips turn every
    bone but move only the pelvis, and never scale.
-3. **Legs under actions** (#186): an attack or cast on the move keeps the stride on the legs
+4. **Legs under actions** (#186): an attack or cast on the move keeps the stride on the legs
    (`walk_under`, `Bones::Lower`), and notes where the action faced the chest.
-4. **Upper-body layers** (`Bones::Upper` is `spine_01` and everything under it), in this order, the
+5. **Upper-body layers** (`Bones::Upper` is `spine_01` and everything under it), in this order, the
    last one applied winning: a drawn weapon's idle while moving, the guard (or the parry), and the
    ready or stow transition.
-5. **Hips toward the travel** (`turn_hips`, #110): the hips turn round the vertical toward where
+6. **Hips toward the travel** (`turn_hips`, #110): the hips turn round the vertical toward where
    the body travels, taking the legs and planted feet with them, and the spine turns the chest back,
    spread evenly over its three bones: to the front, or under an action to where the action faced
-   it. The chest stops `MAX_TWIST` (60°) round from the hips, or at the clip's own twist if that is
-   more.
-6. **World matrices**, then `perform`: the hand reaching for the sheath, the off hand on a
+   it, and on by however far the aim is round from the body. The chest stops `MAX_TWIST` (60°)
+   round from the hips, or at the clip's own twist if that is more, and the neck and head share up
+   to `HEAD_TWIST` (30°) of what it can't take.
+7. **Feet stepping round** (`step_round`, #211): while the body turns on the spot, the legs reach
+   with two-bone IK to where the feet stand.
+8. **World matrices**, then `perform`: the hand reaching for the sheath, the off hand on a
    two-handed grip, and the bow's string and arrow morphs.
-7. **The blender** (`anim::Blender`): when anything switched since the last frame it starts
+9. **The blender** (`anim::Blender`): when anything switched since the last frame it starts
    carrying the old motion into the new, and while a switch settles it changes `local`, so the
    world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
    letting go of or taking a grip.
-8. **Spring bones** (capes) settle on top.
+10. **Spring bones** (capes) settle on top, under the body drawn at its yaw.
 
 ## Locomotion
 
@@ -77,10 +83,42 @@ The clips are three loops that run straight ahead in place (`LOOPS`: walk, jog a
   starts moving.
 
 Not done yet: steps lengthened or shortened to the speed and feet pinned to the ground (#214),
-slopes, turning on the spot (#211), and a single loop at the furthest LOD (#215). Slow walking
+slopes, and a single loop at the furthest LOD (#215). Slow walking
 slides most: the walk clip's trailing foot slides forward as it lifts, about 4 cm a step even at
 the clip's own 1 m/s, and between the walk's speed and the jog's (backing off behind a raised
 guard is 1.5 m/s) the blend can't hide it. Foot locking (#214) is the fix.
+
+## Turning on the spot
+
+Under action controls the sim turns a player to the camera at once, every frame, and a remote
+unit's yaw moves in steps between snapshots. Drawn at the sim's yaw, a standing body would spin on
+its feet. `anim::Turn` (#211) keeps the yaw the body is drawn at apart from the sim's, as Lyra's
+root yaw offset does, and the client draws each character at `Character::body_yaw`:
+
+- **The aim** follows the sim's yaw on a critically damped spring with a half-life of 0.04 s, no
+  faster than 520°/s (`AIM_HALF_LIFE`, `AIM_RATE`), so a sudden turn (a target picked behind, a
+  roll) swings the chest round over a few frames instead of snapping it. The upper body faces the
+  aim: the spine turns the chest up to `MAX_TWIST` from the hips, and the neck and head share up to
+  30° more.
+- **Standing**, the body stays where it faces and the upper body takes the turn. Past 70°
+  (`STEP_AT`), or held past 20° for 0.75 s (`HOLD_AT`, `HOLD`), the feet step round while the body
+  catches up on a spring with a half-life of 0.15 s, no faster than 230°/s (`STEP_RATE`). Spun round
+  faster than that for long, it is dragged no more than 270° behind (`MAX_LAG`), and it always turns
+  the way the sim did. Within 0.3° of the aim it takes the rest at once, so the twist is gone and a
+  standing body costs no more than before.
+- **The feet** (`anim::Steps`, which `step_round` drives) step one at a time, the one on the side of
+  the turn first, from where they stand to where the clip stands them under the yaw the body turns
+  to, at most 60° ahead of the body (`STEP_REACH`), so a long turn goes round in several steps. A
+  foot steps once it is 3 cm or 10° out (`STRAY`, `STRAY_YAW`), takes 0.25 s (`SWING`) and lifts 0.4
+  of how far it goes, up to 6 cm. The legs reach with two-bone IK (`anim::ik::two_bone`, Holden's
+  analytic solver with a pole), the knee pointing the way the clip has it and the foot turned with
+  its step. Once the body has stopped, a foot more than a third of the way out takes one last short
+  step, the feet ease the rest of the way at no more than 5 cm/s (`EASE`), and once both are within
+  2 mm of the clip's the IK lets go.
+- **Moving or acting**, the body follows the aim on a spring with a half-life of 0.08 s
+  (`FOLLOW_HALF_LIFE`), so a yaw that steps between snapshots, or flicks round with a roll, comes in
+  over frames with no jump in the turning speed; an attack or cast turns the body to face where it
+  strikes. Beasts always follow this way, and at LOD 2 and beyond the body faces the sim's yaw.
 
 ## Switches
 
@@ -137,7 +175,14 @@ switches stack without popping. Three methods, picked with the client's `--blend
   touchdowns and speed (and refuses feet that never lift), every loop plants its feet on the same
   phases, a loop plays alone near its own speed and the blend between moves steadily with the
   speed, the hips turn toward the travel and change to backward only past 100° (80° coming back),
-  and changing speed and direction never restarts the stride.
+  and changing speed and direction never restarts the stride. For turning on the spot: standing,
+  the body stays put while the upper body takes a turn, however long a small one is held; past 70°,
+  or held past 20°, the feet step round and the body catches up no faster than they go; a quick
+  half turn swings the chest and steps round one way; moving, the body follows snapshots 20 times
+  a second without jumping in yaw or turning speed; the feet step one at a time, the lead foot
+  first, and end where they should. The IK reaches targets in reach with the bones keeping their
+  lengths, bends the knee toward the pole, and gets the end as near as the chain goes to a target
+  out of reach.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
   bone carries on at every switch, where cuts jump by over 0.5 rad. The other clip-stack tests
@@ -146,10 +191,17 @@ switches stack without popping. Three methods, picked with the client's `--blend
   over the ground (backing off at a walk, no more than the walk clip slides on its own).
   `strafing_turns_the_hips_and_keeps_the_chest_to_the_front` checks the hips against the travel
   and the chest against the facing, beside a twin running straight with the same stride.
+  `turning_on_the_spot_the_feet_stay_put_while_the_chest_takes_the_turn` turns a knight 50°: the
+  feet stay within 0.1 mm of a still twin's and the chest comes round 50°.
+  `past_the_limit_the_feet_step_round_and_land_where_the_clip_stands_them` turns one 115° at once:
+  one foot in the air at a time, planted feet never slide 2 mm in a frame, each foot steps, and
+  they end within 3 mm of where the idle stands them, back on the clip.
+  `an_attack_turns_the_body_to_face_where_it_strikes` checks that a slash takes the twist out.
 - The client's `--gait` run (`crates/client/src/gait.rs`) is for captures: facing one way, the
   player runs ahead, strafes, backpedals, sweeps the travel round every direction, walks, sprints
-  and walks; then turns round, draws a weapon and runs the pattern again. It logs the frame each
-  leg starts on, so a capture can be cut by leg.
+  and walks; then turns round, draws a weapon and runs the pattern again; then turns on the spot
+  (a small turn held, a long one, an about face and a spin) and circle-strafes once round. It logs
+  the frame each leg starts on, so a capture can be cut by leg.
 
 ## Cost
 
@@ -157,20 +209,22 @@ switches stack without popping. Three methods, picked with the client's `--blend
 `update_combat` (the pose) and `draws` (the skinning palettes) for a plate knight with sword,
 shield and cape, a ranger with a bow and an elf mage with a staff, at each LOD. The cases: `idle`,
 `walk` (2.5 m/s, between the walk and jog loops), `run` and `strafe` (running square to the facing)
-hold their pose, `slash` and `run + slash` start the slash over every half second, and
+hold their pose, `turn` stands looking 80° either way and back every two seconds (the feet step
+round on every sweep), `slash` and `run + slash` start the slash over every half second, and
 `start-stop` runs and stops every half second, so those three are blending most of the time.
 
 Instructions per `update_combat`, from callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 |
-| --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 |
-| walk | | | 88,445 | 104,860 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 |
-| strafe | | | 88,893 | 93,947 |
-| slash | | 162,570 | 106,448 | 106,852 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 |
+| --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 |
+| turn | | | | 83,657 | 90,315 |
+| walk | | | 88,445 | 104,860 | 105,340 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 |
+| strafe | | | 88,893 | 93,947 | 95,511 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -181,18 +235,21 @@ time came out 2% to 4% dearer than before #210. #204 stopped looking up each tra
 and sampling tracks the body ignores, which was a third to a half of the instructions. #110 samples
 a second loop while the speed is between two loops' (walking at 2.5 m/s, between the walk and the
 jog: 19% more) and turns the hips and spine (running ahead or strafing: 5% to 6% more). Near a
-loop's own speed that loop plays alone.
+loop's own speed that loop plays alone. #211 costs a body that isn't turning under 1%; turning back
+and forth with the feet stepping most of the time is 8% dearer (mostly the leg IK while the feet
+step, then twisting the spine), and strafing 1.7%, as the neck and head now take the turn the chest
+can't.
 
 Where the time goes now (callgrind, `run`): half in cape springs, about 15% each in sampling clips
 and in world matrices, and about 15% in cloning per frame (`perform` copies the weapon's item and
 the clip's metadata, and clip names are `String`s). #215 takes on both: springs only at full
-detail, and no allocations per frame.
+detail, and no allocations or bone lookups by name per frame.
 
 ## Next
 
-In the plan's order: #211 turning in place (a root yaw offset ahead of the clip stack), #215
-animation LOD, #214 foot IK and foot locking (after the blender, so planted feet stay planted while
-it settles), #212 aim pitch and look-at, #217 lean, landings and the idle phase, #218 hit flinches
+In the plan's order: #215 animation LOD, #214 foot IK and foot locking (after the blender, so
+planted feet stay planted while it settles; `anim::ik` and the way `step_round` hands feet back to
+the clip are its starting point), #212 aim pitch and look-at, #217 lean, landings and the idle phase, #218 hit flinches
 and hitstop (on `Event::Hit`, #191), and #213 traversal (after #192).
 
 One thing to watch: combat clips take their time from `UnitCombat::action_time` in each snapshot.
