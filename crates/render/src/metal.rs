@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, near_character_shadows, stable_cascades},
+    visibility::{Bounds, CharacterShadowState, Frustum, near_character_shadows, stable_cascades},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -345,6 +345,7 @@ pub struct Renderer {
     frame: usize,
     pub stats: Stats,
     previous: HashMap<u64, Previous>,
+    character_shadows: CharacterShadowState,
     previous_vp: Mat4,
     previous_camera: Option<Camera>,
     previous_time: f32,
@@ -772,6 +773,7 @@ impl Renderer {
             frame: 0,
             stats: Stats::default(),
             previous: HashMap::new(),
+            character_shadows: CharacterShadowState::default(),
             previous_vp: Mat4::IDENTITY,
             previous_camera: None,
             previous_time: 0.,
@@ -1316,13 +1318,13 @@ impl Renderer {
         let mut triangles = 0;
         let mut culled = 0;
         // Character::draws uses low 32 bits for parts/primitives; the caller adds
-        // the entity in the upper bits. Scenery/terrain reserve the top two bits.
+        // the entity in the upper bits. Scenery, terrain and effects reserve the top three bits.
         // Seed from skinned draws, then apply the decision to every part, including
         // rigid weapons. This leaves non-character scenery shadows unchanged.
         let mut character_bounds: HashMap<u32, Bounds> = HashMap::new();
         for d in draws
             .iter()
-            .filter(|d| !d.palette.is_empty() && d.instance >> 62 == 0)
+            .filter(|d| !d.palette.is_empty() && d.instance >> 61 == 0)
         {
             let b = d.model.primitives[d.primitive]
                 .bounds
@@ -1339,11 +1341,15 @@ impl Renderer {
                 })
                 .or_insert(b);
         }
-        let shadow_characters = near_character_shadows(
+        if !valid {
+            self.character_shadows = CharacterShadowState::default();
+        }
+        self.character_shadows = near_character_shadows(
             character_bounds.iter().map(|(&id, &bounds)| (id, bounds)),
             camera.eye,
             camera.fov,
             self.height,
+            &self.character_shadows,
         );
         for (i, d) in draws.iter().enumerate() {
             let p = &d.model.primitives[d.primitive];
@@ -1360,7 +1366,7 @@ impl Renderer {
             };
             let character = (d.instance >> 32) as u32;
             let casts_shadow = !character_bounds.contains_key(&character)
-                || shadow_characters.contains(&character);
+                || self.character_shadows.selected.contains(&character);
             let shadows = shadow_views
                 .each_ref()
                 .map(|v| casts_shadow && v.intersects(bounds) && view.intersects(swept));

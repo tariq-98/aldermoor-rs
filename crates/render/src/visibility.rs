@@ -78,28 +78,48 @@ pub fn lod_for_height(pixels: f32, previous: Option<usize>) -> usize {
         }
     }
 }
-/// Bound real character shadows to the nearest 24 near-detail characters (#75).
-/// Uses the existing LOD1 screen-size boundary; no new authored look threshold.
+/// Last-frame selection and LOD state, bounded to characters in the current draws.
+#[derive(Default)]
+pub(crate) struct CharacterShadowState {
+    pub selected: std::collections::HashSet<u32>,
+    lods: std::collections::HashMap<u32, usize>,
+}
+
+/// Bound real character shadows to 24 near-detail characters (#75).
+/// Existing members retain their shadow until a newcomer is appreciably nearer.
 /// Distance rather than signed view depth retains nearby offscreen shadow casters.
 pub(crate) fn near_character_shadows(
     characters: impl Iterator<Item = (u32, Bounds)>,
     eye: Vec3,
     fov: f32,
     pixels: u32,
-) -> std::collections::HashSet<u32> {
+    previous: &CharacterShadowState,
+) -> CharacterShadowState {
+    let mut state = CharacterShadowState::default();
     let mut near: Vec<_> = characters
         .filter_map(|(id, bounds)| {
             let distance = bounds.center.distance_squared(eye);
             let height = bounds.half.y * 2.;
-            (distance.is_finite()
-                && height.is_finite()
-                && height > 0.
-                && lod_for_height(screen_height(height, distance.sqrt(), fov, pixels), None) < 2)
-                .then_some((id, distance))
+            if !distance.is_finite() || !height.is_finite() || height <= 0. {
+                return None;
+            }
+            let lod = lod_for_height(
+                screen_height(height, distance.sqrt(), fov, pixels),
+                previous.lods.get(&id).copied(),
+            );
+            state.lods.insert(id, lod);
+            let rank = distance
+                * if previous.selected.contains(&id) {
+                    0.8
+                } else {
+                    1.
+                };
+            (lod < 2).then_some((id, rank))
         })
         .collect();
     near.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-    near.into_iter().take(24).map(|(id, _)| id).collect()
+    state.selected = near.into_iter().take(24).map(|(id, _)| id).collect();
+    state
 }
 
 pub fn stable_cascades(
@@ -178,20 +198,118 @@ mod tests {
         let input: Vec<_> = (0..40)
             .map(|id| (id, bounds(1. + id as f32 * 0.1)))
             .collect();
-        let a = near_character_shadows(input.iter().copied(), Vec3::ZERO, 1., 1200);
-        let b = near_character_shadows(input.iter().rev().copied(), Vec3::ZERO, 1., 1200);
+        let a = near_character_shadows(
+            input.iter().copied(),
+            Vec3::ZERO,
+            1.,
+            1200,
+            &CharacterShadowState::default(),
+        )
+        .selected;
+        let b = near_character_shadows(
+            input.iter().rev().copied(),
+            Vec3::ZERO,
+            1.,
+            1200,
+            &CharacterShadowState::default(),
+        )
+        .selected;
         assert_eq!(a, b);
         assert_eq!(a, (0..24).collect());
         let same_distance = (0..40).rev().map(|id| (id, bounds(2.)));
         assert_eq!(
-            near_character_shadows(same_distance, Vec3::ZERO, 1., 1200),
+            near_character_shadows(
+                same_distance,
+                Vec3::ZERO,
+                1.,
+                1200,
+                &CharacterShadowState::default()
+            )
+            .selected,
             (0..24).collect()
         );
         let outside = [(0, bounds(100.)), (1, bounds(f32::NAN)), (2, bounds(-2.))];
         assert_eq!(
-            near_character_shadows(outside.into_iter(), Vec3::ZERO, 1., 1200),
+            near_character_shadows(
+                outside.into_iter(),
+                Vec3::ZERO,
+                1.,
+                1200,
+                &CharacterShadowState::default()
+            )
+            .selected,
             [2].into_iter().collect()
         );
+    }
+
+    #[test]
+    fn crowd_shadow_rank_hysteresis_survives_oscillation_but_admits_nearer_casters() {
+        let bounds = |distance| Bounds {
+            center: Vec3::Z * distance,
+            half: Vec3::new(0.4, 0.9, 0.4),
+        };
+        let input = |last, newcomer| {
+            (0..23)
+                .map(|id| (id, bounds(2.)))
+                .chain([(23, bounds(last)), (24, bounds(newcomer))])
+        };
+        let mut state = near_character_shadows(
+            input(5., 5.01),
+            Vec3::ZERO,
+            1.,
+            1200,
+            &CharacterShadowState::default(),
+        );
+        let initial = state.selected.clone();
+        for frame in 0..32 {
+            let movement = if frame % 2 == 0 { 0.02 } else { -0.02 };
+            state = near_character_shadows(
+                input(5. + movement, 5. - movement),
+                Vec3::ZERO,
+                1.,
+                1200,
+                &state,
+            );
+            assert_eq!(state.selected, initial);
+        }
+        state = near_character_shadows(input(5., 4.), Vec3::ZERO, 1., 1200, &state);
+        assert_eq!(state.selected.len(), 24);
+        assert!(state.selected.contains(&24));
+        assert!(!state.selected.contains(&23));
+        // Disappearing entities cannot leave stale state or reserve a slot.
+        state =
+            near_character_shadows([(23, bounds(5.))].into_iter(), Vec3::ZERO, 1., 1200, &state);
+        assert_eq!(state.selected, [23].into_iter().collect());
+        assert_eq!(state.lods.len(), 1);
+    }
+    #[test]
+    fn crowd_shadow_lod_hysteresis_survives_boundary_oscillation() {
+        let bounds = |pixels| Bounds {
+            center: Vec3::Z * (1.8 * 1200. / (2. * (0.5_f32).tan() * pixels)),
+            half: Vec3::new(0.4, 0.9, 0.4),
+        };
+        let select = |pixels, previous: &CharacterShadowState| {
+            near_character_shadows(
+                [(7, bounds(pixels))].into_iter(),
+                Vec3::ZERO,
+                1.,
+                1200,
+                previous,
+            )
+        };
+        let mut state = select(120., &CharacterShadowState::default());
+        for pixels in [99., 101., 95., 105., 91.] {
+            state = select(pixels, &state);
+            assert!(state.selected.contains(&7));
+        }
+        state = select(89., &state);
+        assert!(state.selected.is_empty());
+        for pixels in [99., 101., 105., 109.] {
+            state = select(pixels, &state);
+            assert!(state.selected.is_empty());
+        }
+        state = select(111., &state);
+        assert!(state.selected.contains(&7));
     }
 
     #[test]
