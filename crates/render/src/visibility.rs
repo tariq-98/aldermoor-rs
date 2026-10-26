@@ -149,8 +149,9 @@ mod tests {
             center: Vec3::ZERO,
             half: Vec3::new(32., 10., 32.),
         };
-        let select =
-            |distance, previous| terrain_lod(bounds, Vec3::new(32. + distance, 20., 0.), previous);
+        let select = |distance: f32, previous| {
+            terrain_lod(bounds, Vec3::new(32. + distance, 20., 0.), previous)
+        };
         assert_eq!(terrain_lod(bounds, Vec3::new(0., 100., 0.), None), 0);
         assert_eq!(select(80., None), 1);
         assert_eq!(select(200., None), 2);
