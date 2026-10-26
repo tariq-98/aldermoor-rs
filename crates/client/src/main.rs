@@ -333,6 +333,8 @@ struct Game {
     cursor: Vec2,
     viewport: Vec2,
     aim_slot: Option<u8>,
+    /// A ground skill's key held down with Hold to aim: it casts on release.
+    held_ground: Option<u8>,
     valley: world::Valley,
     effects: Option<effects::Effects>,
     /// The effects' art, for each renderer to upload.
@@ -418,6 +420,7 @@ impl Game {
             cursor: Vec2::ZERO,
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
+            held_ground: None,
             valley: world::Valley::new(),
             effects,
             effects_art,
@@ -541,7 +544,17 @@ impl Game {
                 .zip(self.snaps.current.player.as_ref())
                 .and_then(|(me, player)| bag::nearest_pile(player, me.position))
                 .map(|pile| Command::Loot { pile: pile.id }),
-            c => c.slot().map(|slot| self.use_slot(slot)),
+            c => c.slot().and_then(|slot| {
+                if self.settings.ground_cast == controls::GroundCast::HoldToAim
+                    && self.ground_slot(slot)
+                {
+                    self.held_ground = Some(slot);
+                    self.aim_slot = Some(slot);
+                    None
+                } else {
+                    Some(self.use_slot(slot))
+                }
+            }),
         };
         if let Some(c) = command {
             self.host.send(c);
@@ -554,8 +567,52 @@ impl Game {
                 self.host.send(Command::Guard(false))
             }
             controls::Control::FreePointer => self.pointer_free = self.down(control),
+            c if c.slot().is_some() && c.slot() == self.held_ground && !self.down(c) => {
+                self.held_ground = None;
+                let cast = self.use_slot(c.slot().unwrap());
+                self.host.send(cast);
+            }
             _ => {}
         }
+    }
+    /// The crosshair's state, from your target or the enemy under the crosshair and the reach
+    /// of the basic attack (the bar's auto-attack slot, else its first).
+    fn reticle(&self) -> Reticle {
+        let snapshot = &self.snaps.current;
+        let Some(me) = snapshot.unit(self.host.player) else {
+            return Reticle::Free;
+        };
+        let reach = snapshot.player.as_ref().map_or(0., |p| {
+            p.bar
+                .iter()
+                .find(|s| s.auto)
+                .or(p.bar.first())
+                .map_or(0., |s| s.range)
+        });
+        let enemy = |id| {
+            snapshot
+                .unit(id)
+                .filter(|u| u.hostile && u.health > 0.)
+                .map(|u| u.position.distance(me.position))
+        };
+        let target = me.target.and_then(enemy);
+        let under = if target.is_none() {
+            let (w, h) = (self.viewport.x as u32, self.viewport.y as u32);
+            self.pick(w as f64 / 2., h as f64 / 2., w, h)
+                .and_then(enemy)
+        } else {
+            None
+        };
+        reticle(target, under, reach)
+    }
+    /// Is this bar slot aimed at the ground?
+    fn ground_slot(&self, slot: u8) -> bool {
+        self.snaps
+            .current
+            .player
+            .as_ref()
+            .and_then(|p| p.bar.get(slot as usize))
+            .is_some_and(|s| s.ground)
     }
     /// Lets go of everything, for losing focus or opening the menu.
     fn release_all(&mut self) {
@@ -565,6 +622,7 @@ impl Game {
         self.orbiting = false;
         self.pointer_free = false;
         self.attacking = None;
+        self.held_ground = None;
         self.guard_button = false;
         self.controls(0.);
     }
@@ -638,6 +696,11 @@ impl Game {
                 self.settings.scheme = scheme;
                 self.pilot.scheme = scheme;
                 self.orbit.shoulder = self.settings.shoulder();
+                m.notice = None;
+            }
+            menu::Change::GroundCast(cast) => {
+                self.settings.ground_cast = cast;
+                self.held_ground = None;
                 m.notice = None;
             }
             menu::Change::ScreenShake(shake) => {
@@ -1282,6 +1345,11 @@ impl Game {
                     .unwrap_or(1.),
         };
         let crosshair = self.aiming() && !self.options.showcase;
+        let reticle = if crosshair {
+            self.reticle()
+        } else {
+            Reticle::Free
+        };
         let keys = self.key_labels();
         let mut changes = Vec::new();
         let mut bag_actions = Vec::new();
@@ -1326,7 +1394,7 @@ impl Game {
                 bag_actions.extend(bag::shop(ctx, player));
             }
             if crosshair {
-                paint_crosshair(ctx);
+                paint_crosshair(ctx, reticle);
             }
             self.perf
                 .draw(ctx, self.host.stats().step_ms, r.gpu_counters_enabled());
@@ -1574,14 +1642,49 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     units
 }
 /// A small ring with four ticks at the centre of the screen, where aimed skills go.
-fn paint_crosshair(ctx: &egui::Context) {
+/// What the crosshair says about your attacks, so you know before pressing a key whether a
+/// skill goes to your target or to the crosshair.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Reticle {
+    /// No target: skills fire at the crosshair.
+    Free,
+    /// No target, but an enemy under the crosshair is within the basic attack's reach.
+    EnemyInReach,
+    /// Your target is within the basic attack's reach.
+    TargetInRange,
+    /// Your target is further away than that.
+    TargetOutOfRange,
+}
+
+/// The reticle from how far away your target is (if you have one), how far away a living
+/// enemy under the crosshair is (if any), and the basic attack's reach.
+fn reticle(target: Option<f32>, under: Option<f32>, reach: f32) -> Reticle {
+    match (target, under) {
+        (Some(d), _) if d <= reach => Reticle::TargetInRange,
+        (Some(_), _) => Reticle::TargetOutOfRange,
+        (None, Some(d)) if d <= reach => Reticle::EnemyInReach,
+        _ => Reticle::Free,
+    }
+}
+
+fn paint_crosshair(ctx: &egui::Context, reticle: Reticle) {
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
         egui::Id::new("crosshair"),
     ));
     let c = ctx.content_rect().center();
+    // Colour, and how far out the ticks start and end.
+    let (colour, ticks) = match reticle {
+        Reticle::Free => (egui::Color32::from_white_alpha(220), (7., 13.)),
+        Reticle::EnemyInReach => (egui::Color32::from_rgb(250, 190, 70), (6., 12.)),
+        Reticle::TargetInRange => (egui::Color32::from_rgb(240, 70, 55), (5., 11.)),
+        Reticle::TargetOutOfRange => (
+            egui::Color32::from_rgb(240, 70, 55).gamma_multiply(0.55),
+            (11., 16.),
+        ),
+    };
     let shadow = egui::Stroke::new(3f32, egui::Color32::from_black_alpha(110));
-    let line = egui::Stroke::new(1.5f32, egui::Color32::from_white_alpha(220));
+    let line = egui::Stroke::new(1.5f32, colour);
     for stroke in [shadow, line] {
         painter.circle_stroke(c, 3., stroke);
         for d in [
@@ -1590,8 +1693,11 @@ fn paint_crosshair(ctx: &egui::Context) {
             egui::vec2(0., 1.),
             egui::vec2(0., -1.),
         ] {
-            painter.line_segment([c + d * 7., c + d * 13.], stroke);
+            painter.line_segment([c + d * ticks.0, c + d * ticks.1], stroke);
         }
+    }
+    if reticle == Reticle::TargetInRange {
+        painter.circle_filled(c, 1.8, colour);
     }
 }
 /// The reel's caption, top centre on a dark plate.
@@ -1659,6 +1765,7 @@ impl App {
     /// the menu otherwise.
     fn escape(&mut self) {
         match &mut self.game.menu {
+            None if self.game.held_ground.is_some() => self.game.held_ground = None,
             None if self.game.specialties => self.game.specialties = false,
             None if self.game.bag => self.game.bag = false,
             Some(m) if m.capture.is_some() => {
@@ -1678,6 +1785,10 @@ impl App {
     /// instead, which targets (and with the right button, attacks) the unit under the cursor.
     /// The middle and thumb buttons are bindable inputs like keys.
     fn button(&mut self, button: MouseButton, pressed: bool) {
+        // The right button cancels a held ground skill instead of guarding or steering.
+        if button == MouseButton::Right && pressed && self.game.held_ground.take().is_some() {
+            return;
+        }
         match button {
             MouseButton::Left | MouseButton::Right if pressed && self.game.menu.is_some() => {
                 return;
@@ -2145,6 +2256,14 @@ fn mouse_input(button: MouseButton) -> Option<controls::Input> {
 #[cfg(test)]
 mod catalog_defaults_tests {
     use super::*;
+    #[test]
+    fn reticle_follows_target_and_reach() {
+        assert_eq!(reticle(None, None, 3.), Reticle::Free);
+        assert_eq!(reticle(None, Some(2.), 3.), Reticle::EnemyInReach);
+        assert_eq!(reticle(None, Some(9.), 3.), Reticle::Free);
+        assert_eq!(reticle(Some(2.5), None, 3.), Reticle::TargetInRange);
+        assert_eq!(reticle(Some(12.), Some(1.), 3.), Reticle::TargetOutOfRange);
+    }
     #[test]
     fn the_overlay_key_cannot_be_bound() {
         assert_eq!(

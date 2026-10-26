@@ -1,7 +1,7 @@
 //! The controls menu on Esc: pick the scheme, rebind keys, reset them, or quit. Every change
 //! is saved to the settings file straight away.
 use controls::camera::ScreenShake;
-use controls::{Control, Input, Scheme, Settings};
+use controls::{Control, GroundCast, Input, Scheme, Settings};
 use std::path::Path;
 
 #[derive(Default)]
@@ -18,6 +18,7 @@ pub enum Change {
     Reset,
     Scheme(Scheme),
     ScreenShake(ScreenShake),
+    GroundCast(GroundCast),
     Close,
     Quit,
 }
@@ -54,6 +55,19 @@ pub fn draw(ctx: &egui::Context, menu: &Menu, settings: &Settings, path: &Path) 
                         && settings.screen_shake != shake
                     {
                         changes.push(Change::ScreenShake(shake));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Ground skills:");
+                for (cast, name) in [
+                    (GroundCast::Instant, "Cast at once"),
+                    (GroundCast::HoldToAim, "Hold to aim, release to cast"),
+                ] {
+                    if ui.radio(settings.ground_cast == cast, name).clicked()
+                        && settings.ground_cast != cast
+                    {
+                        changes.push(Change::GroundCast(cast));
                     }
                 }
             });
