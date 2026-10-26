@@ -7,6 +7,7 @@
 
 use glam::{Vec2, Vec3};
 
+pub mod cottage;
 mod holds;
 mod masonry;
 mod noise;
@@ -34,34 +35,25 @@ impl Solid {
     /// True when a circle of `radius` at `p` overlaps the box.
     #[inline]
     pub fn overlaps(&self, p: Vec2, radius: f32) -> bool {
-        let local = self.local(p);
-        local.x.abs() < self.half.x + radius && local.y.abs() < self.half.y + radius
+        Turned::new(*self).overlaps(p, radius)
     }
 
     /// The height of the top at `p`, if the box has one and `p` is on it.
     #[inline]
     pub fn top_at(&self, p: Vec2) -> Option<f32> {
-        let top = self.top?;
-        if (p - self.center).length_squared() > self.half.length_squared() {
-            return None;
-        }
-        let local = self.local(p);
-        (local.x.abs() < self.half.x && local.y.abs() < self.half.y).then_some(top + self.rise * local.x)
+        Turned::new(*self).top_at(p)
     }
 
     /// `p` in the box's own frame.
     #[inline]
     fn local(&self, p: Vec2) -> Vec2 {
-        let d = p - self.center;
-        let (s, c) = self.yaw.sin_cos();
-        Vec2::new(c * d.x - s * d.y, s * d.x + c * d.y)
+        Turned::new(*self).local(p)
     }
 
     /// A direction in the box's own frame, turned back into the world's.
     #[inline]
     fn unturn(&self, v: Vec2) -> Vec2 {
-        let (s, c) = self.yaw.sin_cos();
-        Vec2::new(c * v.x + s * v.y, -s * v.x + c * v.y)
+        Turned::new(*self).unturn(v)
     }
 
     /// The highest its top goes, if it has one.
@@ -75,6 +67,63 @@ impl Solid {
     #[inline]
     fn near(&self, p: Vec2, radius: f32) -> bool {
         (p - self.center).length_squared() < (self.reach() + radius).powi(2)
+    }
+
+    /// Half-size of the box's footprint once turned, for broad-phase grids.
+    fn reach(&self) -> f32 {
+        self.half.length()
+    }
+}
+
+/// A solid with the sine and cosine of its yaw worked out once. The valley keeps one for each
+/// solid, for the lookups that run for every unit every step: a cottage's five blocks turn with
+/// the house, so working out its turn each time cost more than everything else in them.
+#[derive(Clone, Copy, Debug)]
+struct Turned {
+    solid: Solid,
+    sin: f32,
+    cos: f32,
+}
+
+impl std::ops::Deref for Turned {
+    type Target = Solid;
+
+    fn deref(&self) -> &Solid {
+        &self.solid
+    }
+}
+
+impl Turned {
+    fn new(solid: Solid) -> Turned {
+        let (sin, cos) = solid.yaw.sin_cos();
+        Turned { solid, sin, cos }
+    }
+
+    #[inline]
+    fn overlaps(&self, p: Vec2, radius: f32) -> bool {
+        let local = self.local(p);
+        local.x.abs() < self.half.x + radius && local.y.abs() < self.half.y + radius
+    }
+
+    #[inline]
+    fn top_at(&self, p: Vec2) -> Option<f32> {
+        let top = self.top?;
+        if (p - self.center).length_squared() > self.half.length_squared() {
+            return None;
+        }
+        let local = self.local(p);
+        (local.x.abs() < self.half.x && local.y.abs() < self.half.y).then_some(top + self.rise * local.x)
+    }
+
+    #[inline]
+    fn local(&self, p: Vec2) -> Vec2 {
+        let d = p - self.center;
+        Vec2::new(self.cos * d.x - self.sin * d.y, self.sin * d.x + self.cos * d.y)
+    }
+
+    #[inline]
+    fn unturn(&self, v: Vec2) -> Vec2 {
+        Vec2::new(self.cos * v.x + self.sin * v.y, -self.sin * v.x + self.cos * v.y)
     }
 
     /// The height of the top where the box comes nearest `p`, if it has one.
@@ -92,11 +141,6 @@ impl Solid {
         let out = reach - local.abs();
         let moved = if out.x < out.y { Vec2::new(reach.x.copysign(local.x), local.y) } else { Vec2::new(local.x, reach.y.copysign(local.y)) };
         p + self.unturn(moved - local)
-    }
-
-    /// Half-size of the box's footprint once turned, for broad-phase grids.
-    fn reach(&self) -> f32 {
-        self.half.length()
     }
 }
 
@@ -122,6 +166,8 @@ pub struct Valley {
     pub masonry: Vec<Masonry>,
     /// The edges you can hang from (docs/MOVEMENT.md, "Climbing").
     pub holds: Holds,
+    /// `solids`, each with its turn worked out.
+    turned: Vec<Turned>,
     grid: Grid,
     /// The solids with a top, for [`Valley::ground`], and the box round them all (most of the
     /// valley has none, and `ground` is called a lot).
@@ -154,9 +200,13 @@ impl Valley {
         let mut solids = Vec::with_capacity(128);
         let houses: Vec<Placement> =
             HOUSES.iter().enumerate().map(|(variant, &(x, z, yaw, scale))| Placement { position: Vec2::new(x, z), yaw, scale, variant }).collect();
+        // Each house a cottage whose roof you can climb onto and walk (#249): the roof's slopes come
+        // down to the ground round the walls, so the house is masonry, not an obstacle.
         for h in &houses {
-            solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 });
+            solids.extend(cottage::solids(h));
         }
+        // Where the houses stand, plinth and all, for keeping trees away from them.
+        let footprints: Vec<Solid> = houses.iter().map(|h| Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 }).collect();
         // The windmill and the shed by the north fence.
         solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None, rise: 0.0 });
         solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None, rise: 0.0 });
@@ -184,6 +234,7 @@ impl Valley {
             if (p.y - river_z(p.x)).abs() < 12.0
                 || path_distance(p.x, p.y) < 5.0
                 || blocked_by(&solids, p, 3.0)
+                || footprints.iter().any(|f| f.overlaps(p, 3.0))
             {
                 continue;
             }
@@ -211,7 +262,8 @@ impl Valley {
         solids.extend(masonry.iter().flat_map(Masonry::solids));
         let (grid, tops) = Grid::split(&solids);
         let tops_box = tops_box(&solids);
-        let mut valley = Valley { solids, houses, trees, masonry, holds: Holds::default(), grid, tops, tops_box, heights };
+        let turned = solids.iter().copied().map(Turned::new).collect();
+        let mut valley = Valley { solids, houses, trees, masonry, holds: Holds::default(), turned, grid, tops, tops_box, heights };
         valley.holds = Holds::build(&valley);
         valley
     }
@@ -219,6 +271,7 @@ impl Valley {
     /// Adds a solid after the valley is built (for tests, and props placed by later layers).
     pub fn add_solid(&mut self, s: Solid) {
         self.solids.push(s);
+        self.turned.push(Turned::new(s));
         (self.grid, self.tops) = Grid::split(&self.solids);
         self.tops_box = tops_box(&self.solids);
         self.holds = Holds::build(self);
@@ -238,7 +291,7 @@ impl Valley {
             return ground;
         }
         for i in self.tops.near(p, 0.0) {
-            if let Some(top) = self.solids[i as usize].top_at(p) {
+            if let Some(top) = self.turned[i as usize].top_at(p) {
                 ground = ground.max(top);
             }
         }
@@ -259,7 +312,7 @@ impl Valley {
         if p.x.abs() > BOUNDS || p.y.abs() > BOUNDS {
             return true;
         }
-        self.grid.near(p, radius).any(|i| self.solids[i as usize].overlaps(p, radius))
+        self.grid.near(p, radius).any(|i| self.turned[i as usize].overlaps(p, radius))
     }
 
     /// Where a walker of `radius` at `p` stands once it's off the sides of the solids with a top
@@ -274,7 +327,7 @@ impl Valley {
         for _ in 0..2 {
             let mut moved = false;
             for i in self.tops.near(p, radius) {
-                let s = &self.solids[i as usize];
+                let s = &self.turned[i as usize];
                 // Most solids near are low walls, or not that near: ruled out before turning `p`
                 // into their frame.
                 if s.top_max().is_none_or(|top| top <= above) || !s.near(p, radius) {
@@ -300,7 +353,7 @@ impl Valley {
         let probe = p + dir * reach;
         let mut best: Option<(f32, Vec2)> = None;
         for i in self.grid.near(probe, radius).chain(self.tops.near(probe, radius)) {
-            let s = &self.solids[i as usize];
+            let s = &self.turned[i as usize];
             if s.top_max().is_some_and(|top| top <= above) || !s.near(probe, radius) || !s.overlaps(probe, radius) || s.top_nearest(p).is_some_and(|top| top <= above) {
                 continue;
             }
@@ -328,7 +381,7 @@ impl Valley {
     pub fn top_ahead(&self, from: Vec2, dir: Vec2, dist: f32) -> Option<(Vec2, f32)> {
         let mut best: Option<(f32, Vec2, f32)> = None;
         for i in self.tops.near(from, dist.min(1.5)) {
-            let s = &self.solids[i as usize];
+            let s = &self.turned[i as usize];
             let Some(top) = s.top else { continue };
             let (o, d) = (s.local(from), s.local(from + dir) - s.local(from));
             let (mut t0, mut t1) = (0.0f32, dist);
@@ -406,7 +459,7 @@ impl Valley {
             return false;
         }
         self.tops.near(p, radius).any(|i| {
-            let s = &self.solids[i as usize];
+            let s = &self.turned[i as usize];
             s.top_max().is_some_and(|top| top > above) && s.near(p, radius) && s.overlaps(p, radius) && s.top_nearest(p).is_some_and(|top| top > above)
         })
     }
@@ -418,7 +471,7 @@ impl Valley {
         if p.cmplt(lo).any() || p.cmpgt(hi).any() {
             return None;
         }
-        self.tops.near(p, 0.0).filter_map(|i| self.solids[i as usize].top_at(p)).reduce(f32::max)
+        self.tops.near(p, 0.0).filter_map(|i| self.turned[i as usize].top_at(p)).reduce(f32::max)
     }
 }
 
@@ -570,7 +623,9 @@ impl Grid {
 
     #[inline]
     fn cell(p: Vec2) -> (usize, usize) {
-        let f = |v: f32| (((v + BOUNDS) / CELL).floor().max(0.0) as usize).min(SIDE - 1);
+        // Truncating what's kept at 0 or above floors it without calling `floor`, which on
+        // targets without a rounding instruction costs more than the rest of the lookup.
+        let f = |v: f32| (((v + BOUNDS) / CELL).max(0.0) as usize).min(SIDE - 1);
         (f(p.x), f(p.y))
     }
 
@@ -636,10 +691,11 @@ mod tests {
         // 106 from the Swift sequence, less the 19 on cliff faces (#40), which still take their
         // draws so the rest keep their sizes and turns.
         assert_eq!(v.trees.len(), 87);
-        // 9 buildings, 87 trees, the bridge's two parapets, then the walls and the ruin.
+        // 7 cottages of 5 blocks each, the windmill and the shed, 87 trees, the bridge's two
+        // parapets, then the walls and the ruin.
         let masonry: usize = v.masonry.iter().map(|m| m.blocks.len()).sum();
-        assert_eq!(v.solids.len(), 98 + masonry);
-        let last = v.solids[95];
+        assert_eq!(v.solids.len(), 7 * 5 + 2 + 87 + 2 + masonry);
+        let last = v.solids[7 * 5 + 2 + 86];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
         // Each tree keeps the art it had before the cliff trees went: its place in the 106.
@@ -724,11 +780,11 @@ mod tests {
         assert!(v.wall_ahead(at, into, 0.4, 0.25, ground + 3.5).is_none());
         assert!(v.wall_ahead(at - into, into, 0.4, 0.25, ground + 1.5).is_none());
         assert!(v.wall_ahead(at, wall.unturn(Vec2::Y), 0.4, 0.25, ground + 1.5).is_none());
-        // A cottage's side is a wall; a tree and the bridge's parapet aren't.
+        // The shed's side is a wall; a tree and the bridge's parapet aren't.
         let side = |s: &Solid| (s.center + s.unturn(Vec2::new(0.0, -(s.half.y + 0.45))), s.unturn(Vec2::Y));
-        let cottage = v.solids[0];
-        let (p, d) = side(&cottage);
-        assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_some(), "no wall at the cottage");
+        let shed = *v.solids.iter().find(|s| (s.center - Vec2::new(-26.0, -48.0)).length() < 0.01).unwrap();
+        let (p, d) = side(&shed);
+        assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_some(), "no wall at the shed");
         let tree = v.solids.iter().find(|s| s.top.is_none() && s.half.x < 0.7).unwrap();
         let (p, d) = side(tree);
         assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_none(), "a tree is a wall");
@@ -740,9 +796,9 @@ mod tests {
     #[test]
     fn walls_stop_walkers_and_the_bridge_crosses_the_river() {
         let v = Valley::new();
-        // Walking north into the first cottage stops at its wall.
+        // Walking north into the first cottage stops at its roof's verge, too tall to step onto.
         let start = Vec2::new(-12.0, 0.0);
-        let end = v.slide(start, Vec2::new(0.0, -20.0), 0.4);
+        let end = v.slide_below(start, Vec2::new(0.0, -20.0), 0.4, v.ground(start.x, start.y) + 1.5);
         assert!(end.y > -9.5 && end.y < -5.0, "stopped at {end}");
         // The river is deep in the middle and dry on the bridge.
         assert!(v.water_depth(20.0, river_z(20.0)) > 0.7);

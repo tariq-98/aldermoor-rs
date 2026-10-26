@@ -46,7 +46,7 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     and stood on, and a taller one stops you a body's width short of it, as a building's wall
     does (#216; `world::Valley::off_faces`). It stops rolls, leaps, charges, knockbacks and
     blinks the same way, rather than carrying you over it (#311; `world::Valley::slide_below`).
-    Buildings and trees have no top and only block.
+    The shed, the windmill and trees have no top and only block; the cottages are tops (below).
     A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
     a step at a time.
   - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
@@ -57,17 +57,30 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     you onto its raked coping, 2.5 m up, which you walk up (at 40°) to the empty bellcote on its
     apex. A jump at the bellcote pulls you onto its top, 10 to 10.8 m up, the highest point in
     the ruin. The gable's outer face climbs too, by its grips (below).
+  - The cottages climb too (#249; `crates/world/src/cottage.rs`). Each is a top: its roof's two
+    slopes run down to its eaves, 2.6 to 3.4 m up, and only 0.12 m past its gable ends, with the
+    ridge's roll or cap and the chimney stack on top. Walking at one stops you a body's width
+    short of its eaves or gable end. A jump at the eaves pulls you onto the roof (or, with Shift
+    held, catches them to climb up), and a wall run up the side pulls straight onto it. The roof
+    is walked up and over its ridge (under 2:1 all the way), and the chimney, 2 to 2.5 m above
+    the roof beside it, is a jump and a mantle. The gable ends climb by their timbers, which are
+    grips: the window heads and the lintel over the door, 2.4 to 3.2 m up and caught in a jump
+    from the ground, then the wall plate across the top of the wall, the gable window's sill and
+    head (on the front) and the collar, each a climb or a climb leap from the last, then the
+    verge, the roof's sloping edge, and up onto the roof. The back of the house by the river
+    stands over its bank, so its timbers start out of reach.
 - **Climbing** on handholds (#245, part of the climbing epic #251;
   `crates/sim/src/climbing.rs`). A hold is an edge the hands close on: `world::Valley::holds`,
   every top edge of a `Solid` with a top that drops at least 1.6 m (`world::HANG_MIN_DROP`),
-  joined along straight walls, and every grip on the masonry (`world::Grip`): a dressed stone
+  joined along straight walls, and every grip (`world::Grip`): a dressed stone or a timber
   standing proud of a face, held by its top, with no room above it to climb onto. Grips don't
   stand in anyone's way. In the valley that's the ruined hall's taller broken walls, its gable's
   coping and bellcote, and a line of grips up the gable's outer face: the lancet's sill (2.6 m,
   caught in a jump from the ground), two jamb stones and a label stop up the window's east side
   (each a climb from the last), the keystone over its arch (a climb leap), the oculus's sill, and
   the bell's sill in the bellcote (a climb leap), from which a last climb leap reaches the
-  bellcote's coping. Beams, eaves and cliff ledges come with the rest of the routes in #249.
+  bellcote's coping. The cottages add their eaves and verges and the timbers up their gable ends
+  (above); cliff ledges come with the last of the routes in #249.
   - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
     higher, the body out from the wall by its radius and facing it. Pose `Hang`.
   - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at
