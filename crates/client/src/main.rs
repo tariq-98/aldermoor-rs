@@ -1,4 +1,5 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
+mod bag;
 mod combat;
 mod effects;
 mod hud;
@@ -296,6 +297,8 @@ struct Game {
     /// The Specialties screen is open, and how much quest XP its Give buttons send.
     specialties: bool,
     assign_xp: u32,
+    /// The bag is open (it also opens at a shop's counter).
+    bag: bool,
     /// The local player's last level up (specialty, level, seconds left on its banner).
     level_up: Option<(String, u8, f32)>,
     /// The left button held in the Action scheme: keep swinging, and when the next press of the
@@ -388,6 +391,7 @@ impl Game {
             pointer_free: false,
             specialties: false,
             assign_xp: 0,
+            bag: false,
             level_up: None,
             attacking: None,
             guard_button: false,
@@ -526,6 +530,17 @@ impl Game {
                 self.specialties = !self.specialties;
                 None
             }
+            C::Bag => {
+                self.bag = !self.bag;
+                None
+            }
+            C::Loot => self
+                .snaps
+                .current
+                .unit(self.host.player)
+                .zip(self.snaps.current.player.as_ref())
+                .and_then(|(me, player)| bag::nearest_pile(player, me.position))
+                .map(|pile| Command::Loot { pile: pile.id }),
             c => c.slot().map(|slot| self.use_slot(slot)),
         };
         if let Some(c) = command {
@@ -714,6 +729,7 @@ impl Game {
             swap: l(C::SwapWeapons),
             respawn: l(C::Respawn),
             specialties: l(C::Specialties),
+            loot: l(C::Loot),
         }
     }
     fn direction(&self) -> Vec2 {
@@ -820,13 +836,24 @@ impl Game {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|v| v.1)
     }
+    /// A screen that wants the pointer is open: Specialties, the bag, or a shop's counter.
+    fn screen_open(&self) -> bool {
+        self.specialties
+            || self.bag
+            || self
+                .snaps
+                .current
+                .player
+                .as_ref()
+                .is_some_and(|p| p.shop.is_some())
+    }
     /// Aiming at the crosshair in the middle of the screen, rather than at the pointer.
     fn aiming(&self) -> bool {
         self.menu.is_none()
             && (self.mouse_look
                 || (self.pilot.scheme == controls::Scheme::Action
                     && !self.pointer_free
-                    && !self.specialties))
+                    && !self.screen_open()))
     }
     fn aim_point(&self) -> Option<Vec3> {
         let me = self.snaps.current.unit(self.host.player)?;
@@ -1252,6 +1279,7 @@ impl Game {
         let crosshair = self.aiming() && !self.options.showcase;
         let keys = self.key_labels();
         let mut changes = Vec::new();
+        let mut bag_actions = Vec::new();
         let output = ctx.run(raw, |ctx| {
             if !self.options.showcase {
                 combat::paint(
@@ -1281,6 +1309,17 @@ impl Game {
                     ));
                 }
             }
+            if let Some(player) = &self.snaps.current.player
+                && let Some(me) = self.snaps.current.unit(self.host.player)
+                && !self.options.showcase
+            {
+                bag::loot(ctx, &projection, player, me.position, &keys.loot);
+                let at_shop = player.shop.is_some();
+                if self.bag || at_shop {
+                    bag_actions.extend(bag::bag(ctx, player));
+                }
+                bag_actions.extend(bag::shop(ctx, player));
+            }
             if crosshair {
                 paint_crosshair(ctx);
             }
@@ -1301,6 +1340,12 @@ impl Game {
                 hud::Action::AimSlot(slot) => self.aim_slot = Some(slot),
                 hud::Action::CycleTarget => self.host.send(Command::SetTarget(self.target(true))),
                 hud::Action::CloseSpecialties => self.specialties = false,
+            }
+        }
+        for action in bag_actions {
+            match action {
+                bag::Action::Command(c) => self.host.send(c),
+                bag::Action::Close => self.bag = false,
             }
         }
         r.hud = Some(render::gui::HudFrame {
@@ -1610,6 +1655,7 @@ impl App {
     fn escape(&mut self) {
         match &mut self.game.menu {
             None if self.game.specialties => self.game.specialties = false,
+            None if self.game.bag => self.game.bag = false,
             Some(m) if m.capture.is_some() => {
                 m.capture = None;
                 m.notice = None;
@@ -1691,7 +1737,7 @@ impl App {
         let want = focused
             && self.game.pilot.scheme == controls::Scheme::Action
             && !self.game.pointer_free
-            && !self.game.specialties
+            && !self.game.screen_open()
             && self.game.menu.is_none()
             && !self.game.options.showcase;
         if want == self.pointer_held {

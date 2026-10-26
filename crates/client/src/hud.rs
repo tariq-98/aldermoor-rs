@@ -10,6 +10,7 @@ pub struct Keys {
     pub swap: String,
     pub respawn: String,
     pub specialties: String,
+    pub loot: String,
 }
 /// White text on a solid colour, readable over any background.
 fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {

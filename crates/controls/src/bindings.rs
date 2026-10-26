@@ -27,6 +27,8 @@ pub enum Control {
     Revive,
     Respawn,
     Specialties,
+    Loot,
+    Bag,
     Slot1,
     Slot2,
     Slot3,
@@ -41,7 +43,7 @@ pub enum Control {
 
 impl Control {
     /// Every control, in the order the menu lists them.
-    pub const ALL: [Control; 28] = [
+    pub const ALL: [Control; 30] = [
         Self::Forward,
         Self::Back,
         Self::Left,
@@ -60,6 +62,8 @@ impl Control {
         Self::Revive,
         Self::Respawn,
         Self::Specialties,
+        Self::Loot,
+        Self::Bag,
         Self::Slot1,
         Self::Slot2,
         Self::Slot3,
@@ -92,6 +96,8 @@ impl Control {
             Self::Revive => "Revive",
             Self::Respawn => "Respawn",
             Self::Specialties => "Specialties and quest XP",
+            Self::Loot => "Loot the nearest pile",
+            Self::Bag => "Bag",
             Self::Slot1 => "Skill 1",
             Self::Slot2 => "Skill 2",
             Self::Slot3 => "Skill 3",
@@ -133,6 +139,8 @@ impl Control {
             Self::Revive => &["KeyG"],
             Self::Respawn => &["KeyR"],
             Self::Specialties => &["KeyK"],
+            Self::Loot => &["KeyL"],
+            Self::Bag => &["KeyB"],
             Self::Slot1 => &["Digit1"],
             Self::Slot2 => &["Digit2"],
             Self::Slot3 => &["Digit3"],
