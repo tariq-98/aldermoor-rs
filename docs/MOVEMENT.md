@@ -28,9 +28,10 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     `ForcedKind::Mantle`), as long as you aren't yet falling faster than 3 m/s. So a jump at the
     right moment gets you up a ledge about 3.3 m high.
   - **Vaulting:** running (faster than a walk) at a wall no higher than **1.2 m** and shallower
-    than **0.7 m**, with clear, level ground beyond, hops it in 0.45 s and lands you running at
-    the same speed (`ForcedKind::Vault`). Deeper walls are climbed onto, and walking at a low wall
-    doesn't vault it.
+    than **0.7 m**, with clear, level ground beyond, hops it at the speed you ran in (0.2 to
+    0.45 s) and lands you running at that speed (`ForcedKind::Vault`). Deeper walls, such as the
+    0.9 m field walls, are climbed onto, and walking at a low wall doesn't vault it. In Brambleford
+    today only the ruin's fallen stones are thin enough to vault.
   - Not while guarding, casting, swimming or downed. Mantles and vaults are forced moves, so no
     skills meanwhile.
   - The valley has few low faces yet: a few ledges in the limestone terraces west of the

@@ -390,15 +390,20 @@ fn running_at_a_low_thin_wall_vaults_it_in_stride() {
     // Stop just as the hop lands (the road has a field wall of its own a little further on).
     let (kinds, mut sim, id, _) = at_wall(1.0, 0.4, false, None, 0.5);
     assert!(matches!(kinds[..], [ForcedKind::Vault { .. }]), "went through {kinds:?}");
+    // Over at the pace it ran in, not floating across.
+    let run = sim.get::<Motion>(id).unwrap().run_speed;
     let mut steps = 0;
     while sim.get::<Motion>(id).unwrap().forced.is_some() && steps < 60 {
+        let before = sim.get::<Transform>(id).unwrap().pos;
         sim.step();
+        let after = sim.get::<Transform>(id).unwrap().pos;
+        let pace = Vec2::new(after.x - before.x, after.z - before.z).length() * 60.0;
+        assert!(pace > run * 0.8, "hopped at {pace} m/s, ran at {run}");
         steps += 1;
     }
     let t = sim.get::<Transform>(id).unwrap().pos;
     assert!(t.x > 8.5, "only got to x = {}", t.x);
     assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "not on the road beyond: {t}");
-    let run = sim.get::<Motion>(id).unwrap().run_speed;
     sim.step();
     assert!(ground_speed(&sim, id) > run * 0.95, "landed at {} m/s", ground_speed(&sim, id));
 }

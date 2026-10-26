@@ -46,10 +46,12 @@ pub const MANTLE_HEIGHT: f32 = 2.2;
 const MANTLE_FALLING: f32 = -3.0;
 pub const MANTLE_TIME: f64 = 0.5;
 /// Running (faster than a walk) at a wall up to this high and shallower than this, with clear
-/// ground beyond, hops it in stride. Deeper ones (a 0.8 m wall) are climbed onto.
+/// ground beyond, hops it in stride, at the speed you ran in, taking between `VAULT_MIN` and
+/// `VAULT_TIME` seconds. Deeper ones (a 0.8 m wall, the 0.9 m field walls) are climbed onto.
 pub const VAULT_HEIGHT: f32 = 1.2;
 pub const VAULT_DEPTH: f32 = 0.7;
 pub const VAULT_TIME: f64 = 0.45;
+const VAULT_MIN: f64 = 0.2;
 /// Deeper water than this is swum, and swimming stops once it's shallower than `WADE_OUT`.
 pub const SWIM_DEPTH: f32 = 0.5;
 const WADE_OUT: f32 = 0.4;
@@ -347,7 +349,9 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             let speed = Vec2::new(m.vel.x, m.vel.z).length();
             let hop = (able && !busy && !m.swimming && m.grounded && speed > WALK_SPEED * 1.2).then(|| vault_over(land, from, t.pos.y, ahead, body.radius)).flatten();
             if let Some((to, top)) = hop {
-                m.forced = Some(Forced { kind: ForcedKind::Vault { speed }, from: t.pos, to, start: clock.time, duration: VAULT_TIME, arc: top + 0.25 });
+                let travel = Vec2::new(to.x - t.pos.x, to.z - t.pos.z).length();
+                let duration = (travel as f64 / speed as f64).clamp(VAULT_MIN, VAULT_TIME);
+                m.forced = Some(Forced { kind: ForcedKind::Vault { speed }, from: t.pos, to, start: clock.time, duration, arc: top + 0.25 });
                 m.vel = Vec3::ZERO;
                 m.observed = Vec3::ZERO;
                 continue;
