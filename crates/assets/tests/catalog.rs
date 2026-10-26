@@ -146,13 +146,40 @@ fn the_valley_has_scenery_for_everything_world_places() {
     assert!(!env.placements.houses.is_empty() && !env.placements.trees.is_empty());
     for id in &env.placements.houses {
         let fp = prop(id).footprint.expect("houses give their footprint");
-        // world::Valley's house obstacle is 7 x 6.2 m at scale 1.
-        assert!((fp[0] - 7.0).abs() < 0.01 && (fp[1] - 6.2).abs() < 0.01, "{id} fits the house obstacle");
+        // The plinth, 7 x 6.2 m at scale 1, which world::Valley keeps the trees away from.
+        assert!((fp[0] - 7.0).abs() < 0.01 && (fp[1] - 6.2).abs() < 0.01, "{id} fits the house's footprint");
     }
     let mill = env.placements.landmarks.iter().find(|p| p.prop == "windmill").expect("the windmill");
     assert_eq!(mill.at, [49.0, -84.0], "where world::Valley's windmill obstacle is");
     assert!(prop("windmill").parts.iter().any(|p| p.spin.is_some()), "the sails turn");
     assert!(env.props.iter().filter(|p| p.kind == "tree").all(|p| p.wind), "trees sway");
+}
+
+/// Fails unless `prop` was built for these blocks and grips, as `world` has them.
+fn built_for(prop: &assets::Prop, blocks: &[world::Block], grips: &[world::Grip]) {
+    let id = &prop.id;
+    assert_eq!(prop.blocks.len(), blocks.len(), "{id} was built for other blocks: rebuild the environment art");
+    for (a, b) in prop.blocks.iter().zip(blocks) {
+        let near = |x: f32, y: f32| (x - y).abs() < 0.002;
+        let same = near(a.center[0], b.center.x)
+            && near(a.center[1], b.center.y)
+            && near(a.half[0], b.half.x)
+            && near(a.half[1], b.half.y)
+            && near(a.yaw, b.yaw)
+            && near(a.rise, b.rise)
+            && match (a.top, b.top) {
+                (Some(x), Some(y)) => near(x, y),
+                (None, None) => true,
+                _ => false,
+            };
+        assert!(same, "{id}'s {} block moved in world: rebuild the environment art", b.part);
+    }
+    assert_eq!(prop.grips.len(), grips.len(), "{id} was built for other grips: rebuild the environment art");
+    for (a, g) in prop.grips.iter().zip(grips) {
+        let near = |x: &[f32], y: &[f32]| x.iter().zip(y).all(|(x, y)| (x - y).abs() < 0.002);
+        let same = near(&a.a, &g.a.to_array()) && near(&a.b, &g.b.to_array()) && near(&a.out, &g.out.to_array());
+        assert!(same, "{id}'s {} grip moved in world: rebuild the environment art", g.part);
+    }
 }
 
 #[test]
@@ -163,32 +190,25 @@ fn masonry_is_built_for_the_blocks_world_stands_it_on() {
     for m in &valley.masonry {
         let prop = env.props.iter().find(|p| p.id == m.prop).unwrap_or_else(|| panic!("no prop {}: rebuild the environment art", m.prop));
         assert_eq!(prop.kind, "masonry", "{}", m.prop);
-        assert_eq!(prop.blocks.len(), m.blocks.len(), "{} was built for other blocks: rebuild the environment art", m.prop);
-        for (a, b) in prop.blocks.iter().zip(&m.blocks) {
-            let near = |x: f32, y: f32| (x - y).abs() < 0.002;
-            let same = near(a.center[0], b.center.x)
-                && near(a.center[1], b.center.y)
-                && near(a.half[0], b.half.x)
-                && near(a.half[1], b.half.y)
-                && near(a.yaw, b.yaw)
-                && near(a.rise, b.rise)
-                && match (a.top, b.top) {
-                    (Some(x), Some(y)) => near(x, y),
-                    (None, None) => true,
-                    _ => false,
-                };
-            assert!(same, "{}'s {} block moved in world: rebuild the environment art", m.prop, b.part);
-        }
-        assert_eq!(prop.grips.len(), m.grips.len(), "{} was built for other grips: rebuild the environment art", m.prop);
-        for (a, g) in prop.grips.iter().zip(&m.grips) {
-            let near = |x: &[f32], y: &[f32]| x.iter().zip(y).all(|(x, y)| (x - y).abs() < 0.002);
-            let same = near(&a.a, &g.a.to_array()) && near(&a.b, &g.b.to_array()) && near(&a.out, &g.out.to_array());
-            assert!(same, "{}'s {} grip moved in world: rebuild the environment art", m.prop, g.part);
-        }
+        built_for(prop, &m.blocks, &m.grips);
     }
     for p in env.props.iter().filter(|p| p.kind == "masonry") {
         assert!(valley.masonry.iter().any(|m| m.prop == p.id), "world no longer places {}", p.id);
     }
+}
+
+#[test]
+fn cottages_are_built_for_the_roofs_and_timbers_world_climbs() {
+    let cat = assets::Catalog::load(root()).unwrap();
+    let env = cat.environment.as_ref().expect("an environment catalogue");
+    for c in &world::cottage::COTTAGES {
+        let prop = env.props.iter().find(|p| p.id == c.prop).unwrap_or_else(|| panic!("no prop {}: rebuild the environment art", c.prop));
+        assert_eq!(prop.kind, "house", "{}", c.prop);
+        built_for(prop, &c.blocks(), &c.grips());
+    }
+    // A house is drawn as the cottage world climbs it as.
+    let kinds: Vec<&str> = world::cottage::COTTAGES.iter().map(|c| c.prop).collect();
+    assert_eq!(env.placements.houses, kinds, "houses take the cottages in world::cottage's order");
 }
 
 #[test]
