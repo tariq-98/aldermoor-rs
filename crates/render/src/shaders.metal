@@ -74,10 +74,19 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
         float4 weights=max(terrain_weights.sample(control,uv),float4(0));
         for(uint layer=surfaces.flags.x;layer<4;layer++)weights[layer]=0.;
         float sum=dot(weights,float4(1));weights=sum>0.0001?weights/sum:float4(1,0,0,0);
+        // Retain the two strongest layers; strict comparisons break ties by layer index.
+        uint first=0,second=1;
+        if(weights[second]>weights[first]){first=1;second=0;}
+        for(uint layer=2;layer<surfaces.flags.x;layer++){
+            if(weights[layer]>weights[first]){second=first;first=layer;}
+            else if(weights[layer]>weights[second])second=layer;
+        }
+        float retained=weights[first]+weights[second];
+        float4 strongest=0.;
+        strongest[first]=weights[first]/retained;
+        strongest[second]=weights[second]/retained;
+        weights=strongest;
         float3 projections=pow(abs(normalize(i.normal)),float3(4));
-        // Fade negligible projections to zero before renormalising, so skipping them
-        // does not darken the layer or introduce a hard weight jump at the cutoff.
-        projections=max(projections-dot(projections,float3(1))*0.05,float3(0));
         projections/=max(dot(projections,float3(1)),0.0001);
         albedo.rgb=0.;surface_roughness=0.;
         for(uint layer=0;layer<surfaces.flags.x;layer++){
