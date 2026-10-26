@@ -66,9 +66,11 @@ pub struct Character {
     idle: String,
     gear_scale: f32,
     last_pose: Pose,
-    /// How the body was getting about last frame, and the climbing move playing (#247).
+    /// How the body was getting about last frame, and the climbing move playing (#247), and
+    /// whether its last shimmy went right (a wrap round a corner carries on that way).
     last_traversal: Traversal,
     climb: Option<ClimbMove>,
+    shimmied_right: bool,
     attack: usize,
     transition: Option<(String, f32)>,
     last_drawn: bool,
@@ -282,6 +284,7 @@ impl Character {
             last_pose: Pose::Idle,
             last_traversal: Traversal::Ground,
             climb: None,
+            shimmied_right: true,
             attack: 0,
             transition: None,
             last_drawn: look.drawn,
@@ -875,6 +878,9 @@ impl Character {
             Traversal::Hanging => {
                 self.climb = None;
                 let side = u.velocity.dot(right);
+                if side.abs() > 0.3 {
+                    self.shimmied_right = side > 0.;
+                }
                 let clip = if side > 0.3 {
                     "Hang_Shimmy_R_Loop"
                 } else if side < -0.3 {
@@ -889,21 +895,26 @@ impl Character {
                     // Which move this is, from how the body got here: a new move is decided
                     // once, on its first frame.
                     let from_hang = matches!(last, Traversal::Hanging)
-                        || matches!(last, Traversal::Forced(g) if g.kind == ForcedKind::Hold);
+                        || matches!(last, Traversal::Forced(g) if matches!(g.kind, ForcedKind::Hold | ForcedKind::Corner));
                     let d = f.to - f.from;
                     let clip = match f.kind {
                         ForcedKind::Climb if from_hang => "Hang_ClimbUp",
+                        // Up or down to the next hold, or across to one (a side eject's longer
+                        // hop until it has a clip of its own).
                         ForcedKind::Hold if from_hang => {
-                            if d.y > 0.3 {
+                            let across = d.dot(right);
+                            if d.y > 0.3 && d.y > across.abs() {
                                 "Hang_Climb_Up"
-                            } else if d.y < -0.3 {
+                            } else if d.y < -0.3 && -d.y > across.abs() {
                                 "Hang_Climb_Down"
-                            } else if d.dot(right) > 0. {
+                            } else if across > 0. {
                                 "Hang_Hop_R"
                             } else {
                                 "Hang_Hop_L"
                             }
                         }
+                        ForcedKind::Corner if self.shimmied_right => "Hang_Hop_R",
+                        ForcedKind::Corner => "Hang_Hop_L",
                         ForcedKind::Hold if matches!(last_pose, Pose::Jump | Pose::Fall) => {
                             "Hang_Catch"
                         }

@@ -83,6 +83,12 @@ pub enum ForcedKind {
     /// Onto a hold to hang from it: caught in the air, lowered from the edge above, or climbing
     /// to the next hold (docs/MOVEMENT.md, "Climbing").
     ToHold { hold: u32, at: f32 },
+    /// Round a corner onto the hold that meets this one there, to hang from it, swinging about
+    /// the `corner`.
+    Corner { hold: u32, at: f32, corner: Vec2 },
+    /// Running up a wall too tall to climb (Shift into it), catching a hold on the way; `away` is
+    /// out of the wall.
+    WallRun { away: Vec2 },
 }
 
 /// Hanging from a hold (`world::Hold`, by its index in the valley's holds), with the hands `at`
@@ -136,6 +142,11 @@ pub struct Motion {
     pub hang: Option<Hang>,
     /// The hold just let go of, which can't be caught again until the time given.
     pub released: Option<(u32, f64)>,
+    /// Holds are caught in the air without Shift until this time: just after a leap, an eject or
+    /// a wall run.
+    pub catch_until: f64,
+    /// Roll was pressed in the air: landing before this time rolls the fall off.
+    pub landing_roll_until: f64,
 }
 
 impl Motion {
@@ -156,6 +167,8 @@ impl Motion {
             fall_from: f32::NEG_INFINITY,
             hang: None,
             released: None,
+            catch_until: f64::NEG_INFINITY,
+            landing_roll_until: f64::NEG_INFINITY,
         }
     }
 

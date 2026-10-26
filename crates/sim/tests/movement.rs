@@ -465,7 +465,8 @@ fn a_wall_taller_than_chest_height_stops_you() {
     let (mut sim, id, _) = at_a_wall(2.2);
     assert!(!climb(&mut sim, id, 120), "climbed a 2.2 m wall");
     let t = sim.get::<Transform>(id).unwrap().pos;
-    assert!(t.x < 7.6 && t.x > 6.5, "stopped at x = {}", t.x);
+    // A body's width short of its face at 7.6, not in it (#216).
+    assert!(t.x <= 7.2 + 1e-3 && t.x > 6.5, "stopped at x = {}", t.x);
     assert!((t.y - sim.land().ground(t.x, t.z)).abs() < 0.05, "left the road for {t}");
 }
 
