@@ -6,3 +6,7 @@
 /art/out/
 node_modules/
 __pycache__/
+
+# A server's identity (server --cert); the key must never be committed.
+aldermoor.der
+aldermoor.key
