@@ -42,6 +42,8 @@ struct TickOut {
     events: Vec<Event>,
     /// Players living here once the departures have gone.
     players: usize,
+    /// It only moved its clock on this tick.
+    asleep: bool,
     time: f64,
     step_ms: f64,
     exchange_ms: f64,
@@ -84,7 +86,12 @@ pub struct RealmStats {
     pub regions: usize,
     /// Players turned back at a full ground that is never layered.
     pub turned_back: usize,
+    /// Regions asleep this tick: nobody inside or at their border, so they step once a second.
+    pub asleep: usize,
 }
+
+/// A quiet region steps once in this many ticks (a second) and only moves its clock on between.
+pub const SLEEP_EVERY: u64 = 60;
 
 /// How a world opens layers when a ground passes its player cap.
 pub struct Layering {
@@ -356,6 +363,7 @@ impl Realm {
             self.workers[n].players = out.players;
             stats.step_ms = stats.step_ms.max(out.step_ms);
             stats.exchange_ms = stats.exchange_ms.max(out.exchange_ms);
+            stats.asleep += out.asleep as usize;
             for (to, ghosts) in out.ghosts {
                 stats.ghosts += ghosts.len();
                 let (from, mut last) = (&self.workers[n], None);
@@ -519,14 +527,22 @@ fn work(mut sim: Sim, others: Vec<(u32, Bounds)>, near: Vec<(u32, Bounds)>, jobs
         if input.regroup {
             known.iter_mut().for_each(BTreeSet::clear);
         }
+        // Nobody to see it or reach it: it steps once a second (wandering, respawns) and
+        // otherwise only keeps time, so it's on the same tick as its neighbours when it wakes.
+        let watched = !input.arrivals.is_empty() || !input.requests.is_empty() || !input.commands.is_empty() || input.ghosts.iter().any(|g| g.player);
         sim.import(input.arrivals);
         sim.apply_requests(input.requests);
         sim.set_ghosts(input.ghosts);
         for (id, c) in input.commands {
             sim.command(id, c);
         }
+        let asleep = !watched && sim.players().is_empty() && !(sim.tick() + 1).is_multiple_of(SLEEP_EVERY);
         let stepping = Instant::now();
-        sim.step();
+        if asleep {
+            sim.idle();
+        } else {
+            sim.step();
+        }
         let step_ms = stepping.elapsed().as_secs_f64() * 1000.0;
         // Ghosts first, so a unit about to leave is still published as this region's.
         let ghosts: Vec<(u32, Vec<GhostState>)> = near.iter().zip(&known).map(|(&(r, b), k)| (r, sim.ghosts_near(b, k))).collect();
@@ -539,7 +555,7 @@ fn work(mut sim: Sim, others: Vec<(u32, Bounds)>, near: Vec<(u32, Bounds)>, jobs
         let requests = sim.take_requests();
         let events = sim.take_events();
         let exchange_ms = start.elapsed().as_secs_f64() * 1000.0 - step_ms;
-        let out = TickOut { departures, ghosts, requests, events, players, time: sim.time(), step_ms, exchange_ms };
+        let out = TickOut { departures, ghosts, requests, events, players, asleep, time: sim.time(), step_ms, exchange_ms };
         if done.send(out).is_err() {
             return;
         }
