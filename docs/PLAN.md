@@ -23,8 +23,11 @@ rendering technique still decides the frame rate. That's why the engine talks to
    controllers, AVFoundation and VideoToolbox are reached from Rust through the `objc2` crates.
 2. **Our own engine on Metal**, not Bevy or another engine, so we can use MetalFX upscaling, Apple
    GPU tile memory and Metal 4 features. Proven crates where they fit: `bevy_ecs` as a standalone
-   ECS, Rapier for physics, `gltf` for models.
-3. **Platforms:** the game client runs on Apple-silicon Macs. The server builds for Mac and Linux.
+   ECS, Rapier for physics, `gltf` for models. Windows and Linux get a second render backend on
+   wgpu (Vulkan and DX12) next to Metal; culling, batching, passes and look values stay shared
+   (decided 26 October, #96, #317).
+3. **Platforms:** the game client runs on Apple-silicon Macs, with Windows and Linux to follow
+   (epic #92). The server builds for Mac and Linux.
 4. **A fresh repo** (`aldermoor-rs`), ported by feature, not line by line. The Swift game's 169
    simulation checks become the acceptance tests for the Rust simulation.
 5. **The new character design**, not a port of the four classes and talent trees. The whole
