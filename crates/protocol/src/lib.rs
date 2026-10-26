@@ -9,8 +9,10 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub mod wire;
+
 /// Bumped whenever these types change shape.
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 13;
 
 /// A unit's ID, stable for its lifetime.
 pub type UnitId = u32;
@@ -66,6 +68,20 @@ pub enum Command {
     /// the newest). Send it with each batch of commands: a player's shots and blows at other
     /// players are tested where the sender saw them, up to 250 ms back.
     Viewing { tick: u64 },
+    /// Where the player aims up or down with the crosshair, as [`aim_pitch_byte`]: sent when
+    /// it changes, so others see bows and staves point where this player aims.
+    Aim { pitch: i8 },
+}
+
+/// An aim pitch in radians (up positive, clamped to a right angle either way) as one byte, in
+/// steps of about 0.7 degrees.
+pub fn aim_pitch_byte(pitch: f32) -> i8 {
+    (pitch / std::f32::consts::FRAC_PI_2 * 127.).round().clamp(-127., 127.) as i8
+}
+
+/// The pitch in radians that [`aim_pitch_byte`] stands for.
+pub fn aim_pitch_radians(byte: i8) -> f32 {
+    byte as f32 / 127. * std::f32::consts::FRAC_PI_2
 }
 
 /// Schools of damage and magic. Armour only stops physical blows.
@@ -189,6 +205,8 @@ pub enum Pose {
     Cast,
     Hit,
     Dead,
+    /// Hanging from a hold by the hands, still or shimmying, or moving onto one.
+    Hang,
 }
 
 /// How a body is getting about, beyond its pose: what animation needs to show swimmers,
@@ -203,6 +221,9 @@ pub enum Traversal {
     Swimming,
     /// Carried through a move that ignores the controls.
     Forced(ForcedMove),
+    /// Hanging from a hold by the hands, still or shimmying along it (docs/MOVEMENT.md,
+    /// "Climbing").
+    Hanging,
 }
 
 /// A roll, leap, charge, climb or throw: where it began and ends, and when.
@@ -227,6 +248,17 @@ pub enum ForcedKind {
     Climb,
     /// Thrown by a blow.
     Knockback,
+    /// Caught a ledge in a jump and pulling up onto it.
+    Mantle,
+    /// Hopping a low wall in stride.
+    Vault,
+    /// Onto a hold to hang from it: caught in the air, lowered over the edge above, or climbing,
+    /// hopping, leaping or ejecting to the next hold.
+    Hold,
+    /// Round a corner onto the hold that meets the one hung from there.
+    Corner,
+    /// Running up a wall too tall to climb, to catch a hold or pull up onto its top.
+    WallRun,
 }
 
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
@@ -274,6 +306,9 @@ pub struct UnitState {
     /// Seconds since the pose began, for animation timing.
     pub pose_time: f32,
     pub traversal: Traversal,
+    /// Where a player aims up (+) or down (-) with the crosshair, in 127ths of a right angle
+    /// ([`aim_pitch_byte`]); 0 for everyone else and for anyone aiming level.
+    pub aim_pitch: i8,
     pub health: f32,
     pub max_health: f32,
     pub hostile: bool,
@@ -319,6 +354,9 @@ pub struct PlayerState {
     pub xp: u32,
     pub xp_next: u32,
     pub unassigned_xp: u32,
+    /// Every specialty's own level, in the sim's order (warrior, archer, mage, necromancer,
+    /// rogue, healer).
+    pub specialties: Vec<SpecialtyLevel>,
     pub coins: u32,
     /// Every inventory slot in order; an empty one has an empty `item`. Each `price` is what
     /// the shop you stand at pays for it (0 if none, or it doesn't buy that).
@@ -380,6 +418,8 @@ pub struct NodeView {
     pub level: u8,
     /// False while it's run out and growing back.
     pub ready: bool,
+    /// How close you must stand to work it, in metres (further for a fishing spot).
+    pub reach: f32,
 }
 
 /// A crafting station and its recipes.
@@ -399,6 +439,14 @@ pub struct RecipeView {
     pub output: ItemView,
     /// How many you could make now from what you carry (0 below the level).
     pub can_make: u16,
+}
+
+/// One specialty and the level it has reached.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpecialtyLevel {
+    /// "warrior", "mage", …: what `Command::AssignXp` takes.
+    pub specialty: String,
+    pub level: u8,
 }
 
 /// Some of one item: in a slot, a pile or a shop.
@@ -575,6 +623,46 @@ pub enum Event {
     WeaponsSwapped { unit: UnitId },
 }
 
+impl Event {
+    /// The units it's about, for sending it only to those who can see them.
+    pub fn units(&self) -> [Option<UnitId>; 2] {
+        use Event::*;
+        match self {
+            Damage { target, source, .. } | Heal { target, source, .. } | Avoided { target, source, .. } => [Some(*target), Some(*source)],
+            Hit { attacker, victim, .. } => [Some(*victim), Some(*attacker)],
+            Died { unit, killer } => [Some(*unit), *killer],
+            Staggered { unit, by } => [Some(*unit), Some(*by)],
+            AbilityUsed { unit, target, .. } => [Some(*unit), *target],
+            ProjectileLaunched { from, .. } => [Some(*from), None],
+            ProjectileEnded { hit, .. } => [*hit, None],
+            LevelUp { unit, .. }
+            | SkillUp { unit, .. }
+            | Respawned { unit }
+            | Jumped { unit }
+            | Dodged { unit }
+            | CastStarted { unit, .. }
+            | CastInterrupted { unit }
+            | AuraApplied { unit, .. }
+            | AuraRemoved { unit, .. }
+            | Downed { unit }
+            | Rallied { unit }
+            | Revived { unit }
+            | DefianceBroken { unit }
+            | Combo { unit, .. }
+            | WeaponsSwapped { unit } => [Some(*unit), None],
+            AreaImpact { .. } | Message { .. } => [None, None],
+        }
+    }
+
+    /// Where it happened, for those it names no unit for, or that can see the place.
+    pub fn at(&self) -> Option<Vec3> {
+        match self {
+            Event::ProjectileEnded { at, .. } | Event::AreaImpact { at, .. } | Event::Combo { at, .. } => Some(*at),
+            _ => None,
+        }
+    }
+}
+
 /// Everything a client needs for one tick.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -612,6 +700,15 @@ impl Command {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn aim_pitch_fits_a_byte_in_steps_under_a_degree() {
+        assert_eq!(super::aim_pitch_byte(0.), 0);
+        assert_eq!(super::aim_pitch_byte(3.), 127);
+        assert_eq!(super::aim_pitch_byte(-3.), -127);
+        let p = 0.3;
+        let back = super::aim_pitch_radians(super::aim_pitch_byte(p));
+        assert!((back - p).abs() <= 0.5f32.to_radians(), "{back}");
+    }
     use super::*;
 
     #[test]
@@ -633,6 +730,7 @@ mod tests {
                 pose: Pose::Idle,
                 pose_time: 0.0,
                 traversal: Traversal::Ground,
+                aim_pitch: 0,
                 health: 100.0,
                 max_health: 100.0,
                 hostile: false,

@@ -4,6 +4,18 @@ use crate::{Bindings, Orbit, Pilot, Scheme, camera};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// How a ground-targeted skill is cast from its key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundCast {
+    /// Lands at the crosshair (or pointer) the moment the key goes down.
+    #[default]
+    Instant,
+    /// Holding the key shows where it will land; letting go casts it, and Esc or the right
+    /// mouse button cancels.
+    HoldToAim,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -21,6 +33,10 @@ pub struct Settings {
     pub shoulder: Option<f32>,
     /// Classic: the camera swings back behind the character after a second of moving.
     pub swing_back: bool,
+    /// How hard landed blows kick the camera.
+    pub screen_shake: camera::ScreenShake,
+    /// What pressing a ground skill's key does.
+    pub ground_cast: GroundCast,
     /// Keys and mouse buttons; controls left out keep their defaults.
     pub bindings: Bindings,
 }
@@ -36,6 +52,8 @@ impl Default for Settings {
             max_distance: camera::MAX_DISTANCE,
             shoulder: None,
             swing_back: true,
+            screen_shake: camera::ScreenShake::Full,
+            ground_cast: GroundCast::Instant,
             bindings: Bindings::default(),
         }
     }
@@ -113,6 +131,9 @@ mod tests {
         assert_eq!(s.fov_degrees, camera::FOV_DEGREES);
         assert_eq!(s.shoulder(), 0.);
         assert_eq!(Settings::default().shoulder(), 0.6);
+        assert_eq!(s.screen_shake, camera::ScreenShake::Full);
+        let s: Settings = serde_json::from_str(r#"{ "screen_shake": "low" }"#).unwrap();
+        assert_eq!(s.screen_shake, camera::ScreenShake::Low);
     }
 
     #[test]

@@ -28,6 +28,8 @@ const DEFAULT_BODY: Body = Body { radius: 0.4, height: 1.8 };
 
 /// Unit IDs in each region's block.
 pub const BLOCK: UnitId = 1 << 24;
+/// Region IDs there's room for, with blocks that size.
+pub const REGIONS: u32 = (UnitId::MAX / BLOCK) + 1;
 /// Units this close to a neighbour's ground show there as ghosts.
 pub const GHOST_BAND: f32 = 32.0;
 /// How far past its region's edge a unit's centre goes before it hands over, so one strolling
@@ -82,12 +84,38 @@ pub struct Ghost {
     pub drawn: bool,
 }
 
+/// A ghost's combat detail (action, cast, auras, defiance), as its region published it at `at`
+/// (sim time), for the combat view (#208).
+#[derive(Component, Clone, Debug)]
+pub struct GhostCombat {
+    pub at: f64,
+    pub combat: protocol::UnitCombat,
+}
+
+impl GhostCombat {
+    /// Its timers as they stand at `t`.
+    pub fn at(&self, t: f64) -> protocol::UnitCombat {
+        let dt = (t - self.at).max(0.0) as f32;
+        let mut c = self.combat.clone();
+        c.action_time += dt;
+        if let Some(cast) = &mut c.cast {
+            cast.elapsed += dt;
+        }
+        for a in &mut c.auras {
+            a.remaining = (a.remaining - dt).max(0.0);
+        }
+        c
+    }
+}
+
 /// What a region publishes of one of its units for a neighbour's ghost, every step.
 #[derive(Clone, Debug)]
 pub struct GhostState {
     pub id: UnitId,
     pub region: u32,
     pub level: u8,
+    /// Its side now, which can change (a charmed monster, a duel).
+    pub faction: crate::Faction,
     pub transform: Transform,
     pub vitals: Vitals,
     pub anim: Anim,
@@ -95,6 +123,8 @@ pub struct GhostState {
     pub traversal: protocol::Traversal,
     pub target: Option<UnitId>,
     pub drawn: bool,
+    /// Its action, cast, auras and defiance, for anything that fights.
+    pub combat: Option<protocol::UnitCombat>,
     /// Who it is and what it looks like, sent only when the neighbour doesn't have it yet.
     pub first: Option<Box<GhostFirst>>,
 }
@@ -216,10 +246,13 @@ impl UnitRecord {
         let (unit, transform, vitals) = (self.unit.clone()?, self.transform?, self.vitals?);
         let target = self.fighter.as_ref().and_then(|f| f.target);
         let guarding = self.fighter.as_ref().is_some_and(|f| f.guard_since.is_some());
+        let combat = self.fighter.as_ref().map(|f| crate::combat::view::unit_combat(&unit, &vitals, f, self.auras.as_ref(), now));
         Some(GhostState {
             id: unit.id,
             region,
             level: unit.level,
+            faction: unit.faction,
+            combat,
             transform,
             vitals,
             anim: self.anim.unwrap_or_default(),
@@ -240,7 +273,7 @@ impl UnitRecord {
 impl Sim {
     /// Region `id` of a world, owning `bounds` of `land`. Its units take IDs from its own block.
     pub fn region(land: Arc<world::Valley>, seed: u64, id: u32, bounds: Bounds) -> Sim {
-        assert!(id < 256, "unit IDs have room for 256 regions");
+        assert!(id < REGIONS, "unit IDs have room for {REGIONS} regions");
         let mut sim = Sim::on(land, seed);
         sim.world.insert_resource(Region { id, bounds: Some(bounds) });
         let mut units = sim.world.resource_mut::<Units>();
@@ -249,8 +282,32 @@ impl Sim {
         sim
     }
 
+    /// Whether any unit with an ID from `region`'s block lives here, or is a ghost here.
+    pub fn holds_block(&self, region: u32) -> bool {
+        let units = self.world.resource::<Units>();
+        let ids = region * BLOCK..=region * BLOCK + (BLOCK - 1);
+        units.foreign.range(ids.clone()).next().is_some() || units.ghosts.range(ids).next().is_some() || (units.base == region * BLOCK && units.entities.iter().any(Option::is_some))
+    }
+
     pub fn region_info(&self) -> Region {
         *self.world.resource::<Region>()
+    }
+
+    /// The players living here (not neighbours' ghosts), in ID order.
+    pub fn players(&mut self) -> Vec<UnitId> {
+        let mut q = self.world.query_filtered::<&Unit, (With<PlayerControl>, Without<Ghost>)>();
+        let mut ids: Vec<UnitId> = q.iter(&self.world).map(|u| u.id).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Puts a region that hasn't stepped yet at `tick`, so a layer opened later steps with the
+    /// rest of its world.
+    pub fn set_tick(&mut self, tick: u64) {
+        let mut clock = self.world.resource_mut::<crate::Clock>();
+        assert!(clock.tick == 0, "only a new region is set to a tick");
+        clock.tick = tick;
+        clock.time = tick as f64 / crate::TICK_RATE as f64;
     }
 
     /// Units at least [`HANDOFF`] past this region's edge and on one of `others`' ground, with
@@ -311,7 +368,7 @@ impl Sim {
                 .all()
                 .filter_map(|e| q.get(world, e).ok())
                 .filter(|(_, tr, ..)| neighbour.distance(tr.xz()) <= GHOST_BAND)
-                .map(|(u, &transform, &vitals, body, anim, look, player, motion, f)| {
+                .map(|(u, &transform, &vitals, body, anim, look, player, motion, f, auras)| {
                     let target = f.and_then(|f| f.target);
                     let guarding = f.is_some_and(|f| f.guard_since.is_some());
                     let first = (!known.contains(&u.id)).then(|| {
@@ -321,6 +378,7 @@ impl Sim {
                         id: u.id,
                         region,
                         level: u.level,
+                        faction: u.faction,
                         transform,
                         vitals,
                         anim: anim.copied().unwrap_or_default(),
@@ -328,6 +386,7 @@ impl Sim {
                         traversal: motion.map_or_else(Default::default, crate::movement::traversal),
                         target,
                         drawn: target.is_some() || guarding || t - vitals.last_combat < crate::COMBAT_TIMEOUT,
+                        combat: f.map(|f| crate::combat::view::unit_combat(u, &vitals, f, auras, t)),
                         first,
                     }
                 })
@@ -339,6 +398,8 @@ impl Sim {
     /// that lives here (it just crossed in) is left out.
     pub fn set_ghosts(&mut self, mut ghosts: Vec<GhostState>) {
         ghosts.sort_unstable_by_key(|g| g.id);
+        // Published at the end of the step this region has also just finished.
+        let now = self.time();
         let old = std::mem::take(&mut self.world.resource_mut::<Units>().ghosts);
         let mut kept = std::collections::BTreeMap::new();
         let mut old = old.into_iter().peekable();
@@ -357,6 +418,7 @@ impl Sim {
                 continue;
             }
             let ghost = Ghost { region: g.region, velocity: g.velocity, traversal: g.traversal, target: g.target, drawn: g.drawn };
+            let combat = g.combat.map(|combat| GhostCombat { at: now, combat });
             let e = match (existing, g.first) {
                 (Some(e), first) => {
                     // In place, so nothing moves between archetypes.
@@ -375,6 +437,7 @@ impl Sim {
                         None => {
                             if let Some(mut u) = w.get_mut::<Unit>(e) {
                                 u.level = g.level;
+                                u.faction = g.faction;
                             }
                         }
                     }
@@ -393,6 +456,14 @@ impl Sim {
                 // Nothing to make it from: the neighbour thought it was here already.
                 (None, None) => continue,
             };
+            match combat {
+                Some(c) => {
+                    self.world.entity_mut(e).insert(c);
+                }
+                None => {
+                    self.world.entity_mut(e).remove::<GhostCombat>();
+                }
+            }
             kept.insert(id, e);
         }
         for (_, e) in old {

@@ -181,6 +181,9 @@ pub fn use_ability(world: &mut World, e: Entity, id: AbilityId, explicit: Option
     if motion.is_some_and(|m| m.swimming) {
         return fail(world, "You can't fight while swimming.");
     }
+    if motion.is_some_and(|m| m.hang.is_some()) {
+        return fail(world, "You can't fight while climbing.");
+    }
     // A basic attack winding up, or a channel, gives way to another skill (once that skill is
     // known to be usable); anything else in progress has to finish first.
     let mut give_way = false;

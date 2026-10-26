@@ -1,7 +1,7 @@
 //! Bots: players that join over the network like a real client and wander, chase and fight, so
 //! load tests (#74) measure the server the way an MMO loads it.
 
-use crate::net::Client;
+use crate::net::{CertificateDer, Client};
 use glam::{Vec2, Vec3, Vec3Swizzles};
 use protocol::{Command, UnitId};
 use std::io;
@@ -19,8 +19,8 @@ pub struct BotReport {
 }
 
 /// Runs a bot until `stop` is set or the server goes. `seed` makes its choices its own.
-pub fn run(addr: SocketAddr, name: &str, seed: u64, stop: Arc<AtomicBool>) -> io::Result<BotReport> {
-    let mut client = Client::connect(addr, name)?;
+pub fn run(addr: SocketAddr, certificate: &CertificateDer<'_>, name: &str, seed: u64, stop: Arc<AtomicBool>) -> io::Result<BotReport> {
+    let mut client = Client::connect(addr, certificate, name)?;
     let me = client.player;
     let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
     let mut report = BotReport::default();
@@ -39,8 +39,8 @@ pub fn run(addr: SocketAddr, name: &str, seed: u64, stop: Arc<AtomicBool>) -> io
         if target.is_some() {
             report.fighting += 1;
         }
-        // A real player acts a few times a second, not every step.
-        if !report.views.is_multiple_of(15) {
+        // A real player acts a few times a second, not every view.
+        if !report.views.is_multiple_of(5) {
             continue;
         }
         if snapshot.player.as_ref().is_some_and(|p| p.can_respawn) {

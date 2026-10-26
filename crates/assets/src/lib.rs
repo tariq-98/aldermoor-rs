@@ -100,8 +100,10 @@ pub struct BodyType {
 pub const CURVES: [&str; 4] = ["off_hand", "reach", "string", "arrow"];
 
 /// The moments a clip may mark: an item moves to the hand (`grab`) or back to where it rides
-/// (`stow`); an arrow leaves (`release`); a blow lands (`hit`); a spell leaves (`cast`).
-pub const EVENTS: [&str; 5] = ["grab", "stow", "release", "hit", "cast"];
+/// (`stow`); an arrow leaves (`release`); a blow lands (`hit`); a spell leaves (`cast`); and in
+/// climbing, the hands take a hold (`hold`), press down over a top (`push`) or a foot lands on
+/// it (`land`).
+pub const EVENTS: [&str; 8] = ["grab", "stow", "release", "hit", "cast", "hold", "push", "land"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Event {
@@ -321,6 +323,20 @@ pub struct Prop {
     /// `world` puts those boxes, so this says whether the art still matches.
     #[serde(default)]
     pub blocks: Vec<PropBlock>,
+    /// And the grips it carries on its faces (sills, keystones: `world::Grip`), for the same check.
+    #[serde(default)]
+    pub grips: Vec<PropGrip>,
+}
+
+/// One of a masonry prop's grips: as `world::Grip`, the edge from `a` to `b` (x, height above the
+/// origin, z) and `out`, away from the face.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PropGrip {
+    pub a: [f32; 3],
+    pub b: [f32; 3],
+    pub out: [f32; 2],
+    #[serde(default)]
+    pub part: String,
 }
 
 /// One of a masonry prop's boxes: as `world::Block`, `top` measured up from the prop's origin

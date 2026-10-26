@@ -35,12 +35,14 @@ float shadow_visibility(float3 p,float depth,float nl,constant Frame& f,depth2d_
 // Explicit gradients keep mip selection valid when a negligible projection is skipped.
 struct TerrainSample {float3 colour;float3 perturbation;};
 TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float> normals,
-    float3 position,float3 dx,float3 dy,float3 weights,uint layer,float mip_bias) {
+    float3 position,float3 dx,float3 dy,float3 weights,float2 side_signs,uint layer,float mip_bias) {
     constexpr sampler s(coord::normalized,address::repeat,filter::linear,mip_filter::linear,max_anisotropy(4));
     // Side projections stand upright: u runs along the face and v down it, so a layer's rows
     // lie level on a cliff (the limestone's bedding) and its columns hang plumb.
-    float2 uv[3]={float2(position.z,-position.y),position.xz,float2(position.x,-position.y)};
-    float2 gx[3]={float2(dx.z,-dx.y),dx.xz,float2(dx.x,-dx.y)},gy[3]={float2(dy.z,-dy.y),dy.xz,float2(dy.x,-dy.y)};
+    // Keep UVs, explicit mip gradients and tangent slopes in the same signed basis.
+    float2 uv[3]={float2(position.z*side_signs.x,-position.y),position.xz,float2(position.x*side_signs.y,-position.y)};
+    float2 gx[3]={float2(dx.z*side_signs.x,-dx.y),dx.xz,float2(dx.x*side_signs.y,-dx.y)};
+    float2 gy[3]={float2(dy.z*side_signs.x,-dy.y),dy.xz,float2(dy.x*side_signs.y,-dy.y)};
     TerrainSample result={float3(0),float3(0)};
     for(uint axis=0;axis<3;axis++) {
         if(weights[axis]<0.001)continue;
@@ -49,8 +51,8 @@ TerrainSample terrain_layer(texture2d_array<float> colour,texture2d_array<float>
         float3 nm=normals.sample(s,uv[axis],layer,grad).rgb*2.-1.;
         float2 slope=nm.xy/max(nm.z,0.1);
         // Green points towards the image top (-v), matching the supplied normal maps.
-        float3 perturb=axis==0?float3(0,slope.y,slope.x):
-            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x,slope.y,0));
+        float3 perturb=axis==0?float3(0,slope.y,slope.x*side_signs.x):
+            (axis==1?float3(slope.x,0,-slope.y):float3(slope.x*side_signs.y,slope.y,0));
         result.perturbation+=perturb*weights[axis];
     }
     return result;
@@ -82,7 +84,8 @@ fragment SceneOutput scene_fragment(Vary i [[stage_in]],bool front [[front_facin
             if(weights[layer]==0.)continue;
             TerrainSample sample=terrain_layer(terrain_colour,terrain_normal,
                 i.world*surfaces.scales[layer],world_dx*surfaces.scales[layer],world_dy*surfaces.scales[layer],
-                projections,layer,f.params.z);
+                // With v down, +u points right when cross(T_u,T_v) == -normal.
+                projections,float2(-sign(i.normal.x),sign(i.normal.z)),layer,f.params.z);
             albedo.rgb+=sample.colour*weights[layer];
             terrain_perturbation+=sample.perturbation*weights[layer];
             surface_roughness+=surfaces.roughness[layer]*weights[layer];

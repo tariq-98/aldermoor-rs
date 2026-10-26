@@ -50,11 +50,19 @@ Each `Snapshot` (protocol version 6) has:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
   - `look`, which says exactly what to draw (see "Art for each unit" below);
   - position, velocity, yaw, `pose` with `pose_time`;
+  - `aim_pitch`, where a player aims up (+) or down (-) with the crosshair, as an `i8` in
+    127ths of a right angle (about 0.7° steps; `protocol::aim_pitch_radians`), and 0 for
+    monsters and for players across a region border. Point a remote player's bow, wand or
+    gaze along its yaw and this pitch;
   - `traversal`, how the body is getting about: `Ground`, `Wading` (feet in water deeper than
-    0.2 m), `Swimming`, or `Forced` for a move that ignores the controls, with its `kind` (roll,
-    leap, charge, climb or knockback), `from` and `to` points, `start` (sim time, as
-    `Snapshot::time`) and `duration`, so a clip can be fitted to it. Every unit has it, so
-    remote swimmers swim and remote climbers climb. One byte when not forced;
+    0.2 m), `Swimming`, `Hanging` (from a hold, between moves), or `Forced` for a move that
+    ignores the controls, with its `kind` (roll, leap, charge, climb, mantle, vault, hold,
+    corner, wall run or knockback; `Hold` is a move onto a hold: a catch, lowering over an edge,
+    or climbing, hopping, leaping or ejecting to the next hold; `Corner` wraps round a corner
+    onto the next hold; `WallRun` runs up a wall to catch a hold or pull up onto its top),
+    `from` and `to` points, `start` (sim time, as `Snapshot::time`) and `duration`, so a
+    clip can be fitted to it. Every unit has it, so remote swimmers swim and remote climbers
+    climb. One byte when not forced;
   - health, name, level, `hostile` and target.
 - `player`, the viewer's own numbers:
   - endurance (rolls and blocks spend it), the specialty's resource (`resource_kind`: rage,
@@ -121,6 +129,7 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 |---|---|
 | Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed. Charging is Run |
 | Jump, Fall | Rising, then falling. A skill's leap or vault is Jump |
+| Hang | Hanging from a hold by the hands: still, shimmying along it, carried onto it or round a corner (docs/MOVEMENT.md, "Climbing"). The body faces the wall with the hands on the hold and the feet 1.9 m below it. Climbing from a hang onto the top is Jump, as pulling up over a ledge is, and so is a wall run until it has a clip |
 | Dodge | A roll: 0.45 s, about 5 m |
 | Attack | Holds 0.5 s after a blow or a release. A heavy blow's pose starts with its 0.4 s wind-up and runs on unbroken through the blow (0.9 s in all): time the clip so its strike lands when the wind-up ends (the cast bar gives the wind-up). Every attack clip marks its strike with a `hit` event, and spells and throws their release with `cast`; combos have one `hit` per blow |
 | Cast | While casting or channelling |
@@ -198,6 +207,8 @@ Humanoid clips by pose, from `anims.glb`:
 | Walk | `Walk_Loop`; with weapons drawn, the item's idle on the upper body over it |
 | Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 7 m/s of ground speed (ignore the vertical part: a normal run is 6 m/s, and slopes add to the full speed), for swiftness and charges (the same layering when drawn) |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
+| Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold mostly above or below: a climb or a climb leap) or `Hang_Hop_L` / `_R` (mostly across: a gap or a side eject). A `Corner` plays `Hang_Hop_L` / `_R`, the way the body last shimmied. Each one-off is stretched to the move's `duration` |
+| Jump, climbing from a hang | A `Climb` move that starts from `Hanging` plays `Hang_ClimbUp`, stretched to the move |
 | Dodge | `Roll` |
 | Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |
 | Cast | A staff's `clips.attacks` (`Staff_Cast`); otherwise `Spell_Simple_Shoot` |
@@ -223,8 +234,14 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
   not while guarding or casting.
 - **Space:** `Jump`.
 - **Dodge key** (Alt, V or mouse button 4): `Dodge` the way the keys point (a zero direction rolls backwards).
-- **Tab or clicking a unit:** `SetTarget`. Right-clicking an enemy: `SetTarget` plus
+- **Tab or clicking a unit:** `SetTarget`. In Classic, right-clicking an enemy: `SetTarget` plus
   `SetAutoAttack(true)`.
+- **Action scheme mouse:** the left button sends `SetTarget` for the unit under the crosshair (if
+  any) and `UseSlot` for the basic attack, again every 0.1 s while held (presses mid-swing are
+  ignored), then `SetAutoAttack(false)` when released. The right button is `Guard(true)` while
+  held, like the guard key.
+- **Aim:** `Aim { pitch }` with the crosshair's pitch (`protocol::aim_pitch_byte`) whenever
+  it changes, so other players see where you aim.
 - **1–9 and 0:** `UseSlot` 0–9. Send `ground` with the point under the crosshair (the centre of
   the screen) while the mouse is looking, otherwise under the cursor: ground skills land there, and straight-flying shots fly at it, so
   a player can lead a moving target. Show slots with `ground` as a circle of the skill's radius

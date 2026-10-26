@@ -344,7 +344,8 @@ pub fn summon(world: &mut World, owner: Entity, mob: &'static str, count: u8, la
         let side = if i % 2 == 0 { 1.0 } else { -1.0 };
         let a = ot.yaw + side * std::f32::consts::FRAC_PI_2;
         let mut at = ot.xz() + Vec2::new(a.sin(), a.cos()) * (1.8 + (i / 2) as f32 * 0.9);
-        if world.resource::<crate::Land>().0.blocked(at, 0.5) {
+        let land = &world.resource::<crate::Land>().0;
+        if land.blocked(at, 0.5) || land.on_face(at, 0.5, ot.pos.y + crate::movement::CLIMB_HEIGHT) {
             at = ot.xz();
         }
         let Some(id) = crate::spawn_mob(world, mob, at, Some(ou.level), ou.faction) else { continue };
