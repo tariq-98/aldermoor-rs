@@ -30,6 +30,9 @@ pub struct Solid {
     /// How much the top rises per metre along the box's own x: a wall following a slope, which
     /// you walk up rather than climb a step at a time. 0 for a flat top.
     pub rise: f32,
+    /// For a box without a top: the height (y) it stands up to, so a shot or a look passing above
+    /// it gets by (#338). Walkers are stopped at any height. `None` blocks sight at every height.
+    pub roof: Option<f32>,
 }
 
 impl Solid {
@@ -196,6 +199,11 @@ const HOUSES: [(f32, f32, f32, f32); 7] = [
     (27.0, -76.0, -0.4, 0.86),
 ];
 
+/// How tall a tree of scale 1 stands, canopy and all: what it hides behind it (#338).
+const TREE_HEIGHT: f32 = 9.0;
+/// How far the bridge's parapets stand over its deck.
+const PARAPET_HEIGHT: f32 = 1.0;
+
 impl Valley {
     pub fn new() -> Valley {
         let mut solids = Vec::with_capacity(128);
@@ -207,10 +215,11 @@ impl Valley {
             solids.extend(cottage::solids(h));
         }
         // Where the houses stand, plinth and all, for keeping trees away from them.
-        let footprints: Vec<Solid> = houses.iter().map(|h| Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 }).collect();
-        // The windmill and the shed by the north fence.
-        solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None, rise: 0.0 });
-        solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None, rise: 0.0 });
+        let footprints: Vec<Solid> = houses.iter().map(|h| Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0, roof: None }).collect();
+        // The windmill (its sails reach about 12 m) and the shed by the north fence (5.6 m).
+        let over = |x: f32, z: f32, up: f32| Some(height(x, z) + up);
+        solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None, rise: 0.0, roof: over(49.0, -84.0, 12.0) });
+        solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None, rise: 0.0, roof: over(-26.0, -48.0, 5.6) });
 
         // Trees, from the same sequence as the renderer: candidates first, then a size and a turn
         // for each tree that fits.
@@ -249,12 +258,14 @@ impl Valley {
                 continue;
             }
             trees.push(Placement { position: p, yaw, scale, variant: art });
-            solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None, rise: 0.0 });
+            // The trunk stops walkers; up to the top of the canopy it stops shots and looks.
+            solids.push(Solid { center: p, half: Vec2::splat(scale * 0.42), yaw: 0.0, top: None, rise: 0.0, roof: over(p.x, p.y, TREE_HEIGHT * scale) });
         }
         // The bridge's parapets, either side of its deck (after the trees, which are placed
         // from the solids before them).
+        // They stand a metre over the deck, which arches to 3 m at its middle.
         for side in [-1.0, 1.0] {
-            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0, top: None, rise: 0.0 });
+            solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0, top: None, rise: 0.0, roof: Some(3.0 + PARAPET_HEIGHT) });
         }
         // Then the walls, the ruin and the ledges up two of the cliffs, standing on the drawn
         // ground.
@@ -316,6 +327,18 @@ impl Valley {
             return true;
         }
         self.grid.near(p, radius).any(|i| self.turned[i as usize].overlaps(p, radius))
+    }
+
+    /// True when something at `p`, `y` high, is inside an obstacle: what a shot or a look meets.
+    /// Like [`Valley::blocked`], but a line passing over an obstacle's roof gets by.
+    pub fn blocked_at(&self, p: Vec2, radius: f32, y: f32) -> bool {
+        if p.x.abs() > BOUNDS || p.y.abs() > BOUNDS {
+            return true;
+        }
+        self.grid.near(p, radius).any(|i| {
+            let s = &self.turned[i as usize];
+            s.roof.is_none_or(|roof| y < roof) && s.overlaps(p, radius)
+        })
     }
 
     /// Where a walker of `radius` at `p` stands once it's off the sides of the solids with a top
@@ -644,6 +667,23 @@ impl Grid {
 mod tests {
     use super::*;
 
+    #[test]
+    fn shots_and_looks_pass_over_low_obstacles_and_walkers_still_dont() {
+        let v = Valley::new();
+        // On the bridge's east parapet, halfway along.
+        let parapet = Vec2::new(BRIDGE_X + 2.45, river_z(BRIDGE_X));
+        assert!(v.blocked(parapet, 0.4), "walkers stop at the parapet");
+        assert!(v.blocked_at(parapet, 0.05, 2.5), "a shot below the parapet's top is stopped");
+        assert!(!v.blocked_at(parapet, 0.05, 3.0 + PARAPET_HEIGHT + 0.5), "a shot over it gets by");
+        // The shed: a shot over its roof gets by, one through its walls doesn't.
+        let shed = Vec2::new(-26.0, -48.0);
+        let ground = height(shed.x, shed.y);
+        assert!(v.blocked_at(shed, 0.05, ground + 3.0));
+        assert!(!v.blocked_at(shed, 0.05, ground + 7.0));
+        // Off every obstacle, nothing blocks at any height.
+        assert!(!v.blocked_at(Vec2::new(6.0, 28.0), 0.05, 0.0) || v.blocked(Vec2::new(6.0, 28.0), 0.05));
+    }
+
     // Values from the Swift original (aldermoor-wild), computed on 2026-10-23, except where the
     // river now cuts through the west ledge (#41): (-40, -60) sat 0.76 m up on the buried river.
     // The river no longer blocks (#65: you swim it), so (-40, -60) in it isn't blocked either.
@@ -750,7 +790,7 @@ mod tests {
     fn with_a_tall_wall() -> (Valley, Solid, f32) {
         let mut v = Valley::new();
         let ground = v.ground(8.0, 12.0);
-        let wall = Solid { center: Vec2::new(8.0, 12.0), half: Vec2::new(0.45, 3.0), yaw: 0.3, top: Some(ground + 3.0), rise: 0.0 };
+        let wall = Solid { center: Vec2::new(8.0, 12.0), half: Vec2::new(0.45, 3.0), yaw: 0.3, top: Some(ground + 3.0), rise: 0.0, roof: None };
         v.add_solid(wall);
         (v, wall, ground)
     }
