@@ -5,7 +5,7 @@ pub mod camera;
 pub mod settings;
 pub use bindings::{Bindings, Control, Input};
 pub use camera::{Follow, Orbit};
-pub use settings::Settings;
+pub use settings::{GroundCast, Settings};
 
 use glam::Vec2;
 use protocol::Command;
