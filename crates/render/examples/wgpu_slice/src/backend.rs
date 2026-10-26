@@ -908,11 +908,13 @@ pub fn run(
         post_bind(&history[0], &history[1]),
         post_bind(&history[1], &history[0]),
     ];
+    // Same as the Metal renderer's defaults: glTF multiplies the emissive factor by the map, so a
+    // material with a factor and no map needs white here, not black.
     let fallback_maps = [
         [255; 4],
         [128, 128, 255, 255],
         [255; 4],
-        [0, 0, 0, 255],
+        [255; 4],
         [255; 4],
     ]
     .map(fallback);
