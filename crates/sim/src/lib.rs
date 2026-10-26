@@ -425,7 +425,8 @@ impl Sim {
                 (rng.range(-half.x, half.x), rng.range(-half.y, half.y))
             };
             let p = center + Vec2::new(x, z);
-            if self.land().blocked(p, 0.6) || self.land().water_depth(p.x, p.y) > 0.0 {
+            let land = self.land();
+            if land.blocked(p, 0.6) || land.on_face(p, 0.6, land.surface(p.x, p.y) + movement::CLIMB_HEIGHT) || land.water_depth(p.x, p.y) > 0.0 {
                 continue;
             }
             let kind = if placed % 3 == 0 { MonsterKind::Goblin } else { MonsterKind::Wolf };

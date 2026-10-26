@@ -11,7 +11,7 @@ use protocol::UnitId;
 
 use crate::combat::{abilities, auras, can_attack, chest, control, effects, entity, gap, line_of_sight, now, source, unit_id};
 use crate::content::{catalog, MobDef, Targeting};
-use crate::movement::heading;
+use crate::movement::{heading, CLIMB_HEIGHT};
 use crate::spatial::Spatial;
 use crate::{Body, Brain, Fighter, Land, Mode, Motion, MoveIntent, PlayerControl, Rng, Summoned, Threat, Transform, Vitals};
 
@@ -348,8 +348,8 @@ fn idle(world: &mut World, e: Entity, deciding: bool) {
             };
             let w = b.home + Vec2::new(a.sin(), a.cos()) * r;
             let land = &world.resource::<Land>().0;
-            // Monsters wander on dry land.
-            let clear = !land.blocked(w, radius) && land.water_depth(w.x, w.y) == 0.0;
+            // Monsters wander on dry land, clear of walls and roofs too tall to step onto.
+            let clear = !land.blocked(w, radius) && !land.on_face(w, radius, land.surface(w.x, w.y) + CLIMB_HEIGHT) && land.water_depth(w.x, w.y) == 0.0;
             if let Some(mut b) = world.get_mut::<Brain>(e) {
                 if clear {
                     b.wander_target = Some(w);
