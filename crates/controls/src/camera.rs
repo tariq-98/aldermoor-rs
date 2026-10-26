@@ -178,9 +178,106 @@ impl Follow {
     }
 }
 
+/// How hard blows shake the camera.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenShake {
+    Off,
+    Low,
+    #[default]
+    Full,
+}
+
+impl ScreenShake {
+    fn scale(self) -> f32 {
+        match self {
+            Self::Off => 0.,
+            Self::Low => 0.4,
+            Self::Full => 1.,
+        }
+    }
+}
+
+/// The furthest kicks can add up to, in metres.
+const KICK_CAP: f32 = 0.09;
+/// Kicks die away by e every this many seconds: about 5% is left after 150 ms.
+const KICK_DECAY: f32 = 0.05;
+/// The look point moves this share of the eye's kick, which tips the view by a degree or so.
+const KICK_LOOK: f32 = 0.4;
+
+/// A short jolt of the camera when a blow lands, along the way the blow travelled. Kicks add
+/// up to a cap and die away quickly, so a pack of wolves can't keep the screen shaking.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Kick {
+    push: Vec3,
+}
+
+impl Kick {
+    /// Adds a jolt of `metres` (before the setting) along `dir` on the ground.
+    pub fn add(&mut self, dir: glam::Vec2, metres: f32, shake: ScreenShake) {
+        let push =
+            self.push + Vec3::new(dir.x, 0., dir.y).normalize_or_zero() * metres * shake.scale();
+        self.push = push.clamp_length_max(KICK_CAP);
+    }
+
+    /// Dies away by `dt` seconds and moves `view` by what is left.
+    pub fn apply(&mut self, view: View, dt: f32) -> View {
+        self.push *= (-dt / KICK_DECAY).exp();
+        View {
+            eye: view.eye + self.push,
+            target: view.target + self.push * KICK_LOOK,
+        }
+    }
+
+    pub fn size(&self) -> f32 {
+        self.push.length()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kicks_add_up_to_a_cap_and_die_away_in_a_moment() {
+        let mut k = Kick::default();
+        let east = glam::Vec2::X;
+        k.add(east, 0.04, ScreenShake::Full);
+        assert!((k.size() - 0.04).abs() < 1e-6);
+        let view = View {
+            eye: Vec3::ZERO,
+            target: Vec3::Z,
+        };
+        let moved = k.apply(view, 0.);
+        assert!(moved.eye.x > 0.039 && moved.target.x > 0.01 && moved.target.x < moved.eye.x);
+        for _ in 0..20 {
+            k.add(east, 0.04, ScreenShake::Full);
+        }
+        assert!(
+            (k.size() - KICK_CAP).abs() < 1e-6,
+            "a crowd's blows went past the cap"
+        );
+        for _ in 0..9 {
+            k.apply(view, 1. / 60.);
+        }
+        assert!(
+            k.size() < KICK_CAP * 0.06,
+            "still {} m after 150 ms",
+            k.size()
+        );
+    }
+
+    #[test]
+    fn the_setting_scales_kicks() {
+        let size = |shake| {
+            let mut k = Kick::default();
+            k.add(glam::Vec2::Y, 0.05, shake);
+            k.size()
+        };
+        assert_eq!(size(ScreenShake::Off), 0.);
+        assert!((size(ScreenShake::Low) - 0.02).abs() < 1e-6);
+        assert!((size(ScreenShake::Full) - 0.05).abs() < 1e-6);
+    }
 
     fn standing_at(x: f32, z: f32) -> Vec3 {
         Orbit::default().target(Vec3::new(x, world::height(x, z), z))

@@ -299,6 +299,8 @@ struct Game {
     /// The right button holds the guard in the Action scheme.
     guard_button: bool,
     last_move: Option<Command>,
+    /// The camera's jolt from blows landing.
+    kick: controls::camera::Kick,
     last: Instant,
     start: Instant,
     frame: u64,
@@ -382,6 +384,7 @@ impl Game {
             attacking: None,
             guard_button: false,
             last_move: None,
+            kick: controls::camera::Kick::default(),
             last: Instant::now(),
             start: Instant::now(),
             frame: 0,
@@ -608,6 +611,10 @@ impl Game {
                 self.settings.scheme = scheme;
                 self.pilot.scheme = scheme;
                 self.orbit.shoulder = self.settings.shoulder();
+                m.notice = None;
+            }
+            menu::Change::ScreenShake(shake) => {
+                self.settings.screen_shake = shake;
                 m.notice = None;
             }
             menu::Change::Close => {
@@ -941,6 +948,26 @@ impl Game {
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            if let protocol::Event::Hit {
+                attacker,
+                victim,
+                dir,
+                weight,
+                ..
+            } = e
+                && let Some(metres) = kick_for(
+                    weight,
+                    attacker == self.host.player,
+                    victim == self.host.player,
+                )
+            {
+                let yaw = dir as f32 / 256. * std::f32::consts::TAU;
+                self.kick.add(
+                    Vec2::new(yaw.sin(), yaw.cos()),
+                    metres,
+                    self.settings.screen_shake,
+                );
+            }
             // A staged fight makes its own events.
             if let Some(fx) = &mut self.effects
                 && self.stage.is_none()
@@ -1008,13 +1035,13 @@ impl Game {
             .find(|u| u.id == self.host.player)
             .context("no local player")?;
         let scenery = &self.scenery;
-        self.view = Some(
-            self.follow
-                .update(&self.orbit, me.position, dt, |target, eye| match scenery {
-                    Some(scenery) => scenery.camera_eye(target, eye, 0.25),
-                    None => eye,
-                }),
-        );
+        let view = self
+            .follow
+            .update(&self.orbit, me.position, dt, |target, eye| match scenery {
+                Some(scenery) => scenery.camera_eye(target, eye, 0.25),
+                None => eye,
+            });
+        self.view = Some(self.kick.apply(view, dt));
         let camera = self.camera(me.position);
         let mut draws = Vec::new();
         for i in 0..self.terrain.primitives.len() {
@@ -1984,6 +2011,22 @@ fn main() -> Result<()> {
 /// A key by its winit name, which is how the bindings name it.
 fn key_input(key: KeyCode) -> controls::Input {
     controls::Input(format!("{key:?}"))
+}
+
+/// How far a blow kicks the camera, in metres, if it does: the player's own heavy, critical
+/// and parried blows, and every blow they take. Other people's fights and the player's light
+/// blows leave it still.
+fn kick_for(weight: protocol::HitWeight, mine: bool, on_me: bool) -> Option<f32> {
+    use protocol::HitWeight::*;
+    match (weight, mine, on_me) {
+        (Light, false, true) => Some(0.02),
+        (Blocked, false, true) => Some(0.015),
+        (Heavy, _, true) | (Heavy, true, _) => Some(0.04),
+        (Critical, _, true) | (Critical, true, _) => Some(0.05),
+        (Parried, _, true) | (Parried, true, _) => Some(0.045),
+        (Big, _, true) | (Big, true, _) => Some(0.07),
+        _ => None,
+    }
 }
 
 /// The middle and thumb buttons; the left and right ones aren't bindable.
