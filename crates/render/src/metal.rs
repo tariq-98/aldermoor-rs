@@ -3,7 +3,9 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, ShadowCasterVolume, stable_cascades, terrain_lod},
+    visibility::{
+        Bounds, FarShadowCache, Frustum, ShadowCasterVolume, stable_cascades, terrain_lod,
+    },
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -38,11 +40,91 @@ struct Frame {
     ambient: [f32; 4],
     sky: [f32; 4],
     fog: [f32; 4],
+    // Height fog reserves grade[0/1/2].w: base height, height falloff, sky distance.
     grade: [[f32; 4]; 3],
+    // params.w is height-fog enabled; grading RGB and params.xyz keep their meaning.
     params: [f32; 4],
     clock: [f32; 4],
     viewport: [f32; 4],
     splits: [f32; 4],
+}
+// Separate from the scene Frame contract owned by the lighting/fog lane.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PostUniform {
+    ao: [f32; 4],
+    bloom: [f32; 4],
+    projection: [f32; 4],
+    blur: [f32; 4],
+}
+impl PostUniform {
+    fn new(look: &LookSettings, camera: Camera, aspect: f32) -> Self {
+        let projection = 1. / (camera.fov * 0.5).tan();
+        Self {
+            ao: if look.ao_active() {
+                [look.ao_radius, look.ao_bias, look.ao_strength, 1.]
+            } else {
+                [0.; 4]
+            },
+            bloom: if look.bloom_active() {
+                [
+                    look.bloom_threshold,
+                    look.bloom_radius,
+                    look.bloom_strength,
+                    1.,
+                ]
+            } else {
+                [0.; 4]
+            },
+            projection: [projection / aspect, projection, 0., look.bloom_knee],
+            blur: [0.; 4],
+        }
+    }
+    fn active(&self) -> bool {
+        self.ao[3] > 0. || self.bloom[3] > 0.
+    }
+}
+struct PostTargets {
+    ao: Obj<dyn MTLTexture>,
+    bloom: [Obj<dyn MTLTexture>; 3],
+    colour: Obj<dyn MTLTexture>,
+}
+impl PostTargets {
+    fn new(
+        device: &ProtocolObject<dyn MTLDevice>,
+        w: usize,
+        h: usize,
+        colour_usage: MTLTextureUsage,
+    ) -> Result<Self> {
+        let usage = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
+        let half = |format| texture(device, w.div_ceil(2), h.div_ceil(2), format, 1, usage);
+        Ok(Self {
+            ao: half(MTLPixelFormat::RG16Float)?,
+            bloom: [
+                half(MTLPixelFormat::RGBA16Float)?,
+                half(MTLPixelFormat::RGBA16Float)?,
+                half(MTLPixelFormat::RGBA16Float)?,
+            ],
+            colour: texture(
+                device,
+                w,
+                h,
+                MTLPixelFormat::RGBA16Float,
+                1,
+                usage | colour_usage,
+            )?,
+        })
+    }
+}
+impl Frame {
+    fn with_height_fog(mut self, fog: crate::settings::HeightFogSettings) -> Self {
+        let values = fog.uniform();
+        for (row, value) in self.grade.iter_mut().zip(values) {
+            row[3] = value;
+        }
+        self.params[3] = values[3];
+        self
+    }
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -78,7 +160,7 @@ impl GpuMesh {
         }
     }
 }
-pub const GPU_PASS_NAMES: [&str; 10] = [
+pub const GPU_PASS_NAMES: [&str; 15] = [
     "shadow_0",
     "shadow_1",
     "shadow_2",
@@ -89,6 +171,11 @@ pub const GPU_PASS_NAMES: [&str; 10] = [
     "sky",
     "opaque",
     "water_transparent",
+    "ao_half",
+    "bloom_extract_half",
+    "bloom_horizontal_half",
+    "bloom_vertical_half",
+    "post_apply",
 ];
 const PASS_COUNT: usize = GPU_PASS_NAMES.len();
 const SAMPLE_COUNT: usize = PASS_COUNT * 4;
@@ -103,6 +190,8 @@ pub struct PassTiming {
 pub struct GpuFrame {
     pub frame: usize,
     pub counters_sampled: bool,
+    /// Passes deliberately omitted by scheduling, independent of counter availability.
+    pub skipped_pass_mask: u16,
     /// Seconds since renderer creation, at command-buffer submission (not completion).
     pub elapsed_seconds: f64,
     pub gpu_ms: f64,
@@ -303,6 +392,9 @@ pub struct Renderer {
     shadow_mask_pipeline: Obj<dyn MTLRenderPipelineState>,
     taa: Obj<dyn MTLRenderPipelineState>,
     composite: Obj<dyn MTLRenderPipelineState>,
+    post_pipelines: [Obj<dyn MTLRenderPipelineState>; 4],
+    post_targets: Option<PostTargets>,
+    post_config: [[f32; 4]; 3],
     depth_state: Obj<dyn MTLDepthStencilState>,
     read_depth: Obj<dyn MTLDepthStencilState>,
     hdr: Obj<dyn MTLTexture>,
@@ -311,6 +403,7 @@ pub struct Renderer {
     motion_msaa: Obj<dyn MTLTexture>,
     depth: Obj<dyn MTLTexture>,
     shadow: Obj<dyn MTLTexture>,
+    far_shadow_cache: FarShadowCache,
     history: [Obj<dyn MTLTexture>; 2],
     output: Obj<dyn MTLTexture>,
     pub width: u32,
@@ -600,6 +693,48 @@ impl Renderer {
             false,
             false,
         )?;
+        let post_pipelines = [
+            pipeline(
+                "fullscreen",
+                Some(if samples > 1 {
+                    "post_ao_msaa"
+                } else {
+                    "post_ao"
+                }),
+                1,
+                &[MTLPixelFormat::RG16Float],
+                false,
+                false,
+            )?,
+            pipeline(
+                "fullscreen",
+                Some("post_bloom_extract"),
+                1,
+                &[MTLPixelFormat::RGBA16Float],
+                false,
+                false,
+            )?,
+            pipeline(
+                "fullscreen",
+                Some("post_bloom_blur"),
+                1,
+                &[MTLPixelFormat::RGBA16Float],
+                false,
+                false,
+            )?,
+            pipeline(
+                "fullscreen",
+                Some(if samples > 1 {
+                    "post_apply_msaa"
+                } else {
+                    "post_apply"
+                }),
+                1,
+                &[MTLPixelFormat::RGBA16Float],
+                false,
+                false,
+            )?,
+        ];
         let desc = MTLDepthStencilDescriptor::new();
         desc.setDepthCompareFunction(MTLCompareFunction::LessEqual);
         desc.setDepthWriteEnabled(true);
@@ -735,6 +870,9 @@ impl Renderer {
             shadow_mask_pipeline,
             taa,
             composite,
+            post_pipelines,
+            post_targets: None,
+            post_config: [[0.; 4]; 3],
             depth_state,
             read_depth,
             hdr,
@@ -743,6 +881,7 @@ impl Renderer {
             motion_msaa,
             depth,
             shadow,
+            far_shadow_cache: FarShadowCache::default(),
             history,
             output,
             width,
@@ -1187,6 +1326,47 @@ impl Renderer {
         let width = self.hdr.width() as f32;
         let height = self.hdr.height() as f32;
         let aspect = self.width as f32 / self.height as f32;
+        let mut post = PostUniform::new(&self.look, camera, aspect);
+        // Repeat a bounded sampling sequence; keep non-temporal AA stable between frames.
+        post.projection[2] = if self.temporal || self.metalfx.is_some() {
+            (self.frame % 64) as f32
+        } else {
+            0.
+        };
+        let post_config = [
+            post.ao,
+            post.bloom,
+            [
+                if post.bloom[3] > 0. {
+                    post.projection[3]
+                } else {
+                    0.
+                },
+                0.,
+                0.,
+                0.,
+            ],
+        ];
+        if self.post_config != post_config {
+            // A toggle or changed look must not blend the old effect through temporal history.
+            self.history_valid = false;
+            self.post_config = post_config;
+        }
+        if post.active()
+            && self.post_targets.as_ref().is_none_or(|p| {
+                p.colour.width() != self.hdr.width()
+                    || p.colour.height() != self.hdr.height()
+                    || !p.colour.usage().contains(self.hdr.usage())
+            })
+        {
+            self.wait()?;
+            self.post_targets = Some(PostTargets::new(
+                &self.device,
+                self.hdr.width(),
+                self.hdr.height(),
+                self.hdr.usage(),
+            )?);
+        }
         let unjittered = camera.matrix(aspect);
         let jitter = if self.temporal {
             let phases = if self.metalfx.is_some() {
@@ -1214,8 +1394,12 @@ impl Renderer {
         let valid = self.history_valid && !cut;
         self.stats.history_resets += usize::from(!valid);
         let previous_vp = if valid { self.previous_vp } else { unjittered };
-        let sun = Vec3::from_array(self.look.sun_direction).normalize();
-        let cascades = stable_cascades(
+        let time = self
+            .scene_time
+            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
+        let lighting = self.look.lighting_at(f64::from(time));
+        let sun = Vec3::from_array(lighting.sun_direction).normalize();
+        let mut cascades = stable_cascades(
             camera.eye,
             camera.target,
             camera.fov,
@@ -1223,10 +1407,12 @@ impl Renderer {
             sun,
             SHADOW_SIZE as u32,
         );
+        let (far_matrix, refresh_far) =
+            self.far_shadow_cache
+                .plan(self.frame, cascades[2], SHADOW_SIZE as u32, !valid);
+        // Sampling and caster culling must use the matrix that produced the stored layer.
+        cascades[2] = far_matrix;
         let view = Frustum::new(unjittered);
-        let time = self
-            .scene_time
-            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
         let f = Frame {
             vp: unjittered.to_cols_array_2d(),
             previous_vp: previous_vp.to_cols_array_2d(),
@@ -1234,16 +1420,19 @@ impl Renderer {
             jitter: [jitter.x, jitter.y, jitter.x * 0.5, -jitter.y * 0.5],
             shadows: cascades.map(|m| m.to_cols_array_2d()),
             eye: camera.eye.extend(1.).to_array(),
-            sun: sun.extend(self.look.sun_intensity).to_array(),
-            sun_colour: Vec3::from_array(self.look.sun_colour).extend(1.).to_array(),
-            ambient: Vec3::from_array(self.look.ambient).extend(1.).to_array(),
-            sky: Vec3::from_array(self.look.sky).extend(1.).to_array(),
-            fog: Vec3::from_array(self.look.fog_colour)
-                .extend(self.look.fog_density)
+            sun: sun.extend(lighting.sun_intensity).to_array(),
+            sun_colour: Vec3::from_array(lighting.sun_colour).extend(1.).to_array(),
+            ambient: Vec3::from_array(lighting.ambient).extend(1.).to_array(),
+            // Combine the two authored factors once, retaining one multiply per sky sample.
+            sky: Vec3::from_array(lighting.sky)
+                .extend(lighting.sky_texture_intensity * self.surface_uniform.sky[1])
+                .to_array(),
+            fog: Vec3::from_array(lighting.fog_colour)
+                .extend(lighting.fog_density)
                 .to_array(),
             grade: self.look.grade.map(|r| [r[0], r[1], r[2], 0.]),
             params: [
-                self.look.exposure,
+                lighting.exposure,
                 (self.look.tone_map == ToneMap::Aces) as u32 as f32,
                 if self.metalfx.is_some() {
                     self.scale.log2()
@@ -1260,7 +1449,8 @@ impl Renderer {
             ],
             viewport: [width, height, 1. / width, 1. / height],
             splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
-        };
+        }
+        .with_height_fog(self.look.height_fog);
         let shadow_views: [_; 3] = std::array::from_fn(|i| {
             ShadowCasterVolume::new(
                 cascades[i],
@@ -1462,7 +1652,13 @@ impl Renderer {
             .unwrap_or_default();
         let submitted_at = self.started.elapsed().as_secs_f64();
         let mut pass_mask = 0u16;
+        let mut skipped_pass_mask = 0u16;
         for cascade in 0..3 {
+            if cascade == 2 && !refresh_far {
+                skipped_pass_mask |= 1 << cascade;
+                // Preserve the layer without an encoder, clear, or stale timestamp samples.
+                continue;
+            }
             let pass = MTLRenderPassDescriptor::new();
             if let Some(c) = counters {
                 c.attach(&pass, cascade);
@@ -1488,6 +1684,9 @@ impl Renderer {
                 DrawPass::Shadow(cascade),
             )?;
             enc.endEncoding();
+            if cascade == 2 {
+                self.far_shadow_cache.encoded(self.frame, far_matrix);
+            }
         }
         let split_scene = self.profile_scene && counters.is_some();
         // MSAA depth cannot be stored/reloaded as a resolved depth texture here.
@@ -1590,10 +1789,20 @@ impl Renderer {
             }
             enc.endEncoding();
         }
+        let scene_colour = if post.active() {
+            calls += self.encode_post(&cb, &f, &post, counters, &mut pass_mask)?;
+            &self
+                .post_targets
+                .as_ref()
+                .expect("active post targets")
+                .colour
+        } else {
+            &self.hdr
+        };
         let history_index = self.frame % 2;
         if let Some(scaler) = &self.metalfx {
             unsafe {
-                scaler.setColorTexture(Some(&self.hdr));
+                scaler.setColorTexture(Some(scene_colour));
                 scaler.setDepthTexture(Some(&self.depth));
                 scaler.setMotionTexture(Some(&self.motion));
                 scaler.setOutputTexture(self.metalfx_output.as_deref());
@@ -1621,7 +1830,7 @@ impl Renderer {
             enc.setRenderPipelineState(&self.taa);
             unsafe {
                 enc.setFragmentBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
-                enc.setFragmentTexture_atIndex(Some(&self.hdr), 0);
+                enc.setFragmentTexture_atIndex(Some(scene_colour), 0);
                 enc.setFragmentTexture_atIndex(Some(&self.motion), 1);
                 enc.setFragmentTexture_atIndex(Some(&self.depth), 2);
                 enc.setFragmentTexture_atIndex(Some(&self.history[1 - history_index]), 3);
@@ -1660,7 +1869,7 @@ impl Renderer {
                 } else if self.temporal {
                     &self.history[history_index]
                 } else {
-                    &self.hdr
+                    scene_colour
                 }),
                 0,
             );
@@ -1761,6 +1970,7 @@ impl Renderer {
         self.slots[slot].measured = GpuFrame {
             frame: self.frame,
             counters_sampled: pass_mask != 0,
+            skipped_pass_mask,
             elapsed_seconds: submitted_at,
             draw_calls: calls,
             visible_triangles: triangles,
@@ -1781,6 +1991,86 @@ impl Renderer {
         self.stats.bone_bytes = used;
         self.stats.bone_capacity = bones.length();
         Ok(self.stats)
+    }
+    /// Each post pass has its own stage counters. The final application is full internal
+    /// resolution; only AO evaluation and bloom filtering use the half-resolution targets.
+    fn encode_post(
+        &self,
+        cb: &ProtocolObject<dyn MTLCommandBuffer>,
+        frame: &Frame,
+        post: &PostUniform,
+        counters: Option<&PassCounters>,
+        mask: &mut u16,
+    ) -> Result<usize> {
+        let targets = self.post_targets.as_ref().expect("active post targets");
+        let mut calls = 0;
+        let mut run = |index: usize,
+                       pipeline: usize,
+                       target: &Obj<dyn MTLTexture>,
+                       source: &Obj<dyn MTLTexture>,
+                       uniforms: &PostUniform|
+         -> Result<()> {
+            let pass = MTLRenderPassDescriptor::new();
+            if let Some(c) = counters {
+                c.attach(&pass, index);
+                *mask |= 1 << index;
+            }
+            let colour = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+            colour.setTexture(Some(target));
+            colour.setLoadAction(MTLLoadAction::DontCare);
+            colour.setStoreAction(MTLStoreAction::Store);
+            let enc = cb
+                .renderCommandEncoderWithDescriptor(&pass)
+                .context("post encoder")?;
+            enc.setLabel(Some(&NSString::from_str(GPU_PASS_NAMES[index])));
+            enc.setRenderPipelineState(&self.post_pipelines[pipeline]);
+            unsafe {
+                enc.setFragmentBytes_length_atIndex(
+                    ptr(uniforms),
+                    std::mem::size_of::<PostUniform>(),
+                    0,
+                );
+                enc.setFragmentBytes_length_atIndex(ptr(frame), std::mem::size_of::<Frame>(), 1);
+                enc.setFragmentTexture_atIndex(Some(source), 0);
+                enc.setFragmentTexture_atIndex(Some(&self.depth), 1);
+                // Bind the effect targets only when applying, never while rendering into them.
+                if pipeline == 3 {
+                    enc.setFragmentTexture_atIndex(
+                        Some(if post.ao[3] > 0. {
+                            &targets.ao
+                        } else {
+                            &self.fallbacks[0]
+                        }),
+                        2,
+                    );
+                    enc.setFragmentTexture_atIndex(
+                        Some(if post.bloom[3] > 0. {
+                            &targets.bloom[2]
+                        } else {
+                            &self.fallbacks[0]
+                        }),
+                        3,
+                    );
+                }
+                enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3);
+            }
+            enc.endEncoding();
+            calls += 1;
+            Ok(())
+        };
+        if post.ao[3] > 0. {
+            run(10, 0, &targets.ao, &self.hdr, post)?;
+        }
+        if post.bloom[3] > 0. {
+            run(11, 1, &targets.bloom[0], &self.hdr, post)?;
+            let mut blur = *post;
+            blur.blur = [1., 0., 0., 0.];
+            run(12, 2, &targets.bloom[1], &targets.bloom[0], &blur)?;
+            blur.blur = [0., 1., 0., 0.];
+            run(13, 2, &targets.bloom[2], &targets.bloom[1], &blur)?;
+        }
+        run(14, 3, &targets.colour, &self.hdr, post)?;
+        Ok(calls)
     }
     fn encode(
         &self,
@@ -2169,6 +2459,37 @@ fn texture_array(
 #[cfg(test)]
 mod temporal_tests {
     use super::*;
+    #[test]
+    fn frame_packs_height_fog_without_changing_other_channels() {
+        use crate::settings::HeightFogSettings;
+        let mut original: Frame = bytemuck::Zeroable::zeroed();
+        original.grade = [[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]];
+        original.params = [13., 14., 15., 16.];
+        for enabled in [false, true] {
+            let fog = HeightFogSettings {
+                enabled,
+                base_height: -12.,
+                height_falloff: 0.25,
+                sky_distance: 800.,
+            };
+            let mut packed = original.with_height_fog(fog);
+            assert_eq!(
+                [
+                    packed.grade[0][3],
+                    packed.grade[1][3],
+                    packed.grade[2][3],
+                    packed.params[3]
+                ],
+                fog.uniform()
+            );
+            for (row, before) in packed.grade.iter_mut().zip(original.grade) {
+                row[3] = before[3];
+            }
+            packed.params[3] = original.params[3];
+            assert_eq!(bytemuck::bytes_of(&packed), bytemuck::bytes_of(&original));
+        }
+    }
+
     /// Hosted macOS uses a paravirtual GPU. Verify the real fallback there; never
     /// swallow allocation/sampling failures on hardware that advertises support.
     fn counter_device_or_verify_fallback(r: &mut Renderer) -> bool {
@@ -2340,6 +2661,11 @@ mod temporal_tests {
             (0..7).collect::<Vec<_>>()
         );
         for f in &frames {
+            assert_eq!(
+                f.skipped_pass_mask,
+                if f.frame % 2 == 1 { 1 << 2 } else { 0 }
+            );
+            assert_eq!(f.passes[2].is_none(), f.frame % 2 == 1);
             assert!(f.gpu_ms > 0.);
             assert!(f.allocated_gpu_bytes > 0);
             for i in [3, 4, 5] {
@@ -2407,6 +2733,220 @@ mod temporal_tests {
         }
     }
     #[test]
+    fn post_toggles_skip_work_and_half_targets_resize_for_each_aa_mode() {
+        let camera = Camera {
+            eye: Vec3::new(0., 30., 30.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        // Numerical fixtures only, not authored look presets. No capture files are written.
+        for mode in [0, 1, 4] {
+            let mut r = Renderer::with_samples(65, 47, 1., mode).unwrap();
+            let sampled = counter_device_or_verify_fallback(&mut r);
+            if sampled {
+                r.set_gpu_counters(true).unwrap();
+            }
+            r.scene_time = Some(0.);
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            let original = output_bytes(&r);
+            assert!(
+                r.post_targets.is_none(),
+                "disabled post allocates no targets"
+            );
+            let base_calls = r.stats.draw_calls;
+            r.look.ao_enabled = true;
+            r.look.ao_radius = 1.;
+            r.look.ao_strength = 1.;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(
+                original,
+                output_bytes(&r),
+                "AO leaves sky untouched (mode {mode})"
+            );
+            assert_eq!(r.stats.draw_calls, base_calls + 2);
+            let targets = r.post_targets.as_ref().unwrap();
+            assert_eq!((targets.ao.width(), targets.ao.height()), (33, 24));
+            if sampled {
+                let f = r.stats.completed.unwrap();
+                assert!(f.passes[10].is_some() && f.passes[14].is_some());
+                assert!(f.passes[11..14].iter().all(Option::is_none));
+            }
+            r.look.bloom_enabled = true;
+            r.look.bloom_threshold = 100.;
+            r.look.bloom_radius = 1.;
+            r.look.bloom_strength = 0.5;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(
+                original,
+                output_bytes(&r),
+                "sub-threshold bloom preserves colour"
+            );
+            if sampled {
+                assert!(
+                    r.stats.completed.unwrap().passes[10..15]
+                        .iter()
+                        .all(Option::is_some)
+                );
+            }
+            r.look.ao_enabled = false;
+            r.look.bloom_threshold = 0.;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            let bright = output_bytes(&r);
+            assert!(
+                bright
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(original.as_chunks::<4>().0)
+                    .all(|(a, b)| a[0] > b[0] && a[1] > b[1] && a[2] > b[2])
+            );
+            if sampled {
+                let f = r.stats.completed.unwrap();
+                assert!(f.passes[10].is_none(), "disabled AO has no stale sample");
+                assert!(f.passes[11..15].iter().all(Option::is_some));
+            }
+            r.resize(97, 63).unwrap();
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            let targets = r.post_targets.as_ref().unwrap();
+            assert_eq!((targets.ao.width(), targets.ao.height()), (49, 32));
+            r.look.bloom_strength = 0.;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(r.stats.draw_calls, base_calls);
+            if sampled {
+                assert!(
+                    r.stats.completed.unwrap().passes[10..15]
+                        .iter()
+                        .all(Option::is_none)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn post_ao_obscures_geometry_and_toggles_reset_temporal_history() {
+        let mut r = Renderer::with_samples(128, 128, 1., 1).unwrap();
+        r.scene_time = Some(0.);
+        let terrain = crate::terrain::valley();
+        let draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let camera = Camera {
+            eye: Vec3::new(0., 30., 30.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let before = output_bytes(&r);
+        r.look.ao_enabled = true;
+        r.look.ao_radius = 10.;
+        r.look.ao_strength = 1.;
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let after = output_bytes(&r);
+        assert!(
+            after.iter().zip(&before).any(|(a, b)| a < b),
+            "AO must affect non-flat geometry"
+        );
+        assert!(
+            after
+                .iter()
+                .zip(&before)
+                .all(|(a, b)| *a <= b.saturating_add(1)),
+            "AO cannot brighten geometry"
+        );
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(after, output_bytes(&r), "non-temporal AO must stay stable");
+        let ao_bytes = |r: &Renderer| {
+            let texture = &r.post_targets.as_ref().unwrap().ao;
+            let row = texture.width() * 4; // RG16Float
+            let size = row * texture.height();
+            let buffer = r
+                .device
+                .newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared)
+                .unwrap();
+            let cb = r.queue.commandBuffer().unwrap();
+            let enc = cb.blitCommandEncoder().unwrap();
+            unsafe {
+                enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                    texture, 0, 0, MTLOrigin { x: 0, y: 0, z: 0 },
+                    MTLSize { width: texture.width(), height: texture.height(), depth: 1 },
+                    &buffer, 0, row, size);
+            }
+            enc.endEncoding();
+            cb.commit();
+            cb.waitUntilCompleted();
+            assert!(cb.error().is_none());
+            unsafe {
+                std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), size).to_vec()
+            }
+        };
+        r.temporal = true;
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let first = ao_bytes(&r);
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_ne!(first, ao_bytes(&r), "temporal AO must vary its samples");
+        let mut r = Renderer::new(64, 64, 1.).unwrap();
+        for metalfx in [false, true] {
+            if metalfx && !r.enable_metalfx(true).unwrap() {
+                continue;
+            }
+            r.look.bloom_enabled = false;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            let resets = r.stats.history_resets;
+            r.look.bloom_enabled = true;
+            r.look.bloom_radius = 1.;
+            r.look.bloom_strength = 0.5;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(r.stats.history_resets, resets + 1);
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(
+                r.stats.history_resets,
+                resets + 1,
+                "stable post look keeps history"
+            );
+            r.look.bloom_knee = 1.;
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(
+                r.stats.history_resets,
+                resets + 2,
+                "knee changes reset history"
+            );
+            r.draw(camera, &[], None).unwrap();
+            r.wait().unwrap();
+            assert_eq!(r.stats.history_resets, resets + 2);
+            r.look.bloom_knee = 0.5;
+        }
+    }
+
+    #[test]
     fn diagnostic_scene_split_preserves_supplied_surfaces_and_hud_samples_expire() {
         let mut r = Renderer::with_samples(256, 256, 1., 1).unwrap();
         if !counter_device_or_verify_fallback(&mut r) {
@@ -2443,6 +2983,17 @@ mod temporal_tests {
         let normal = r.draw(camera, &draws, None).unwrap();
         r.wait().unwrap();
         let before = output_bytes(&r);
+        assert_eq!(r.stats.completed.unwrap().frame, 0);
+        assert_eq!(r.stats.completed.unwrap().skipped_pass_mask, 0);
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let reuse = r.stats.completed.unwrap();
+        assert_eq!(reuse.frame, 1);
+        assert_eq!(reuse.skipped_pass_mask, 1 << 2);
+        assert!(
+            reuse.passes[2].is_none(),
+            "reused far layer has no timestamp"
+        );
         r.set_gpu_counters(true).unwrap();
         r.profile_scene = true;
         let split = r.draw(camera, &draws, None).unwrap();
@@ -2455,6 +3006,9 @@ mod temporal_tests {
             "profiling must not change the rendered pixels"
         );
         let frame = r.stats.completed.unwrap();
+        assert_eq!(frame.frame, 2);
+        assert_eq!(frame.skipped_pass_mask, 0);
+        assert!(frame.passes[2].is_some());
         for i in [7, 8, 9] {
             assert!(frame.passes[i].is_some(), "missing split pass {i}");
         }

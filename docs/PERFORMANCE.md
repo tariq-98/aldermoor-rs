@@ -73,6 +73,13 @@ appearance sent once, deltas against what the client already has, quantised fiel
 - **Server per player:** the `snapshot` time printed by the same bench.
 - **Network:** postcard-encoded `Snapshot` plus `CombatView` bytes per player per second at the
   60 Hz tick (#31, #34).
+- **Character animation:** `cargo run --release -p client -- --crowd 200 --offscreen --frames 1320`
+  puts 200 characters round the player and ends with an `ANIM` line: posing a frame, which
+  `anim::Crowd` keeps inside 1 ms of the crowd's 3 ms CPU (#215), building skinning palettes, and
+  how many characters were at each update rate. Add `--anim-tiers off` for every pose rebuilt every
+  frame, or `--foot-ik off` for feet left as the clips have them (#214). F3 shows the same live,
+  and `anim_bench` gives the cost per character for each case and rate, with the feet on the
+  ground or not ([ANIMATION.md](ANIMATION.md)).
 - **Memory:** `footprint -p <pid>` on the running client, peak and steady.
 - **Launch:** wall clock from starting the release binary to its first presented frame.
 - **MMO server and network:** `cargo run -p sim --release --example regions` times a busy region
