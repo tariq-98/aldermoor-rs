@@ -31,6 +31,8 @@ pub enum Switch {
     Land,
     /// A level-of-detail swap: the same motion from other clip data.
     Detail,
+    /// A change of gear or clothes (#239): the new weapon's clips and grips taking over.
+    Gear,
 }
 
 impl Switch {
@@ -46,6 +48,7 @@ impl Switch {
             Switch::Layer => 0.07,
             Switch::Land => 0.06,
             Switch::Detail => 0.05,
+            Switch::Gear => 0.07,
         }
     }
 }
@@ -165,6 +168,30 @@ impl Blender {
     /// Whether a switch is still settling.
     pub fn blending(&self) -> bool {
         self.phase != Phase::Settled
+    }
+
+    /// Follows the skeleton to a new set of bones (#239), as when gear brings bones of its own or
+    /// takes them away: bone `i` of `pose` was bone `was(i)` before, and keeps its motion and any
+    /// offset still settling. A bone that is new starts as `pose` has it, with nothing to carry on.
+    pub fn remap<B: Bone>(&mut self, pose: &[B], was: impl Fn(usize) -> Option<usize>) {
+        let was: Vec<_> = (0..pose.len())
+            .map(|i| was(i).filter(|&j| j < self.bones.len()))
+            .collect();
+        let follow = |kept: &[(Quat, Vec3)]| -> Vec<(Quat, Vec3)> {
+            pose.iter()
+                .zip(&was)
+                .map(|(bone, was)| match was {
+                    Some(j) => kept[*j],
+                    None => (bone.rotation(), bone.translation()),
+                })
+                .collect()
+        };
+        self.shown = [follow(&self.shown[0]), follow(&self.shown[1])];
+        self.target = follow(&self.target);
+        self.bones = was
+            .iter()
+            .map(|was| was.map_or(Motion::default(), |j| self.bones[j]))
+            .collect();
     }
 
     /// Turns the clip stack's pose for this frame into the pose to show, in place. `switch` says
@@ -722,5 +749,60 @@ mod tests {
         blender.update(&mut bigger, Some(Switch::Action), 1. / 60.);
         assert_eq!(bigger, [(Quat::IDENTITY, Vec3::ZERO); 3]);
         assert!(!blender.blending());
+    }
+
+    #[test]
+    fn remapped_bones_carry_on_through_a_change_of_skeleton() {
+        // An arm and a leg, then gear that brings a bone of its own: the new skeleton has the leg
+        // first, the gear's bone, then the arm, which switches clips as the gear goes on.
+        let [arm, swung] = swing();
+        let leg = Steady::turning(Quat::from_rotation_x(0.3), Vec3::new(6., 0., 0.));
+        let gear = (Quat::from_rotation_z(0.4), Vec3::Y);
+        let dt = 1. / 60.;
+        let play = |remap: bool| {
+            let mut blender = Blender::new(Method::Inertialize);
+            let mut shown = Vec::new();
+            for frame in 0..60 {
+                let t = frame as f32 * dt;
+                if frame < 30 {
+                    let mut pose = [arm.at(t), leg.at(t)];
+                    blender.update(&mut pose, None, dt);
+                    shown.push(vec![pose[1], gear, pose[0]]);
+                } else {
+                    let mut pose = [leg.at(t), gear, swung.at(t)];
+                    if frame == 30 && remap {
+                        blender.remap(&pose, |i| [Some(1), None, Some(0)][i]);
+                    }
+                    blender.update(&mut pose, (frame == 30).then_some(Switch::Gear), dt);
+                    shown.push(pose.to_vec());
+                }
+            }
+            shown
+        };
+        let shown = play(true);
+        let at = 30;
+        let t = at as f32 * dt;
+        assert!(
+            angle(shown[at][2].0, arm.at(t).0) < 1e-4,
+            "the arm carries on its old motion through the swap"
+        );
+        assert!(
+            angle(shown[at][0].0, leg.at(t).0) < 1e-4,
+            "the leg carries on"
+        );
+        assert!(
+            angle(shown[at][1].0, gear.0) < 1e-6 && shown[at][1].1.distance(gear.1) < 1e-6,
+            "the gear's bone starts as the pose has it"
+        );
+        let step = |shown: &[Vec<(Quat, Vec3)>], f: usize| angle(shown[f - 1][2].0, shown[f][2].0);
+        let jump = angle(arm.at(t).0, swung.at(t).0);
+        let worst = (31..60).map(|f| step(&shown, f)).fold(0., f32::max);
+        assert!(
+            worst < jump / 4.,
+            "a frame turned {worst} rad of a {jump} rad jump"
+        );
+        // Without the remap the blender has no old motion for the new skeleton: the arm pops.
+        let popped = play(false);
+        assert!(angle(popped[at - 1][2].0, popped[at][2].0) > 1.);
     }
 }

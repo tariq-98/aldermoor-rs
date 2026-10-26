@@ -10,6 +10,7 @@
 //! turns the spine back toward the facing (Paragon, Fortnite and Lyra's orientation warping).
 use glam::{Vec2, Vec3};
 use std::f32::consts::{FRAC_PI_2, LN_2, PI, TAU};
+use std::ops::{Add, Mul, Sub};
 
 /// How far a strafe must swing past square before the legs change between going forward and going
 /// backward, in radians (10°), so a strafe straight to the side doesn't flicker between the two.
@@ -18,8 +19,8 @@ pub const HYSTERESIS: f32 = 0.17;
 /// once; the legs catch up this fast.
 pub const SPEED_HALF_LIFE: f32 = 0.1;
 pub const TURN_HALF_LIFE: f32 = 0.08;
-/// The slowest and fastest a blend plays against its own pace. Past them the feet slide, until
-/// stride warping (#214) lengthens or shortens the steps instead.
+/// The slowest and fastest a blend plays against its own pace. Past them stride warping (#214)
+/// shortens or lengthens the steps instead: see [`Step::warp`].
 pub const PACE: [f32; 2] = [0.8, 1.25];
 /// From this share of a loop's own speed to this one it plays alone, a little slower or faster,
 /// so a second clip is only sampled between two loops' speeds.
@@ -35,19 +36,25 @@ pub struct Gait {
     pub duration: f32,
     /// When the left and the right foot touch down, in seconds from the clip's start.
     pub contacts: [f32; 2],
+    /// When they lift off again.
+    pub lifts: [f32; 2],
+    /// How high the ball of each foot is while it is planted, in the model's frame: the median.
+    /// Running on their toes, the clips hold it higher than walking flat footed.
+    pub floors: [f32; 2],
     /// Metres a cycle carries the body at the clip's own pace: how far back a planted foot slides
     /// over a whole cycle.
     pub stride: f32,
 }
 
 impl Gait {
-    /// Measures a loop from where its feet (left, right) are at evenly spaced times over its
-    /// `duration`, the first at the start, in the model's frame (+y up, +z ahead). A foot is
-    /// planted for the longest stretch it slides back at more than [`PLANTED`] of its usual speed,
-    /// and touches down where that starts. Heights are no guide: a sprinting foot bounces on its
-    /// toes, and on a short body the foot is lowest as it pushes off. The loop's speed is the
-    /// median speed planted feet slide back at. `None` if a foot never lifts, never slides back,
-    /// or is higher planted than swinging (the loop goes backward).
+    /// Measures a loop from where the balls of its feet (left, right) are at evenly spaced times
+    /// over its `duration`, the first at the start, in the model's frame (+y up, +z ahead). A foot
+    /// is planted for the longest stretch it slides back at more than [`PLANTED`] of its usual
+    /// speed, touching down where that starts and lifting off where it ends. Heights are no guide
+    /// to that: a sprinting foot bounces on its toes, and on a short body the foot is lowest as it
+    /// pushes off. The loop's speed is the median speed planted feet slide back at. `None` if a
+    /// foot never lifts, never slides back, or is higher planted than swinging (the loop goes
+    /// backward).
     pub fn measure(feet: &[[Vec3; 2]], duration: f32) -> Option<Gait> {
         let n = feet.len();
         let step = duration / n as f32;
@@ -56,9 +63,9 @@ impl Gait {
             let at = (v.len().max(1) - 1) as f32 * q;
             v.get(at as usize).copied()
         };
-        let mut contacts = [0.; 2];
+        let [mut contacts, mut lifts, mut floors] = [[0.; 2]; 3];
         let mut slides = Vec::with_capacity(n);
-        for (foot, contact) in contacts.iter_mut().enumerate() {
+        for foot in 0..2 {
             // How fast the foot slides back from each sample to the next.
             let back: Vec<f32> = (0..n)
                 .map(|k| (feet[k][foot].z - feet[(k + 1) % n][foot].z) / step)
@@ -76,13 +83,17 @@ impl Gait {
             if down >= up {
                 return None;
             }
-            *contact = start as f32 * step;
+            contacts[foot] = start as f32 * step;
+            lifts[foot] = ((start + length) % n) as f32 * step;
+            floors[foot] = quantile((0..length).map(height).collect(), 0.5)?;
             slides.extend((0..length).map(|j| back[(start + j) % n]));
         }
         let speed = quantile(slides, 0.5)?;
         (speed > 0.).then_some(Gait {
             duration,
             contacts,
+            lifts,
+            floors,
             stride: speed * duration,
         })
     }
@@ -104,6 +115,23 @@ impl Gait {
             half + (phase - 0.5) * 2. * (self.duration - half)
         };
         (left + since).rem_euclid(self.duration)
+    }
+
+    /// The stride phase at clip time `time`: the inverse of [`Gait::time_at`].
+    pub fn phase_at(&self, time: f32) -> f32 {
+        let [left, right] = self.contacts;
+        let half = (right - left).rem_euclid(self.duration);
+        let since = (time - left).rem_euclid(self.duration);
+        if since < half {
+            since / (2. * half)
+        } else {
+            0.5 + (since - half) / (2. * (self.duration - half))
+        }
+    }
+
+    /// How much of the cycle, in phase, each foot (left, right) stays planted from touching down.
+    pub fn stances(&self) -> [f32; 2] {
+        [0, 1].map(|foot| (self.phase_at(self.lifts[foot]) - foot as f32 * 0.5).rem_euclid(1.))
     }
 
     /// Seconds of clip a whole cycle of phase would take at the pace of the step `phase` is in:
@@ -142,16 +170,19 @@ pub fn blend(gaits: &[Gait], speed: f32) -> (usize, usize, f32) {
     (last, last, 0.)
 }
 
-/// A value that follows its target on a critically damped spring, in the blender's half-life
-/// convention (see [`crate::Switch::half_life`]).
+/// A value (a number, or a vector) that follows its target on a critically damped spring, in the
+/// blender's half-life convention (see [`crate::Switch::half_life`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Spring {
-    pub value: f32,
-    pub velocity: f32,
+pub struct Spring<T = f32> {
+    pub value: T,
+    pub velocity: T,
 }
 
-impl Spring {
-    pub fn update(&mut self, target: f32, half_life: f32, dt: f32) -> f32 {
+impl<T> Spring<T>
+where
+    T: Copy + Default + Add<Output = T> + Sub<Output = T> + Mul<f32, Output = T>,
+{
+    pub fn update(&mut self, target: T, half_life: f32, dt: f32) -> T {
         let rate = 2. * LN_2 / half_life;
         let decay = (-rate * dt).exp();
         let offset = self.value - target;
@@ -161,10 +192,10 @@ impl Spring {
         self.value
     }
 
-    pub fn snap(&mut self, value: f32) {
+    pub fn snap(&mut self, value: T) {
         *self = Self {
             value,
-            velocity: 0.,
+            velocity: T::default(),
         };
     }
 }
@@ -194,6 +225,13 @@ pub struct Step {
     pub weight: f32,
     /// How far round the vertical to turn the hips from the facing, in radians toward +x.
     pub turn: f32,
+    /// Whether each foot (left, right) is planted, by where the stride is in the blend's stances,
+    /// and how high the blend holds the ball of each foot while it is ([`Gait::floors`]).
+    pub planted: [bool; 2],
+    pub floors: [f32; 2],
+    /// How much longer than the clips' the steps must be to carry the body at its speed: 1 while
+    /// the blend's pace keeps up, less below its slowest pace and more above its fastest.
+    pub warp: f32,
 }
 
 /// One character's place in its locomotion: the stride phase, and the speed and hip turn its legs
@@ -236,11 +274,19 @@ impl Stride {
         // backward when they face away, and slower while they swing round from one to the other.
         let along = (travel - self.turn.value).cos();
         self.phase = (self.phase + cycles * along * dt).rem_euclid(1.);
+        let [sa, sb] = [ga.stances(), gb.stances()];
+        let planted = [0, 1].map(|foot| {
+            let stance = sa[foot] + (sb[foot] - sa[foot]) * w;
+            (self.phase - foot as f32 * 0.5).rem_euclid(1.) < stance
+        });
         Step {
             from: (a, ga.time_at(self.phase)),
             to: (b, gb.time_at(self.phase)),
             weight: w,
             turn: self.turn.value,
+            planted,
+            floors: [0, 1].map(|foot| ga.floors[foot] + (gb.floors[foot] - ga.floors[foot]) * w),
+            warp: speed / (reach * cycles),
         }
     }
 
@@ -283,13 +329,18 @@ mod tests {
 
     /// Gaits like the male body's walk, jog and sprint, each step half a cycle.
     fn loops() -> [Gait; 3] {
-        [(1.333, 0.95, 0.11), (0.933, 6.1, 0.04), (0.667, 9.4, 0.03)].map(
-            |(duration, speed, left)| Gait {
-                duration,
-                contacts: [left, left + duration / 2.],
-                stride: speed * duration,
-            },
-        )
+        [
+            (1.333, 0.95, 0.11, 0.02),
+            (0.933, 6.1, 0.04, 0.04),
+            (0.667, 9.4, 0.03, 0.03),
+        ]
+        .map(|(duration, speed, left, floor)| Gait {
+            duration,
+            contacts: [left, left + duration / 2.],
+            lifts: [left + duration * 0.4, left + duration * 0.9],
+            floors: [floor; 2],
+            stride: speed * duration,
+        })
     }
 
     #[test]
@@ -303,6 +354,14 @@ mod tests {
                 "{gait:?}"
             );
             assert!((gait.speed() - speed).abs() < 0.01 * speed, "{gait:?}");
+            // Each foot lifts off once it has been planted for its stance, the ball as high
+            // through it as on touching down.
+            for (foot, down) in [left, left + duration / 2.].into_iter().enumerate() {
+                let lift = (down + stance * duration).rem_euclid(duration);
+                let off = (gait.lifts[foot] - lift + duration / 2.).rem_euclid(duration);
+                assert!((off - duration / 2.).abs() <= 2. * sample, "{gait:?}");
+                assert!((gait.floors[foot] - 0.03).abs() < 1e-4, "{gait:?}");
+            }
         }
         // Feet that never leave the ground, or slide forward, are not a forward loop.
         let still = vec![[Vec3::ZERO; 2]; 32];
@@ -320,6 +379,10 @@ mod tests {
             assert!((gait.time_at(0.) - gait.contacts[0]).abs() < 1e-5);
             assert!((gait.time_at(0.5) - gait.contacts[1]).abs() < 1e-5);
             assert!((gait.time_at(1.) - gait.contacts[0]).abs() < 1e-5);
+            for k in 0..20 {
+                let phase = k as f32 / 20.;
+                assert!((gait.phase_at(gait.time_at(phase)) - phase).abs() < 1e-4);
+            }
             // Time runs on steadily through the cycle and round the end of the clip.
             let mut last = gait.time_at(0.);
             for k in 1..=200 {
@@ -338,6 +401,8 @@ mod tests {
         let gait = Gait {
             duration: 1.,
             contacts: [0.1, 0.5],
+            lifts: [0.35, 0.85],
+            floors: [0.03; 2],
             stride: 2.,
         };
         let mut stride = Stride::default();
@@ -350,6 +415,47 @@ mod tests {
                 let played = (step.from.1 - time).rem_euclid(1.);
                 assert!((played - dt).abs() < 1e-4, "{played} s at phase {phase}");
             }
+        }
+    }
+
+    #[test]
+    fn each_foot_is_planted_through_its_stance_and_steps_warp_past_the_pace() {
+        let gaits = loops();
+        let dt = 1. / 60.;
+        // Within the loops' paces: planted from touching down (phase 0 and 0.5) through the
+        // stance, 40% of the cycle, and the steps as long as the clips'.
+        let mut stride = Stride::default();
+        for _ in 0..120 {
+            let step = stride.advance(&gaits, Vec2::new(0., 6.), dt);
+            assert!((step.warp - 1.).abs() < 1e-4, "{step:?}");
+            assert_eq!(step.floors, gaits[1].floors);
+            for (foot, down) in [0., 0.5].into_iter().enumerate() {
+                let since = (stride.phase - down).rem_euclid(1.);
+                if (since - 0.4).abs() > 0.02 {
+                    assert_eq!(step.planted[foot], since < 0.4, "{foot} at {since}");
+                }
+            }
+        }
+        // Between two loops, the balls of the feet are held between the two loops' heights.
+        let step = Stride::default().advance(&gaits, Vec2::new(0., 3.), dt);
+        let floor = step.floors[0];
+        assert!(
+            floor > 0.021 && floor < 0.039 && step.floors[1] == floor,
+            "{step:?}"
+        );
+        // Slower than the walk can play, and faster than the sprint, the steps shorten and
+        // lengthen to carry the body.
+        for (speed, gait) in [(0.4, gaits[0]), (14., gaits[2])] {
+            let mut stride = Stride::default();
+            let mut step = stride.advance(&gaits, Vec2::new(0., speed), dt);
+            for _ in 0..60 {
+                step = stride.advance(&gaits, Vec2::new(0., speed), dt);
+            }
+            let pace = (speed / gait.speed()).clamp(PACE[0], PACE[1]);
+            assert!(
+                (step.warp - speed / (gait.speed() * pace)).abs() < 1e-3,
+                "{step:?}"
+            );
         }
     }
 
