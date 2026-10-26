@@ -117,6 +117,7 @@ mod tests {
                 pose: Pose::Run,
                 pose_time: tick as f32 / 60.,
                 traversal: Default::default(),
+                aim_pitch: 0,
                 health: 100.,
                 max_health: 100.,
                 hostile: false,

@@ -135,6 +135,8 @@ pub struct Motion {
     pub wading: bool,
     /// Sprinting this step (asked to, and allowed).
     pub sprinting: bool,
+    /// Where a player aims up or down (`Command::Aim`), as `protocol::aim_pitch_byte`.
+    pub aim_pitch: i8,
     /// The highest the feet have been since they last touched the ground or the water, for fall
     /// damage.
     pub fall_from: f32,
@@ -164,6 +166,7 @@ impl Motion {
             swimming: false,
             wading: false,
             sprinting: false,
+            aim_pitch: 0,
             fall_from: f32::NEG_INFINITY,
             hang: None,
             released: None,
