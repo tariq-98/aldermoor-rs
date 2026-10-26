@@ -314,6 +314,21 @@ impl Realm {
         snapshot
     }
 
+    /// Combat detail as `viewer` sees it, from the region it's in.
+    pub fn combat_view(&self, viewer: UnitId) -> protocol::CombatView {
+        self.with_unit(viewer, |sim, id| sim.combat_view(Some(id)))
+    }
+
+    /// The regions running now, layers included.
+    pub fn regions(&self) -> Vec<u32> {
+        self.workers.iter().map(|w| w.id).collect()
+    }
+
+    /// The tick every region has stepped to.
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
     /// What happened in a region last tick.
     pub fn events(&self, region: u32) -> &[Event] {
         self.index(region).map_or(&[], |i| &self.events[i])
