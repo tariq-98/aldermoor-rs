@@ -8578,6 +8578,74 @@
     ]
    },
    {
+    "name": "Hang_Corner_In_L",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Corner_In_R",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Corner_Out_L",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Corner_Out_R",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hold"
+     }
+    ]
+   },
+   {
     "name": "Hang_Drop",
     "seconds": 0.6,
     "loop": false,
@@ -8590,6 +8658,57 @@
     "events": [
      {
       "t": 0.15,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Eject_Back",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.03,
+      "name": "push"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Eject_L",
+    "seconds": 0.55,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.34,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Eject_R",
+    "seconds": 0.55,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.34,
       "name": "hold"
      }
     ]
@@ -8638,6 +8757,23 @@
      "climb"
     ],
     "source": "authored"
+   },
+   {
+    "name": "Hang_Leap_Up",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.24,
+      "name": "hold"
+     }
+    ]
    },
    {
     "name": "Hang_Shimmy_L_Loop",
@@ -9052,6 +9188,28 @@
       ],
       [
        0.87,
+       1
+      ]
+     ]
+    }
+   },
+   {
+    "name": "Roll_Land",
+    "seconds": 0.967,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion"
+    ],
+    "source": "authored",
+    "curves": {
+     "travel": [
+      [
+       0,
+       0
+      ],
+      [
+       0.45,
        1
       ]
      ]
@@ -9823,6 +9981,17 @@
     "tags": [
      "locomotion"
     ]
+   },
+   {
+    "name": "Wall_Run",
+    "seconds": 0.5,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored"
    },
    {
     "name": "Yes",
