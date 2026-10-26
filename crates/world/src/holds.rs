@@ -1,13 +1,14 @@
 //! Handholds: the edges a climber's hands close on (docs/MOVEMENT.md, "Climbing"). Every top edge
 //! of a [`Solid`] with a top that drops far enough to hang from is one, joined along straight
-//! walls, and so is every grip on the masonry (a sill, a keystone: [`crate::Grip`]). Beams, eaves
-//! and cliff ledges join them as the routes through the valley are built (#249).
+//! walls (the ruin's courses and coping, the cottages' eaves and verges), and so is every grip on
+//! the masonry and the cottages (a sill, a keystone, a window head: [`crate::Grip`]). Cliff ledges
+//! join them as the routes through the valley are built (#249).
 
 use std::collections::HashMap;
 
 use glam::{Vec2, Vec3, Vec3Swizzles};
 
-use crate::{Solid, Valley};
+use crate::{cottage, Solid, Valley};
 
 /// An edge that drops less than this is climbed from the ground, not hung from.
 pub const HANG_MIN_DROP: f32 = 1.6;
@@ -79,15 +80,14 @@ impl Holds {
                 edge_holds(valley, s, side, &mut list);
             }
         }
-        for m in &valley.masonry {
-            for g in &m.grips {
-                let (mut a, mut b, out) = (m.place(g.a), m.place(g.b), m.turn(g.out));
-                // Run to the right of a climber facing the wall.
-                if (b - a).xz().dot(Vec2::new(out.y, -out.x)) < 0.0 {
-                    std::mem::swap(&mut a, &mut b);
-                }
-                list.push(Hold { a, b, out, braced: true });
+        let grips = valley.masonry.iter().flat_map(|m| m.grips.iter().map(|g| (m.place(g.a), m.place(g.b), m.turn(g.out))));
+        let timbers = valley.houses.iter().flat_map(|h| cottage::of(h).grips().map(|g| (cottage::place(h, g.a), cottage::place(h, g.b), cottage::turn(h, g.out))));
+        for (mut a, mut b, out) in grips.chain(timbers) {
+            // Run to the right of a climber facing the wall.
+            if (b - a).xz().dot(Vec2::new(out.y, -out.x)) < 0.0 {
+                std::mem::swap(&mut a, &mut b);
             }
+            list.push(Hold { a, b, out, braced: true });
         }
         join(&mut list);
         let mut cells: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
@@ -192,7 +192,10 @@ fn edge_holds(valley: &Valley, s: &Solid, side: usize, list: &mut Vec<Hold>) {
 }
 
 /// Joins holds that carry straight on from one another (a wall built of several boxes), so a
-/// climber shimmies along one hold rather than hopping between pieces.
+/// climber shimmies along one hold rather than hopping between pieces. Holds that bend by less
+/// than about 2.5° are joined too, and the joined hold cuts across the bend, where a body
+/// hanging from it can touch a face that bulges past it: so a front meant to be one hold is
+/// built straight (the cliff ledges are one block each).
 fn join(list: &mut Vec<Hold>) {
     let mut i = 0;
     while i < list.len() {

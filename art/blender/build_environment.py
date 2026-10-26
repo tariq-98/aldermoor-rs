@@ -5,9 +5,10 @@ plants and village props, and writes assets/catalog/environment.json.
 
 Props are authored in Blender's frame (up +Z, front -Y, metres), centred on their footprint at
 ground level, so the glTF export puts them on +Y up, facing +Z, like every other asset. Sizes
-match the obstacles in the `world` crate: a cottage fills 7 x 6.2 m at scale 1 (Solid half
-3.5 x 3.1), the shed 8.8 x 7.4 m, the windmill 5 x 5 m, and the bridge deck follows
-`Valley::ground` exactly. aldermoor_art/env.py has the materials, UVs, shading and wind.
+match the `world` crate: a cottage's roof and the timbers you climb are where `world::cottage`
+has them (read from art/out/world/places.json, and checked), its plinth fills 7 x 6.2 m at scale
+1, the shed 8.8 x 7.4 m, the windmill 5 x 5 m, and the bridge deck follows `Valley::ground`
+exactly. aldermoor_art/env.py has the materials, UVs, shading and wind.
 """
 
 import json
@@ -52,13 +53,21 @@ COTTAGES = {
     "cottage.thatch": dict(label="Thatched cottage", roof="thatch", lower=None, shutters=(0.16, 0.26, 0.12),
                           plaster_tint=(1.0, 0.98, 0.93), timber="planks_dark", chimney=-1, rise=3.0),
     "cottage.tiles": dict(label="Tiled cottage", roof="roof_tiles", lower=None, shutters=(0.08, 0.17, 0.3),
-                         plaster_tint=(1.0, 0.95, 0.86), timber="planks", chimney=1, rise=2.5),
+                         plaster_tint=(1.0, 0.95, 0.86), timber="planks_dark", chimney=1, rise=2.5),
     "cottage.stone": dict(label="Stone cottage", roof="roof_tiles", lower="stone", shutters=(0.32, 0.08, 0.06),
                          plaster_tint=(0.98, 0.97, 0.95), timber="planks_dark", chimney=-1, rise=2.6),
 }
 
 W, D = 6.6, 5.8          # Wall footprint (the plinth adds 0.2 all round: 7.0 x 6.2).
 WALL0, WALL1 = 0.6, 3.4  # Wall bottom and top.
+EAVES, VERGE = 0.55, 0.12  # How far the roof runs out past the side walls and past the gable ends.
+SINK = 3.0               # How far the plinth goes down, so a house on a slope stands on it.
+
+# The cottages as `world` climbs them (crates/world/src/cottage.rs): the art is built to the same
+# measurements, and its roof and the timbers you climb are checked against them.
+WORLD_COTTAGES = masonry.places()["cottages"]
+assert [WORLD_COTTAGES[k] for k in ("width", "depth", "wall0", "wall1", "eaves", "verge")] == [W, D, WALL0, WALL1, EAVES, VERGE], \
+    "world::cottage's measurements changed: update the cottages here to match"
 
 
 def roof_slab(name, side, rise, overhang, thick, length, mat, round_edge):
@@ -85,17 +94,24 @@ def roof_slab(name, side, rise, overhang, thick, length, mat, round_edge):
     return ob
 
 
-def window(parts, x, y, z, w, h, facing, timber_mat, shutter_col, box=True, shutters=True):
-    """A window on the wall facing `facing` (a unit vector out of the wall), with shutters."""
+def window(parts, x, y, z, w, h, facing, timber_mat, shutter_col, box=True, shutters=True, holds=None, sill=None, head=None):
+    """A window on the wall facing `facing` (a unit vector out of the wall), with shutters. `sill`
+    and `head` name the timbers under and over it that are holds (as `world::cottage` names their
+    grips), recorded in `holds`."""
     out = Vector(facing)
     side = Z.cross(out).normalized()
     c = Vector((x, y, z))
     glass = env.flat("glass_dark", (0.05, 0.08, 0.09), rough=0.15)
     parts.append(_oriented_box("pane", c + out * 0.015, w, h, 0.03, out, glass))
     for dx in (-0.5, 0.5):
-        parts.append(_oriented_box("jamb", c + side * (dx * (w + 0.12)) + out * 0.05, 0.12, h + 0.24, 0.1, out, timber_mat, beam=True))
-    for dz in (-0.5, 0.5):
-        parts.append(_oriented_box("sill", c + Z * (dz * (h + 0.12)) + out * 0.06, w + 0.36, 0.12, 0.12, out, timber_mat, beam=True))
+        parts.append(_oriented_box("jamb", c + side * (dx * (w + 0.12)) + out * 0.05, 0.12, h, 0.1, out, timber_mat, beam=True))
+    for dz, grip in ((-0.5, sill), (0.5, head)):
+        centre = c + Z * (dz * (h + 0.12)) + out * 0.06
+        if grip:
+            parts.append(_hold_box("sill", centre, w + 0.36, 0.12, 0.12, out, timber_mat))
+            holds.append(_grip(grip, centre, w + 0.36, 0.12, 0.12, out))
+        else:
+            parts.append(_oriented_box("sill", centre, w + 0.36, 0.12, 0.12, out, timber_mat, beam=True))
     parts.append(_oriented_box("mullion", c + out * 0.045, 0.05, h, 0.05, out, timber_mat, beam=True))
     parts.append(_oriented_box("transom", c + out * 0.045, w, 0.05, 0.05, out, timber_mat, beam=True))
     paint = env.flat(f"paint_{'%.2f_%.2f_%.2f' % shutter_col}", shutter_col, rough=0.7)
@@ -128,6 +144,45 @@ def _oriented_box(name, centre, w, h, d, out, mat, beam=False):
     return ob
 
 
+def _hold_box(name, centre, w, h, d, out, mat):
+    """A timber you climb by (docs/ART.md, "Reading the world"): a beam w along the wall, h tall and
+    d out from it, dark, with a light, rubbed top whose front edge is worn back to a broad chamfer,
+    which shows from the ground below as a pale line."""
+    out = Vector(out).normalized()
+    side = Z.cross(out).normalized()
+    c = min(0.07, h * 0.45, d * 0.45)
+    centre = Vector(centre)
+    profile = [(-d / 2, -h / 2), (d / 2, -h / 2), (d / 2, h / 2 - c), (d / 2 - c, h / 2), (-d / 2, h / 2)]
+    ob = env.prism(name, [tuple(centre + out * u + Z * v) for u, v in profile], w, tuple(side), mat)
+    _rub(ob)
+    mod = ob.modifiers.new("bevel", "BEVEL")
+    mod.width = 0.008
+    mod.segments = 2
+    mod.limit_method = "ANGLE"
+    sc.activate(ob)
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    env.beam_uvs(ob)
+    return ob
+
+
+def _rub(ob):
+    """Gives a timber the light, rubbed top of a hold: its faces turned up are bare, pale wood."""
+    ob.data.materials.append(env.flat("timber_worn", (0.56, 0.44, 0.3), rough=0.6))
+    for p in ob.data.polygons:
+        if p.normal.z > 0.3:
+            p.material_index = len(ob.data.materials) - 1
+
+
+def _grip(part, centre, w, h, d, out):
+    """The grip a hold timber is to `world` (`world::Grip`): its top's front edge and the way out
+    from the wall, in the game's frame (x across, y up, z toward the door, Blender's -y)."""
+    out = Vector(out).normalized()
+    side = Z.cross(out).normalized()
+    front = Vector(centre) + out * (d / 2) + Z * (h / 2)
+    a, b = sorted((front - side * (w / 2), front + side * (w / 2)), key=lambda v: v.x)
+    return {"part": part, "a": [a.x, a.z, -a.y], "b": [b.x, b.z, -b.y], "out": [out.x, -out.y]}
+
+
 def _blob(name, centre, r, mat, rng):
     bm = bmesh.new()
     bmesh.ops.create_icosphere(bm, subdivisions=1, radius=r)
@@ -138,15 +193,18 @@ def _blob(name, centre, r, mat, rng):
     return ob
 
 
-def cottage(spec):
-    parts = []
+def cottage(cid):
+    """A cottage, built to `world::cottage`'s measurements: you climb its gable ends by their timbers
+    (dark, with light, rubbed tops), and walk its roof."""
+    spec = COTTAGES[cid]
+    parts, holds = [], []
     stone = env.surface("stone")[0]
     plaster = env.surface("plaster")[0]
     tmat = env.surface(spec["timber"])[0]
     roof = env.surface(spec["roof"])[0]
     thatch = spec["roof"] == "thatch"
-    # Plinth: rubble stone, sunk into the ground for slopes.
-    parts.append(env.box("plinth", (0, 0, (WALL0 - 0.5) / 2), (W + 0.4, D + 0.4, WALL0 + 0.5), stone, bevel=0.04))
+    # Plinth: rubble stone, running down into the ground so a house on a slope stands on it.
+    parts.append(env.box("plinth", (0, 0, (WALL0 - SINK) / 2), (W + 0.4, D + 0.4, WALL0 + SINK), stone, bevel=0.04))
     # Walls.
     if spec["lower"]:
         parts.append(env.box("lower", (0, 0, (WALL0 + 2.0) / 2), (W + 0.06, D + 0.06, 2.0 - WALL0), env.surface(spec["lower"])[0], bevel=0.02))
@@ -154,27 +212,37 @@ def cottage(spec):
     rise = spec["rise"]
     for y in (-(D / 2 - 0.1), D / 2 - 0.1):
         parts.append(env.prism("gable", [(-W / 2, y, WALL1), (W / 2, y, WALL1), (0, y, WALL1 + rise)], 0.2, (0, 1, 0), plaster))
-    # Timber frame: sill, corner posts, wall plate, a mid rail and braces on the long sides.
+    # Timber frame: sill, corner posts, wall plate, a mid rail and braces on the long sides. The
+    # plate across each gable end is a hold, standing out as far as the roof's verge above it.
     s = 0.2
     for y in (-D / 2, D / 2):
+        out = (0, 1 if y > 0 else -1, 0)
         parts.append(timber("sill", (0, y, WALL0 + 0.09), (W + 0.12, s, 0.18), tmat))
-        parts.append(timber("plate", (0, y, WALL1 - 0.09), (W + 0.12, s, 0.18), tmat))
+        plate = (0, y + out[1] * 0.02, WALL1 - 0.09)
+        parts.append(_hold_box("plate", plate, W + 0.12, 0.18, s, out, tmat))
+        holds.append(_grip("wall plate", plate, W + 0.12, 0.18, s, out))
     for x in (-W / 2, W / 2):
         parts.append(timber("sill", (x, 0, WALL0 + 0.09), (s, D + 0.12, 0.18), tmat))
-        parts.append(timber("plate", (x, 0, WALL1 - 0.09), (s, D + 0.12, 0.18), tmat))
+        # Ending inside the gable ends' plates, behind their worn tops.
+        parts.append(timber("plate", (x, 0, WALL1 - 0.09), (s, D, 0.18), tmat))
         parts.append(timber("rail", (x, 0, 2.05), (s, D, 0.14), tmat))
         for y0, y1 in ((-D / 2, -D / 2 + 1.4), (D / 2, D / 2 - 1.4)):
             parts.append(brace("brace", (x, y0, WALL0 + 0.2), (x, y1, 2.0), 0.14, tmat))
         parts.append(timber("post", (x, 0, (WALL0 + WALL1) / 2), (s, 0.18, WALL1 - WALL0), tmat))
     for x in (-W / 2, W / 2):
         for y in (-D / 2, D / 2):
-            parts.append(timber("corner", (x, y, (WALL0 + WALL1) / 2), (s + 0.02, s + 0.02, WALL1 - WALL0), tmat))
-    # Gable timbers: a collar and two studs on each end, the gable window between them.
+            parts.append(timber("corner", (x, y, (WALL0 + WALL1 - 0.18) / 2), (s + 0.02, s + 0.02, WALL1 - 0.18 - WALL0), tmat))
+    # Gable timbers: a collar (a hold, out as far as the verge) and two studs on each end, the
+    # gable window between them.
     for y in (-D / 2, D / 2):
-        parts.append(timber("collar", (0, y, WALL1 + rise * 0.48), (W * 0.52, 0.16, 0.14), tmat))
+        out = (0, 1 if y > 0 else -1, 0)
+        collar = (0, y + out[1] * 0.04, WALL1 + rise * 0.48)
+        parts.append(_hold_box("collar", collar, W * 0.52, 0.14, 0.16, out, tmat))
+        holds.append(_grip("collar", collar, W * 0.52, 0.14, 0.16, out))
         for sx in (-1, 1):
+            # Shallow enough to pass behind the collar's worn top.
             top = WALL1 + rise * (1 - 1.05 / (W / 2))
-            parts.append(timber("stud", (sx * 1.05, y, (WALL1 + top) / 2), (0.14, 0.16, top - WALL1), tmat))
+            parts.append(timber("stud", (sx * 1.05, y, (WALL1 + top) / 2), (0.14, 0.1, top - WALL1), tmat))
     # The door, centred on the front (-Y), and its step.
     front = (0, -1, 0)
     door_y = -D / 2
@@ -182,26 +250,30 @@ def cottage(spec):
     parts.append(_oriented_box("door", (0, door_y - 0.03, WALL0 + 1.0), 1.1, 2.0, 0.08, front, planks, beam=True))
     for dx in (-0.62, 0.62):
         parts.append(_oriented_box("doorpost", (dx, door_y - 0.07, WALL0 + 1.1), 0.16, 2.2, 0.14, front, tmat, beam=True))
-    parts.append(_oriented_box("lintel", (0, door_y - 0.08, WALL0 + 2.18), 1.5, 0.18, 0.16, front, tmat, beam=True))
+    lintel = (0, door_y - 0.08, WALL0 + 2.18)
+    parts.append(_hold_box("lintel", lintel, 1.5, 0.18, 0.16, front, tmat))
+    holds.append(_grip("lintel", lintel, 1.5, 0.18, 0.16, front))
     iron = env.flat("iron", (0.08, 0.08, 0.085), rough=0.5, metal=1.0)
     for dz in (0.45, 1.55):
         parts.append(_oriented_box("hinge", (-0.2, door_y - 0.08, WALL0 + dz), 0.7, 0.05, 0.02, front, iron))
     ring = _blob("handle", (0.4, door_y - 0.1, WALL0 + 1.0), 0.04, iron, random.Random(4))
     parts.append(ring)
     parts.append(env.box("step", (0, -(D / 2 + 0.55), 0.15), (1.6, 0.7, 0.3), stone, bevel=0.03))
-    # Windows: two in front, one on each side, one at the back, one in the front gable.
+    # Windows: two in front, one on each side, one at the back, one in the front gable. The heads
+    # of those on the gable ends are holds, and the gable window's sill.
     for x in (-2.05, 2.05):
-        window(parts, x, door_y, WALL0 + 1.55, 0.85, 0.95, front, tmat, spec["shutters"])
+        window(parts, x, door_y, WALL0 + 1.55, 0.85, 0.95, front, tmat, spec["shutters"], holds=holds, head="window head")
     for x, f in ((-W / 2, (-1, 0, 0)), (W / 2, (1, 0, 0))):
         window(parts, x, 0.75, WALL0 + 1.55, 0.7, 0.9, f, tmat, spec["shutters"], shutters=False)
-    window(parts, 0.9, D / 2, WALL0 + 1.55, 0.85, 0.95, (0, 1, 0), tmat, spec["shutters"], box=False)
-    window(parts, 0, door_y, WALL1 + rise * 0.24, 0.5, 0.55, front, tmat, spec["shutters"], box=False, shutters=False)
-    # The roof.
-    overhang = 0.55
-    length = D + 0.9
+    window(parts, 0.9, D / 2, WALL0 + 1.55, 0.85, 0.95, (0, 1, 0), tmat, spec["shutters"], box=False, holds=holds, head="window head")
+    window(parts, 0, door_y, WALL1 + rise * 0.24, 0.5, 0.55, front, tmat, spec["shutters"], box=False, shutters=False,
+           holds=holds, sill="gable window sill", head="gable window head")
+    # The roof: out past the side walls over the eaves, and only a little past the gable ends, where
+    # the timbers you climb by stand out under the verge.
     thick = 0.42 if thatch else 0.14
+    length = D + 2 * VERGE
     for side in (-1, 1):
-        parts.append(roof_slab("roof", side, rise, overhang, thick, length, roof, round_edge=thatch))
+        parts.append(roof_slab("roof", side, rise, EAVES, thick, length, roof, round_edge=thatch))
     ridge_z = WALL1 + rise
     if thatch:
         bm = bmesh.new()
@@ -209,20 +281,24 @@ def cottage(spec):
         bmesh.ops.rotate(bm, verts=bm.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
         bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, ridge_z + thick * 0.35))
         parts.append(env.mesh("ridge", bm, roof, smooth=True))
+        peak = ridge_z + thick * 0.35 + 0.32
     else:
         bm = bmesh.new()
         bmesh.ops.create_cone(bm, cap_ends=True, segments=10, radius1=0.13, radius2=0.13, depth=length + 0.04)
         bmesh.ops.rotate(bm, verts=bm.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
         bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, ridge_z + thick * 0.75))
         parts.append(env.mesh("ridge", bm, roof, smooth=True))
-        # Bargeboards along the gable edges.
-        half = W / 2 + overhang
+        peak = ridge_z + thick * 0.75 + 0.13
+        # Bargeboards along the gable edges: the verges you hang from, with the same rubbed tops.
+        half = W / 2 + EAVES
         slope = rise / (W / 2)
         for y in (-length / 2 - 0.02, length / 2 + 0.02):
             for sx in (-1, 1):
                 a = (0, y, ridge_z + thick + 0.02)
-                b = (sx * half, y, WALL1 - overhang * slope + thick + 0.02)
-                parts.append(brace("barge", a, b, 0.07, tmat))
+                b = (sx * half, y, WALL1 - EAVES * slope + thick + 0.02)
+                barge = brace("barge", a, b, 0.07, tmat)
+                _rub(barge)
+                parts.append(barge)
     # Chimney through one slope, near the back.
     cx = spec["chimney"] * 1.55
     parts.append(env.box("chimney", (cx, 1.4, (WALL1 + ridge_z + 1.0) / 2 + 0.2), (0.75, 0.75, ridge_z + 1.0 - WALL1 + 0.4), stone, bevel=0.02))
@@ -234,11 +310,30 @@ def cottage(spec):
     parts.append(_oriented_box("lantern", (0.95, door_y - 0.25, WALL0 + 1.95), 0.18, 0.26, 0.18, front, glow))
     parts.append(_oriented_box("lantern_top", (0.95, door_y - 0.25, WALL0 + 2.12), 0.24, 0.06, 0.24, front, iron))
     parts.append(_oriented_box("lantern_arm", (0.95, door_y - 0.12, WALL0 + 2.2), 0.04, 0.04, 0.26, front, iron))
+    _check_against_world(cid, rise, thick, peak, cx, ridge_z + 1.52, holds)
     return parts
 
 
-def finish(parts, name, ground_grime=True, eaves=None):
-    """UVs for tiled surfaces, shading, then one object."""
+def _check_against_world(cid, rise, thick, peak, chimney_x, chimney_top, holds):
+    """Stops the build if this cottage isn't the one `world::cottage` climbs: its pitch, roof, ridge
+    and chimney, and every timber you climb by, where the world has its grip."""
+    world = next(k for k in WORLD_COTTAGES["kinds"] if k["prop"] == cid)
+    near = lambda u, v: abs(u - v) < 0.002
+    ridge_top = WALL1 + world["rise"] + world["thick"] / 2
+    stack = next(b for b in world["blocks"] if b["part"] == "chimney")
+    assert near(rise, world["rise"]) and near(thick, world["thick"]), f"{cid}'s roof isn't world::cottage's"
+    assert near(peak, ridge_top + world["ridge"][1]), f"{cid}'s ridge peaks at {peak}, world::cottage's at {ridge_top + world['ridge'][1]}"
+    assert near(chimney_x, stack["center"][0]) and near(-1.4, stack["center"][1]) and near(chimney_top, stack["top"]), f"{cid}'s chimney isn't world::cottage's"
+    key = lambda g: (g["part"], round(g["a"][2], 3), round(g["a"][0], 3))
+    ours, theirs = sorted(holds, key=key), sorted(world["grips"], key=key)
+    assert len(ours) == len(theirs), f"{cid} has {len(ours)} timbers to climb by, world::cottage {len(theirs)} grips"
+    for a, b in zip(ours, theirs):
+        same = a["part"] == b["part"] and all(near(u, v) for k in ("a", "b", "out") for u, v in zip(a[k], b[k]))
+        assert same, f"{cid}'s {a['part']} is at {a}, world::cottage's grip at {b}"
+
+
+def finish(parts, name, ground_grime=True, eaves=None, shade=None):
+    """UVs for tiled surfaces, shading (`shade`, or grime toward the ground), then one object."""
     for ob in sc.alive(parts):
         mat = ob.material_slots[0].material if ob.material_slots else None
         if mat is not None and "metres" in mat and not ob.data.uv_layers:
@@ -246,8 +341,18 @@ def finish(parts, name, ground_grime=True, eaves=None):
         elif not ob.data.uv_layers:
             ob.data.uv_layers.new(name="UVMap")
     ob = env.join(parts, name)
-    env.shade(ob, env.grime(0.0, 0.8, 0.32 if ground_grime else 0.0, eaves))
+    env.shade(ob, shade or env.grime(0.0, 0.8, 0.32 if ground_grime else 0.0, eaves))
     return ob
+
+
+def cottage_shade(co, n):
+    """A cottage's vertex shading: darker toward the ground (rain splash and soil, and the damp
+    plinth below it where the house stands on a slope), and on the long walls under the eaves. The
+    gable ends, under only a narrow verge, stay light, and so do the tops of the timbers you climb."""
+    k = 1.0 - 0.32 * min(1.0, max(0.0, 1.0 - co.z / 0.8)) ** 1.5
+    if abs(co.x) >= W / 2 - 0.01 and co.z < WALL1:
+        k *= 1.0 - 0.25 * max(0.0, 1.0 - (WALL1 - co.z) / 0.8)
+    return k, k, k
 
 
 # --- Shared shapes -------------------------------------------------------------------------------
@@ -898,8 +1003,11 @@ def prop(pid, label, kind, **info):
     return deco
 
 
+# Cottages record the blocks and grips `world` climbs them by, as masonry does, for the same check.
 for _cid, _spec in COTTAGES.items():
-    prop(_cid, _spec["label"], "house", footprint=[7.0, 6.2])(lambda spec=_spec, cid=_cid: [finish(cottage(spec), cid, eaves=(WALL1, 0.8))])
+    _world = next(k for k in WORLD_COTTAGES["kinds"] if k["prop"] == _cid)
+    prop(_cid, _spec["label"], "house", footprint=[7.0, 6.2], blocks=_world["blocks"], grips=_world["grips"])(
+        lambda cid=_cid: [finish(cottage(cid), cid, shade=cottage_shade)])
 prop("shed", "Shed", "landmark", footprint=[8.8, 7.4])(shed)
 prop("windmill", "Windmill", "landmark", footprint=[5.0, 5.0],
      parts=[{"file": "environment/windmill.sails.gltf", "at": [0.0, 7.2, 1.9], "spin": {"axis": [0.0, 0.0, 1.0], "rpm": 5.0}}])(windmill)
@@ -941,6 +1049,9 @@ for _id, _piece in MASONRY.items():
             lambda lod, piece=_piece, pid=_id: masonry.field_wall(piece, HEADS[pid], lod, seed=sum(map(ord, pid))))
     elif _id == "ruin.hall":
         prop(_id, "Ruined hall", "masonry", blocks=_blocks, grips=_grips, levels=True)(lambda lod, piece=_piece: masonry.ruin_hall(piece, lod, seed=7))
+    elif _id.startswith("terrace.ledges."):
+        prop(_id, "Cliff ledges", "masonry", blocks=_blocks, grips=_grips, levels=True)(
+            lambda lod, piece=_piece, pid=_id: masonry.terrace_ledges(piece, lod, seed=sum(map(ord, pid))))
 
 
 def triangles(objs):

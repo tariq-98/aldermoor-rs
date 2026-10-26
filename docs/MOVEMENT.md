@@ -27,7 +27,9 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     a face that tops out within **2.2 m** of your feet at that moment is caught and pulled up
     onto in 0.5 s (a mantle, `ForcedKind::Mantle`), as long as you aren't yet falling faster than
     3 m/s. So a jump at the right moment gets you up a ledge about 3.3 m high. A climb or mantle
-    needs room on the top for the body: not a sill's top against the wall it stands out from.
+    needs room on the top for the body: not a sill's top against the wall it stands out from,
+    nor a cliff's ledge too narrow to stand on below the next. On a narrow top it stands you as
+    near its front as you fit.
   - **Vaulting:** running (faster than a walk) at a wall no higher than **1.2 m** and shallower
     than **0.7 m**, with clear, level ground beyond, hops it at the speed you ran in (0.2 to
     0.45 s) and lands you running at that speed (`ForcedKind::Vault`). Deeper walls, such as the
@@ -36,7 +38,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Not while guarding, casting, swimming or downed. Mantles and vaults are forced moves, so no
     skills meanwhile.
   - The valley has few low faces yet: a few ledges in the limestone terraces west of the
-    village. Most of the terraces and the east terrace are tall cliffs.
+    village. Most of the terraces and the east terrace are tall cliffs; two stretches of them
+    climb by their ledges (below).
   - Walking or running off the top of a cliff is a fall (see below), not a slide down it. You
     only stay on the ground going down ground no steeper than 2:1.
   - The bridge has stone parapets along both sides (solids in `world`), so you can't climb onto
@@ -46,7 +49,7 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     and stood on, and a taller one stops you a body's width short of it, as a building's wall
     does (#216; `world::Valley::off_faces`). It stops rolls, leaps, charges, knockbacks and
     blinks the same way, rather than carrying you over it (#311; `world::Valley::slide_below`).
-    Buildings and trees have no top and only block.
+    The shed, the windmill and trees have no top and only block; the cottages are tops (below).
     A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
     a step at a time.
   - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
@@ -57,17 +60,41 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     you onto its raked coping, 2.5 m up, which you walk up (at 40°) to the empty bellcote on its
     apex. A jump at the bellcote pulls you onto its top, 10 to 10.8 m up, the highest point in
     the ruin. The gable's outer face climbs too, by its grips (below).
+  - The cottages climb too (#249; `crates/world/src/cottage.rs`). Each is a top: its roof's two
+    slopes run down to its eaves, 2.6 to 3.4 m up, and only 0.12 m past its gable ends, with the
+    ridge's roll or cap and the chimney stack on top. Walking at one stops you a body's width
+    short of its eaves or gable end. A jump at the eaves pulls you onto the roof (or, with Shift
+    held, catches them to climb up), and a wall run up the side pulls straight onto it. The roof
+    is walked up and over its ridge (under 2:1 all the way), and the chimney, 2 to 2.5 m above
+    the roof beside it, is a jump and a mantle. The gable ends climb by their timbers, which are
+    grips: the window heads and the lintel over the door, 2.4 to 3.2 m up and caught in a jump
+    from the ground, then the wall plate across the top of the wall, the gable window's sill and
+    head (on the front) and the collar, each a climb or a climb leap from the last, then the
+    verge, the roof's sloping edge, and up onto the roof. The back of the house by the river
+    stands over its bank, so its timbers start out of reach.
 - **Climbing** on handholds (#245, part of the climbing epic #251;
   `crates/sim/src/climbing.rs`). A hold is an edge the hands close on: `world::Valley::holds`,
   every top edge of a `Solid` with a top that drops at least 1.6 m (`world::HANG_MIN_DROP`),
-  joined along straight walls, and every grip on the masonry (`world::Grip`): a dressed stone
+  joined along straight walls, and every grip (`world::Grip`): a dressed stone or a timber
   standing proud of a face, held by its top, with no room above it to climb onto. Grips don't
   stand in anyone's way. In the valley that's the ruined hall's taller broken walls, its gable's
   coping and bellcote, and a line of grips up the gable's outer face: the lancet's sill (2.6 m,
   caught in a jump from the ground), two jamb stones and a label stop up the window's east side
   (each a climb from the last), the keystone over its arch (a climb leap), the oculus's sill, and
   the bell's sill in the bellcote (a climb leap), from which a last climb leap reaches the
-  bellcote's coping. Beams, eaves and cliff ledges come with the rest of the routes in #249.
+  bellcote's coping. The cottages add their eaves and verges and the timbers up their gable ends
+  (above), and two cliffs their ledges:
+  - **Cliff ledges** (#249; `crates/world/src/ledges.rs`): beds of pale, harder stone along the
+    strata of two cliffs, 1.7 to 1.8 m apart, so each front is a hold: the west terrace's face
+    behind the village (16 m) and the east terrace's below the windmill (26 m). The rest of the
+    cliffs stay sheer. Each ledge is one straight block, so its front is one hold from end to end
+    and you shimmy the whole way along it. It runs back into the rock, and its front runs just
+    out from where the cliff meets the ledge below, so the next ledge up overhangs it. A jump
+    catches the first from the foot of the cliff. Where a ledge is deep enough to stand on (about
+    half a metre), you climb onto it, and a jump at the cliff pulls you onto the next or catches
+    it. Where the cliff is steeper and the ledges are narrower, you hang, and a climb leap reaches
+    the next ledge. The last is a course of capstones along the edge of the terrace, which you
+    climb onto and walk off onto the terrace.
   - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
     higher, the body out from the wall by its radius and facing it. Pose `Hang`.
   - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at
@@ -80,7 +107,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     Away from the wall climbs down to a hold up to 1 m lower, and does nothing if there isn't
     one, so you never fall by accident.
   - **Leaps and ejects:** Space while hanging, by the direction pressed (#246). Into the wall or
-    none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, in 0.5 s
+    none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, or in or out
+    (a ledge set back up a sloping cliff), in 0.5 s
     (`LEAP_REACH`, `LEAP_SIDE`, `LEAP_TIME`); with none in reach, Space adds nothing to the
     direction. Along the wall: a side eject to a hold 0.8 to 2.5 m that way and up to 1 m up or
     down (`EJECT_REACH`, `EJECT_RISE`), in 0.55 s with a hop, or, with none there, a jump off the
