@@ -192,7 +192,10 @@ fn edge_holds(valley: &Valley, s: &Solid, side: usize, list: &mut Vec<Hold>) {
 }
 
 /// Joins holds that carry straight on from one another (a wall built of several boxes), so a
-/// climber shimmies along one hold rather than hopping between pieces.
+/// climber shimmies along one hold rather than hopping between pieces. Holds that bend by less
+/// than about 2.5° are joined too, and the joined hold cuts across the bend, where a body
+/// hanging from it can touch a face that bulges past it: so a front meant to be one hold is
+/// built straight (the cliff ledges are one block each).
 fn join(list: &mut Vec<Hold>) {
     let mut i = 0;
     while i < list.len() {

@@ -1049,6 +1049,9 @@ for _id, _piece in MASONRY.items():
             lambda lod, piece=_piece, pid=_id: masonry.field_wall(piece, HEADS[pid], lod, seed=sum(map(ord, pid))))
     elif _id == "ruin.hall":
         prop(_id, "Ruined hall", "masonry", blocks=_blocks, grips=_grips, levels=True)(lambda lod, piece=_piece: masonry.ruin_hall(piece, lod, seed=7))
+    elif _id.startswith("terrace.ledges."):
+        prop(_id, "Cliff ledges", "masonry", blocks=_blocks, grips=_grips, levels=True)(
+            lambda lod, piece=_piece, pid=_id: masonry.terrace_ledges(piece, lod, seed=sum(map(ord, pid))))
 
 
 def triangles(objs):
