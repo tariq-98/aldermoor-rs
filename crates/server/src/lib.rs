@@ -179,11 +179,26 @@ impl Drop for Server {
     }
 }
 
-/// A world with one in-process player: the client's built-in server for solo play.
+/// One player's view of a world: the client's built-in server for solo play, or a server
+/// across the network (`--connect`). Both look the same to the client.
 pub struct Host {
-    server: Server,
+    backend: Backend,
     latest: Arc<Latest>,
     pub player: UnitId,
+}
+
+enum Backend {
+    Local(Server),
+    Remote(Link),
+}
+
+/// A network player's connection, read on a thread of its own into the same [`Latest`] an
+/// in-process player has.
+struct Link {
+    commands: net::Commands,
+    closer: net::Closer,
+    received: Arc<std::sync::atomic::AtomicU64>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl Host {
@@ -196,21 +211,66 @@ impl Host {
     pub fn join(server: Server, player_name: &str) -> Host {
         let latest = Arc::new(Latest::default());
         let player = server.join(player_name, Viewer::Local(latest.clone())).expect("the simulation is running");
-        let host = Host { server, latest, player };
+        let host = Host { backend: Backend::Local(server), latest, player };
         while host.snapshot().is_none() {
             std::thread::sleep(Duration::from_millis(1));
         }
         host
     }
 
-    /// The world this player is in, for others to join (`net::listen`).
-    pub fn server(&self) -> &Server {
-        &self.server
+    /// Joins the server at `addr` (whose certificate is `certificate`) over the network, and
+    /// returns once its first view has arrived.
+    pub fn connect(addr: impl std::net::ToSocketAddrs, certificate: &net::CertificateDer<'_>, player_name: &str) -> std::io::Result<Host> {
+        let mut client = net::Client::connect(addr, certificate, player_name)?;
+        let latest = Arc::new(Latest::default());
+        let (player, commands, closer, received) = (client.player, client.commands(), client.closer(), client.received());
+        let into = latest.clone();
+        let thread = std::thread::Builder::new().name("Aldermoor connection".into()).spawn(move || loop {
+            match client.next_view() {
+                Ok((snapshot, combat)) => {
+                    into.events.lock().unwrap().extend(snapshot.events.iter().cloned());
+                    *into.combat.lock().unwrap() = Some(Arc::new(combat));
+                    // Arrival stands in for the server's schedule, so this clock has the
+                    // network's jitter in it.
+                    *into.clock.lock().unwrap() = Some((snapshot.time, Instant::now()));
+                    *into.snapshot.lock().unwrap() = Some(Arc::new(snapshot));
+                }
+                Err(e) => {
+                    eprintln!("disconnected: {e}");
+                    break;
+                }
+            }
+        })?;
+        let host = Host { backend: Backend::Remote(Link { commands, closer, received, thread: Some(thread) }), latest, player };
+        let start = Instant::now();
+        while host.snapshot().is_none() {
+            if start.elapsed() > Duration::from_secs(10) {
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "no view from the server"));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(host)
+    }
+
+    /// The world this player is in, for others to join (`net::listen`); `None` over the
+    /// network.
+    pub fn server(&self) -> Option<&Server> {
+        match &self.backend {
+            Backend::Local(server) => Some(server),
+            Backend::Remote(_) => None,
+        }
     }
 
     /// Queues a command from the local player.
     pub fn send(&self, c: Command) {
-        let _ = self.server.commands.send((self.player, c));
+        match &self.backend {
+            Backend::Local(server) => {
+                let _ = server.commands.send((self.player, c));
+            }
+            Backend::Remote(link) => {
+                let _ = link.commands.send(c);
+            }
+        }
     }
 
     /// The most recent snapshot.
@@ -235,12 +295,36 @@ impl Host {
         std::mem::take(&mut *self.latest.events.lock().unwrap())
     }
 
+    /// The world's stats in-process. Over the network only `ticks` (the newest view's) and
+    /// `bytes_out` (views received) are known.
     pub fn stats(&self) -> HostStats {
-        self.server.stats()
+        match &self.backend {
+            Backend::Local(server) => server.stats(),
+            Backend::Remote(link) => HostStats {
+                ticks: self.snapshot().map_or(0, |s| s.tick),
+                players: 1,
+                bytes_out: link.received.load(Ordering::Relaxed),
+                ..HostStats::default()
+            },
+        }
     }
 
     pub fn stop(&mut self) {
-        self.server.stop();
+        match &mut self.backend {
+            Backend::Local(server) => server.stop(),
+            Backend::Remote(link) => {
+                link.closer.close();
+                if let Some(t) = link.thread.take() {
+                    let _ = t.join();
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -411,8 +495,8 @@ mod tests {
     #[test]
     fn a_remote_player_sees_the_local_one() {
         let host = Host::start(2, "Local");
-        let listener = net::listen(host.server(), "127.0.0.1:0").unwrap();
-        let mut remote = net::Client::connect(listener.addr(), "Remote").unwrap();
+        let listener = net::listen(host.server().unwrap(), "127.0.0.1:0").unwrap();
+        let mut remote = net::Client::connect(listener.addr(), listener.certificate(), "Remote").unwrap();
         assert_ne!(remote.player, host.player);
         let (snapshot, combat) = remote.next_view().unwrap();
         assert!(snapshot.unit(host.player).is_some_and(|u| u.name == "Local"));
@@ -431,8 +515,8 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         let bots: Vec<_> = (0..4)
             .map(|i| {
-                let (addr, stop) = (listener.addr(), stop.clone());
-                std::thread::spawn(move || bots::run(addr, &format!("Bot {i}"), i, stop).unwrap())
+                let (addr, cert, stop) = (listener.addr(), listener.certificate().clone(), stop.clone());
+                std::thread::spawn(move || bots::run(addr, &cert, &format!("Bot {i}"), i, stop).unwrap())
             })
             .collect();
         std::thread::sleep(Duration::from_secs(2));
@@ -448,9 +532,9 @@ mod tests {
     #[test]
     fn the_same_name_takes_its_character_back() {
         let host = Host::start(3, "Local");
-        let listener = net::listen(host.server(), "127.0.0.1:0").unwrap();
-        let first = net::Client::connect(listener.addr(), "Wanderer").unwrap().player;
-        let again = net::Client::connect(listener.addr(), "Wanderer").unwrap().player;
+        let listener = net::listen(host.server().unwrap(), "127.0.0.1:0").unwrap();
+        let first = net::Client::connect(listener.addr(), listener.certificate(), "Wanderer").unwrap().player;
+        let again = net::Client::connect(listener.addr(), listener.certificate(), "Wanderer").unwrap().player;
         assert_eq!(first, again);
     }
 }
