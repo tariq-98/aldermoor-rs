@@ -34,7 +34,7 @@ compression is part of the asset build (the `assets` crate).
 | [Quaternius Universal Base Characters](https://quaternius.itch.io/universal-base-characters) (free tier) | Two bodies, six hairstyles and beards, two eyebrow sets | CC0 |
 | [Quaternius Modular Outfits, Fantasy](https://quaternius.itch.io/modular-character-outfits-fantasy) (free tier) | Peasant and Ranger outfits, 20 parts, two colourways each | CC0 |
 | [Quaternius Universal Animation Library 1 and 2](https://quaternius.itch.io/universal-animation-library) (free tiers) | 84 clips: locomotion, roll, sword combos, block, shield, casting, hits, deaths, farming, chopping, sitting, talking, zombies | CC0 |
-| Our own (built in `art/blender/`) | Weapons, shields, bows, staves, capes, backpacks, armour, garments, race parts, creatures, 29 more clips | Ours |
+| Our own (built in `art/blender/`) | Weapons, shields, bows, staves, capes, backpacks, armour, garments, race parts, creatures, 39 more clips | Ours |
 
 All of these share one 65-bone humanoid rig with Unreal-mannequin bone names. Downloads are listed,
 hashed and licensed in `art/vendor.json`; `art/fetch_vendor.sh` re-fetches them. The archives
@@ -210,7 +210,7 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 
 ## Clips, curves and events
 
-The library is the Universal Animation Library's 84 clips, one swing cut from them, and 29 of
+The library is the Universal Animation Library's 84 clips, one swing cut from them, and 39 of
 our own, built by
 `art/blender/build_clips.py`. Ours are keyed in code on the broad frame's skeleton: each pose
 places the item and the hands follow their sockets, so on that body every grip is exact.
@@ -223,6 +223,13 @@ places the item and the hands follow their sockets, so on that body every grip i
 | Greatsword | `GreatSword_Idle_Loop`, `GreatSword_Slash`, `GreatSword_Swing`, `GreatSword_Overhead` |
 | Drawing | `Draw_Hip` / `Sheathe_Hip` (right hand, left hip), `Draw_Hip_L` / `Sheathe_Hip_L` (the mirror), `Draw_Side` / `Sheathe_Side` (right hand, right hip), `Draw_Back` / `Sheathe_Back` (blades over the right shoulder), `Draw_Pole` / `Sheathe_Pole` (poles over the right shoulder), `Draw_Bow` / `Sheathe_Bow` (the left hand, over the left shoulder) |
 | Robes | `Idle_Robe_Loop`: the idle with the arms held a little out, clear of a skirt |
+| Climbing | `Hang_Idle_Loop` (the braced hang), `Hang_Shimmy_L_Loop` / `Hang_Shimmy_R_Loop` (one step of each hand, 0.4 s at 1.2 m/s), `Hang_ClimbUp` (onto the top, 0.8 s), `Hang_Drop` (lowering over an edge to hang, 0.6 s), `Hang_Catch` (0.2 s), `Hang_Climb_Up` / `Hang_Climb_Down` (to a hold 0.8 m up or down, 0.4 s), `Hang_Hop_L` / `Hang_Hop_R` (across a gap, 0.3 s) |
+
+**Climbing clips** are keyed on the sim's own numbers (docs/MOVEMENT.md, "Climbing"): the hands
+over an edge 1.9 m up and 0.4 m ahead of the root, the feet on the wall below. A move onto, off
+or between holds follows the sim's carry for that move, so a hand on the edge stays on it while
+the body travels, and the clip is played stretched to the move's own duration. Events: `hold`
+(the hands take a hold), `push` (pressing down over the top) and `land` (a foot on the top).
 
 **Upper-body clips** (`upper_body: true`, the draws) play on the spine, arms, neck and head over
 whatever the legs are doing. The same goes for a drawn idle while the unit moves: legs from the
@@ -244,8 +251,8 @@ later key wins. `assets::curve` implements this, and the workshop's `perform.js`
 | `arrow` | A nocked arrow shows |
 
 **Events** mark moments: `grab` (the item moves to the hand), `stow` (it moves back to where it
-rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands) and `cast` (a
-spell leaves).
+rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands), `cast` (a
+spell leaves), and for climbing `hold`, `push` and `land`.
 
 Every attack clip says when its blow lands, so a clip can be timed to strike when the
 simulation resolves the blow (CONTRACT.md, "Poses to animation"). Ours are authored; the
@@ -304,11 +311,12 @@ same kit the Swift village used, remade at the characters' quality.
   along the box so a wall follows a slope) and masonry too tall to climb, which blocks. The
   `world` crate owns the list (`crates/world/src/masonry.rs`); `ground_fields` writes it out
   with the drawn ground under each piece, and `aldermoor_art/masonry.py` builds each prop to
-  fill its blocks exactly, so the stone you see is the stone you stand on. Each prop records
-  its `blocks` (as `world` gave them, in its own frame), and `cargo test -p assets` fails if
-  `world` has moved them since: rebuild the environment art. A climbable top carries a lip of
-  worn, pale dressed stone (ART.md, "Reading the world"); masonry too tall to climb ends in
-  broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
+  fill its blocks exactly, so the stone you see is the stone you stand on, and to carry a stone
+  for each of its grips (`world::Grip`: a sill or a jamb stone you hang from, which stands in
+  nobody's way). Each prop records its `blocks` and `grips` (as `world` gave them, in its own
+  frame), and `cargo test -p assets` fails if `world` has moved them since: rebuild the
+  environment art. A climbable top carries a lip of worn, pale dressed stone (ART.md, "Reading
+  the world"), and so does every grip; masonry too tall to climb ends in broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
   metre-high wall is seen at LOD 2 from about 11 m.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
@@ -543,7 +551,8 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
   - that no piece costs more than four draws beyond its materials: parts that share a
     material are joined into one mesh at export (`export.joined`), so the renderer draws plate
     a material at a time, not a plate at a time;
-  - that every masonry prop was built for the blocks `world` stands it on;
+  - that every masonry prop was built for the blocks `world` stands it on and the grips it puts
+    on it;
   - that the ground, river and sky files exist, the terrain's layers match in size (they stack
     into texture arrays), the weights are square, the sky is twice as wide as tall, and the
     light's numbers make sense;

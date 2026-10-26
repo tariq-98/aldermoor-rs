@@ -57,13 +57,17 @@ Agreed with Chippy on 25 October 2026 (#68). The tables are `crates/content/craf
 - The chains: mine copper → smelt ingots → smith a dagger, pickaxe or sword (with an oak log for
   the handle); skin wolves → tan leather → a jerkin or (with oak) a bow; pick flax → linen → a
   padded coat; pick marigolds → a healing draught; catch trout → cook it.
-- Crafted gear isn't fine yet, and food and potions can't be used yet (#205).
+- Crafted gear isn't fine yet. Food and potions are used from the pack (ECONOMY.md).
 
 ## What the player sees
 
 The player's own state carries `skills` (level, XP and the next level's XP for all 11, in
 `content::crafts::Skill` order), `work` (the swing or item under way, with the sweet spot in
 seconds and whether this swing's strike landed), the `nodes` within 40 m (ready or growing
-back), and the `station` you stand at with each recipe and how many you could make now.
-`Event::SkillUp` marks a level. Protocol version 8. The client side (the swing bar, strike key,
-crafting window and skills panel) is #206.
+back, with the reach to work each), and the `station` you stand at with each recipe and how
+many you could make now. `Event::SkillUp` marks a level. Protocol version 8 (13 with node reach).
+
+In the client (#206), X gathers from the nearest ready node in reach or skins a dead beast, and
+pressing it again during a swing strikes. A swing bar marks the sweet spot and flashes on a hit
+or miss. Standing at a station opens its recipes, P opens the skills panel, and a skill's level
+up shows a banner.

@@ -28,7 +28,7 @@ this table, or the table changes in the same PR with the reason written down. Is
 | Client CPU, main thread | 6 ms a frame | frame median 22.7 ms vs GPU 14.5 ms with one frame in flight (#6) |
 | Sim step | 2 ms p99 at 2,000 active units | 0.52 ms mean, 0.77 ms p99 on the M1 (#58); in the cloud 0.55 ms mean, 1.05 ms p99, and 1.3 ms mean, 2.5–3.3 ms p99 with 5,000 packed within 100 m (#33) |
 | Server, each extra player | 0.1 ms a tick for their snapshot | 0.16 ms at 2,000 units on the M1 (#58) |
-| Network, down | 10 KB/s per player typical, 64 KB/s in a big fight | about 3 MB/s at 300 units in view (#34) |
+| Network, down | 10 KB/s per player typical, 64 KB/s in a big fight | wire views at 20 Hz, far units less often (#34, #278): 2.3 KB/s standing among 1,000 units in view, 16 KB/s in the perf gate's fight, 15 KB/s running through 2,000 |
 | GPU and client memory | 2 GB footprint | 1.34 GB steady, 1.9 GB peak while loading (#6) |
 | Launch to playable | 5 s | 4.1 s to first frame and exit (#6) |
 
@@ -45,8 +45,8 @@ instances and fit inside these numbers.
 | Area | Budget | Last measured |
 | --- | --- | --- |
 | Server region tick (step, interest, sends) | 16.7 ms at 200 players and 2,000 monsters | 1.14 ms step (#33) plus 92 ms building views at 200 bots (#189, load test) |
-| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | about 0.8 ms, a full snapshot every tick (#34); finding its neighbours from a grid is 0.005 ms (#73) |
-| Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | about 3 MB/s at 300 units in view (#34) |
+| Server, each player's view | 0.02 ms at a 20–30 Hz send rate | 0.1 ms with 1,000 units in view, picked from a frame a step shared by every player (0.6 ms a step at 2,000 units); was 0.3 ms to build and 0.2 ms to encode (#286) |
+| Network, down, MMO | 20 KB/s per player typical, 64 KB/s in a 100v100 fight | 23 KB/s per bot at 50 bots and 60 ticks a second in the load test, 42 KB/s at 200; the perf gate's `players` scene (200 players and 2,000 monsters, all in view) 61 KB/s, measured over 5 s (#278, #286) |
 | Server out, one region | 4 MB/s at 200 players | 2.8 GB/s at 200 players (#73) |
 | Client: crowd of 200 characters | 4 ms GPU and 3 ms CPU together, inside the frame budgets above | not built (#75) |
 

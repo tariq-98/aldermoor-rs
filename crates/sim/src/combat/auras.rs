@@ -6,8 +6,8 @@ use glam::Vec2;
 use protocol::{Avoid, Event};
 
 use super::{emit, entity, now, HitSource};
-use crate::content::{catalog, AuraDef, AuraId, Cc, Effect, Rank};
-use crate::stats::{diminish, scale, DEFIANCE_BACK, DEFIANCE_PER_SECOND, DR_WINDOW};
+use crate::content::{catalog, AuraDef, AuraId, Cc, Effect, Pvp, Rank};
+use crate::stats::{diminish, scale, DEFIANCE_BACK, DEFIANCE_PER_SECOND, DR_WINDOW, PVP_DR_WINDOW};
 use crate::{AuraInstance, Auras, Brain, Control, ForcedKind, Motion, Transform, Unit, Vitals};
 
 /// The sum of `f` over a unit's auras, each counted once per stack.
@@ -112,6 +112,12 @@ pub fn apply(world: &mut World, id: AuraId, te: Entity, src: &HitSource) -> bool
     let mut duration = def.duration;
     let t = now(world);
     let target = super::unit_id(world, te).unwrap_or(0);
+    // On an enemy player: the aura's and the ability's PvP lengths.
+    let length = def.pvp.duration * src.ability.map_or(1.0, |a| cat.ability(a).pvp.duration);
+    let pvp = (def.cc.is_some() || length != 1.0) && super::pvp(world, src, te);
+    if pvp {
+        duration *= length as f64;
+    }
     if let Some(cc) = def.cc {
         let broken = def.key == "broken";
         let ctl = compute(world, te);
@@ -146,7 +152,7 @@ pub fn apply(world: &mut World, id: AuraId, te: Entity, src: &HitSource) -> bool
             }
             duration *= mult;
             dr.count += 1;
-            dr.reset_at = t + DR_WINDOW;
+            dr.reset_at = t + if pvp { PVP_DR_WINDOW } else { DR_WINDOW };
         }
         if cc.hard() {
             super::abilities::cancel_cast(world, te, true);
@@ -164,6 +170,7 @@ pub fn apply(world: &mut World, id: AuraId, te: Entity, src: &HitSource) -> bool
             i.power = src.power;
             i.level = src.level;
             i.absorb_left = i.absorb_left.max(absorb);
+            i.player = src.player;
         }
         None => {
             a.list.push(AuraInstance {
@@ -176,6 +183,7 @@ pub fn apply(world: &mut World, id: AuraId, te: Entity, src: &HitSource) -> bool
                 stacks: 1,
                 next_tick: t + def.tick.as_ref().map_or(0.0, |(every, _)| *every),
                 absorb_left: absorb,
+                player: src.player,
             });
             emit(world, Event::AuraApplied { unit: target, aura: def.key.to_string() });
         }
@@ -305,8 +313,9 @@ pub fn update(world: &mut World) {
                     faction: entity(world, inst.source).and_then(|s| world.get::<Unit>(s)).map_or(crate::Faction::Hostile, |u| u.faction),
                     ability: None,
                     from: world.get::<Transform>(e).map_or(glam::Vec3::ZERO, |t| t.pos),
+                    player: inst.player,
                 };
-                periodic(world, effect, inst.stacks, e, &src);
+                periodic(world, effect, def.pvp, inst.stacks, e, &src);
                 if world.get::<Vitals>(e).is_none_or(|v| v.dead) {
                     break;
                 }
@@ -330,13 +339,15 @@ pub fn update(world: &mut World) {
     crate::return_units(world, entities);
 }
 
-fn periodic(world: &mut World, effect: &Effect, stacks: u8, e: Entity, src: &HitSource) {
+fn periodic(world: &mut World, effect: &Effect, pvp: Pvp, stacks: u8, e: Entity, src: &HitSource) {
     let k = stacks as f32;
     match effect {
         Effect::Damage { base, coeff } => {
+            let k = if pvp.damage != 1.0 && super::pvp(world, src, e) { k * pvp.damage } else { k };
             super::effects::deal_damage(world, src, e, (base * scale(src.level) + coeff * src.power) * k, false, true);
         }
         Effect::Heal { base, coeff } => {
+            let k = k * super::effects::healing(world, pvp, e);
             super::effects::heal(world, src, e, (base * scale(src.level) + coeff * src.power) * k, false);
         }
         _ => {}

@@ -2,7 +2,7 @@
 //! warned blows, guards and parries, blows from behind, being downed, help, summons, combos,
 //! and what all of it looks like from outside.
 
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use glam::{Vec2, Vec3};
 use protocol::{Avoid, Command, Event, HitWeight, ResourceKind, Shape};
@@ -887,6 +887,50 @@ fn aimed_shots_miss_a_target_that_steps_aside_unless_you_lead_it() {
     assert!(shoot(true).0, "an arrow at where it was going should hit");
 }
 
+/// Looses one aimed arrow at a point `off` metres beside a still target 20 m away, past the
+/// edge of its body. Returns whether it struck.
+fn near_miss(off: f32, player: bool) -> bool {
+    let mut f = Fight::new();
+    let archer = f.hero(Specialty::Archer, 1, ROAD, 0.0);
+    let at = ROAD + Vec2::new(0.0, 20.0);
+    let target = if player { f.foe(Specialty::Warrior, 1, at, PI) } else { f.dummy("goblin", at, PI) };
+    f.run(0.5);
+    f.target(archer, target);
+    let radius = f.sim.get::<sim::Body>(target).unwrap().radius;
+    let ground = f.sim.get::<Transform>(target).unwrap().pos + Vec3::X * (radius + off);
+    f.cmd(archer, Command::UseSlot { slot: 0, ground: Some(ground) });
+    f.cmd(archer, Command::SetAutoAttack(false));
+    f.run(0.8);
+    f.damage_to(target) > 0.0
+}
+
+#[test]
+fn a_near_miss_lands_on_a_monster_but_not_on_a_player() {
+    assert!(near_miss(0.2, false), "0.2 m beside a monster should land");
+    assert!(!near_miss(0.2, true), "0.2 m beside a player should miss");
+    assert!(near_miss(0.05, true), "a shot grazing a player still lands");
+    assert!(!near_miss(0.6, false), "a wide miss still misses");
+}
+
+#[test]
+fn magnetism_still_gives_the_shot_to_the_first_body_in_its_path() {
+    let mut f = Fight::new();
+    let archer = f.hero(Specialty::Archer, 1, ROAD, 0.0);
+    let far = f.dummy("goblin", ROAD + Vec2::new(0.0, 20.0), PI);
+    // A second goblin in the way, just beside the line.
+    let near = f.dummy("goblin", ROAD + Vec2::new(0.0, 10.0), PI);
+    f.run(0.5);
+    let r = f.sim.get::<sim::Body>(near).unwrap().radius;
+    f.sim.get_mut::<Transform>(near).unwrap().pos.x += r + 0.2;
+    f.target(archer, far);
+    let ground = f.sim.get::<Transform>(far).unwrap().pos;
+    f.cmd(archer, Command::UseSlot { slot: 0, ground: Some(ground) });
+    f.cmd(archer, Command::SetAutoAttack(false));
+    f.run(0.8);
+    assert!(f.damage_to(near) > 0.0, "the nearer goblin takes it");
+    assert_eq!(f.damage_to(far), 0.0);
+}
+
 #[test]
 fn homing_missiles_follow_their_target() {
     let mut f = Fight::new();
@@ -1212,4 +1256,20 @@ fn hit_directions_are_256ths_of_a_turn_from_south() {
     assert_eq!(quantise_yaw(PI), 128);
     assert_eq!(quantise_yaw(-PI / 2.0), 192);
     assert_eq!(quantise_yaw(-0.001), 0);
+}
+
+#[test]
+fn masonry_too_tall_to_climb_blocks_sight_and_low_walls_do_not() {
+    // #311: a goblin archer north of the ruined hall's gable, a hero inside the hall behind it.
+    let mut f = Fight::new();
+    let archer = f.dummy("goblin_archer", Vec2::new(-18.0, 38.5), 0.0);
+    let hero = f.hero(Specialty::Warrior, 1, Vec2::new(-18.0, 44.5), PI);
+    f.step();
+    assert!(!f.force(archer, "goblin_shot", Some(hero)), "shot through the gable");
+    // Across a field wall, about a metre high, the same shot goes off.
+    let mut f = Fight::new();
+    let archer = f.dummy("goblin_archer", Vec2::new(5.0, 8.0), FRAC_PI_2);
+    let hero = f.hero(Specialty::Warrior, 1, Vec2::new(11.0, 8.0), -FRAC_PI_2);
+    f.step();
+    assert!(f.force(archer, "goblin_shot", Some(hero)), "a field wall hid the hero");
 }

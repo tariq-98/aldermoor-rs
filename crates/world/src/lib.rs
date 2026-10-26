@@ -7,9 +7,11 @@
 
 use glam::{Vec2, Vec3};
 
+mod holds;
 mod masonry;
 mod noise;
-pub use masonry::{Block, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
+pub use holds::{Hold, Holds, HANG_MIN_DROP};
+pub use masonry::{Block, Grip, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
 pub use noise::{fbm, hash, mix, noise, smooth, Lcg};
 
 /// Something you can't walk through: a box on the ground, turned by `yaw`.
@@ -55,6 +57,43 @@ impl Solid {
         Vec2::new(c * d.x - s * d.y, s * d.x + c * d.y)
     }
 
+    /// A direction in the box's own frame, turned back into the world's.
+    #[inline]
+    fn unturn(&self, v: Vec2) -> Vec2 {
+        let (s, c) = self.yaw.sin_cos();
+        Vec2::new(c * v.x + s * v.y, -s * v.x + c * v.y)
+    }
+
+    /// The highest its top goes, if it has one.
+    #[inline]
+    fn top_max(&self) -> Option<f32> {
+        Some(self.top? + self.rise.abs() * self.half.x)
+    }
+
+    /// Whether a circle of `radius` at `p` might touch the box: a cheap test before
+    /// [`Solid::overlaps`].
+    #[inline]
+    fn near(&self, p: Vec2, radius: f32) -> bool {
+        (p - self.center).length_squared() < (self.reach() + radius).powi(2)
+    }
+
+    /// The height of the top where the box comes nearest `p`, if it has one.
+    #[inline]
+    fn top_nearest(&self, p: Vec2) -> Option<f32> {
+        Some(self.top? + self.rise * self.local(p).x.clamp(-self.half.x, self.half.x))
+    }
+
+    /// Where a circle of `radius` at `p`, overlapping the box, stops touching it: moved straight
+    /// out through the side it's nearest.
+    fn push_out(&self, p: Vec2, radius: f32) -> Vec2 {
+        let local = self.local(p);
+        // A hair past touching, so the turn back into the world's frame can't leave it overlapping.
+        let reach = self.half + Vec2::splat(radius + 1e-4);
+        let out = reach - local.abs();
+        let moved = if out.x < out.y { Vec2::new(reach.x.copysign(local.x), local.y) } else { Vec2::new(local.x, reach.y.copysign(local.y)) };
+        p + self.unturn(moved - local)
+    }
+
     /// Half-size of the box's footprint once turned, for broad-phase grids.
     fn reach(&self) -> f32 {
         self.half.length()
@@ -81,6 +120,8 @@ pub struct Valley {
     /// The field walls and the ruin: what the renderer draws, and the solids at the end of
     /// `solids` that you climb onto (or that stop you).
     pub masonry: Vec<Masonry>,
+    /// The edges you can hang from (docs/MOVEMENT.md, "Climbing").
+    pub holds: Holds,
     grid: Grid,
     /// The solids with a top, for [`Valley::ground`], and the box round them all (most of the
     /// valley has none, and `ground` is called a lot).
@@ -170,7 +211,9 @@ impl Valley {
         solids.extend(masonry.iter().flat_map(Masonry::solids));
         let (grid, tops) = Grid::split(&solids);
         let tops_box = tops_box(&solids);
-        Valley { solids, houses, trees, masonry, grid, tops, tops_box, heights }
+        let mut valley = Valley { solids, houses, trees, masonry, holds: Holds::default(), grid, tops, tops_box, heights };
+        valley.holds = Holds::build(&valley);
+        valley
     }
 
     /// Adds a solid after the valley is built (for tests, and props placed by later layers).
@@ -178,6 +221,7 @@ impl Valley {
         self.solids.push(s);
         (self.grid, self.tops) = Grid::split(&self.solids);
         self.tops_box = tops_box(&self.solids);
+        self.holds = Holds::build(self);
     }
 
     /// The ground a walker stands on, including the bridge deck: the terrain as it is drawn
@@ -218,6 +262,96 @@ impl Valley {
         self.grid.near(p, radius).any(|i| self.solids[i as usize].overlaps(p, radius))
     }
 
+    /// Where a walker of `radius` at `p` stands once it's off the sides of the solids with a top
+    /// higher than `above` (a face too tall to step onto): a radius short of them, as obstacles
+    /// stop it (#216). `p` when it touches none.
+    pub fn off_faces(&self, mut p: Vec2, radius: f32, above: f32) -> Vec2 {
+        let (lo, hi) = self.tops_box;
+        if p.cmplt(lo - Vec2::splat(radius)).any() || p.cmpgt(hi + Vec2::splat(radius)).any() {
+            return p;
+        }
+        // Twice, for an inner corner, where moving off one face can put the body on the other.
+        for _ in 0..2 {
+            let mut moved = false;
+            for i in self.tops.near(p, radius) {
+                let s = &self.solids[i as usize];
+                // Most solids near are low walls, or not that near: ruled out before turning `p`
+                // into their frame.
+                if s.top_max().is_none_or(|top| top <= above) || !s.near(p, radius) {
+                    continue;
+                }
+                if s.overlaps(p, radius) && s.top_nearest(p).is_some_and(|top| top > above) {
+                    p = s.push_out(p, radius);
+                    moved = true;
+                }
+            }
+            if !moved {
+                break;
+            }
+        }
+        p
+    }
+
+    /// The wall a walker of `radius` at `p` going along `dir` (a unit vector) meets within
+    /// `reach`, if it's one it can't step onto: a solid with a top higher than `above`, or an
+    /// obstacle at least 2 m across and 0.6 m deep (a building's wall, not a tree or a parapet).
+    /// The wall's outward normal, and how far the body is short of touching it.
+    pub fn wall_ahead(&self, p: Vec2, dir: Vec2, radius: f32, reach: f32, above: f32) -> Option<(Vec2, f32)> {
+        let probe = p + dir * reach;
+        let mut best: Option<(f32, Vec2)> = None;
+        for i in self.grid.near(probe, radius).chain(self.tops.near(probe, radius)) {
+            let s = &self.solids[i as usize];
+            if s.top_max().is_some_and(|top| top <= above) || !s.near(probe, radius) || !s.overlaps(probe, radius) || s.top_nearest(p).is_some_and(|top| top <= above) {
+                continue;
+            }
+            // The side the body is in front of, and how far short of it.
+            let local = s.local(p);
+            let short = local.abs() - s.half - Vec2::splat(radius);
+            let (normal, gap, across, deep) = if short.x > short.y {
+                (Vec2::new(local.x.signum(), 0.0), short.x, s.half.y, s.half.x)
+            } else {
+                (Vec2::new(0.0, local.y.signum()), short.y, s.half.x, s.half.y)
+            };
+            if s.top.is_none() && (across < 1.0 || deep < 0.3) {
+                continue;
+            }
+            if best.is_none_or(|b| gap < b.0) {
+                best = Some((gap, s.unturn(normal)));
+            }
+        }
+        best.map(|(gap, normal)| (normal, gap.max(0.0)))
+    }
+
+    /// The first top of a solid that a walker at `from` going along `dir` (a unit vector) meets
+    /// within `dist`: a point on it halfway through (or `dist` along, if that comes first), and
+    /// its height there. Finds walls too thin for [`Valley::ground`]'s samples to catch.
+    pub fn top_ahead(&self, from: Vec2, dir: Vec2, dist: f32) -> Option<(Vec2, f32)> {
+        let mut best: Option<(f32, Vec2, f32)> = None;
+        for i in self.tops.near(from, dist.min(1.5)) {
+            let s = &self.solids[i as usize];
+            let Some(top) = s.top else { continue };
+            let (o, d) = (s.local(from), s.local(from + dir) - s.local(from));
+            let (mut t0, mut t1) = (0.0f32, dist);
+            for (o, d, h) in [(o.x, d.x, s.half.x), (o.y, d.y, s.half.y)] {
+                if d.abs() < 1e-6 {
+                    if o.abs() >= h {
+                        t1 = -1.0;
+                    }
+                    continue;
+                }
+                let (a, b) = ((-h - o) / d, (h - o) / d);
+                t0 = t0.max(a.min(b));
+                t1 = t1.min(a.max(b));
+            }
+            if t0 < t1 && best.is_none_or(|b| t0 < b.0) {
+                let t = (t0 + t1) / 2.0;
+                let p = from + dir * t;
+                best = Some((t0, p, top + s.rise * s.local(p).x));
+            }
+        }
+        best.map(|(_, p, h)| (p, h))
+    }
+
     /// How deep the river is at (x, z): from its surface down to the ground (or the bridge
     /// deck, which is above it). 0 away from the river.
     pub fn water_depth(&self, x: f32, z: f32) -> f32 {
@@ -230,6 +364,18 @@ impl Valley {
     /// Moves `from` by `delta`, sliding along anything in the way (in short steps so nothing is
     /// tunnelled through).
     pub fn slide(&self, from: Vec2, delta: Vec2, radius: f32) -> Vec2 {
+        self.slide_where(from, delta, |p| self.blocked(p, radius))
+    }
+
+    /// Moves `from` by `delta` as [`Valley::slide`] does, also stopped a radius short of the faces
+    /// of solids whose tops stand higher than `above`: the masonry a body moving with its feet
+    /// below that can't step onto (#311). For moves the controls don't steer: rolls, leaps,
+    /// knockbacks, blinks.
+    pub fn slide_below(&self, from: Vec2, delta: Vec2, radius: f32, above: f32) -> Vec2 {
+        self.slide_where(from, delta, |p| self.blocked(p, radius) || self.on_face(p, radius, above))
+    }
+
+    fn slide_where(&self, from: Vec2, delta: Vec2, stopped: impl Fn(Vec2) -> bool) -> Vec2 {
         let len = delta.length();
         if len < 1e-6 {
             return from;
@@ -239,17 +385,40 @@ impl Valley {
         let mut p = from;
         for _ in 0..steps {
             let next = p + d;
-            if !self.blocked(next, radius) {
+            if !stopped(next) {
                 p = next;
-            } else if !self.blocked(Vec2::new(next.x, p.y), radius) {
+            } else if !stopped(Vec2::new(next.x, p.y)) {
                 p.x = next.x;
-            } else if !self.blocked(Vec2::new(p.x, next.y), radius) {
+            } else if !stopped(Vec2::new(p.x, next.y)) {
                 p.y = next.y;
             } else {
                 break;
             }
         }
         p
+    }
+
+    /// Whether a walker of `radius` at `p` stands in the side of a solid whose top is higher
+    /// than `above`: a face too tall for it to step onto (see [`Valley::off_faces`]).
+    pub fn on_face(&self, p: Vec2, radius: f32, above: f32) -> bool {
+        let (lo, hi) = self.tops_box;
+        if p.cmplt(lo - Vec2::splat(radius)).any() || p.cmpgt(hi + Vec2::splat(radius)).any() {
+            return false;
+        }
+        self.tops.near(p, radius).any(|i| {
+            let s = &self.solids[i as usize];
+            s.top_max().is_some_and(|top| top > above) && s.near(p, radius) && s.overlaps(p, radius) && s.top_nearest(p).is_some_and(|top| top > above)
+        })
+    }
+
+    /// The highest top of the solids standing at `p`, if any: masonry, without the terrain under
+    /// it.
+    pub fn top_at(&self, p: Vec2) -> Option<f32> {
+        let (lo, hi) = self.tops_box;
+        if p.cmplt(lo).any() || p.cmpgt(hi).any() {
+            return None;
+        }
+        self.tops.near(p, 0.0).filter_map(|i| self.solids[i as usize].top_at(p)).reduce(f32::max)
     }
 }
 
@@ -369,13 +538,13 @@ impl Heights {
     }
 }
 
-/// Obstacles bucketed into 16 m cells, so a collision check looks at a handful, not all of them.
+/// Obstacles bucketed into 8 m cells, so a collision check looks at a handful, not all of them.
 #[derive(Clone)]
 struct Grid {
     cells: Vec<Vec<u16>>,
 }
 
-const CELL: f32 = 16.0;
+const CELL: f32 = 8.0;
 const SIDE: usize = ((BOUNDS * 2.0 / CELL) as usize) + 2;
 
 impl Grid {
@@ -516,6 +685,56 @@ mod tests {
         let mid = v.surface(x0 + 1.0, z0 + 1.0);
         let ends = (height(x0 + 2.0, z0) + height(x0, z0 + 2.0)) / 2.0;
         assert!((mid - ends).abs() < 1e-4, "{mid} vs {ends}");
+    }
+
+    /// A wall 3 m tall, 0.9 m deep and 6 m long by the road, turned a little off the grid.
+    fn with_a_tall_wall() -> (Valley, Solid, f32) {
+        let mut v = Valley::new();
+        let ground = v.ground(8.0, 12.0);
+        let wall = Solid { center: Vec2::new(8.0, 12.0), half: Vec2::new(0.45, 3.0), yaw: 0.3, top: Some(ground + 3.0), rise: 0.0 };
+        v.add_solid(wall);
+        (v, wall, ground)
+    }
+
+    #[test]
+    fn faces_too_tall_to_step_onto_stop_walkers_a_body_short() {
+        let (v, wall, ground) = with_a_tall_wall();
+        // A body overlapping the wall's west face moves straight out, to a radius from it.
+        let into = wall.center + wall.unturn(Vec2::new(-0.6, 0.5));
+        let out = v.off_faces(into, 0.4, ground + 1.5);
+        let local = wall.local(out);
+        assert!((local.x + 0.85).abs() < 1e-3 && (local.y - 0.5).abs() < 1e-3, "moved to {local} in the wall's frame");
+        assert!(!wall.overlaps(out, 0.4));
+        // A top low enough to step onto is ground, not a face: the body stays.
+        assert_eq!(v.off_faces(into, 0.4, ground + 3.5), into);
+        // And so does one clear of it.
+        let clear = wall.center + wall.unturn(Vec2::new(-1.0, 0.0));
+        assert_eq!(v.off_faces(clear, 0.4, ground + 1.5), clear);
+    }
+
+    #[test]
+    fn a_wall_ahead_is_a_face_too_tall_to_step_onto_or_a_buildings_side() {
+        let (v, wall, ground) = with_a_tall_wall();
+        // 0.1 m short of the wall's west face, heading into it.
+        let at = wall.center + wall.unturn(Vec2::new(-0.95, 0.0));
+        let into = wall.unturn(Vec2::X);
+        let (normal, gap) = v.wall_ahead(at, into, 0.4, 0.25, ground + 1.5).expect("no wall ahead");
+        assert!(normal.dot(-into) > 0.999 && (gap - 0.1).abs() < 1e-3, "{normal} {gap}");
+        // Not when it's low enough to step onto, out of reach, or off to the side.
+        assert!(v.wall_ahead(at, into, 0.4, 0.25, ground + 3.5).is_none());
+        assert!(v.wall_ahead(at - into, into, 0.4, 0.25, ground + 1.5).is_none());
+        assert!(v.wall_ahead(at, wall.unturn(Vec2::Y), 0.4, 0.25, ground + 1.5).is_none());
+        // A cottage's side is a wall; a tree and the bridge's parapet aren't.
+        let side = |s: &Solid| (s.center + s.unturn(Vec2::new(0.0, -(s.half.y + 0.45))), s.unturn(Vec2::Y));
+        let cottage = v.solids[0];
+        let (p, d) = side(&cottage);
+        assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_some(), "no wall at the cottage");
+        let tree = v.solids.iter().find(|s| s.top.is_none() && s.half.x < 0.7).unwrap();
+        let (p, d) = side(tree);
+        assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_none(), "a tree is a wall");
+        let parapet = v.solids.iter().find(|s| s.top.is_none() && s.half.x == 0.2).unwrap();
+        let p = parapet.center + Vec2::new(-0.65, 0.0);
+        assert!(v.wall_ahead(p, Vec2::X, 0.4, 0.25, f32::INFINITY).is_none(), "the parapet is a wall");
     }
 
     #[test]

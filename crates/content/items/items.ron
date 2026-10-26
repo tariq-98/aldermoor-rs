@@ -59,9 +59,9 @@
         (key: "rod.fishing", name: "Fishing Rod", kind: Tool, value: 20, tags: ["tool", "wood"]),
 
         // Food and drink.
-        (key: "bread", name: "Bread", kind: Consumable, value: 3, stack: 20, tags: ["food"]),
-        (key: "grilled_trout", name: "Grilled Trout", kind: Consumable, value: 10, stack: 20, tags: ["food"]),
-        (key: "healing_draught", name: "Healing Draught", kind: Consumable, value: 25, stack: 10, tags: ["potion"]),
+        (key: "bread", name: "Bread", kind: Consumable, value: 3, stack: 20, tags: ["food"], effect: Some("fed")),
+        (key: "grilled_trout", name: "Grilled Trout", kind: Consumable, value: 10, stack: 20, tags: ["food"], effect: Some("well_fed")),
+        (key: "healing_draught", name: "Healing Draught", kind: Consumable, value: 25, stack: 10, tags: ["potion"], effect: Some("draught_healing")),
 
         // Junk.
         (key: "goblin_trinket", name: "Goblin Trinket", kind: Junk, value: 10, stack: 20, tags: ["junk"]),

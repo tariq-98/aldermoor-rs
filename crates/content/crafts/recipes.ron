@@ -39,7 +39,7 @@
         (key: "orb.focus", skill: Enchanting, level: 5, station: "altar", inputs: [("rough_garnet", 1), ("copper_ingot", 1)], output: ("orb.focus", 1), seconds: 5.0, xp: 60),
         (key: "wand.yew", skill: Enchanting, level: 10, station: "altar", inputs: [("yew_log", 2), ("silverleaf", 2)], output: ("wand.yew", 1), seconds: 5.0, xp: 90),
 
-        // Cooking and alchemy. What food and potions do when used comes with using items (#205).
+        // Cooking and alchemy. What food and potions do when used is their `effect` in items.ron.
         (key: "grilled_trout", skill: Cooking, station: "fire", inputs: [("river_trout", 1)], output: ("grilled_trout", 1), seconds: 2.0, xp: 12),
         (key: "healing_draught", skill: Alchemy, station: "alchemy_table", inputs: [("marigold", 3)], output: ("healing_draught", 1), seconds: 3.0, xp: 25),
     ],

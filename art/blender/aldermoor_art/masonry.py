@@ -346,12 +346,18 @@ def heads(all_pieces):
 #
 # Its blocks come from `world` in the hall's own frame (here x across, y = −z along, the gable at
 # −y facing the village). What stands too tall to climb is drawn taller still, so it never looks
-# like a ledge: the gable rises to 9 m with a lancet window, an oculus and an empty bellcote,
-# buttressed at its corners; the door's jambs carry a pointed arch. The rest has broken down in
-# steps, each top a course of worn, pale capstones.
+# like a ledge: the gable's buttresses and the door's jambs, which carry a pointed arch. The rest
+# has broken down in steps, each top a course of worn, pale capstones. The gable rises to 9 m with
+# a lancet window, an oculus and an empty bellcote, and climbs (#249): its coping, the blocks' raked
+# tops, is walked up to the bellcote, and its grips (a sill, jamb stones, a keystone) stand proud
+# of its outer face. Everything you can climb has the same pale, worn top (docs/ART.md, "Reading
+# the world").
 
-EAVES, APEX = 6.0, 9.0
 CAP = 0.15
+# Grip stones run this far back into the wall behind their proud fronts, and stand this tall.
+GRIP_BACK, GRIP_HEIGHT = 0.12, 0.24
+# Parts built by `_gable` from the gable's blocks rather than as stepped walls.
+GABLE_PARTS = ("gable", "bellcote")
 
 
 def _rect(b):
@@ -447,6 +453,13 @@ def ruin_hall(piece, lod, seed):
     """The ruined hall at a level of detail (0, 1 or 2). Returns its objects."""
     rng = random.Random(seed)
     ground = Ground(piece["ground"])
+    gable_blocks = piece
+    # Everything but the gable sees it as one wall, first, as it stood before it climbed, so the
+    # rest of the hall comes out stone for stone as it did.
+    pieces = [b for b in piece["blocks"] if b["part"] in GABLE_PARTS]
+    whole = {"part": "gable", "center": [0.0, pieces[0]["center"][1]], "half": [max(abs(b["center"][0]) + b["half"][0] for b in pieces), pieces[0]["half"][1]],
+             "yaw": 0.0, "top": None, "rise": 0.0}
+    piece = dict(piece, blocks=[whole] + [b for b in piece["blocks"] if b["part"] not in GABLE_PARTS])
     rubble, dressed = env.surface("rubble")[0], env.surface("dressed")[0]
     step = (0.45, 0.75, None)[lod]
     walls, stones = [], []
@@ -491,7 +504,7 @@ def ruin_hall(piece, lod, seed):
             capstones(x0, x1, y0, y1, b["top"], along)
         elif part == "fallen":
             stones.append(_fallen(b, ground, dressed, rng, lod))
-    gable = _gable(piece, ground, rubble, dressed, rng, lod, step, walls, stones)
+    gable = _gable(gable_blocks, ground, rubble, dressed, rng, lod, step, walls, stones)
     for b in piece["blocks"]:
         if b["part"] == "buttress":
             _buttress(_rect(b), ground, rubble, dressed, rng, lod, walls, stones)
@@ -532,13 +545,35 @@ def _fallen(b, ground, mat, rng, lod):
     return st
 
 
+def _top_at(b, x):
+    """A raked block's top at x, from its top at its middle and its rise."""
+    return b["top"] + b["rise"] * (x - b["center"][0])
+
+
+def _lift(rise, thick, over):
+    """How far the top of a coping stands above the rake it sits on: stones `thick` deep, their
+    middles `over` above the rake, on a rake rising `rise` a metre."""
+    return over + thick / 2 / math.cos(math.atan(abs(rise)))
+
+
 def _gable(piece, ground, rubble, dressed, rng, lod, step, walls, stones):
-    """The gable end: 7.2 m across, eaves at EAVES and the apex at APEX, a lancet window and an
-    oculus through it, raked coping up both slopes and an empty bellcote on top."""
-    b = next(b for b in piece["blocks"] if b["part"] == "gable")
-    x0, x1, y0, y1 = _rect(b)
+    """The gable end: 7.2 m across, eaves at 6 m and the apex at 9 m, a lancet window and an
+    oculus through it, raked coping up both slopes and an empty bellcote on top, all where its
+    blocks say: the coping's top is their raked tops, the bellcote's coping its blocks'. Then a
+    dressed stone for each of its grips, standing proud of the face."""
+    halves = sorted((b for b in piece["blocks"] if b["part"] == "gable"), key=lambda b: b["center"][0])
+    bells = sorted((b for b in piece["blocks"] if b["part"] == "bellcote"), key=lambda b: b["center"][0])
+    x0, _, y0, y1 = _rect(halves[0])
+    x1 = _rect(halves[-1])[1]
+    eaves = _top_at(halves[0], x0) - _lift(halves[0]["rise"], 0.24, 0.12)
+    apex = _top_at(halves[0], 0.0) - _lift(halves[0]["rise"], 0.24, 0.12)
+    bw = -_rect(bells[0])[0]
+    bell_eaves = _top_at(bells[0], -bw) - _lift(bells[0]["rise"], 0.16, 0.09)
+    bell_apex = _top_at(bells[0], 0.0) - _lift(bells[0]["rise"], 0.16, 0.09)
     z0 = _foot(ground, x0, x1, y0, y1)
-    outline = [(x0, z0), (x1, z0), (x1, EAVES), (0.0, APEX), (x0, EAVES)]
+    # Up the rakes to the bellcote, which stands on the masonry 0.8 m below the apex.
+    shoulder = apex - (apex - eaves) * bw / x1
+    outline = [(x0, z0), (x1, z0), (x1, eaves), (bw, shoulder), (bw, apex - 0.8), (-bw, apex - 0.8), (-bw, shoulder), (x0, eaves)]
     ob = _outline_prism("gable", outline, y0, y1, rubble)
     cutters = [_outline_prism("lancet", _pointed(0.0, 1.1, 5.3, 6.45, below=2.6), y0 - 0.3, y1 + 0.3, rubble)]
     if lod < 2:
@@ -559,12 +594,10 @@ def _gable(piece, ground, rubble, dressed, rng, lod, step, walls, stones):
                 stones.append(_box("jamb", Vector((xi + side * w / 2, (y0 + y1) / 2, z + h / 2)), (w, y1 - y0 + 0.04, h - 0.012), dressed,
                                    bevel=0.015 if lod == 0 else 0.0, segments=1))
             z += h
-        stones.append(_box("sill", Vector((0, (y0 + y1) / 2 - 0.05, 2.6 - 0.09)), (1.5, y1 - y0 + 0.14, 0.18), dressed,
-                           bevel=0.02 if lod == 0 else 0.0, segments=1))
-    # Raked coping up both slopes, kneelers at the eaves.
+    # Raked coping up both slopes to the bellcote, kneelers at the eaves.
     for side in (-1, 1):
-        a = Vector((side * 3.6, 0, EAVES))
-        tip = Vector((0, 0, APEX))
+        a = Vector((x1 if side > 0 else x0, 0, eaves))
+        tip = Vector((side * bw, 0, shoulder))
         run = (tip - a).length
         d = (tip - a).normalized()
         n = max(4, int(run / 0.55))
@@ -576,18 +609,34 @@ def _gable(piece, ground, rubble, dressed, rng, lod, step, walls, stones):
             centre = Vector((c.x, (y0 + y1) / 2, c.z)) + Vector((0, 0, 0.12))
             stones.append(_box("coping", centre, (l - 0.015, y1 - y0 + 0.12, 0.24), dressed, rot=Matrix.Rotation(-math.atan2(d.z, d.x), 3, "Y"),
                                bevel=0.025 if lod == 0 else 0.0, segments=1))
-        stones.append(_box("kneeler", Vector((side * 3.35, (y0 + y1) / 2, EAVES - 0.1)), (0.75, y1 - y0 + 0.14, 0.42), dressed,
+        end = x1 if side > 0 else x0
+        stones.append(_box("kneeler", Vector((end - side * 0.25, (y0 + y1) / 2, eaves - 0.1)), (0.75, y1 - y0 + 0.14, 0.42), dressed,
                            bevel=0.03 if lod == 0 else 0.0, segments=1))
     # The bellcote: a pierced gable on the apex, the bell long gone.
     yc = (y0 + y1) / 2
-    bell = _outline_prism("bellcote", [(-0.75, APEX - 0.9), (0.75, APEX - 0.9), (0.75, APEX + 0.95), (0.0, APEX + 1.6), (-0.75, APEX + 0.95)],
+    bell = _outline_prism("bellcote", [(-bw, apex - 0.9), (bw, apex - 0.9), (bw, bell_eaves), (0.0, bell_apex), (-bw, bell_eaves)],
                           y0 + 0.08, y1 - 0.08, rubble)
-    _cut(bell, [_outline_prism("bell", _pointed(0.0, 0.56, APEX + 0.35, APEX + 0.85, below=APEX - 0.05), y0 - 0.3, y1 + 0.3, rubble)])
+    _cut(bell, [_outline_prism("bell", _pointed(0.0, 0.56, apex + 0.35, apex + 0.85, below=apex - 0.05), y0 - 0.3, y1 + 0.3, rubble)])
     walls.append(bell)
+    rake = bell_apex - bell_eaves
     for side in (-1, 1):
-        mid = Vector((side * 0.375, yc, APEX + 0.95 + 0.325 + 0.09))
-        stones.append(_box("coping", mid, (0.99, y1 - y0 - 0.06, 0.16), dressed, rot=Matrix.Rotation(side * math.atan2(0.65, 0.75), 3, "Y"),
-                           bevel=0.02 if lod == 0 else 0.0, segments=1))
+        mid = Vector((side * bw / 2, yc, bell_eaves + rake / 2 + 0.09))
+        stones.append(_box("coping", mid, (math.hypot(bw, rake), y1 - y0 - 0.06, 0.16), dressed,
+                           rot=Matrix.Rotation(side * math.atan2(rake, bw), 3, "Y"), bevel=0.02 if lod == 0 else 0.0, segments=1))
+    # The grips: dressed stones proud of the face, their tops the edges you hang from, at every
+    # level of detail, since they mark the route. The sill runs through the wall under the window;
+    # the rest are corbels, their pale tops over a shadowed underside that slopes back to the wall.
+    for g in piece.get("grips", []):
+        a, b = blender(g["a"]), blender(g["b"])
+        front, top, cx, length = a.y, a.z, (a.x + b.x) / 2, abs(b.x - a.x)
+        if g["part"] == "lancet sill":
+            stones.append(_box("grip", Vector((cx, (front + y1 + 0.02) / 2, top - 0.09)), (length, y1 + 0.02 - front, 0.18), dressed,
+                               bevel=0.02 if lod == 0 else 0.0, segments=1))
+            continue
+        face = y0 + (0.08 if top > apex - 0.8 else 0.0)  # the bellcote stands back from the face
+        h = 0.32 if g["part"] == "keystone" else GRIP_HEIGHT
+        profile = [(face + GRIP_BACK, top), (front, top), (front, top - h * 0.45), (face, top - h), (face + GRIP_BACK, top - h)]
+        stones.append(env.prism("grip", [(cx, y, z) for y, z in profile], length, (1, 0, 0), dressed))
     return ob
 
 
@@ -676,16 +725,18 @@ def _broken(env, mat, x0, x1, y0, y1, z0, tops, rng, lod):
 
 def _ruin_shade(ground, seed, kind):
     """COLOR_0 for the ruin: damp and green at the foot, moss on what faces up and on the shaded
-    north faces, rain streaks; capstones' worn tops stay pale, the lip you climb onto."""
+    north faces, rain streaks; the worn tops of what you climb (capstones, the gable's coping and
+    kneelers, its grips) stay pale, the lip your hands find."""
     def fn(co, n):
         h = co.z - ground(co.x, co.y)
         damp = 0.6 + 0.4 * _smooth(0.0, 0.7, h)
         patch = 0.86 + 0.18 * _noise(co.x * 0.4, co.y * 0.4 + co.z * 0.3, seed + 5)
         streak = 1 - 0.14 * _smooth(0.55, 0.75, _noise(co.x * 3.0, co.y * 3.0, seed + 9)) * _smooth(1.0, 3.0, h)
         north = _smooth(-0.2, -0.9, n.y)  # faces toward −y, the village, stay in shade
-        moss = max(_smooth(0.6, 0.95, n.z) * (kind != "capstone"), 0.5 * north * _smooth(0.4, 0.8, _noise(co.x * 0.8, co.z * 0.8, seed + 2)),
+        pale = kind in ("capstone", "grip", "coping", "kneeler")
+        moss = max(_smooth(0.6, 0.95, n.z) * (not pale), 0.5 * north * _smooth(0.4, 0.8, _noise(co.x * 0.8, co.z * 0.8, seed + 2)),
                    1 - _smooth(0.0, 0.3, h))
-        if kind == "capstone":
+        if pale:
             k = (0.94 if n.z > 0.7 else 0.76 if n.z > -0.3 else 0.58) * (0.92 + 0.08 * _noise(co.x * 2, co.y * 2, seed))
         elif kind in ("fallen", "rubble"):
             k = 0.66 * damp * patch

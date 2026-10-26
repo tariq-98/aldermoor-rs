@@ -10,15 +10,19 @@
 //! and warned blows, guarding and parrying, threat, and being downed (docs/DESIGN.md).
 
 mod brain;
+pub mod climbing;
 pub mod combat;
 mod components;
+mod consumables;
 pub mod content;
 mod crafting;
 mod loot;
 mod movement;
+mod net_view;
 mod progress;
 mod queries;
 pub mod region;
+mod rewind;
 mod rng;
 mod spatial;
 pub mod stats;
@@ -33,9 +37,12 @@ use std::sync::{Arc, OnceLock};
 
 pub use brain::{notice_radius, NOTICE_IGNORE};
 pub use components::*;
+pub use consumables::PotionCooldown;
 pub use content::Specialty;
 pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
+pub use net_view::NetFrame;
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
+pub use rewind::{Trail, HISTORY, MAX_REWIND};
 pub use progress::{Credit, Progress, SHARE_FLOOR};
 pub use rng::Rng;
 pub use vitals::{COMBAT_TIMEOUT, ENDURANCE_MAX};
@@ -205,6 +212,7 @@ impl Sim {
                 combat::auras::refresh_control,
                 movement::move_units,
                 movement::after_moving,
+                rewind::record,
                 combat::abilities::land_charges,
                 combat::abilities::update,
                 combat::missiles::update,
@@ -314,7 +322,7 @@ impl Sim {
             ))
             .id();
         let id = self.world.resource_mut::<Units>().issue(e);
-        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default()));
+        self.world.entity_mut(e).insert((Inventory::default(), crafting::Skills::default(), rewind::Trail::default()));
         self.world.entity_mut(e).insert(Unit {
             id,
             kind: UnitKind::Player,
@@ -483,6 +491,8 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
+                traversal: movement::traversal(m),
+                aim_pitch: m.aim_pitch,
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
@@ -513,6 +523,8 @@ impl Sim {
                 yaw: t.yaw,
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
+                traversal: g.traversal,
+                aim_pitch: 0,
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,

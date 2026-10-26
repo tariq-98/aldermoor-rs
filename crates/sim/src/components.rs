@@ -75,6 +75,28 @@ pub enum ForcedKind {
     Charge { target: UnitId, ability: AbilityId },
     /// Pulling up over a ledge: up first, then over the edge.
     Climb,
+    /// Pulling up onto a ledge caught in a jump: as a climb, from higher up the face.
+    Mantle,
+    /// Hopping a low wall in stride, at the speed it was run at (`speed`, m/s), which it keeps
+    /// on landing. `Forced::arc` is how high above the start the hop clears.
+    Vault { speed: f32 },
+    /// Onto a hold to hang from it: caught in the air, lowered from the edge above, or climbing
+    /// to the next hold (docs/MOVEMENT.md, "Climbing").
+    ToHold { hold: u32, at: f32 },
+    /// Round a corner onto the hold that meets this one there, to hang from it, swinging about
+    /// the `corner`.
+    Corner { hold: u32, at: f32, corner: Vec2 },
+    /// Running up a wall too tall to climb (Shift into it), catching a hold on the way; `away` is
+    /// out of the wall.
+    WallRun { away: Vec2 },
+}
+
+/// Hanging from a hold (`world::Hold`, by its index in the valley's holds), with the hands `at`
+/// metres along it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hang {
+    pub hold: u32,
+    pub at: f32,
 }
 
 /// A move the body is carried through (a roll, a leap, being thrown), ignoring the controls.
@@ -108,11 +130,25 @@ pub struct Motion {
     pub forced: Option<Forced>,
     /// In deep water: floating at the surface, slow, and unable to fight.
     pub swimming: bool,
+    /// On its feet in water deeper than `movement::WADE_DEPTH` after the last step, for the
+    /// snapshot (found once a step, not once for each viewer).
+    pub wading: bool,
     /// Sprinting this step (asked to, and allowed).
     pub sprinting: bool,
+    /// Where a player aims up or down (`Command::Aim`), as `protocol::aim_pitch_byte`.
+    pub aim_pitch: i8,
     /// The highest the feet have been since they last touched the ground or the water, for fall
     /// damage.
     pub fall_from: f32,
+    /// Hanging from a hold, between moves.
+    pub hang: Option<Hang>,
+    /// The hold just let go of, which can't be caught again until the time given.
+    pub released: Option<(u32, f64)>,
+    /// Holds are caught in the air without Shift until this time: just after a leap, an eject or
+    /// a wall run.
+    pub catch_until: f64,
+    /// Roll was pressed in the air: landing before this time rolls the fall off.
+    pub landing_roll_until: f64,
 }
 
 impl Motion {
@@ -128,8 +164,14 @@ impl Motion {
             dodge_queued: None,
             forced: None,
             swimming: false,
+            wading: false,
             sprinting: false,
+            aim_pitch: 0,
             fall_from: f32::NEG_INFINITY,
+            hang: None,
+            released: None,
+            catch_until: f64::NEG_INFINITY,
+            landing_roll_until: f64::NEG_INFINITY,
         }
     }
 
@@ -248,6 +290,8 @@ pub struct Fighter {
     pub action_time: f64,
     /// Enemies this unit hurt recently (felling one rallies you if you're downed).
     pub recent_victims: Vec<(UnitId, f64)>,
+    /// Fighting players until then: heals on it take PvP numbers.
+    pub pvp_until: f64,
     /// Helping someone up: who, and since when.
     pub reviving: Option<(UnitId, f64)>,
 }
@@ -276,6 +320,7 @@ impl Fighter {
             action: Action::None,
             action_time: 0.0,
             recent_victims: Vec::new(),
+            pvp_until: -100.0,
             reviving: None,
         }
     }
@@ -310,6 +355,8 @@ pub struct AuraInstance {
     pub stacks: u8,
     pub next_tick: f64,
     pub absorb_left: f32,
+    /// Put on by a player or their summon (see [`crate::combat::HitSource::player`]).
+    pub player: bool,
 }
 
 /// Diminishing returns in one category of crowd control.
@@ -530,7 +577,12 @@ impl Appearance {
 
     /// The look to send, weapons drawn or not.
     pub fn shared(&self, drawn: bool) -> Arc<protocol::Look> {
-        Arc::clone(if drawn { &self.drawn } else { &self.put_away })
+        Arc::clone(self.shown(drawn))
+    }
+
+    /// The same, borrowed.
+    pub fn shown(&self, drawn: bool) -> &Arc<protocol::Look> {
+        if drawn { &self.drawn } else { &self.put_away }
     }
 
     /// What a unit with no look of its own is sent: the body type's defaults.

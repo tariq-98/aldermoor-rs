@@ -6,11 +6,11 @@ use glam::{Vec2, Vec3};
 use protocol::{Avoid, Event, HitWeight, Pose, School, Shape};
 
 use super::{auras, can_attack, chest, control, emit, entity, guard, line_of_sight, now, unit_id, HitSource};
-use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, HITSTOP, WINDUP};
-use crate::movement::{heading, ATTACK_POSE, HIT_POSE};
+use crate::content::{catalog, AbilityDef, Effect, Field, Finisher, Pvp, HITSTOP, WINDUP};
+use crate::movement::{heading, ATTACK_POSE, CLIMB_HEIGHT, HIT_POSE};
 use crate::region::Landing;
 use crate::spatial::Spatial;
-use crate::stats::{armor_reduction, scale, CRIT_MULTIPLIER};
+use crate::stats::{armor_reduction, scale, CRIT_MULTIPLIER, PVP_COMBAT};
 use crate::{Anim, Auras, Body, Brain, Faction, Fighter, Forced, ForcedKind, Land, Mode, Motion, Rng, Stats, Threat, Transform, Unit, Vitals};
 
 /// Blows from behind land 10% harder and can't be blocked.
@@ -76,6 +76,10 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
         emit(world, Event::Damage { target, source: src.unit, amount: dealt, crit, school: src.school, periodic });
         auras::remove_where(world, te, |d| d.breaks_on_damage);
     }
+    let pvp = super::pvp(world, src, te);
+    if pvp && let Some(mut f) = world.get_mut::<Fighter>(te) {
+        f.pvp_until = t + PVP_COMBAT;
+    }
     let (lethal, finished, counted) = {
         let mut v = world.get_mut::<Vitals>(te).unwrap();
         v.last_combat = t;
@@ -98,6 +102,9 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
             v.last_combat = t;
         }
         if let Some(mut f) = world.get_mut::<Fighter>(a) {
+            if pvp {
+                f.pvp_until = t + PVP_COMBAT;
+            }
             match f.recent_victims.iter_mut().find(|(id, _)| *id == target) {
                 Some(r) => r.1 = t,
                 None => f.recent_victims.push((target, t)),
@@ -280,7 +287,10 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
         let Some(e) = entity(world, id) else { continue };
         let (Some(u), Some(v), Some(t)) = (world.get::<Unit>(e), world.get::<Vitals>(e), world.get::<Transform>(e)) else { continue };
         let r = world.get::<Body>(e).map_or(0.4, |b| b.radius);
-        if !in_shape(shape, origin, yaw, t.xz(), r) {
+        // Against another player, where the attacker saw them (#169).
+        let at = crate::rewind::seen_at(world, src, e).unwrap_or(t.pos);
+        let xz = Vec2::new(at.x, at.z);
+        if !in_shape(shape, origin, yaw, xz, r) {
             continue;
         }
         if allies {
@@ -290,10 +300,10 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
         } else if !u.faction.is_enemy(src.faction) || v.dead {
             continue;
         }
-        if !line_of_sight(world, origin + Vec3::Y, chest(world, e)) {
+        if !line_of_sight(world, origin + Vec3::Y, chest(world, e) - t.pos + at) {
             continue;
         }
-        found.push(((t.xz() - o2).length_squared(), e));
+        found.push(((xz - o2).length_squared(), e));
     }
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
     found.into_iter().take(max as usize).map(|(_, e)| e).collect()
@@ -366,7 +376,8 @@ pub fn apply_effects(world: &mut World, effects: &[Effect], src: &HitSource, def
                 }
             }
             Effect::SelfHeal { base, coeff } => {
-                heal(world, src, u, base * scale(src.level) + coeff * src.power, false);
+                let amount = (base * scale(src.level) + coeff * src.power) * healing(world, split(def, src), u);
+                heal(world, src, u, amount, false);
             }
             Effect::Field { field, radius, duration, interval, enemies, allies } => {
                 super::missiles::spawn_field(world, src, *field, *radius, *duration, *interval, enemies.clone(), allies.clone(), center);
@@ -494,10 +505,15 @@ fn apply(world: &mut World, e: &Effect, te: Entity, src: &HitSource, def: Option
             if let Some((below, times)) = def.and_then(|d| d.execute) && world.get::<Vitals>(te).is_some_and(|v| v.fraction() < below) {
                 amount *= times;
             }
+            let pvp = split(def, src).damage;
+            if pvp != 1.0 && super::pvp(world, src, te) {
+                amount *= pvp;
+            }
             deal_damage(world, src, te, amount, crit, false) > 0.0
         }
         Effect::Heal { base, coeff } => {
-            heal(world, src, te, base * scale(src.level) + coeff * src.power, crit);
+            let amount = (base * scale(src.level) + coeff * src.power) * healing(world, split(def, src), te);
+            heal(world, src, te, amount, crit);
             false
         }
         Effect::Aura { key, .. } => {
@@ -564,6 +580,17 @@ fn apply(world: &mut World, e: &Effect, te: Entity, src: &HitSource, def: Option
     }
 }
 
+/// An ability's PvP numbers: `def`'s, or (for fields and combos) those of the ability `src`
+/// came from.
+fn split(def: Option<&AbilityDef>, src: &HitSource) -> Pvp {
+    def.map(|d| d.pvp).or_else(|| src.ability.map(|a| catalog().ability(a).pvp)).unwrap_or_default()
+}
+
+/// Healing on `te` times this: the PvP number if it's fighting players.
+pub(crate) fn healing(world: &World, pvp: Pvp, te: Entity) -> f32 {
+    if pvp.healing != 1.0 && super::in_pvp(world, te) { pvp.healing } else { 1.0 }
+}
+
 /// Throws a unit: it can't act until it lands. Elites soak it into their defiance.
 pub fn knock(world: &mut World, te: Entity, dir: Vec2, distance: f32, src: &HitSource) {
     if world.get::<Vitals>(te).is_none_or(|v| !v.alive()) || distance < 0.1 {
@@ -588,8 +615,18 @@ pub fn knock(world: &mut World, te: Entity, dir: Vec2, distance: f32, src: &HitS
 pub fn leap(world: &mut World, e: Entity, delta: Vec2, seconds: f64, arc: f32, kind: ForcedKind) {
     let t = now(world);
     let Some(tr) = world.get::<Transform>(e).copied() else { return };
+    // On a wall, a blow knocks you off it rather than along the ground.
+    if world.get::<Motion>(e).is_some_and(|m| m.hang.is_some() || matches!(m.forced, Some(f) if matches!(f.kind, ForcedKind::ToHold { .. }))) {
+        let land = world.resource::<Land>().0.clone();
+        if let Some(mut m) = world.get_mut::<Motion>(e) {
+            m.forced = None;
+            crate::climbing::knock_off(&land, t, &mut m, delta, seconds);
+        }
+        return;
+    }
     let radius = world.get::<Body>(e).map_or(0.4, |b| b.radius);
-    let end = world.resource::<Land>().0.slide(tr.xz(), delta, radius);
+    // Stopped by masonry too tall to step onto, not carried over it (#311).
+    let end = world.resource::<Land>().0.slide_below(tr.xz(), delta, radius, tr.pos.y + CLIMB_HEIGHT);
     if let Some(mut m) = world.get_mut::<Motion>(e) {
         m.forced = Some(Forced { kind, from: tr.pos, to: Vec3::new(end.x, tr.pos.y, end.y), start: t, duration: seconds, arc });
     }
@@ -615,7 +652,7 @@ fn blink(world: &mut World, u: Entity, distance: f32) {
     let Some(tr) = world.get::<Transform>(u).copied() else { return };
     let radius = world.get::<Body>(u).map_or(0.4, |b| b.radius);
     let land = &world.resource::<Land>().0;
-    let end = land.slide(tr.xz(), tr.forward() * distance, radius);
+    let end = land.slide_below(tr.xz(), tr.forward() * distance, radius, tr.pos.y + CLIMB_HEIGHT);
     let y = land.ground(end.x, end.y);
     if let Some(mut tr) = world.get_mut::<Transform>(u) {
         tr.pos = Vec3::new(end.x, y, end.y);
@@ -632,7 +669,7 @@ fn shadowstep(world: &mut World, u: Entity, target: Entity) {
     let reach = world.get::<Body>(u).map_or(0.4, |b| b.radius) + world.get::<Body>(target).map_or(0.4, |b| b.radius) + 0.4;
     let spot = tt.xz() - tt.forward() * reach;
     let land = &world.resource::<Land>().0;
-    if land.blocked(spot, 0.3) {
+    if land.blocked(spot, 0.3) || land.on_face(spot, 0.3, tt.pos.y + CLIMB_HEIGHT) {
         return;
     }
     let y = land.ground(spot.x, spot.y);

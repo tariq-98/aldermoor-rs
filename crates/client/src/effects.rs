@@ -1165,6 +1165,8 @@ mod tests {
             hostile: false,
             target: None,
             look: Default::default(),
+            traversal: Default::default(),
+            aim_pitch: 0,
         }
     }
 
