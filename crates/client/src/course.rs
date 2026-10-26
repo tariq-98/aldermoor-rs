@@ -1,11 +1,14 @@
 //! `--traverse`: a scripted course over the traversal moves (#213), for captures, as `--gait` is
 //! for locomotion. Facing west, the player strafes and rolls each way in turn (left, right, back
-//! and ahead), standing up out of two rolls and running on out of the others. They walk south
+//! and ahead), standing up out of two rolls and running on out of the others. They walk north
 //! into the field wall west of the north road, climbing onto it, and drop off its far side; run
-//! south through the village and east of the bridge, where the banks are gentle, wade into the
-//! river, swim across, wade out and swim back. Last they run back north, climbing the wall from
-//! the other side, and at the wolves in the meadow west of the road, lunging at the first within
-//! reach. Each step is logged as it starts, so captures can be cut by frame.
+//! north through the village and east of the bridge, where the banks are gentle, wade into the
+//! river, swim across, wade out and swim back. They run back south, climbing the wall from the
+//! other side, and on up the ruined hall's stepped east wall to the lookout under its gable,
+//! where they lower themselves over the edge to hang (#245), shimmy left and right, climb back
+//! up, then drop to hang again and let go. Last they run at the wolves in the meadow west of the
+//! road, lunging at the first within reach. Each step is logged as it starts, so captures can be
+//! cut by frame.
 use glam::{Vec2, Vec3, Vec3Swizzles};
 use protocol::{Command, UnitId};
 use std::f32::consts::FRAC_PI_2;
@@ -28,6 +31,9 @@ enum Step {
         way: f32,
         roll: bool,
     },
+    /// Rolling `way` degrees round from facing `yaw` (left is positive), then standing for
+    /// `seconds`. At an edge that lowers the player over it to hang, and hanging, it lets go.
+    Roll { seconds: f32, yaw: f32, way: f32 },
     /// To the point (x, z) at `pace`, facing the way it goes.
     Go { to: Vec2, pace: Pace },
     /// At the nearest enemy, lunging at it (the sword's third skill) once it's within reach, then
@@ -55,6 +61,17 @@ const fn stand(name: &'static str, seconds: f32) -> (&'static str, Step) {
     (name, Step::Stand { seconds, yaw: WEST })
 }
 
+const fn roll(name: &'static str, seconds: f32, way: f32) -> (&'static str, Step) {
+    (
+        name,
+        Step::Roll {
+            seconds,
+            yaw: WEST,
+            way,
+        },
+    )
+}
+
 const fn go(name: &'static str, x: f32, z: f32, pace: Pace) -> (&'static str, Step) {
     (
         name,
@@ -69,7 +86,7 @@ const fn go(name: &'static str, x: f32, z: f32, pace: Pace) -> (&'static str, St
 /// back at 8 a second, so they're 5 s apart.
 const ROLL: f32 = 0.45;
 
-const STEPS: [(&str, Step); 27] = [
+const STEPS: [(&str, Step); 39] = [
     stand("stand", 1.),
     strafe("strafe left", 0.5, 90., false),
     strafe("roll left", ROLL, 90., true),
@@ -96,7 +113,27 @@ const STEPS: [(&str, Step); 27] = [
     go("swim back", 17., -45., Pace::Run),
     go("back through the village", -2., -30., Pace::Run),
     go("to the wall again", -2., 16., Pace::Run),
-    go("climb it from the south", -2., 25., Pace::Run),
+    go("climb it from the north", -2., 25., Pace::Run),
+    // The ruined hall on the hill (`world::masonry`): its east wall, along x -14.9, steps up from
+    // the rear at z 52 to the lookout under the gable, 4.2 m up, each step a climb from the last.
+    // The lookout's outer edge is a hold 2.35 m long, from z 44.6 to 42.25.
+    go("to the ruin", -11., 51.6, Pace::Run),
+    go("onto its east wall", -14.9, 51.6, Pace::Walk),
+    go("up the steps", -14.9, 43.4, Pace::Walk),
+    stand("on the lookout", 1.),
+    // Facing in over the hall, so rolling back lowers the player over the outer edge, to hang
+    // facing the wall.
+    roll("drop to hang", 1.5, 180.),
+    strafe("shimmy left", 0.6, 90., false),
+    strafe("shimmy right", 1., -90., false),
+    // Into the wall climbs onto the top in 0.8 s; pressing on after that would walk off the far
+    // side, so this lets go as the climb starts.
+    strafe("climb up", 0.5, 0., false),
+    stand("back on the lookout", 1.5),
+    roll("drop to hang again", 1.5, 180.),
+    roll("let go", 2., 0.),
+    // Round the gable's buttress.
+    go("round the ruin", -12., 38., Pace::Run),
     // The wolves are at (-38, 30) and notice a player 13 m off.
     go("to the meadow", -20., 29., Pace::Run),
     ("lunge", Step::Lunge { seconds: 3. }),
@@ -133,6 +170,7 @@ impl Course {
                 let limit = match step {
                     Step::Stand { seconds, .. }
                     | Step::Strafe { seconds, .. }
+                    | Step::Roll { seconds, .. }
                     | Step::Lunge { seconds } => seconds,
                     // Long enough at a swim, and over walls on the way.
                     Step::Go { to, .. } => to.distance(at.xz()) / 1.5 + 4.,
@@ -162,6 +200,15 @@ impl Course {
                         out.push(Command::Dodge { direction });
                     }
                     out.push(walk(direction, Pace::Run, Some(yaw)));
+                }
+                Step::Roll { yaw, way, .. } => {
+                    if first {
+                        let way = yaw + way.to_radians();
+                        out.push(Command::Dodge {
+                            direction: Vec2::new(way.sin(), way.cos()),
+                        });
+                    }
+                    out.push(walk(Vec2::ZERO, Pace::Run, Some(yaw)));
                 }
                 Step::Go { to, pace } => {
                     out.push(walk((to - at.xz()).normalize_or_zero(), pace, None));
@@ -220,16 +267,19 @@ mod tests {
     use protocol::{ForcedKind, Traversal};
 
     /// The course run against the valley as the client's own server starts it, the player at its
-    /// spawn facing south: every step is reached, every place arrived at, and on the way the
-    /// player rolls four times, climbs the wall twice, swims and lunges.
+    /// spawn facing north: every step is reached, every place arrived at, and on the way the
+    /// player rolls four times, climbs the field wall twice and the ruin's wall and steps five
+    /// times, swims, hangs from the lookout twice, shimmies along it and climbs back up from it,
+    /// takes no harm letting go, and lunges.
     #[test]
-    fn the_course_rolls_climbs_swims_and_lunges() {
+    fn the_course_rolls_climbs_swims_hangs_and_lunges() {
         let mut sim = sim::Sim::brambleford(0xa1de);
         let me = sim.spawn_player("Traveller", Vec2::new(6., 28.), std::f32::consts::PI);
         let mut course = Course::default();
         let start = sim.tick();
         let (mut moves, mut swam, mut reached) = (vec![], false, Vec::<usize>::new());
-        let mut last = None;
+        let (mut last, mut hung, mut unharmed) = (None, Vec::<f32>::new(), true);
+        let wolves = STEPS.iter().position(|s| s.0 == "to the meadow").unwrap();
         while let Some((step, _)) = course.step() {
             let snapshot = sim.snapshot(Some(me));
             let u = snapshot.units.iter().find(|u| u.id == me).unwrap();
@@ -238,7 +288,7 @@ mod tests {
                 .map(|f| (f.id, f.position))
                 .collect();
             let now = (sim.tick() - start) as f32 / 60.;
-            assert!(now < 90., "still on {} after 90 s", STEPS[step].0);
+            assert!(now < 120., "still on {} after 120 s", STEPS[step].0);
             let commands = course.update(now, u.position, &foes);
             if let Some(was) = reached.last().copied().filter(|was| *was != step)
                 && let Step::Go { to, .. } = STEPS[was].1
@@ -256,6 +306,12 @@ mod tests {
                 moves.push(m.kind);
             }
             swam |= u.traversal == Traversal::Swimming;
+            if u.traversal == Traversal::Hanging {
+                hung.push(u.position.z);
+            }
+            if step < wolves {
+                unharmed &= u.health == u.max_health;
+            }
             for c in commands {
                 sim.command(me, c);
             }
@@ -264,8 +320,13 @@ mod tests {
         assert_eq!(reached, (0..STEPS.len()).collect::<Vec<_>>());
         let count = |kind| moves.iter().filter(|k| **k == kind).count();
         assert_eq!(count(ForcedKind::Roll), 4, "{moves:?}");
-        assert_eq!(count(ForcedKind::Climb), 2, "{moves:?}");
+        assert_eq!(count(ForcedKind::Climb), 8, "{moves:?}");
+        assert_eq!(count(ForcedKind::Hold), 2, "{moves:?}");
         assert_eq!(count(ForcedKind::Charge), 1, "{moves:?}");
         assert!(swam, "never swam");
+        let along = hung.iter().fold(f32::MIN, |a, &z| a.max(z))
+            - hung.iter().fold(f32::MAX, |a, &z| a.min(z));
+        assert!(along > 1., "shimmied {along} m along the hold");
+        assert!(unharmed, "hurt before the wolves");
     }
 }
