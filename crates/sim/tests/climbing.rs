@@ -50,7 +50,7 @@ fn go(sim: &mut Sim, id: u32, direction: Vec2, sprint: bool) {
 fn hang_on(sim: &mut Sim, id: u32, near: Vec2, y: f32, out: Vec2) -> Hang {
     let land = sim.land();
     let (i, h) = land.holds.iter().enumerate().find(|(_, h)| (h.a.y - y).abs() < 0.01 && h.out.dot(out) > 0.99).expect("no such hold");
-    let at = h.locate(near).0.clamp(0.2, h.len() - 0.2);
+    let at = h.locate(near).0.clamp(0.2_f32.min(h.len() / 2.0), (h.len() - 0.2).max(h.len() / 2.0));
     let spot = sim::climbing::hang_point(land, h, at, 0.4);
     let hang = Hang { hold: i as u32, at };
     {
@@ -647,4 +647,90 @@ fn killed_on_a_wall_the_body_drops_to_the_ground() {
     let p = pos(&sim, id);
     assert!(motion(&sim, id).hang.is_none());
     assert!((p.y - sim.land().ground(p.x, p.z)).abs() < 0.02, "the body hangs in the air at {p}");
+}
+
+/// The ruined hall's origin, and a point in its own frame (x across, z toward its gable) in the
+/// world's.
+fn ruin(sim: &Sim) -> (Vec3, impl Fn(f32, f32) -> Vec2 + use<>) {
+    let m = sim.land().masonry.iter().find(|m| m.prop == "ruin.hall").unwrap();
+    let (o, (s, c)) = (m.origin, m.yaw.sin_cos());
+    (o, move |x: f32, z: f32| Vec2::new(o.x + c * x + s * z, o.z - s * x + c * z))
+}
+
+#[test]
+fn the_ruins_gable_climbs_from_its_lancet_sill_to_the_top_of_its_bellcote() {
+    let mut sim = Sim::new(7);
+    let (o, at) = ruin(&sim);
+    let id = sim.spawn_player("Hero", at(0.0, 7.5), 0.0);
+    sim.step();
+    // The gable's outer face looks toward the village: in its frame, +z.
+    let out = (at(0.0, 1.0) - at(0.0, 0.0)).normalize();
+    let up = -out;
+    // Hanging from the lancet's sill, a little toward the window's east jamb.
+    hang_on(&mut sim, id, at(-0.4, 5.9), o.y + 2.6, out);
+    let height = |sim: &Sim| sim.get::<Motion>(id).unwrap().hang.map(|h| sim.land().holds.get(h.hold).at(h.at).y - o.y);
+    let climb = |sim: &mut Sim, leap: bool| {
+        go(sim, id, up, false);
+        if leap {
+            sim.command(id, Command::Jump);
+        }
+        sim.step();
+        go(sim, id, Vec2::ZERO, false);
+        sim.run_for(0.8);
+    };
+    // Hand over hand up the jamb to the label stop at the springing of the arch.
+    for want in [3.55, 4.45, 5.3] {
+        climb(&mut sim, false);
+        let h = height(&sim).expect("fell off the jamb");
+        assert!((h - want).abs() < 0.01, "at {h}, not the hold at {want}");
+    }
+    // The keystone over the arch is out of reach hand over hand: a climb leap.
+    climb(&mut sim, false);
+    assert!((height(&sim).unwrap() - 5.3).abs() < 0.01, "climbed past the label stop without a leap");
+    for (want, leap) in [(6.75, true), (7.2, false), (8.95, true)] {
+        climb(&mut sim, leap);
+        let h = height(&sim).expect("fell off the gable");
+        assert!((h - want).abs() < 0.01, "at {h}, not the hold at {want}");
+    }
+    // From the bell's sill, a leap to the bellcote's coping and up onto its top.
+    climb(&mut sim, true);
+    assert!(height(&sim).expect("missed the bellcote's coping") > 10.4);
+    climb(&mut sim, false);
+    sim.run_for(0.5);
+    let p = pos(&sim, id);
+    assert!(motion(&sim, id).grounded && p.y - o.y > 10.4, "ended at {} m", p.y - o.y);
+}
+
+#[test]
+fn from_the_ruins_lookout_a_jump_reaches_the_coping_and_it_climbs_to_the_bellcote() {
+    let mut sim = Sim::new(7);
+    let (o, at) = ruin(&sim);
+    let toward_gable = (at(0.0, 1.0) - at(0.0, 0.0)).normalize();
+    let toward_middle = (at(1.0, 0.0) - at(0.0, 0.0)).normalize();
+    // On the lookout at the top of the broken east wall, facing the gable.
+    let start = at(-3.125, 4.0);
+    let id = sim.spawn_player("Hero", start, toward_gable.x.atan2(toward_gable.y));
+    sim.step();
+    assert!((pos(&sim, id).y - (o.y + 4.2)).abs() < 0.01, "not on the lookout");
+    // Walking at the gable stops a body short of it; a jump pulls up onto its coping.
+    go(&mut sim, id, toward_gable, false);
+    sim.run_for(0.5);
+    sim.command(id, Command::Jump);
+    assert!(until(&mut sim, id, 1.0, |k| *k == ForcedKind::Mantle), "didn't pull up onto the coping");
+    go(&mut sim, id, Vec2::ZERO, false);
+    sim.run_for(0.8);
+    let p = pos(&sim, id);
+    assert!(motion(&sim, id).grounded && p.y - o.y > 6.4, "not on the coping: {} m up", p.y - o.y);
+    // Up the coping toward the gable's middle, until the bellcote stops it, about 8.3 m up.
+    go(&mut sim, id, toward_middle, false);
+    sim.run_for(3.0);
+    let p = pos(&sim, id);
+    assert!(motion(&sim, id).grounded && (p.y - o.y - 8.32).abs() < 0.15, "stopped {} m up", p.y - o.y);
+    // A jump at the bellcote pulls up onto it.
+    sim.command(id, Command::Jump);
+    assert!(until(&mut sim, id, 1.0, |k| *k == ForcedKind::Mantle), "didn't pull up onto the bellcote");
+    go(&mut sim, id, Vec2::ZERO, false);
+    sim.run_for(1.0);
+    let p = pos(&sim, id);
+    assert!(motion(&sim, id).grounded && p.y - o.y > 10.1, "ended {} m up", p.y - o.y);
 }
