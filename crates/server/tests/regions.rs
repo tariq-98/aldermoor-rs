@@ -382,7 +382,8 @@ fn a_kill_across_the_border_pays_and_puts_the_hero_in_combat() {
 #[test]
 fn a_region_with_nobody_near_sleeps_and_wakes_when_someone_comes() {
     let (mut a, b) = two_regions(10);
-    let hero = a.spawn_player("Hero", Vec2::new(BORDER - 80.0, 10.0), 0.0);
+    // Further from the border than a ghost reaches, so nobody in the east can see it.
+    let hero = a.spawn_player("Hero", Vec2::new(BORDER - 40.0, 10.0), 0.0);
     let mut realm = Realm::new(vec![a, b]);
     // Not on a whole second, when a sleeping region takes its one step.
     run(&mut realm, 1.25);
