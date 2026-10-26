@@ -58,6 +58,51 @@ impl Frustum {
             .all(|p| p.truncate().dot(b.center) + p.w + p.truncate().abs().dot(b.half) >= 0.)
     }
 }
+/// Conservative receiver/caster volume for one shadow map. Keep the camera's
+/// near plane for every cascade so the shader's inter-cascade blend is covered.
+pub struct ShadowCasterVolume {
+    light: Frustum,
+    receivers: Frustum,
+    texel_axes: [Vec3; 2],
+}
+impl ShadowCasterVolume {
+    pub fn new(
+        light_vp: Mat4,
+        camera_vp: Mat4,
+        eye: Vec3,
+        forward: Vec3,
+        receiver_far: f32,
+        resolution: u32,
+    ) -> Self {
+        let forward = forward.normalize();
+        let mut receivers = Frustum::new(camera_vp);
+        receivers.planes[5] = (-forward).extend(forward.dot(eye) + receiver_far);
+        Self {
+            light: Frustum::new(light_vp),
+            receivers,
+            // NDC spans two units. Bounds.half also needs a factor of two,
+            // so these axes yield the full projected width/height in texels.
+            texel_axes: [0, 1].map(|i| light_vp.row(i).truncate().abs() * resolution as f32),
+        }
+    }
+    pub fn intersects(&self, bounds: Bounds, sun: Vec3, reject_small: bool) -> bool {
+        // Preserve the existing 100 m caster-to-receiver sweep, but test it
+        // against this cascade's receiver depth rather than the whole camera.
+        // An offscreen caster can still shade an onscreen receiver.
+        let swept = Bounds {
+            center: bounds.center - sun * 50.,
+            half: bounds.half + sun.abs() * 50.,
+        };
+        if !self.light.intersects(bounds) || !self.receivers.intersects(swept) {
+            return false;
+        }
+        // Only mid/far cascades opt into the issue's two-texel size policy.
+        // Use the larger dimension: a long thin caster must not disappear.
+        // Bounds already include skin/wind padding; invalid sizes fail open.
+        let [width, height] = self.texel_axes.map(|axis| axis.dot(bounds.half));
+        !reject_small || !width.is_finite() || !height.is_finite() || width.max(height) >= 2.
+    }
+}
 pub fn screen_height(height: f32, depth: f32, fov: f32, pixels: u32) -> f32 {
     height * pixels as f32 / (2. * (fov * 0.5).tan() * depth.max(0.1))
 }
@@ -135,6 +180,76 @@ mod tests {
                 half: Vec3::splat(0.1)
             }));
         }
+    }
+    fn shadow_volume(far: f32) -> ShadowCasterVolume {
+        let camera = glam::camera::rh::proj::directx::perspective(1., 1., 0.1, 800.);
+        let light = Mat4::from_scale(Vec3::new(0.01, 0.01, -0.005));
+        ShadowCasterVolume::new(light, camera, Vec3::ZERO, -Vec3::Z, far, 1024)
+    }
+    #[test]
+    fn shadow_receivers_are_bounded_per_cascade_but_keep_blend_overlap() {
+        let caster = Bounds {
+            center: Vec3::new(0., 0., -30.),
+            half: Vec3::splat(0.5),
+        };
+        assert!(!shadow_volume(15.).intersects(caster, Vec3::Y, false));
+        assert!(shadow_volume(50.).intersects(caster, Vec3::Y, false));
+        // The mid map is sampled before the near split as part of blending.
+        let overlap = Bounds {
+            center: Vec3::new(0., 0., -14.),
+            ..caster
+        };
+        assert!(shadow_volume(50.).intersects(overlap, Vec3::Y, false));
+        assert!(shadow_volume(150.).intersects(caster, Vec3::Y, false));
+    }
+    #[test]
+    fn shadow_volume_retains_offscreen_casters_and_rejects_unreachable_ones() {
+        let volume = shadow_volume(50.);
+        let caster = Bounds {
+            center: Vec3::new(0., 20., -20.),
+            half: Vec3::splat(0.5),
+        };
+        assert!(!volume.receivers.intersects(caster));
+        assert!(volume.intersects(caster, Vec3::Y, false));
+        assert!(!volume.intersects(caster, -Vec3::Y, false));
+        let outside_light = Bounds {
+            center: Vec3::new(101., 0., -20.),
+            ..caster
+        };
+        assert!(!volume.intersects(outside_light, Vec3::X, false));
+    }
+    #[test]
+    fn shadow_texel_rejection_preserves_near_and_long_thin_casters() {
+        let volume = shadow_volume(50.);
+        let small = Bounds {
+            center: Vec3::new(0., 0., -20.),
+            half: Vec3::splat(0.05),
+        };
+        assert!(volume.intersects(small, Vec3::Y, false));
+        assert!(!volume.intersects(small, Vec3::Y, true));
+        let thin = Bounds {
+            half: Vec3::new(0.5, 0.01, 0.01),
+            ..small
+        };
+        assert!(volume.intersects(thin, Vec3::Y, true));
+        let boundary = Bounds {
+            half: Vec3::splat(2. / 10.24),
+            ..small
+        };
+        assert!(volume.intersects(boundary, Vec3::Y, true));
+    }
+    #[test]
+    fn shadow_texel_footprint_includes_rotated_axes() {
+        let camera = glam::camera::rh::proj::directx::perspective(1., 1., 0.1, 800.);
+        let light = Mat4::from_scale(Vec3::new(0.01, 0.01, -0.005))
+            * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_4);
+        let volume = ShadowCasterVolume::new(light, camera, Vec3::ZERO, -Vec3::Z, 50., 1024);
+        let bounds = Bounds {
+            center: Vec3::new(0., 0., -20.),
+            half: Vec3::new(0.15, 0.15, 0.01),
+        };
+        assert!(volume.intersects(bounds, Vec3::Y, true));
+        assert!(!shadow_volume(50.).intersects(bounds, Vec3::Y, true));
     }
     #[test]
     fn lod_thresholds_have_hysteresis() {
