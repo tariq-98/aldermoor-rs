@@ -172,13 +172,14 @@ impl LookSettings {
             b.phase + 1. - a.phase
         };
         let t = ((phase - a.phase).rem_euclid(1.) / span) as f32;
-        // Zero velocity at each key and at midnight, without overshooting authored values.
-        let t = t * t * (3. - 2. * t);
         let (a_light, a_angles) = a.resolve(base);
         let (b_light, b_angles) = b.resolve(base);
+        // Keep the sun moving through keys; easing angles would stop it at every key.
         let azimuth =
             a_angles[0] + ((b_angles[0] - a_angles[0] + 180.).rem_euclid(360.) - 180.) * t;
         let elevation = lerp(a_angles[1], b_angles[1], t);
+        // Ease the lighting channels without overshooting authored values.
+        let t = t * t * (3. - 2. * t);
         TimeOfDayLighting {
             sun_direction: sun_direction(azimuth, elevation),
             sun_colour: lerp3(a_light.sun_colour, b_light.sun_colour, t),
@@ -368,6 +369,12 @@ mod time_of_day_tests {
         assert_eq!(middle.exposure, 2.);
         assert_eq!(s.lighting_at(25.).sun_intensity, 0.);
         assert_eq!(s.lighting_at(75.).sun_intensity, 2.);
+        let quarter = s.lighting_at(37.5);
+        let expected = sun_direction(355., -15.);
+        for (actual, expected) in quarter.sun_direction.into_iter().zip(expected) {
+            near(actual, expected);
+        }
+        near(quarter.sun_intensity, 0.3125); // Colours/intensities still ease.
     }
 
     #[test]
