@@ -2,6 +2,7 @@
 mod bag;
 mod combat;
 mod craft;
+mod crowd;
 mod effects;
 mod gait;
 mod hud;
@@ -87,6 +88,11 @@ struct Options {
     controls: Option<PathBuf>,
     /// How characters blend from one clip to the next (#210). The others are for comparisons.
     blend: anim::Method,
+    /// More characters round the player, to measure animation with a crowd in view (#215).
+    crowd: usize,
+    /// Whether characters' poses rebuild at the rates `anim::Crowd` gives them (#215), or all
+    /// every frame, to compare.
+    anim_tiers: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -132,6 +138,8 @@ impl Options {
             scheme: None,
             controls: None,
             blend: anim::Method::default(),
+            crowd: 0,
+            anim_tiers: true,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -248,13 +256,21 @@ impl Options {
                         _ => anyhow::bail!("--blend expects inertialize, dead or off"),
                     }
                 }
+                "--crowd" => o.crowd = args.next().context("--crowd needs a count")?.parse()?,
+                "--anim-tiers" => {
+                    o.anim_tiers = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--anim-tiers expects on or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -357,6 +373,9 @@ struct Game {
     gpu: Vec<f64>,
     frame_times: Vec<f64>,
     intervals: Vec<f64>,
+    /// Ranks the characters each frame for how often their poses rebuild, inside the animation
+    /// budget (#215).
+    animation: anim::Crowd,
     finished_at: Instant,
     smoke_stage: usize,
     /// Sim tick the last smoke stage went out on.
@@ -476,6 +495,7 @@ impl Game {
             gpu: Vec::new(),
             frame_times: Vec::new(),
             intervals: Vec::new(),
+            animation: anim::Crowd::default(),
             finished_at: Instant::now(),
             smoke_stage: 0,
             smoke_tick: None,
@@ -1372,6 +1392,14 @@ impl Game {
                     vec![("main_hand".into(), "sword.great".into())]
                 };
         }
+        if self.options.crowd > 0
+            && !self.options.showcase
+            && let Some(base) = units.iter().find(|u| u.id == self.host.player)
+        {
+            let time = self.start.elapsed().as_secs_f32();
+            let others = crowd::units(base, self.options.crowd, time);
+            units.extend(others);
+        }
         let me = units
             .iter()
             .find(|u| u.id == self.host.player)
@@ -1434,7 +1462,24 @@ impl Game {
             }
         });
         let combat_index: HashMap<_, _> = self.fight.units.iter().map(|c| (c.id, c)).collect();
-        for u in &units {
+        // How often each character's pose rebuilds (#215): the player, their target and whoever
+        // targets them first, then the nearest, as many at the higher rates as the budget allows.
+        let tiers: &[anim::Tier] = if self.options.anim_tiers && !self.options.showcase {
+            self.animation.assign(units.iter().map(|u| {
+                anim::Importance {
+                    involved: u.id == me.id || Some(u.id) == me.target || u.target == Some(me.id),
+                    distance: u.position.distance_squared(camera.eye),
+                    tier: self
+                        .characters
+                        .get(&u.id)
+                        .map_or(anim::Tier::Full, |c| c.tier()),
+                }
+            }))
+        } else {
+            &[]
+        };
+        let (mut posing, mut skinning, mut counts) = (Duration::ZERO, Duration::ZERO, [0; 3]);
+        for (i, u) in units.iter().enumerate() {
             let mut look = (*u.look).clone();
             look.drawn = false;
             let height = self
@@ -1473,7 +1518,11 @@ impl Game {
             c.partial_updates = !self.options.legacy_cpu;
             c.blender.set_method(self.options.blend);
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
-            c.update_combat(
+            let tier = tiers.get(i).copied().unwrap_or_default();
+            counts[tier as usize] += 1;
+            c.set_tier(tier);
+            let started = Instant::now();
+            c.animate(
                 u,
                 if self.options.showcase {
                     None
@@ -1481,12 +1530,23 @@ impl Game {
                     combat_index.get(&u.id).copied()
                 },
                 if self.options.showcase { 1. / 60. } else { dt },
+                self.frame,
             );
-            draws.extend(c.draws(u.position, u.yaw).into_iter().map(|mut d| {
+            let posed = Instant::now();
+            // Drawn at the body's yaw, which lags the sim's while turning on the spot (#211).
+            draws.extend(c.draws(u.position, c.body_yaw()).into_iter().map(|mut d| {
                 d.instance |= (u.id as u64) << 32;
                 d
             }));
+            posing += posed - started;
+            skinning += posed.elapsed();
         }
+        let animation = perf_overlay::Animation {
+            pose_ms: posing.as_secs_f64() * 1000.,
+            palettes_ms: skinning.as_secs_f64() * 1000.,
+            tiers: counts,
+        };
+        self.animation.spent(animation.pose_ms as f32);
         let player = units
             .iter()
             .find(|u| u.id == self.host.player)
@@ -1499,6 +1559,8 @@ impl Game {
             && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.)
             && (!self.options.gait
                 || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none());
+        self.perf
+            .animate(animation, self.frame > self.options.warmup && !done);
         let frame_file = self
             .options
             .sequence
@@ -1722,13 +1784,18 @@ impl Game {
         self.finished_at = finished;
         if self.frame.is_multiple_of(120) || done {
             eprintln!(
-                "frame={} gpu={:.2}ms draws={} triangles={} sim={:.3}ms units={}",
+                "frame={} gpu={:.2}ms draws={} triangles={} sim={:.3}ms units={} pose={:.3}ms palettes={:.3}ms tiers={}/{}/{}",
                 self.frame,
                 stats.gpu_ms,
                 stats.draw_calls,
                 stats.triangles,
                 self.host.stats().step_ms,
-                units.len()
+                units.len(),
+                animation.pose_ms,
+                animation.palettes_ms,
+                animation.tiers[0],
+                animation.tiers[1],
+                animation.tiers[2]
             );
         }
         if done {
@@ -1763,6 +1830,9 @@ impl Game {
             eprintln!(
                 "PACING judder_rms paced={paced:.3}ms by_arrival={by_arrival:.3}ms (sim time drawn vs refreshes shown)"
             );
+            if let Some(line) = self.perf.animation_report() {
+                eprintln!("{line}");
+            }
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
                 let mut intervals: Vec<_> = presentations
