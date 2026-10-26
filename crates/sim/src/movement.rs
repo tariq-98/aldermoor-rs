@@ -188,11 +188,16 @@ fn vault_over(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, radius: f32) 
         let d = face + i as f32 * STEP;
         let p = from + dir * d;
         let h = land.ground(p.x, p.y) - y;
+        // Too tall to hop: no need to look further (a runner pressed against a cottage would
+        // otherwise sample its whole depth every step).
+        if h > VAULT_HEIGHT {
+            return None;
+        }
         if h <= 0.3 {
             // Over it: the ground beyond must be about level and clear.
             let at = p + dir * (radius + 0.1);
             let g = land.ground(at.x, at.y);
-            if d - face >= VAULT_DEPTH || top > VAULT_HEIGHT || (g - y).abs() > STEP_DOWN || land.blocked(at, radius) {
+            if d - face >= VAULT_DEPTH || (g - y).abs() > STEP_DOWN || land.blocked(at, radius) {
                 return None;
             }
             return Some((Vec3::new(at.x, g, at.y), top));
