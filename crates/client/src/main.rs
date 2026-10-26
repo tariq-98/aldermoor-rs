@@ -5,6 +5,7 @@ mod craft;
 mod effects;
 mod hud;
 mod interpolate;
+mod latency;
 mod menu;
 mod pacing;
 mod perf_overlay;
@@ -100,7 +101,9 @@ impl Options {
             inspect: None,
             warmup: 120,
             samples: 0,
-            in_flight: 2,
+            // One frame in flight: a frame sooner on screen, and on the M1 Air it held the
+            // same frame rate as two with a lower GPU p95 (#219).
+            in_flight: 1,
             fps: None,
             benchmark: false,
             inline_constants: true,
@@ -325,6 +328,8 @@ struct Game {
     /// The last frame's clock reading and the sim times it drew, by this pacing and by
     /// arrival time as before #223, for the judder comparison printed at exit.
     judder: Option<(f64, f64, f64)>,
+    /// Press-to-photon times for jumps, rolls and skills (#219).
+    latency: latency::Latency,
     /// Seconds per frame when frames come from the display's refresh (capped by `--fps`).
     frame_period: Option<f64>,
     frame: u64,
@@ -424,6 +429,7 @@ impl Game {
             pacing: pacing::Stats::default(),
             paced: None,
             judder: None,
+            latency: latency::Latency::default(),
             frame_period: None,
             frame: 0,
             gpu: Vec::new(),
@@ -526,9 +532,24 @@ impl Game {
             orbiting: self.orbiting,
         }
     }
+    /// The ability on bar slot `slot` now, if any.
+    fn slot_ability(&self, slot: u8) -> Option<String> {
+        let s = self.snaps.current.player.as_ref()?.bar.get(slot as usize)?;
+        (!s.ability.is_empty()).then(|| s.ability.clone())
+    }
     /// Does what a bound control does when its key goes down.
     fn press(&mut self, control: controls::Control) {
         use controls::Control as C;
+        let pressed = match control {
+            C::Jump => Some((latency::Kind::Jump, None)),
+            C::Roll => Some((latency::Kind::Roll, None)),
+            c => c
+                .slot()
+                .map(|slot| (latency::Kind::Skill, self.slot_ability(slot))),
+        };
+        if let Some((kind, ability)) = pressed {
+            self.latency.pressed(kind, ability, latency::now());
+        }
         let command = match control {
             C::Jump => Some(Command::Jump),
             C::Roll => Some(Command::Dodge {
@@ -1040,18 +1061,31 @@ impl Game {
                     sprint: false,
                     face_yaw: None,
                 }),
-                1 => self.host.send(Command::Jump),
-                2 => self.host.send(Command::Dodge {
-                    direction: Vec2::new(-1., 0.),
-                }),
+                1 => {
+                    self.latency
+                        .pressed(latency::Kind::Jump, None, latency::now());
+                    self.host.send(Command::Jump)
+                }
+                2 => {
+                    self.latency
+                        .pressed(latency::Kind::Roll, None, latency::now());
+                    self.host.send(Command::Dodge {
+                        direction: Vec2::new(-1., 0.),
+                    })
+                }
                 3 => {
                     self.host.send(Command::SetTarget(self.target(false)));
                     self.host.send(Command::SetAutoAttack(true));
                 }
-                4 | 5 => self.host.send(Command::UseSlot {
-                    slot: 1,
-                    ground: None,
-                }),
+                4 | 5 => {
+                    let ability = self.slot_ability(1);
+                    self.latency
+                        .pressed(latency::Kind::Skill, ability, latency::now());
+                    self.host.send(Command::UseSlot {
+                        slot: 1,
+                        ground: None,
+                    })
+                }
                 7 => self.host.send(Command::SwapWeapons),
                 _ => self.host.send(Command::Move {
                     direction: Vec2::ZERO,
@@ -1073,6 +1107,7 @@ impl Game {
     }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
         perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
+        self.latency.presented(|frame| r.presented_at(frame));
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -1140,6 +1175,25 @@ impl Game {
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            let me = self.host.player;
+            let shown = match &e {
+                protocol::Event::Jumped { unit } if *unit == me => {
+                    Some((latency::Kind::Jump, None))
+                }
+                protocol::Event::Dodged { unit } if *unit == me => {
+                    Some((latency::Kind::Roll, None))
+                }
+                protocol::Event::AbilityUsed { unit, ability, .. }
+                | protocol::Event::CastStarted { unit, ability, .. }
+                    if *unit == me =>
+                {
+                    Some((latency::Kind::Skill, Some(ability.as_str())))
+                }
+                _ => None,
+            };
+            if let Some((kind, ability)) = shown {
+                self.latency.stepped(kind, ability, self.snaps.current.time);
+            }
             if let protocol::Event::Hit {
                 attacker,
                 victim,
@@ -1211,7 +1265,14 @@ impl Game {
         let mut units = if self.options.showcase {
             self.review.clone()
         } else {
-            self.snaps.units(!self.options.legacy_cpu)
+            let own = OWN_AHEAD.then_some(self.host.player);
+            let lead = if OWN_AHEAD { pacing::DRAW_DELAY } else { 0. };
+            self.latency.drew(
+                r.next_frame(),
+                self.snaps.previous.time + self.snaps.since() as f64 + lead,
+                latency::now(),
+            );
+            self.snaps.units(!self.options.legacy_cpu, own)
         };
         let time = self.frame as f32 / 60.;
         self.reel_time =
@@ -1498,6 +1559,7 @@ impl Game {
                 self.host.stats().step_ms,
                 r.gpu_counters_enabled(),
                 &self.pacing,
+                &self.latency,
             );
             if let Some(m) = &self.menu {
                 changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
@@ -1588,6 +1650,20 @@ impl Game {
                 self.perf.report(r.gpu_counters_enabled());
             }
             eprintln!("HISTORY resets={}", r.stats.history_resets);
+            for kind in latency::Kind::ALL {
+                if let Some((median, p95, n)) = self.latency.summary(kind) {
+                    eprintln!(
+                        "LATENCY {} press_to_photon median={median:.1}ms p95={p95:.1}ms samples={n}",
+                        kind.name()
+                    );
+                }
+                if let Some((median, p95, n)) = self.latency.to_frame(kind) {
+                    eprintln!(
+                        "LATENCY {} press_to_frame median={median:.1}ms p95={p95:.1}ms samples={n}",
+                        kind.name()
+                    );
+                }
+            }
             let [none, one, more] = self.pacing.total;
             eprintln!("PACING steps_per_frame 0={none} 1={one} 2+={more}");
             let (paced, by_arrival) = self.pacing.judder_ms();
@@ -1838,6 +1914,8 @@ fn paint_caption(ctx: &egui::Context, text: &str) {
 }
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
+/// Your own character is drawn at the newest sim time rather than a step behind (#219).
+const OWN_AHEAD: bool = true;
 /// How often a held attack button presses the basic attack again, in seconds.
 const SWING_REPEAT: f32 = 0.1;
 /// A press of the left or right button, until both are up again.

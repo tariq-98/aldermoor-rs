@@ -91,6 +91,7 @@ impl Overlay {
         sim_ms: f64,
         enabled: bool,
         pacing: &crate::pacing::Stats,
+        latency: &crate::latency::Latency,
     ) {
         if !self.visible {
             return;
@@ -107,6 +108,19 @@ impl Overlay {
                 ui.label(format!(
                     "Sim steps per frame (last 2 s): 0 × {none} · 1 × {one} · 2+ × {more}"
                 ));
+                for kind in crate::latency::Kind::ALL {
+                    if let Some((median, p95, n)) = latency.summary(kind) {
+                        ui.label(format!(
+                            "Press to photon, {}: {median:.0} ms (p95 {p95:.0}, {n} presses)",
+                            kind.name()
+                        ));
+                    } else if let Some((median, p95, n)) = latency.to_frame(kind) {
+                        ui.label(format!(
+                            "Press to frame, {}: {median:.0} ms (p95 {p95:.0}, {n} presses; not on screen yet)",
+                            kind.name()
+                        ));
+                    }
+                }
                 if let Some(frame) = self.latest {
                     ui.label(format!("GPU frame: {:.3} ms / 12 ms", frame.gpu_ms));
                     ui.label(format!(
@@ -276,7 +290,13 @@ mod tests {
             ..Default::default()
         };
         let output = ctx.run(egui::RawInput::default(), |ctx| {
-            overlay.draw(ctx, 1., true, &crate::pacing::Stats::default())
+            overlay.draw(
+                ctx,
+                1.,
+                true,
+                &crate::pacing::Stats::default(),
+                &crate::latency::Latency::default(),
+            )
         });
         assert!(!output.shapes.is_empty());
     }
