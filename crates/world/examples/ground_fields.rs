@@ -89,6 +89,24 @@ fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
             )
         })
         .collect();
+    let grips: Vec<String> = m
+        .grips
+        .iter()
+        .map(|g| {
+            format!(
+                "{{\"part\": \"{}\", \"a\": [{}, {}, {}], \"b\": [{}, {}, {}], \"out\": [{}, {}]}}",
+                g.part,
+                f(g.a.x),
+                f(g.a.y),
+                f(g.a.z),
+                f(g.b.x),
+                f(g.b.y),
+                f(g.b.z),
+                f(g.out.x),
+                f(g.out.y)
+            )
+        })
+        .collect();
     let line: Vec<String> = m.line.iter().map(|p| format!("[{}, {}, {}]", f(p.x), f(p.y), f(p.z))).collect();
     let reach = m.blocks.iter().map(|b| b.center.abs() + Vec2::splat(b.half.length())).fold(Vec2::ZERO, Vec2::max) + Vec2::splat(2.0);
     let (nx, nz) = ((reach.x * 2.0).ceil() as i32, (reach.y * 2.0).ceil() as i32);
@@ -101,13 +119,14 @@ fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
         }
     }
     format!(
-        "{{\"prop\": \"{}\", \"origin\": [{}, {}, {}], \"yaw\": {}, \"blocks\": [{}], \"line\": [{}], \"ground\": {{\"from\": [{}, {}], \"step\": 0.5, \"size\": [{}, {}], \"heights\": [{}]}}}}",
+        "{{\"prop\": \"{}\", \"origin\": [{}, {}, {}], \"yaw\": {}, \"blocks\": [{}], \"grips\": [{}], \"line\": [{}], \"ground\": {{\"from\": [{}, {}], \"step\": 0.5, \"size\": [{}, {}], \"heights\": [{}]}}}}",
         m.prop,
         f(m.origin.x),
         f(m.origin.y),
         f(m.origin.z),
         f(m.yaw),
         blocks.join(", "),
+        grips.join(", "),
         line.join(", "),
         f(-nx as f32 * 0.5),
         f(-nz as f32 * 0.5),
