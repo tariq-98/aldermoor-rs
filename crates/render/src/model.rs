@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -209,6 +209,9 @@ pub struct BoundClip {
 /// `ModelCache::clip_set`.
 pub struct ClipSet {
     pub clips: HashMap<String, BoundClip>,
+    /// A humanoid's walk, jog and sprint as this skeleton plays them (#110), measured by the first
+    /// character to use the set; `None` if they don't measure.
+    pub gaits: OnceLock<Option<[anim::Gait; 3]>>,
 }
 impl ClipSet {
     pub fn bind(skeleton: &[Node], clips: &Model, humanoid: bool) -> Self {
@@ -263,7 +266,10 @@ impl ClipSet {
                 (name.clone(), bound)
             })
             .collect();
-        Self { clips }
+        Self {
+            clips,
+            gaits: OnceLock::new(),
+        }
     }
 }
 static NEXT_MODEL: AtomicU64 = AtomicU64::new(1);
