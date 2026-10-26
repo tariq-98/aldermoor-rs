@@ -46,7 +46,11 @@ the unit's combat view and calls `update`, which builds the pose in this order:
    carrying the old motion into the new, and while a switch settles it changes `local`, so the
    world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
    letting go of or taking a grip.
-10. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
+10. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops and the legs
+    reach for the ground, and planted feet hold still (see Feet on the ground below). After the
+    blender, so nothing smooths the feet off the ground, and the blender keeps the pose from
+    before it.
+11. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
 
 ## Locomotion
 
@@ -56,8 +60,9 @@ The clips are three loops that run straight ahead in place (`LOOPS`: walk, jog a
 `anim::locomotion` (#110) fits them to the motion, the way Paragon and Lyra do:
 
 - **Gaits, measured once.** `Gait::measure` reads each loop's feet (the `ball_l` and `ball_r`
-  bones) at 64 times through its cycle: when each foot touches down, and how fast a planted foot
-  slides back, which is the speed the loop would carry the body. The first character to play a
+  bones) at 64 times through its cycle: when each foot touches down and lifts off, how high the
+  ball of a planted foot is (`floors`, the median), and how fast a planted foot slides back, which
+  is the speed the loop would carry the body. The first character to play a
   set of clips measures them (`measure_gaits`, kept in `ClipSet::gaits`), so every body measures
   its own: the male's walk is 1.03 m/s, jog 6.02 and sprint 9.25; the goblin's 0.64, 3.93 and
   5.73. A body whose loops don't measure plays them as before, by `stride_rate`.
@@ -72,7 +77,9 @@ The clips are three loops that run straight ahead in place (`LOOPS`: walk, jog a
 - **The phase follows the ground.** Each frame it moves on by the speed over the stride length of
   the step under way, so a planted foot moves back exactly as fast as the body moves on. Below the
   walk's speed and above the sprint's it plays between 0.8 and 1.25 of the loops' pace (`PACE`),
-  and past that the feet slide, until stride warping (#214) lengthens or shortens the steps.
+  and past that stride warping (#214) shortens or lengthens the steps (`Step::warp`). Each step
+  also says which feet are planted, by where the phase is in the blend's stances (`Step::planted`),
+  and how high the blend holds the ball of each (`Step::floors`), for foot locking.
 - **Hips toward the travel** (`locomotion::hip_turn`): turned toward the travel up to 100° round
   from the facing, and past that toward the opposite way with the loops playing backward, so
   backpedalling is the run in reverse. The change between the two is 10° either side of square
@@ -83,10 +90,57 @@ The clips are three loops that run straight ahead in place (`LOOPS`: walk, jog a
   on critically damped springs, with half-lives of 0.1 s and 0.08 s, and snap when the character
   starts moving.
 
-Not done yet: steps lengthened or shortened to the speed and feet pinned to the ground (#214), and
-slopes. Slow walking slides most: the walk clip's trailing foot slides forward as it lifts, about 4 cm a step even at
-the clip's own 1 m/s, and between the walk's speed and the jog's (backing off behind a raised
-guard is 1.5 m/s) the blend can't hide it. Foot locking (#214) is the fix.
+Between the walk's speed and the jog's (a sim walk is 2.5 m/s, backing off behind a raised guard
+1.5 m/s) the blend can't keep planted feet still on its own, and the walk clip's trailing foot
+slides forward as it lifts, about 4 cm a step even at the clip's own 1 m/s. Foot locking (below)
+holds them.
+
+## Feet on the ground
+
+The clips are made on flat ground and play in place at the root, which the sim keeps on the ground
+under the middle of the body. On a slope, a terrace or the bridge's ramps one foot would sink and
+the other float, and wherever the stride can't match the body exactly (two loops blended, a turn,
+past the loops' paces) planted feet slide. `anim::Feet` (#214, `crates/anim/src/feet.rs`) puts
+the feet on the ground at full detail, the way Unreal's foot placement and the Game Animation
+Sample's leg IK do. `Character::set_ground` gives it the ground; the client's is
+`world::Valley::ground`, with the bridge deck and the tops of solids, and without one the ground is
+level with the unit.
+
+- **Each foot** finds the ground under its ankle and the slope there, measured 10 cm either side
+  and taking the gentler side (`SPAN`), so a step or the foot of a wall doesn't tip it. It keeps
+  the height above the ground that the clip gives it, square to the slope, and turns to the slope
+  up to 30° (`MAX_TILT`), following it with a half-life of 0.04 s so it turns evenly where the
+  ground bends. A jump in the ground under a foot (a step, a ledge) eases out (`EASE_HALF_LIFE`).
+- **The pelvis** drops on a spring with a half-life of 0.05 s as far as the lower foot needs, and
+  further, at up to 2 m/s, while a held leg would otherwise be straighter than 99.8% of its length
+  (`REACH`, `REACH_RATE`). When the body steps up or down, the drop takes up the step, so the pelvis
+  settles from where it was rather than dipping twice. Then two-bone IK (`anim::ik`, as for
+  stepping round) bends each leg to its foot.
+- **Foot locking.** A foot planted in its stride holds still in the world. The ball of the foot is
+  what holds, so the heel still rises as the clip rolls over it. It holds once the clip has the
+  ball within 1.2 cm of its planted height (`DOWN`; the gait's `floors`, higher running on the toes
+  than walking flat footed, and each body's own), not yet as the heel strikes with the toes up. It
+  lets go once the ball is 2.5 cm above that (`UP`), the stride lifts the foot, the clip carries it
+  forward faster than half the body's speed as the toes push off (`LEAVE`), or the body gets a
+  quarter of the leg's length away (`STRETCH`). Between `DOWN` and `UP` the sprint's planted feet
+  jitter 3 cm up and down without letting go. Letting go, the foot eases from where it was held
+  back onto the clip, on a spring that starts slowly so it doesn't jump after the clip.
+- **Stride warping.** Past the loops' paces the steps shorten or lengthen along the line the legs
+  stride along (`Step::warp`, between half and 1.6 times the clips'), so the feet keep up with the
+  body instead of sliding.
+- **Off the ground** (jumping, falling, rolling, on a wall (#247), downed or dead, below full
+  detail, or 20 cm or more above the ground: in the air or afloat, `AIRBORNE`) the placement fades
+  out over 0.15 s, eased in and out, and fades back in on landing (`FADE`). Moved 1.5 m in a frame
+  (a teleport, `JUMP`), the feet let go at once.
+
+Over the frames feet are held, the clips alone would slide them 18 to 94 cm (four seconds of
+walking, jogging, sprinting or backpedalling on each of the five bodies); held, they move under
+3 mm in all. `--foot-ik off` leaves the feet as the clips have them, to compare.
+
+Not done yet: the walk's trailing foot still slides as its toes push off, since the hold lets go
+as the clip carries the foot on (held longer, the foot is left behind and races after the clip;
+pinning the toes needs the toe joint to hold instead of the ball). A goblin sprinting at a human's
+9 m/s overstretches its legs, and its held feet drag 6.5 cm.
 
 ## Turning on the spot
 
@@ -229,13 +283,27 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   lengths, bends the knee toward the pole, and gets the end as near as the chain goes to a target
   out of reach. For level of detail: rebuilds spread evenly over the frames at every tier, the
   involved come first and then the nearest, a character keeps its tier against one a little
-  nearer, and over budget the higher tiers shrink and come back under it.
+  nearer, and over budget the higher tiers shrink and come back under it. For the feet on the
+  ground, with a walking leg on synthetic ground: on a 30° slope the soles meet the ground through
+  each contact (within 1 cm) going up, down, across and slantwise; a held foot moves under 2 mm
+  through its contact going faster or slower than the clip and turning, on level ground, a gentle
+  slope and a 30° one, and with the clip's planted feet jittering 2 cm, and it holds through most
+  of each contact; the pelvis drop never jumps up a slope, over its top, down a 30 cm ledge,
+  standing, in the air and landing; slower than the clips play, the steps shorten so planted feet
+  stay put unheld; off the ground the placement fades out and comes back on landing; and a
+  teleport lets go of the feet at once. Measuring a gait finds where each foot lifts off and how
+  high its planted ball is, and each step says which feet are planted and how much to warp.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
-  bone carries on at every switch, where cuts jump by over 0.5 rad. The other clip-stack tests
-  set `Method::Off`. `planted_feet_stay_put_walking_running_and_sprinting_every_way` walks, runs
-  and sprints a knight ahead, to each side and backward, and fails if a planted foot slides 2 cm
-  over the ground (backing off at a walk, no more than the walk clip slides on its own).
+  bone carries on at every switch, where cuts jump by over 0.5 rad (with the feet left as the
+  clips have them: they go on the ground after the blender). The other clip-stack tests set
+  `Method::Off`. `planted_feet_stay_put_walking_running_and_sprinting_every_way` walks, runs and
+  sprints a knight ahead, to each side and backward without foot locking, and fails if a planted
+  foot slides 2 cm over the ground (backing off at a walk, no more than the walk clip slides on its
+  own). `held_feet_stay_put_through_each_contact_every_way` does the same with foot locking: each
+  foot holds in every stride, for at least 4 frames each time, and moves under 5 mm held.
+  `on_a_wall_the_feet_leave_the_ground_even_taking_a_blow` hangs a knight 10 cm off the ground
+  (#247), struck: the feet don't reach for the ground.
   `strafing_turns_the_hips_and_keeps_the_chest_to_the_front` checks the hips against the travel
   and the chest against the facing, beside a twin running straight with the same stride.
   `turning_on_the_spot_the_feet_stay_put_while_the_chest_takes_the_turn` turns a knight 50°: the
@@ -263,28 +331,30 @@ frame (median and 95th percentile) and how many characters were at each tier on 
 
 ## Cost
 
-`cargo run --release -p render --example anim_bench -- [characters] [frames] [case] [tier]` times
-`animate` (the pose) and `draws` (the skinning palettes) for a plate knight with sword, shield and
-cape, a ranger with a bow and an elf mage with a staff, at each LOD at full detail, then at half
-and quarter detail, and counts what posing allocates once it is going (nothing). The cases: `idle`,
-`walk` (2.5 m/s, between the walk and jog loops), `run` and `strafe` (running square to the facing)
-hold their pose, `turn` stands looking 80° either way and back every two seconds (the feet step
-round on every sweep), `slash` and `run + slash` start the slash over every half second, and
-`start-stop` runs and stops every half second, so those three are blending most of the time.
+`cargo run --release -p render --example anim_bench -- [characters] [frames] [case] [tier] [feet]`
+times `animate` (the pose) and `draws` (the skinning palettes) for a plate knight with sword,
+shield and cape, a ranger with a bow and an elf mage with a staff, at each LOD at full detail, then
+at half and quarter detail, and counts what posing allocates once it is going (nothing). They go
+over the slopes west of the village with their feet on the ground; `off` for the feet leaves them
+as the clips have them. The cases: `idle`, `walk` (2.5 m/s, between the walk and jog loops), `run`
+and `strafe` (running square to the facing) hold their pose, `turn` stands looking 80° either way
+and back every two seconds (the feet step round on every sweep), `slash` and `run + slash` start
+the slash over every half second, and `start-stop` runs and stops every half second, so those
+three are blending most of the time.
 
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 |
-| --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 |
-| turn | | | | 83,657 | 90,315 | 48,176 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -312,6 +382,16 @@ averaged over the cases): posing takes 7.7 at full detail, 3.3 at half and 1.6 a
 skinning palettes 3.6 at every tier. So 200 characters in the default tiers (8, 16 and 176) pose in
 about 0.4 ms on one core, against about 1.5 ms all at full detail.
 
+#214 puts the feet on the ground at full detail: 9,500 to 11,200 more instructions a pose (15% to
+27%). With the feet `off` the bench costs what it did after #215, within 1.3%. About a third of the
+extra is the two-bone IK solves, a fifth rebuilding the legs' world matrices, a sixth sampling the
+ground (under the body and each ankle, and either side of each for the slope: 15 samples), a tenth
+dropping the pelvis, and the rest working out where each foot goes. The pelvis carries nearly the
+whole skeleton, so the world matrices of everything on it move with it in one flat pass instead of
+being rebuilt. Wall clock on the cloud runner, posing at full detail goes from 7.8 to 9.6 µs a
+character a frame, so the 8 full-detail characters cost about 15 µs more a frame, however big the
+crowd.
+
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are
 the next cost to take on (#243): they're rebuilt every frame at every tier, and half of them are
@@ -319,10 +399,8 @@ copies of another part's.
 
 ## Next
 
-In the plan's order: #214 foot IK and foot locking (after the blender, so
-planted feet stay planted while it settles; `anim::ik` and the way `step_round` hands feet back to
-the clip are its starting point), #212 aim pitch and look-at, #217 lean, landings and the idle phase, #218 hit flinches
-and hitstop (on `Event::Hit`, #191), and #213 traversal (after #192).
+In the plan's order: #212 aim pitch and look-at, #217 lean, landings and the idle phase, #218
+hit flinches and hitstop (on `Event::Hit`, #191), and #213 traversal (after #192).
 
 One thing to watch: combat clips take their time from `UnitCombat::action_time` in each snapshot.
 Snapshots go out every tick today; if the send rate drops to 20–30 Hz (#73), attacks would play in

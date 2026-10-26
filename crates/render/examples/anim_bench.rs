@@ -1,16 +1,19 @@
 //! CPU cost of animating characters: `Character::animate` (pose) and `Character::draws`
 //! (skinning palettes) per character per frame, for a few typical looks and poses.
 //!
-//!     cargo run --release -p render --example anim_bench -- [characters] [frames] [case] [tier]
+//!     cargo run --release -p render --example anim_bench -- [characters] [frames] [case] [tier] [feet]
 //!
 //! The cases are listed in `main`; without one, it runs them all. The tiers (#215) are `full`
-//! (every LOD), `half` and `quarter` (LOD 0); without one, it runs them all.
+//! (every LOD), `half` and `quarter` (LOD 0); without one, it runs them all. The characters go
+//! over the valley's ground with their feet on it (#214); `off` for the feet leaves them as the
+//! clips have them, to compare.
 use anim::Tier;
 use glam::Vec3;
 use protocol::{Action, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
-use render::character::Character;
+use render::character::{Character, Ground};
 use render::model::ModelCache;
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Instant;
 
@@ -116,6 +119,16 @@ fn main() -> anyhow::Result<()> {
         Some("quarter") => vec![(0, Tier::Quarter)],
         Some(other) => anyhow::bail!("the tier is full, half or quarter, not {other}"),
     };
+    let feet = match args.next().as_deref() {
+        None | Some("on") => true,
+        Some("off") => false,
+        Some(other) => anyhow::bail!("the feet are on or off, not {other}"),
+    };
+    let valley = Arc::new(world::Valley::new());
+    let ground: Ground = {
+        let valley = Arc::clone(&valley);
+        Arc::new(move |x, z| valley.ground(x, z))
+    };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     let cat = assets::Catalog::load(&root)?;
     let mut cache = ModelCache::default();
@@ -144,9 +157,20 @@ fn main() -> anyhow::Result<()> {
                 .collect::<anyhow::Result<Vec<_>>>()?;
             for c in &mut characters {
                 c.set_tier(tier);
+                c.set_ground(Arc::clone(&ground));
+                c.foot_placement = feet;
             }
+            // Side by side on the slopes west of the village, going north over the terraces.
             let mut units: Vec<_> = (0..count)
-                .map(|i| unit(i as u32, look(i), pose, speed))
+                .map(|i| {
+                    let mut u = unit(i as u32, look(i), pose, speed);
+                    u.position = Vec3::new(
+                        -75. + 1.5 * (i % 20) as f32,
+                        0.,
+                        -70. - 3. * (i / 20) as f32,
+                    );
+                    u
+                })
                 .collect();
             if label == "strafe" {
                 for u in &mut units {
@@ -188,6 +212,8 @@ fn main() -> anyhow::Result<()> {
                         cycle
                     };
                     let f = fight(u.id, if action == Action::None { t } else { cycle });
+                    u.position += u.velocity / 60.;
+                    u.position.y = valley.ground(u.position.x, u.position.z);
                     rebuilds += c.animate(u, Some(&f), 1. / 60., frame as u64) as usize;
                 }
                 let posed = Instant::now();

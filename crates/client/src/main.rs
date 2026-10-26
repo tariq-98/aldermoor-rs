@@ -18,7 +18,7 @@ use protocol::{Command, Look, Pose, UnitState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use render::{
     Camera, Renderer,
-    character::{Character, Draw},
+    character::{Character, Draw, Ground},
     model::{Model, ModelCache},
 };
 use std::{
@@ -93,6 +93,9 @@ struct Options {
     /// Whether characters' poses rebuild at the rates `anim::Crowd` gives them (#215), or all
     /// every frame, to compare.
     anim_tiers: bool,
+    /// Whether characters' feet go on the ground (#214), or stay as the clips have them, to
+    /// compare.
+    foot_ik: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -140,6 +143,7 @@ impl Options {
             blend: anim::Method::default(),
             crowd: 0,
             anim_tiers: true,
+            foot_ik: true,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -264,13 +268,20 @@ impl Options {
                         _ => anyhow::bail!("--anim-tiers expects on or off"),
                     }
                 }
+                "--foot-ik" => {
+                    o.foot_ik = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--foot-ik expects on or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -399,7 +410,9 @@ struct Game {
     aim_slot: Option<u8>,
     /// A ground skill's key held down with Hold to aim: it casts on release.
     held_ground: Option<u8>,
-    valley: world::Valley,
+    valley: Arc<world::Valley>,
+    /// The valley's ground, which characters put their feet on (#214).
+    ground: Ground,
     effects: Option<effects::Effects>,
     /// The effects' art, for each renderer to upload.
     effects_art: Option<render::fx::Library>,
@@ -427,6 +440,11 @@ impl Game {
                 )
                 .with_context(|| format!("connecting to {addr}"))?
             }
+        };
+        let valley = Arc::new(world::Valley::new());
+        let ground: Ground = {
+            let valley = Arc::clone(&valley);
+            Arc::new(move |x, z| valley.ground(x, z))
         };
         let settings_path = options.controls.clone().unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
@@ -514,7 +532,8 @@ impl Game {
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
             held_ground: None,
-            valley: world::Valley::new(),
+            valley,
+            ground,
             effects,
             effects_art,
             stage: None,
@@ -557,8 +576,9 @@ impl Game {
             g.snaps.current.units.clone()
         };
         for u in units {
-            g.characters
-                .insert(u.id, Character::load(&g.catalog, &mut g.cache, &u.look)?);
+            let mut c = Character::load(&g.catalog, &mut g.cache, &u.look)?;
+            c.set_ground(Arc::clone(&g.ground));
+            g.characters.insert(u.id, c);
         }
         if let Some(path) = &g.options.hud_font {
             let mut fonts = egui::FontDefinitions::default();
@@ -1397,7 +1417,8 @@ impl Game {
             && let Some(base) = units.iter().find(|u| u.id == self.host.player)
         {
             let time = self.start.elapsed().as_secs_f32();
-            let others = crowd::units(base, self.options.crowd, time);
+            let valley = &self.valley;
+            let others = crowd::units(base, self.options.crowd, time, |x, z| valley.ground(x, z));
             units.extend(others);
         }
         let me = units
@@ -1509,14 +1530,14 @@ impl Game {
                 if self.options.reset_on_look && self.characters.contains_key(&u.id) {
                     r.reset_temporal_history();
                 }
-                self.characters.insert(
-                    u.id,
-                    Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?,
-                );
+                let mut c = Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?;
+                c.set_ground(Arc::clone(&self.ground));
+                self.characters.insert(u.id, c);
             }
             let c = self.characters.get_mut(&u.id).unwrap();
             c.partial_updates = !self.options.legacy_cpu;
             c.blender.set_method(self.options.blend);
+            c.foot_placement = self.options.foot_ik;
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
             let tier = tiers.get(i).copied().unwrap_or_default();
             counts[tier as usize] += 1;

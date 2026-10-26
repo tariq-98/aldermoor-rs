@@ -39,6 +39,9 @@ pub struct Character {
     pub lod: usize,
     /// Diagnostic reference path for measuring and checking partial skeleton updates.
     pub partial_updates: bool,
+    /// Whether full-detail feet go on the ground (#214); off to compare with the clips as they
+    /// are.
+    pub foot_placement: bool,
     pub parts: Vec<Part>,
     pub nodes: Vec<Node>,
     pub local: Vec<Transform>,
@@ -97,8 +100,13 @@ pub struct Character {
     /// the feet stepping round after it.
     turn: anim::Turn,
     steps: Option<anim::Steps>,
-    /// The left and right legs' hip, knee and ankle bones, which step round.
+    /// The left and right legs' hip, knee and ankle bones, which step round and reach for the
+    /// ground, and the balls of the feet.
     leg_bones: Option<[[usize; 3]; 2]>,
+    ball_bones: Option<[usize; 2]>,
+    /// The feet on the ground (#214): where each is held, and how far the pelvis drops.
+    feet: anim::Feet,
+    ground: Option<Ground>,
     /// The pelvis and the spine up to the chest, which turn toward the travel and the aim.
     spine_bones: Option<[usize; 4]>,
     /// The neck and head, which share the turn the chest can't take.
@@ -121,10 +129,16 @@ pub struct Character {
     children: Vec<Vec<usize>>,
     /// Every node after its parent, to rebuild world matrices in one pass.
     order: Vec<usize>,
+    /// The bone the feet last dropped (the pelvis, #214) and everything on it, parents first, and
+    /// how many nodes there were when they were listed.
+    dropped: (usize, Vec<usize>),
     lod_parts: HashMap<usize, Stashed>,
 }
 /// What `set_lod` keeps of a LOD it swapped out: its parts, its clips and their binding.
 type Stashed = (Vec<Part>, Arc<Model>, Arc<ClipSet>);
+/// The height of the ground at any (x, z), which full-detail characters put their feet on (#214):
+/// `world::Valley::ground` in the game.
+pub type Ground = Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>;
 
 /// A climbing clip under way (#247): the sim's move onto, between or off holds that it plays,
 /// and how far into that move the renderer has got.
@@ -366,6 +380,15 @@ impl Character {
         let leg_bones = leg(["thigh_l", "calf_l", "foot_l"])
             .zip(leg(["thigh_r", "calf_r", "foot_r"]))
             .map(|(left, right)| [left, right]);
+        let ball_bones = leg_bones.and_then(|[left, right]| {
+            let ball = |name: &str, foot: usize| {
+                names
+                    .get(name)
+                    .copied()
+                    .filter(|&b| nodes[b].parent == Some(foot))
+            };
+            Some([ball("ball_l", left[2])?, ball("ball_r", right[2])?])
+        });
         let all = |bones: [&str; 4]| match bones.map(|n| names.get(n).copied()) {
             [Some(a), Some(b), Some(c), Some(d)] => Some([a, b, c, d]),
             _ => None,
@@ -379,6 +402,7 @@ impl Character {
         let mut c = Self {
             lod,
             partial_updates: true,
+            foot_placement: true,
             parts: Vec::new(),
             world: world_matrices(&nodes, &local),
             nodes,
@@ -437,6 +461,9 @@ impl Character {
             turn: anim::Turn::default(),
             steps: None,
             leg_bones,
+            ball_bones,
+            feet: anim::Feet::default(),
+            ground: None,
             spine_bones,
             head_bones,
             arm_bones,
@@ -450,6 +477,7 @@ impl Character {
             since: 0.,
             between: None,
             children: Vec::new(),
+            dropped: (0, Vec::new()),
             order,
             lod_parts: HashMap::new(),
         };
@@ -815,11 +843,8 @@ impl Character {
             };
         }
     }
-    pub(crate) fn update_chain(&mut self, root: usize) {
-        if !self.partial_updates {
-            self.pose_world();
-            return;
-        }
+    /// Lists each node's children, once there are as many nodes as there will be.
+    fn find_children(&mut self) {
         if self.children.len() != self.nodes.len() {
             self.children = vec![Vec::new(); self.nodes.len()];
             for (i, n) in self.nodes.iter().enumerate() {
@@ -828,6 +853,13 @@ impl Character {
                 }
             }
         }
+    }
+    pub(crate) fn update_chain(&mut self, root: usize) {
+        if !self.partial_updates {
+            self.pose_world();
+            return;
+        }
+        self.find_children();
         fn update(
             i: usize,
             nodes: &[Node],
@@ -1231,25 +1263,106 @@ impl Character {
         let to_model = Quat::from_rotation_y(-body);
         for ((leg, joints), foot) in legs.into_iter().zip(joints).zip(feet) {
             let turn = Quat::from_rotation_y(foot.yaw - body);
-            self.reach(leg, joints, to_model * (foot.at - position), turn);
+            self.reach(leg, joints, to_model * (foot.at - position), turn, turn);
         }
         false
     }
+    /// Puts the feet on the ground (#214): `anim::Feet` says where each goes and how far the
+    /// pelvis drops for the body at `root` turned `body`, then the pelvis drops, taking everything
+    /// on it down, and each leg bends to its foot. `contact` is `None` off the ground, which
+    /// fades the placement out.
+    fn place_feet(&mut self, root: Vec3, body: f32, contact: Option<anim::Contact>, dt: f32) {
+        let (Some(legs), Some(balls), Some([pelvis, ..])) =
+            (self.leg_bones, self.ball_bones, self.spine_bones)
+        else {
+            return;
+        };
+        let at = |i: usize| self.world[i].w_axis.truncate();
+        let clip = [0, 1].map(|side| {
+            let [hip, knee, ankle] = legs[side];
+            anim::Leg {
+                hip: at(hip),
+                knee: at(knee),
+                ankle: at(ankle),
+                ball: at(balls[side]),
+            }
+        });
+        // Without a ground, it is level with the unit.
+        let placed = match &self.ground {
+            Some(ground) => self
+                .feet
+                .update(root, body, clip, contact, |x, z| ground(x, z), dt),
+            None => self
+                .feet
+                .update(root, body, clip, contact, |_, _| root.y, dt),
+        };
+        let Some(placed) = placed else {
+            return;
+        };
+        let drop = Vec3::Y * placed.drop;
+        if placed.drop != 0. {
+            let above = self.nodes[pelvis]
+                .parent
+                .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+            self.local[pelvis].translation += above.inverse() * drop;
+            self.shift(pelvis, drop);
+        }
+        for ((leg, clip), to) in legs.into_iter().zip(clip).zip(placed.legs) {
+            let joints = [clip.hip + drop, clip.knee + drop, clip.ankle + drop];
+            if joints[2].distance_squared(to.ankle) < 1e-10 && to.tilt.w.abs() > 1. - 1e-7 {
+                continue;
+            }
+            self.reach(leg, joints, to.ankle, Quat::IDENTITY, to.tilt);
+            self.update_chain(leg[0]);
+        }
+    }
+    /// Moves bone `i` and everything on it by `by` in the model's frame: their world matrices
+    /// move with it, so need no rebuilding.
+    fn shift(&mut self, i: usize, by: Vec3) {
+        if !self.partial_updates {
+            self.pose_world();
+            return;
+        }
+        let (count, on) = &mut self.dropped;
+        if *count != self.nodes.len() || on.first() != Some(&i) {
+            // Listed once (again if a piece brings bones): a flat list is quicker to go through
+            // than the tree, and the pelvis carries nearly the whole skeleton.
+            let mut under = vec![false; self.nodes.len()];
+            under[i] = true;
+            on.clear();
+            on.push(i);
+            for &n in &self.order {
+                if let Some(p) = self.nodes[n].parent
+                    && under[p]
+                    && !under[n]
+                {
+                    under[n] = true;
+                    on.push(n);
+                }
+            }
+            *count = self.nodes.len();
+        }
+        let by = by.extend(0.);
+        for &n in on.iter() {
+            self.world[n].w_axis += by;
+        }
+    }
     /// Bends a leg (hip, knee and ankle bones, its `joints` where `chain` has them) with two-bone
-    /// IK so that the ankle is at `target` in the model's frame, the knee and foot turned round
-    /// the vertical by `turn` from the way the clip has them.
+    /// IK so that the ankle is at `target` in the model's frame. The knee points as the clip has
+    /// it, turned by `pole`, and the foot turns by `foot` in the model's frame.
     fn reach(
         &mut self,
         [hip, knee, ankle]: [usize; 3],
         joints: [Vec3; 3],
         target: Vec3,
-        turn: Quat,
+        pole: Quat,
+        foot: Quat,
     ) {
         let [a, b, c] = joints;
         // The knee points as the clip has it, out from the line from hip to ankle.
         let line = (c - a).normalize_or(Vec3::NEG_Y);
         let out = (b - a) - line * (b - a).dot(line);
-        let pole = turn * if out.length() > 0.01 { out } else { Vec3::Z };
+        let pole = pole * if out.length() > 0.01 { out } else { Vec3::Z };
         let (upper, lower) = anim::ik::two_bone(a, b, c, target, pole);
         let above = self.nodes[hip]
             .parent
@@ -1260,7 +1373,7 @@ impl Character {
         let [hip_now, knee_now] = [upper * hip_was, lower * knee_was];
         self.local[hip].rotation = (above.inverse() * hip_now).normalize();
         self.local[knee].rotation = (hip_now.inverse() * knee_now).normalize();
-        self.local[ankle].rotation = (knee_now.inverse() * turn * ankle_was).normalize();
+        self.local[ankle].rotation = (knee_now.inverse() * foot * ankle_was).normalize();
     }
     /// Where the joints of `bones`, each the parent of the next, are in the model's frame, in the
     /// live pose.
@@ -1623,6 +1736,36 @@ impl Character {
         if self.blender.blending() {
             self.pose_world();
         }
+        // Then the feet go on the ground (#214), so that nothing smooths them off it: at full
+        // detail, standing, walking or acting on it, the feet planted in the stride held still.
+        // Not on a wall (#247), even taking a blow there.
+        let kneeling = self
+            .combat
+            .as_ref()
+            .is_some_and(|c| c.downed || c.action == Action::Revive);
+        let grounded = full
+            && self.humanoid
+            && !kneeling
+            && self.rally_time.is_none()
+            && climbing.is_none()
+            && matches!(
+                u.pose,
+                Pose::Idle | Pose::Walk | Pose::Run | Pose::Attack | Pose::Cast | Pose::Hit
+            );
+        let contact = grounded.then(|| match step {
+            Some(step) => anim::Contact {
+                planted: step.planted,
+                floors: step.floors,
+                stride: Quat::from_rotation_y(step.turn) * Vec3::Z,
+                warp: step.warp,
+            },
+            None => anim::Contact::STILL,
+        });
+        if self.foot_placement {
+            self.place_feet(u.position, body, contact, dt);
+        } else {
+            self.feet = anim::Feet::default();
+        }
         let root = Mat4::from_rotation_translation(Quat::from_rotation_y(body), u.position);
         let mut springs = std::mem::take(&mut self.springs);
         for s in &mut springs {
@@ -1633,6 +1776,10 @@ impl Character {
     /// How often the pose is rebuilt (#215).
     pub fn tier(&self) -> anim::Tier {
         self.tier
+    }
+    /// Stands the character on `ground` (#214). Without one, the ground is level with the unit.
+    pub fn set_ground(&mut self, ground: Ground) {
+        self.ground = Some(ground);
     }
     /// Sets how often the pose is rebuilt, as `anim::Crowd` ranks the character this frame.
     pub fn set_tier(&mut self, tier: anim::Tier) {
@@ -2264,6 +2411,9 @@ mod combat_tests {
         let play = |method: anim::Method| {
             let (mut c, mut u, mut fight) = fighter(4.5);
             c.blender.set_method(method);
+            // The blender's own smoothness: the feet go on the ground after it (#214), which has
+            // tests of its own.
+            c.foot_placement = false;
             let mut shown = Vec::new();
             for frame in 0..160 {
                 let (pose, speed, action) = match frame / 20 {
@@ -2379,10 +2529,12 @@ mod combat_tests {
         (c, u)
     }
     /// The furthest a planted foot slides over the ground in one contact, travelling at `speed`
-    /// m/s `travel` degrees round from the facing. A foot is planted while the ball of the foot is
-    /// within 1 cm of the lowest it gets.
+    /// m/s `travel` degrees round from the facing, as the stride plays the clips (#110): without
+    /// foot locking (#214) to pin the feet. A foot is planted while the ball of the foot is within
+    /// 1 cm of the lowest it gets.
     fn foot_skate(speed: f32, travel: f32) -> f32 {
         let (mut c, mut u) = traveller(speed, travel);
+        c.foot_placement = false;
         let feet = ["ball_l", "ball_r"].map(|n| c.names[n]);
         let mut track = Vec::new();
         for frame in 0..240 {
@@ -2428,7 +2580,8 @@ mod combat_tests {
         }
         // Backing off at a walk (1.5 m/s, as behind a raised guard) is mostly the walk clip,
         // whose trailing foot slides as it lifts even at the clip's own pace (4 cm on this body).
-        // The blend mustn't make that worse; foot locking (#214) will pin it.
+        // The blend mustn't make that worse; foot locking (#214) pins it (see
+        // `held_feet_stay_put_through_each_contact_every_way`).
         let own = traveller(0., 0.).0.gaits.unwrap()[0].speed();
         let (back, clip) = (foot_skate(1.5, 180.), foot_skate(own, 0.));
         assert!(
@@ -2437,6 +2590,84 @@ mod combat_tests {
             back * 100.,
             clip * 100.
         );
+    }
+    #[test]
+    fn held_feet_stay_put_through_each_contact_every_way() {
+        // With foot locking on (#214), at the sim's speeds ahead, to either side and backward
+        // (backpedalling at 0.6 of them, and backing off at a walk): each foot holds in every
+        // stride, for at least 4 frames each time, and moves under 5 mm over the ground held.
+        for (speed, travel) in [
+            (2.5, 0.),
+            (2.5, 90.),
+            (1.5, 180.),
+            (6., 0.),
+            (6., -90.),
+            (3.6, 180.),
+            (9., 0.),
+            (9., 90.),
+            (5.4, 180.),
+        ] {
+            let (mut c, mut u) = traveller(speed, travel);
+            let feet = ["ball_l", "ball_r"].map(|n| c.names[n]);
+            let mut from: [Option<Vec3>; 2] = [None; 2];
+            let [mut holds, mut frames] = [[0; 2]; 2];
+            let mut worst = 0f32;
+            for frame in 0..240 {
+                c.update(&u, 1. / 60.);
+                let root = Mat4::from_rotation_translation(
+                    Quat::from_rotation_y(c.body_yaw()),
+                    u.position,
+                );
+                u.position += u.velocity / 60.;
+                let held = c.feet.held();
+                for s in 0..2 {
+                    if frame < 60 || !held[s] {
+                        from[s] = None;
+                        continue;
+                    }
+                    let at = root.transform_point3(c.world[feet[s]].w_axis.truncate());
+                    holds[s] += usize::from(from[s].is_none());
+                    frames[s] += 1;
+                    let from = *from[s].get_or_insert(at);
+                    worst = worst.max((at - from).with_y(0.).length());
+                }
+            }
+            assert!(
+                worst < 0.005,
+                "{speed} m/s at {travel}°: a held foot moved {:.1} mm",
+                worst * 1000.
+            );
+            for s in 0..2 {
+                assert!(
+                    holds[s] >= 2 && frames[s] >= 4 * holds[s],
+                    "{speed} m/s at {travel}°: foot {s} held {} frames over {} contacts",
+                    frames[s],
+                    holds[s]
+                );
+            }
+        }
+    }
+    #[test]
+    fn on_a_wall_the_feet_leave_the_ground_even_taking_a_blow() {
+        // Hanging low on a wall (#247), the feet 10 cm off the ground, and struck there, so the
+        // sim holds its hit pose: the feet don't reach for the ground, and the placement fades
+        // out as it does in the air.
+        let (mut c, mut u, _) = fighter(0.);
+        c.set_ground(Arc::new(|_, _| 0.));
+        for _ in 0..30 {
+            c.update(&u, 1. / 60.);
+        }
+        assert!(
+            c.feet.weight() > 0.99,
+            "standing, placed {}",
+            c.feet.weight()
+        );
+        (u.position.y, u.pose, u.traversal) = (0.1, Pose::Hit, Traversal::Hanging);
+        for _ in 0..20 {
+            c.update(&u, 1. / 60.);
+        }
+        assert_eq!(c.last_clip, "Hang_Idle_Loop");
+        assert_eq!(c.feet.weight(), 0., "the feet still reached for the ground");
     }
     #[test]
     fn a_cape_with_bones_of_its_own_still_lets_the_loops_be_measured() {
