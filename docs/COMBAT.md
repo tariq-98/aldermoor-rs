@@ -108,6 +108,9 @@ Health, power and armour are multipliers on the level's base numbers (below).
   muscle memory.
 - **Piercing** missiles strike everything along their flight.
 - **Shield Wall** turns missiles back on whoever loosed them.
+- **Walls** (buildings, trunks, parapets, and wall tops or ground rising above the missile) stop
+  a missile where it first meets them, tested every 0.1 m along its flight, so even the fastest
+  arrow can't skip a thin wall between steps (#337). Nobody behind the wall is struck.
 
 ## On the ground
 
