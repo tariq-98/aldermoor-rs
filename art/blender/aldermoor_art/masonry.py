@@ -302,9 +302,10 @@ def terrace_ledges(piece, lod, seed):
     """Ledges up a limestone cliff at a level of detail (0, 1 or 2): beds of pale, harder stone
     along the strata, each laid on its block (`world::ledges`) from the front edge you hang from
     back into the rock. A bed is split by tight joints, a little askew, into blocks that each sit
-    a little differently, with their own thickness and tone. The front is worn round, with a
-    bedding line across it below which pieces have broken away; the underside is lumpy and in
-    shadow, and the bed thins a little towards its ends, where its front corner is broken back.
+    a little differently, with their own thickness and tone. The front is worn round; below a
+    bedding line across it the stone is darker and has weathered back, in hollows here and
+    there. The underside is lumpy and in shadow, and the bed thins a little towards its ends,
+    where its front corner is broken back.
     Grass grows where a ledge meets the cliff. The rock between the beds is the cliff itself,
     the terrain. Returns its objects."""
     rng = random.Random(seed)
@@ -366,18 +367,18 @@ def _bed(b, ground, mat, lod, seed):
     # Each joint's crack: how wide it opens and how far its edges are worn back.
     gaps = [(rng.uniform(0.003, 0.012), rng.uniform(0.012, 0.03)) for _ in joints]
     # Each block's front is set back from the hold by f (a few centimetres either way); it has
-    # its own thickness t and tone, a bedding line at `bed` of its thickness, and a top that
+    # its own thickness t and tone, a bedding line at `bed` of its thickness (below it the stone
+    # is darker and weathers back further), and a top that
     # sits a little high or low (`lift`), leans along the bed and tips in or out (`pitch`). Its
-    # corners at the joints may be chipped, and pieces may have broken away from its front below
-    # the bedding line (`spalls`: where along it, how wide either side and how deep).
+    # front below the bedding line may have weathered back in a hollow (`hollows`: where along
+    # it, how wide either side and how deep).
     thick, tone = rng.uniform(*LEDGE_THICK), rng.uniform(0.93, 1.04)
     stones = []
     for a, b2 in zip(joints, joints[1:]):
-        spalls = [(rng.uniform(a + 0.4, b2 - 0.4), rng.uniform(0.15, 0.45), rng.uniform(0.04, 0.1)) for _ in range(rng.choice((0, 1, 1, 2)))]
+        hollows = [(rng.uniform(a + 0.4, b2 - 0.4), rng.uniform(0.25, 0.6), rng.uniform(0.02, 0.045)) for _ in range(rng.choice((0, 0, 1)))]
         stones.append(dict(f=rng.uniform(-0.012, 0.03), t=thick * rng.uniform(0.85, 1.15), tone=tone * rng.uniform(0.94, 1.04),
-                           bed=rng.uniform(0.38, 0.62), cut=rng.uniform(0.01, 0.03) if rng.random() < 0.6 else 0.0, lift=rng.uniform(-0.008, 0.004),
-                           lean=rng.uniform(-0.006, 0.006), pitch=rng.uniform(-0.015, 0.01),
-                           chips=[rng.uniform(0.02, 0.05) if rng.random() < 0.5 else 0.0 for _ in range(2)], spalls=spalls))
+                           bed=rng.uniform(0.38, 0.62), lift=rng.uniform(-0.008, 0.004),
+                           lean=rng.uniform(-0.006, 0.006), pitch=rng.uniform(-0.015, 0.01), hollows=hollows))
     # Towards each end the bed thins a little, and its front corner is broken back (only past
     # where the hands go, 0.2 m from the end).
     broken = (rng.uniform(0.06, 0.12), rng.uniform(0.06, 0.12))
@@ -386,7 +387,7 @@ def _bed(b, ground, mat, lod, seed):
     if lod == 2:
         # One stone, the bed's own thickness and tone.
         joints, skews, gaps = [0.0, length], [0.0, 0.0], [(0.0, 0.0)] * 2
-        stones = [dict(f=0.0, t=thick, tone=tone, bed=0.5, cut=0.0, lift=0.0, lean=0.0, pitch=0.0, chips=[0.0, 0.0], spalls=[])]
+        stones = [dict(f=0.0, t=thick, tone=tone, bed=0.5, lift=0.0, lean=0.0, pitch=0.0, hollows=[])]
 
     def ends(u):
         d = min(u, length - u)
@@ -395,10 +396,9 @@ def _bed(b, ground, mat, lod, seed):
 
     r = LEDGE_LIP
 
-    def section(u, j, inset, chip=0.0):
+    def section(u, j, inset):
         """Stone j's cross-section at u, as (v, z) from the top at the back round to the
-        underside, pulled in by `inset` at a joint so the joint shows as a groove, and its
-        corner where the top meets the front by `chip` more where it's broken off."""
+        underside, pulled in by `inset` at a joint so the joint shows as a groove."""
         st = stones[j]
         e, thin = ends(u)
         f, t = st["f"] + e, st["t"] * thin
@@ -417,16 +417,18 @@ def _bed(b, ground, mat, lod, seed):
             top_side = [(depth, st["pitch"] - i), (mid, tip - i), (f + r + g, -i)]
             front = [(f + g, -r - i), (f + 0.03 + g, -0.55 * t), (f + 0.08 + g, -0.9 * t + g / 2), (f + 0.17 + g, -t + g / 2)]
         else:
-            # The front wanders a centimetre or so, more below the bedding line, where pieces have
-            # broken away; the underside is lumpy.
+            # The front wanders a centimetre or so, more below the bedding line, where it has
+            # weathered back in places; the underside is lumpy.
             w = 0.012 * (_noise(u * 1.7, top * 0.31, seed) - 0.5) * 2
             w2 = w + 0.02 * (_noise(u * 3.1, top * 0.71, seed + 9) - 0.5) * 2
-            w2 += max([d * (1 - _smooth(0.55, 1.0, abs(u - c) / h)) for c, h, d in st["spalls"]] or [0.0])
+            w2 += max([d * (1 - _smooth(0.0, 1.0, abs(u - c) / h)) for c, h, d in st["hollows"]] or [0.0])
+            # (Never standing out past the stone above it, nor stepping back sharply: a thin lip
+            # or step only catches speckles of shadow.)
+            w2 = max(w2, w + 0.012)
             lo = 0.04 * (_noise(u * 2.3, top * 0.53, seed + 5) - 0.5) * 2
-            bed, cut = st["bed"], st["cut"]
-            top_side = [(depth, st["pitch"] - i), (mid, tip - i), (f + r + g + chip, -i), (f + 0.3 * r + g + chip, -0.3 * r - i - chip)]
-            front = [(f + g + w, -r - i - chip), (f + 0.008 + g + w, -(bed - 0.06) * t), (f + cut + g + w2, -bed * t),
-                     (f + cut * 0.7 + g + w2, -(bed + 0.06) * t), (f + 0.03 + g + w2, -0.93 * t + g / 2 + lo),
+            bed = st["bed"]
+            top_side = [(depth, st["pitch"] - i), (mid, tip - i), (f + r + g, -i), (f + 0.3 * r + g, -0.3 * r - i)]
+            front = [(f + g + w, -r - i), (f + 0.008 + g + w, -bed * t), (f + 0.03 + g + w2, -0.93 * t + g / 2 + lo),
                      (f + 0.09 + g + w2, -t + g / 2 + lo)]
         # Down the front without doubling back, however thin the stone.
         for k in range(1, len(front)):
@@ -447,26 +449,25 @@ def _bed(b, ground, mat, lod, seed):
         c0, c1 = (c0, c1) if lod == 0 else (0.0, 0.0)
         u0 = joints[j] + (g0 / 2 if j and lod < 2 else 0.0)
         u1 = joints[j + 1] - (g1 / 2 if j + 1 < len(stones) and lod < 2 else 0.0)
-        # Rows across the stone: its ends (grooved, and chipped), a row in from each, and enough
-        # between for the front to wander and the ends of the bed to thin. The rows at each end
-        # follow its joint askew.
-        chips = stones[j]["chips"] if lod == 0 else (0.0, 0.0)
-        rows = [(u0, j, c0, chips[0]), (u1, j + 1, c1, chips[1])]
+        # Rows across the stone: its ends (grooved), a row in from each, and enough between for
+        # the front to wander and the ends of the bed to thin. The rows at each end follow its
+        # joint askew.
+        rows = [(u0, j, c0), (u1, j + 1, c1)]
         if lod == 0:
-            rows += [(u0 + c0, j, 0.0, 0.0), (u1 - c1, j + 1, 0.0, 0.0)]
+            rows += [(u0 + c0, j, 0.0), (u1 - c1, j + 1, 0.0)]
         n = max(1, round((u1 - u0) / every))
-        rows += [(u0 + (u1 - u0) * k / n, None, 0.0, 0.0) for k in range(1, n)]
-        rows += [(u, None, 0.0, 0.0) for u in (0.1, 0.2, 0.6, length - 0.6, length - 0.2, length - 0.1) if u0 + 0.15 < u < u1 - 0.15]
-        # Enough rows to shape where pieces have broken away.
+        rows += [(u0 + (u1 - u0) * k / n, None, 0.0) for k in range(1, n)]
+        rows += [(u, None, 0.0) for u in (0.1, 0.2, 0.6, length - 0.6, length - 0.2, length - 0.1) if u0 + 0.15 < u < u1 - 0.15]
+        # Enough rows to shape the hollows.
         if lod == 0:
-            rows += [(c + h * k, None, 0.0, 0.0) for c, h, _ in stones[j]["spalls"] for k in (-1.0, -0.55, 0.0, 0.55, 1.0)
+            rows += [(c + h * k, None, 0.0) for c, h, _ in stones[j]["hollows"] for k in (-1.0, -0.5, 0.0, 0.5, 1.0)
                      if u0 + 0.12 < c + h * k < u1 - 0.12]
         rows.sort(key=lambda q: (q[0], q[1] is None))
         # (No row between two others closer than 2 cm to either, unless it ends the stone.)
         rows = [q for n_, q in enumerate(rows) if q[1] is not None or all(abs(q[0] - o[0]) > 0.02 for o in rows[:n_])]
         verts = []
-        for u, k, inset, chip in rows:
-            verts.append([bm.verts.new((*at(u + (shift(k, v) if k is not None else 0.0), v), top + z)) for v, z in section(u, j, inset, chip)])
+        for u, k, inset in rows:
+            verts.append([bm.verts.new((*at(u + (shift(k, v) if k is not None else 0.0), v), top + z)) for v, z in section(u, j, inset)])
         m = len(verts[0])
         for a, b2 in zip(verts, verts[1:]):
             for i in range(m):

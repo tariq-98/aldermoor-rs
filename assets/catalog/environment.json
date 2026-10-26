@@ -1617,7 +1617,7 @@
    "grips": [],
    "file": "environment/terrace.ledges.mill.gltf",
    "height": 26.216,
-   "triangles": 20792
+   "triangles": 15230
   },
   {
    "id": "terrace.ledges.west",
@@ -1740,7 +1740,7 @@
    "grips": [],
    "file": "environment/terrace.ledges.west.gltf",
    "height": 15.858,
-   "triangles": 14778
+   "triangles": 10410
   },
   {
    "id": "tree.oak.1",
