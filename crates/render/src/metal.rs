@@ -2379,6 +2379,93 @@ mod temporal_tests {
             std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), size).to_vec()
         }
     }
+    /// Run the compiled test binary under the shared GPU lock, never via an unlocked test run.
+    /// The enabled mode reuses the numerical regression fixture, not an authored look preset.
+    #[test]
+    #[ignore = "reference-size timed water diagnostic; needs GPU lock and output path"]
+    fn river_reference_benchmark() {
+        let expected =
+            std::env::var("ALDER_WATER_BENCH_LOCK_OWNER").expect("GPU lock owner required");
+        assert_eq!(
+            std::fs::read_to_string("/tmp/aldermoor-gpu.lock/owner")
+                .unwrap()
+                .trim_end(),
+            expected.trim_end()
+        );
+        assert!(expected.starts_with("codex lane A pid ") && expected.contains(" issue #325 "));
+        let output =
+            std::env::var("ALDER_WATER_REPORT").expect("temporary JSON report path required");
+        let quality = std::env::var("ALDER_WATER_QUALITY").as_deref() == Ok("on");
+        let mut r = Renderer::new(2560, 1600, 0.75).unwrap();
+        r.scene_time = Some(0.);
+        r.set_frames_in_flight(1).unwrap();
+        r.set_gpu_counters(true).unwrap();
+        r.profile_scene = std::env::var("ALDER_WATER_SPLIT").as_deref() == Ok("1");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        r.look = LookSettings::load(&root.join("catalog/look.json")).unwrap();
+        r.load_surface_assets(&root.join("catalog/surfaces.json"), &root)
+            .unwrap();
+        // BEGIN screen-water test inputs (the baseline harness omits this new-setting block).
+        if quality {
+            r.surface_uniform.water_screen = [20., 0.1, 0.1, 1.];
+            r.surface_uniform.water_shore = [0.1, 1., 1., 0.];
+            r.surface_uniform.water_features = [1; 4];
+            r.resize_water_inputs().unwrap();
+        }
+        // END screen-water test inputs.
+        let terrain = crate::terrain::valley();
+        let mut draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let target = Vec3::new(0., world::WATER_LEVEL, world::river_z(0.));
+        let camera = Camera {
+            eye: target + Vec3::new(8., 8., 18.),
+            target,
+            fov: 1.,
+        };
+        let catalog = assets::Catalog::load(&root).unwrap();
+        let mut cache = crate::model::ModelCache::default();
+        let mut scenery = crate::scenery::Scenery::new(&catalog, &mut cache).unwrap();
+        draws.extend(
+            scenery
+                .draws(&catalog, &mut cache, camera, 1600, 0.)
+                .unwrap(),
+        );
+        let mut frames = Vec::new();
+        for frame in 0..480 {
+            r.draw(camera, &draws, None).unwrap();
+            r.wait().unwrap();
+            for sample in r.take_completed_frames() {
+                if frame >= 120 {
+                    frames.push(sample);
+                }
+            }
+        }
+        assert_eq!(frames.len(), 360);
+        let report = serde_json::json!({
+            "scene": "static authored valley at the river regression camera; no crowd or HUD",
+            "quality_fixture": quality, "profile_scene": r.profile_scene,
+            "output": [2560,1600], "scale": 0.75, "aa": "taa", "warmup": 120,
+            "eye": camera.eye.to_array(), "target": camera.target.to_array(), "fov": camera.fov,
+            "pass_names": GPU_PASS_NAMES, "frames": frames,
+        });
+        std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+
     #[test]
     fn screen_water_lifecycle_and_disabled_pixels() {
         let mut r = Renderer::with_samples(256, 256, 1., 1).unwrap();
@@ -2439,7 +2526,13 @@ mod temporal_tests {
             r.draw(camera, &draws, None).unwrap();
             r.wait().unwrap();
             let pixels = output_bytes(&r);
-            assert!(pixels.chunks_exact(4).any(|p| p[..3] != [0, 0, 0]));
+            assert!(
+                pixels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[..3] != [0, 0, 0])
+            );
             if features[2] != 0 || features[3] != 0 {
                 assert_ne!(
                     legacy, pixels,

@@ -227,6 +227,22 @@ Claude's Mac check must compare main and the exact PR head from bridge/bank, low
 angles and a pan: screen-edge reflection transitions, bank refraction bleed, shoreline bands,
 and TAA shimmer. Codex does not generate capture image files.
 
+The ignored `metal::temporal_tests::river_reference_benchmark` provides a repeatable static
+river view through the existing renderer/scenery APIs, without a client camera change. It loads
+the authored valley and look, uses the water regression camera, renders 2560x1600 / 75% TAA,
+one frame in flight, and records 360 frames after 120 warmup frames. There is no crowd or HUD;
+these are offscreen diagnostic timings, not a full-scene or ten-minute budget acceptance.
+`ALDER_WATER_QUALITY=on` reuses the unit-test parameter fixture (20 m ray, 0.1 m tolerance,
+0.1 edge fade, 1 m refraction offset, 0.1 m shore depth, foam strength/frequency 1). These are
+explicit engineering test inputs, not new authored defaults. Omit it for legacy water.
+`ALDER_WATER_SPLIT=1` separates sky/opaque timings. `ALDER_WATER_REPORT` names a temporary JSON
+report. Build the test executable through `aldermoor-build-slot cargo test --release -p render
+--locked --no-run`, then run that executable with `river_reference_benchmark --ignored --exact`
+(using its full module-qualified test name). Hold the shared GPU lock throughout the timed run,
+write its owner immediately, and set `ALDER_WATER_BENCH_LOCK_OWNER` to that owner line. The test
+refuses to run without a matching owner. Release the lock on exit, including failures. The
+benchmark creates only a numeric JSON report; no image or model files.
+
 ## Earlier baseline measurements (24 October 2026)
 
 ```sh
