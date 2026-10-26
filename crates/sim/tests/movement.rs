@@ -777,3 +777,32 @@ fn walking_wading_and_swimming_cost_a_unit_one_byte() {
         assert_eq!(postcard::to_stdvec(&t).unwrap().len(), 1, "{t:?}");
     }
 }
+
+/// Where a player rolling from `at` along `dir` ends up a second later, and how high above the
+/// ground they started on the roll took them.
+fn roll_from(at: Vec2, dir: Vec2) -> (glam::Vec3, f32) {
+    let mut sim = Sim::new(7);
+    let id = sim.spawn_player("Hero", at, dir.x.atan2(dir.y));
+    sim.step();
+    let start = sim.get::<Transform>(id).unwrap().pos.y;
+    sim.command(id, Command::Dodge { direction: dir });
+    let mut top: f32 = f32::MIN;
+    for _ in 0..60 {
+        sim.step();
+        top = top.max(sim.get::<Transform>(id).unwrap().pos.y);
+    }
+    (sim.get::<Transform>(id).unwrap().pos, top - start)
+}
+
+#[test]
+fn a_roll_stops_short_of_masonry_too_tall_to_climb() {
+    // #311: east of the ruined hall's lookout (4.2 m), rolling west into it.
+    let (p, up) = roll_from(Vec2::new(-12.6, 43.4), -Vec2::X);
+    assert!(p.x > -14.4 + 0.39 && up < 0.5, "rolled into the wall to x = {}, {up} m up", p.x);
+    // North of its gable, rolling south at it.
+    let (p, up) = roll_from(Vec2::new(-17.0, 38.8), Vec2::Y);
+    assert!(p.z < 41.3 - 0.39 && up < 0.5, "rolled into the gable to z = {}, {up} m up", p.z);
+    // A field wall, about a metre high, is still rolled over.
+    let (p, _) = roll_from(Vec2::new(6.0, 8.0), Vec2::X);
+    assert!(p.x > 8.5, "a field wall stopped the roll at x = {}", p.x);
+}

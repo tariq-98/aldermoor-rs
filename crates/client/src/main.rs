@@ -7,6 +7,7 @@ mod effects;
 mod gait;
 mod hud;
 mod interpolate;
+mod latency;
 mod menu;
 mod pacing;
 mod perf_overlay;
@@ -47,6 +48,12 @@ struct Options {
     offscreen: bool,
     showcase: bool,
     smoke: bool,
+    /// Play on a server across the network (`--connect ADDR`), trusting the certificate at
+    /// `server_cert`, instead of the built-in one.
+    connect: Option<String>,
+    server_cert: PathBuf,
+    /// The character's name on the server.
+    name: String,
     effects_review: bool,
     /// The effects review as a captioned reel of close shots, one effect at a time, from this
     /// many seconds in.
@@ -111,6 +118,9 @@ impl Options {
             offscreen: false,
             showcase: false,
             smoke: false,
+            connect: None,
+            server_cert: PathBuf::from("aldermoor.der"),
+            name: "Traveller".into(),
             effects_review: false,
             reel: false,
             reel_from: 0.,
@@ -121,7 +131,9 @@ impl Options {
             inspect: None,
             warmup: 120,
             samples: 0,
-            in_flight: 2,
+            // One frame in flight: a frame sooner on screen, and on the M1 Air it held the
+            // same frame rate as two with a lower GPU p95 (#219).
+            in_flight: 1,
             fps: None,
             benchmark: false,
             inline_constants: true,
@@ -224,6 +236,11 @@ impl Options {
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
+                "--connect" => o.connect = Some(args.next().context("--connect needs HOST:PORT")?),
+                "--server-cert" => {
+                    o.server_cert = args.next().context("--server-cert needs a file")?.into()
+                }
+                "--name" => o.name = args.next().context("--name needs a name")?,
                 "--effects-review" => {
                     o.effects_review = true;
                     o.showcase = true;
@@ -290,7 +307,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -383,6 +400,8 @@ struct Game {
     /// The last frame's clock reading and the sim times it drew, by this pacing and by
     /// arrival time as before #223, for the judder comparison printed at exit.
     judder: Option<(f64, f64, f64)>,
+    /// Press-to-photon times for jumps, rolls and skills (#219).
+    latency: latency::Latency,
     /// Seconds per frame when frames come from the display's refresh (capped by `--fps`).
     frame_period: Option<f64>,
     frame: u64,
@@ -429,7 +448,23 @@ struct Game {
 impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
-        let host = server::Host::start(0xa1de, "Traveller");
+        let host = match &options.connect {
+            None => server::Host::start(0xa1de, &options.name),
+            Some(addr) => {
+                let cert = std::fs::read(&options.server_cert).with_context(|| {
+                    format!(
+                        "the server's certificate {} (--server-cert)",
+                        options.server_cert.display()
+                    )
+                })?;
+                server::Host::connect(
+                    addr.as_str(),
+                    &server::net::CertificateDer::from(cert),
+                    &options.name,
+                )
+                .with_context(|| format!("connecting to {addr}"))?
+            }
+        };
         let valley = Arc::new(world::Valley::new());
         let ground: Ground = {
             let valley = Arc::clone(&valley);
@@ -495,6 +530,7 @@ impl Game {
             pacing: pacing::Stats::default(),
             paced: None,
             judder: None,
+            latency: latency::Latency::default(),
             frame_period: None,
             frame: 0,
             gpu: Vec::new(),
@@ -602,9 +638,24 @@ impl Game {
             orbiting: self.orbiting,
         }
     }
+    /// The ability on bar slot `slot` now, if any.
+    fn slot_ability(&self, slot: u8) -> Option<String> {
+        let s = self.snaps.current.player.as_ref()?.bar.get(slot as usize)?;
+        (!s.ability.is_empty()).then(|| s.ability.clone())
+    }
     /// Does what a bound control does when its key goes down.
     fn press(&mut self, control: controls::Control) {
         use controls::Control as C;
+        let pressed = match control {
+            C::Jump => Some((latency::Kind::Jump, None)),
+            C::Roll => Some((latency::Kind::Roll, None)),
+            c => c
+                .slot()
+                .map(|slot| (latency::Kind::Skill, self.slot_ability(slot))),
+        };
+        if let Some((kind, ability)) = pressed {
+            self.latency.pressed(kind, ability, latency::now());
+        }
         let command = match control {
             C::Jump => Some(Command::Jump),
             C::Roll => Some(Command::Dodge {
@@ -1116,18 +1167,31 @@ impl Game {
                     sprint: false,
                     face_yaw: None,
                 }),
-                1 => self.host.send(Command::Jump),
-                2 => self.host.send(Command::Dodge {
-                    direction: Vec2::new(-1., 0.),
-                }),
+                1 => {
+                    self.latency
+                        .pressed(latency::Kind::Jump, None, latency::now());
+                    self.host.send(Command::Jump)
+                }
+                2 => {
+                    self.latency
+                        .pressed(latency::Kind::Roll, None, latency::now());
+                    self.host.send(Command::Dodge {
+                        direction: Vec2::new(-1., 0.),
+                    })
+                }
                 3 => {
                     self.host.send(Command::SetTarget(self.target(false)));
                     self.host.send(Command::SetAutoAttack(true));
                 }
-                4 | 5 => self.host.send(Command::UseSlot {
-                    slot: 1,
-                    ground: None,
-                }),
+                4 | 5 => {
+                    let ability = self.slot_ability(1);
+                    self.latency
+                        .pressed(latency::Kind::Skill, ability, latency::now());
+                    self.host.send(Command::UseSlot {
+                        slot: 1,
+                        ground: None,
+                    })
+                }
                 7 => self.host.send(Command::SwapWeapons),
                 _ => self.host.send(Command::Move {
                     direction: Vec2::ZERO,
@@ -1244,6 +1308,7 @@ impl Game {
     }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
         perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
+        self.latency.presented(|frame| r.presented_at(frame));
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -1313,6 +1378,25 @@ impl Game {
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            let me = self.host.player;
+            let shown = match &e {
+                protocol::Event::Jumped { unit } if *unit == me => {
+                    Some((latency::Kind::Jump, None))
+                }
+                protocol::Event::Dodged { unit } if *unit == me => {
+                    Some((latency::Kind::Roll, None))
+                }
+                protocol::Event::AbilityUsed { unit, ability, .. }
+                | protocol::Event::CastStarted { unit, ability, .. }
+                    if *unit == me =>
+                {
+                    Some((latency::Kind::Skill, Some(ability.as_str())))
+                }
+                _ => None,
+            };
+            if let Some((kind, ability)) = shown {
+                self.latency.stepped(kind, ability, self.snaps.current.time);
+            }
             if let protocol::Event::Hit {
                 attacker,
                 victim,
@@ -1405,7 +1489,14 @@ impl Game {
         let mut units = if self.options.showcase {
             self.review.clone()
         } else {
-            self.snaps.units(!self.options.legacy_cpu)
+            let own = OWN_AHEAD.then_some(self.host.player);
+            let lead = if OWN_AHEAD { pacing::DRAW_DELAY } else { 0. };
+            self.latency.drew(
+                r.next_frame(),
+                self.snaps.previous.time + self.snaps.since() as f64 + lead,
+                latency::now(),
+            );
+            self.snaps.units(!self.options.legacy_cpu, own)
         };
         let time = self.frame as f32 / 60.;
         self.reel_time =
@@ -1442,6 +1533,17 @@ impl Game {
             .iter()
             .find(|u| u.id == self.host.player)
             .context("no local player")?;
+        // Hanging, moving between holds or running up a wall: frame the wall (#250).
+        self.follow.climbing = match me.traversal {
+            protocol::Traversal::Hanging => true,
+            protocol::Traversal::Forced(f) => matches!(
+                f.kind,
+                protocol::ForcedKind::Hold
+                    | protocol::ForcedKind::Corner
+                    | protocol::ForcedKind::WallRun
+            ),
+            _ => false,
+        };
         let scenery = &self.scenery;
         let view = self
             .follow
@@ -1779,6 +1881,7 @@ impl Game {
                 self.host.stats().step_ms,
                 r.gpu_counters_enabled(),
                 &self.pacing,
+                &self.latency,
             );
             if let Some(m) = &self.menu {
                 changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
@@ -1874,6 +1977,20 @@ impl Game {
                 self.perf.report(r.gpu_counters_enabled());
             }
             eprintln!("HISTORY resets={}", r.stats.history_resets);
+            for kind in latency::Kind::ALL {
+                if let Some((median, p95, n)) = self.latency.summary(kind) {
+                    eprintln!(
+                        "LATENCY {} press_to_photon median={median:.1}ms p95={p95:.1}ms samples={n}",
+                        kind.name()
+                    );
+                }
+                if let Some((median, p95, n)) = self.latency.to_frame(kind) {
+                    eprintln!(
+                        "LATENCY {} press_to_frame median={median:.1}ms p95={p95:.1}ms samples={n}",
+                        kind.name()
+                    );
+                }
+            }
             let [none, one, more] = self.pacing.total;
             eprintln!("PACING steps_per_frame 0={none} 1={one} 2+={more}");
             let (paced, by_arrival) = self.pacing.judder_ms();
@@ -2145,6 +2262,8 @@ fn body_height(
 }
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
+/// Your own character is drawn at the newest sim time rather than a step behind (#219).
+const OWN_AHEAD: bool = true;
 /// How often a held attack button presses the basic attack again, in seconds.
 const SWING_REPEAT: f32 = 0.1;
 /// Where characters look (#212): how far along the crosshair you look when it points at the sky,
