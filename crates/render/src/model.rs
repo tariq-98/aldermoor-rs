@@ -3,10 +3,10 @@ use crate::visibility::Bounds;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Quat, Vec3, Vec4};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -123,55 +123,139 @@ pub enum Property {
     Rotation,
     Scale,
 }
+/// One property of one bone through a clip, as evenly spaced keys (#215): clips are baked at 30
+/// fps, and a track that isn't evenly spaced is resampled when it loads, so sampling indexes
+/// its two keys instead of searching for them.
 #[derive(Clone)]
 pub struct Track {
     pub node: String,
     pub property: Property,
-    pub times: Vec<f32>,
-    pub values: Vec<Vec4>,
-    pub interpolation: gltf::animation::Interpolation,
+    /// When the first key is.
+    start: f32,
+    /// Keys a second; 0 for a track that never changes, which keeps a single key.
+    rate: f32,
+    /// Rotations are unit quaternions.
+    values: Vec<Vec4>,
+    /// Holds each key until the next rather than blending to it.
+    step: bool,
 }
 impl Track {
+    pub fn new(
+        node: String,
+        property: Property,
+        times: &[f32],
+        values: &[Vec4],
+        interpolation: gltf::animation::Interpolation,
+    ) -> Self {
+        use gltf::animation::Interpolation::*;
+        let cubic = interpolation == CubicSpline;
+        let key = |i: usize| values[if cubic { i * 3 + 1 } else { i }];
+        let start = times[0];
+        let span = times[times.len() - 1] - start;
+        let gap = span / (times.len() - 1).max(1) as f32;
+        let even = times
+            .iter()
+            .enumerate()
+            .all(|(i, t)| (t - start - gap * i as f32).abs() <= gap * 0.01);
+        let (rate, mut values) = if span <= 0. {
+            (0., vec![key(times.len() - 1)])
+        } else if (0..times.len()).all(|i| key(i).abs_diff_eq(key(0), 1e-6)) {
+            (0., vec![key(0)])
+        } else if even && !cubic {
+            (1. / gap, values.to_vec())
+        } else {
+            // 30 keys a second at least, the first and last where the track's are.
+            let frames = (span * 30.).ceil() as usize;
+            let rate = frames as f32 / span;
+            let times_at = (0..=frames).map(|f| start + f as f32 / rate);
+            let keys = times_at.map(|t| sample_keys(times, values, interpolation, property, t));
+            (rate, keys.collect())
+        };
+        if property == Property::Rotation {
+            for v in &mut values {
+                *v = v.normalize();
+            }
+        }
+        Self {
+            node,
+            property,
+            start,
+            rate,
+            values,
+            step: interpolation == Step,
+        }
+    }
     pub fn sample(&self, t: f32) -> Vec4 {
-        let cubic = self.interpolation == gltf::animation::Interpolation::CubicSpline;
-        let value = |i: usize| self.values[if cubic { i * 3 + 1 } else { i }];
-        let hi = self.times.partition_point(|x| *x <= t);
-        if hi == 0 {
-            return value(0);
-        }
-        if hi == self.times.len() {
-            return value(hi - 1);
-        }
-        let lo = hi - 1;
-        let dt = self.times[hi] - self.times[lo];
-        let f = ((t - self.times[lo]) / dt).clamp(0., 1.);
-        let a = value(lo);
-        let b = value(hi);
-        if self.interpolation == gltf::animation::Interpolation::Step {
+        let last = self.values.len() - 1;
+        let at = ((t - self.start) * self.rate).clamp(0., last as f32);
+        let i = at as usize;
+        let a = self.values[i];
+        if i == last || self.step {
             return a;
         }
-        if cubic {
-            let f2 = f * f;
-            let f3 = f2 * f;
-            let v = (2. * f3 - 3. * f2 + 1.) * a
-                + (f3 - 2. * f2 + f) * dt * self.values[lo * 3 + 2]
-                + (-2. * f3 + 3. * f2) * b
-                + (f3 - f2) * dt * self.values[hi * 3];
-            return if self.property == Property::Rotation {
-                v.normalize()
-            } else {
-                v
-            };
-        }
+        let b = self.values[i + 1];
+        let f = at - i as f32;
         if self.property == Property::Rotation {
-            Vec4::from_array(
-                Quat::from_array(a.to_array())
-                    .slerp(Quat::from_array(b.to_array()), f)
-                    .to_array(),
-            )
+            // Between keys a 30th of a second apart, a normalized lerp comes within 0.05° of slerp
+            // for far less, unless the bone swings over 30° in the step (a fast blow).
+            let d = a.dot(b);
+            if d.abs() > 0.966 {
+                a.lerp(b * d.signum(), f).normalize()
+            } else {
+                Quat::from_vec4(a).slerp(Quat::from_vec4(b), f).into()
+            }
         } else {
             a.lerp(b, f)
         }
+    }
+}
+/// A glTF sampler's value at `t`, searching its keys: only for resampling a track that isn't
+/// evenly spaced.
+fn sample_keys(
+    times: &[f32],
+    values: &[Vec4],
+    interpolation: gltf::animation::Interpolation,
+    property: Property,
+    t: f32,
+) -> Vec4 {
+    let cubic = interpolation == gltf::animation::Interpolation::CubicSpline;
+    let value = |i: usize| values[if cubic { i * 3 + 1 } else { i }];
+    let hi = times.partition_point(|x| *x <= t);
+    if hi == 0 {
+        return value(0);
+    }
+    if hi == times.len() {
+        return value(hi - 1);
+    }
+    let lo = hi - 1;
+    let dt = times[hi] - times[lo];
+    let f = ((t - times[lo]) / dt).clamp(0., 1.);
+    let a = value(lo);
+    let b = value(hi);
+    if interpolation == gltf::animation::Interpolation::Step {
+        return a;
+    }
+    if cubic {
+        let f2 = f * f;
+        let f3 = f2 * f;
+        let v = (2. * f3 - 3. * f2 + 1.) * a
+            + (f3 - 2. * f2 + f) * dt * values[lo * 3 + 2]
+            + (-2. * f3 + 3. * f2) * b
+            + (f3 - f2) * dt * values[hi * 3];
+        return if property == Property::Rotation {
+            v.normalize()
+        } else {
+            v
+        };
+    }
+    if property == Property::Rotation {
+        Vec4::from_array(
+            Quat::from_array(a.to_array())
+                .slerp(Quat::from_array(b.to_array()), f)
+                .to_array(),
+        )
+    } else {
+        a.lerp(b, f)
     }
 }
 #[derive(Clone)]
@@ -209,6 +293,9 @@ pub struct BoundClip {
 /// `ModelCache::clip_set`.
 pub struct ClipSet {
     pub clips: HashMap<String, BoundClip>,
+    /// A humanoid's walk, jog and sprint as this skeleton plays them (#110), measured by the first
+    /// character to use the set; `None` if they don't measure.
+    pub gaits: OnceLock<Option<[anim::Gait; 3]>>,
 }
 impl ClipSet {
     pub fn bind(skeleton: &[Node], clips: &Model, humanoid: bool) -> Self {
@@ -263,8 +350,23 @@ impl ClipSet {
                 (name.clone(), bound)
             })
             .collect();
-        Self { clips }
+        Self {
+            clips,
+            gaits: OnceLock::new(),
+        }
     }
+}
+/// A clip's name, kept for the life of the program, so that choosing a clip every frame copies a
+/// pointer instead of allocating a `String` (#215). There are only as many as the catalogue names.
+pub fn intern(name: &str) -> &'static str {
+    static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut names = NAMES.lock().unwrap();
+    if let Some(name) = names.get(name) {
+        return name;
+    }
+    let name: &'static str = Box::leak(name.into());
+    names.insert(name);
+    name
 }
 static NEXT_MODEL: AtomicU64 = AtomicU64::new(1);
 pub fn next_model_id() -> u64 {
@@ -561,7 +663,7 @@ impl Model {
                 }
                 duration = duration.max(*times.last().unwrap());
                 use gltf::animation::util::ReadOutputs::*;
-                let (property, values) =
+                let (property, values): (Property, Vec<Vec4>) =
                     match r.read_outputs().context("animation without values")? {
                         Translations(v) => (
                             Property::Translation,
@@ -577,13 +679,13 @@ impl Model {
                         ),
                         MorphTargetWeights(_) => continue,
                     };
-                tracks.push(Track {
-                    node: c.target().node().name().unwrap_or("").into(),
+                tracks.push(Track::new(
+                    c.target().node().name().unwrap_or("").into(),
                     property,
-                    times,
-                    values,
-                    interpolation: c.sampler().interpolation(),
-                });
+                    &times,
+                    &values,
+                    c.sampler().interpolation(),
+                ));
             }
             let name = a.name().unwrap_or("unnamed").to_owned();
             clips.insert(
@@ -784,5 +886,64 @@ impl Texture {
             rgba: Mutex::new(Some(img.into_raw())),
             compressed: None,
         }))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gltf::animation::Interpolation::{Linear, Step};
+    fn x(v: f32) -> Vec4 {
+        Vec4::new(v, 0., 0., 0.)
+    }
+    fn turned(degrees: f32) -> Vec4 {
+        Vec4::from(Quat::from_rotation_y(degrees.to_radians()))
+    }
+    #[test]
+    fn even_keys_are_indexed_and_blended() {
+        let times = [0., 1. / 30., 2. / 30., 3. / 30.];
+        let at = [0., 10., 30., 60.].map(x);
+        let track = Track::new("a".into(), Property::Translation, &times, &at, Linear);
+        for (t, v) in times.iter().zip(&at) {
+            assert!(track.sample(*t).abs_diff_eq(*v, 1e-4));
+        }
+        assert!(track.sample(1.5 / 30.).abs_diff_eq(x(20.), 1e-3));
+        // Before the first key and after the last, the track holds.
+        assert_eq!(track.sample(-1.), at[0]);
+        assert_eq!(track.sample(5.), at[3]);
+        // The last step is a fast blow's 100° swing.
+        let turns = [0., 12., 30., 130.].map(turned);
+        let track = Track::new("a".into(), Property::Rotation, &times, &turns, Linear);
+        for (i, f) in [(0, 0.25), (1, 0.5), (2, 0.2), (2, 0.9)] {
+            let [a, b] = [turns[i], turns[i + 1]].map(Quat::from_vec4);
+            let q = Quat::from_vec4(track.sample((i as f32 + f) / 30.));
+            assert!(q.angle_between(a.slerp(b, f)) < 0.05f32.to_radians());
+            assert!(q.is_normalized());
+        }
+    }
+    #[test]
+    fn a_track_that_never_changes_keeps_one_key() {
+        let held = Vec4::new(1., 2., 3., 0.);
+        let track = Track::new("a".into(), Property::Scale, &[0., 2.], &[held; 2], Linear);
+        assert_eq!(track.values.len(), 1);
+        assert_eq!(track.sample(0.7), held);
+    }
+    #[test]
+    fn uneven_keys_are_resampled_at_30_a_second() {
+        let times = [0., 0.1, 0.5, 1.];
+        let at = [0., 1., 5., 10.].map(x);
+        let track = Track::new("a".into(), Property::Translation, &times, &at, Linear);
+        assert!(track.rate >= 30.);
+        for t in [0., 0.05, 0.1, 0.33, 0.5, 0.8, 1.] {
+            let want = sample_keys(&times, &at, Linear, Property::Translation, t);
+            assert!(track.sample(t).abs_diff_eq(want, 1e-3), "{t}");
+        }
+    }
+    #[test]
+    fn step_keys_hold_until_the_next() {
+        let at = [0., 1., 2.].map(x);
+        let track = Track::new("a".into(), Property::Translation, &[0., 0.5, 1.], &at, Step);
+        assert_eq!(track.sample(0.49), at[0]);
+        assert_eq!(track.sample(0.51), at[1]);
+        assert_eq!(track.sample(1.), at[2]);
     }
 }

@@ -291,8 +291,8 @@ always meets the hand, whatever the archer's size. The drawing hand is the one n
 `build_environment.py` builds the valley's buildings, trees, rocks, plants and props, the
 same kit the Swift village used, remade at the characters' quality.
 - **Props** (`props[]`): `id`, `label`, `kind` (house, landmark, bridge, tree, plant, rock,
-  grass, flower, prop, part or masonry), `file`, `height`, `triangles`, and, for obstacles, `footprint`
-  (width and depth in metres at scale 1). Each is centred on its footprint at ground level,
+  grass, flower, prop, part or masonry), `file`, `height`, `triangles`, and, for obstacles and
+  houses, `footprint` (width and depth in metres at scale 1). Each is centred on its footprint at ground level,
   facing +Z, with levels of detail beside it like everything else.
 - **Placements** (`placements`) say which prop stands where `world::Valley` puts things:
   - `houses[i]` take `placements.houses[i % len]` and `trees[i]` take `placements.trees[i % len]`,
@@ -318,6 +318,15 @@ same kit the Swift village used, remade at the characters' quality.
   environment art. A climbable top carries a lip of worn, pale dressed stone (ART.md, "Reading
   the world"), and so does every grip; masonry too tall to climb ends in broken, mossy rubble. Masonry builds its own levels of detail rather than decimating, since a
   metre-high wall is seen at LOD 2 from about 11 m.
+- **Cottages** (`kind` "house") are built to `world::cottage`'s measurements, which
+  `ground_fields` writes out beside the masonry: the roof's pitch, eaves and verges, its ridge
+  and chimney, which the sim's roof boxes follow, and the timbers up each gable end that are its
+  grips. The art build checks its own timbers against those grips and stops if they differ. Each
+  house records its `blocks` and `grips` as masonry does, and `cargo test -p assets` fails if
+  `world` has changed them since, or if `placements.houses` doesn't list the cottages in
+  `world::cottage::COTTAGES`' order. The timbers you climb by are dark with a pale, worn chamfer
+  along the top (ART.md, "Reading the world"); the plinth runs 3 m into the ground, so a house
+  on a slope stands on it.
 - **Moving parts** (`parts`): a file placed at `at` (the prop's glTF space) that turns about
   `spin.axis` at `spin.rpm`: the windmill's sails.
 - **Materials:** shared tiling textures in `environment/textures/` (plaster, stone, planks,
@@ -552,7 +561,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
     material are joined into one mesh at export (`export.joined`), so the renderer draws plate
     a material at a time, not a plate at a time;
   - that every masonry prop was built for the blocks `world` stands it on and the grips it puts
-    on it;
+    on it, and every cottage for the roof and timbers `world` climbs it by;
   - that the ground, river and sky files exist, the terrain's layers match in size (they stack
     into texture arrays), the weights are square, the sky is twice as wide as tall, and the
     light's numbers make sense;

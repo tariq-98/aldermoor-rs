@@ -3,7 +3,7 @@ use crate::{
     character::Draw,
     model::{Material, Texture},
     settings::{LookSettings, ToneMap},
-    visibility::{Bounds, Frustum, stable_cascades},
+    visibility::{Bounds, Frustum, ShadowCasterVolume, stable_cascades},
 };
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec3};
@@ -286,6 +286,7 @@ pub struct Renderer {
     opaque: Obj<dyn MTLRenderPipelineState>,
     blend: Obj<dyn MTLRenderPipelineState>,
     shadow_pipeline: Obj<dyn MTLRenderPipelineState>,
+    shadow_mask_pipeline: Obj<dyn MTLRenderPipelineState>,
     taa: Obj<dyn MTLRenderPipelineState>,
     composite: Obj<dyn MTLRenderPipelineState>,
     depth_state: Obj<dyn MTLDepthStencilState>,
@@ -551,7 +552,9 @@ impl Renderer {
             true,
             true,
         )?;
-        let shadow_pipeline = pipeline(
+        // Opaque casters need only depth. Keep discard confined to masked casters.
+        let shadow_pipeline = pipeline("shadow_vertex", None, 1, &[], true, false)?;
+        let shadow_mask_pipeline = pipeline(
             "shadow_vertex",
             Some("shadow_fragment"),
             1,
@@ -715,6 +718,7 @@ impl Renderer {
             opaque,
             blend,
             shadow_pipeline,
+            shadow_mask_pipeline,
             taa,
             composite,
             depth_state,
@@ -1187,7 +1191,11 @@ impl Renderer {
         let valid = self.history_valid && !cut;
         self.stats.history_resets += usize::from(!valid);
         let previous_vp = if valid { self.previous_vp } else { unjittered };
-        let sun = Vec3::from_array(self.look.sun_direction).normalize();
+        let time = self
+            .scene_time
+            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
+        let lighting = self.look.lighting_at(f64::from(time));
+        let sun = Vec3::from_array(lighting.sun_direction).normalize();
         let cascades = stable_cascades(
             camera.eye,
             camera.target,
@@ -1197,10 +1205,6 @@ impl Renderer {
             SHADOW_SIZE as u32,
         );
         let view = Frustum::new(unjittered);
-        let shadow_views = cascades.map(Frustum::new);
-        let time = self
-            .scene_time
-            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
         let f = Frame {
             vp: unjittered.to_cols_array_2d(),
             previous_vp: previous_vp.to_cols_array_2d(),
@@ -1208,16 +1212,19 @@ impl Renderer {
             jitter: [jitter.x, jitter.y, jitter.x * 0.5, -jitter.y * 0.5],
             shadows: cascades.map(|m| m.to_cols_array_2d()),
             eye: camera.eye.extend(1.).to_array(),
-            sun: sun.extend(self.look.sun_intensity).to_array(),
-            sun_colour: Vec3::from_array(self.look.sun_colour).extend(1.).to_array(),
-            ambient: Vec3::from_array(self.look.ambient).extend(1.).to_array(),
-            sky: Vec3::from_array(self.look.sky).extend(1.).to_array(),
-            fog: Vec3::from_array(self.look.fog_colour)
-                .extend(self.look.fog_density)
+            sun: sun.extend(lighting.sun_intensity).to_array(),
+            sun_colour: Vec3::from_array(lighting.sun_colour).extend(1.).to_array(),
+            ambient: Vec3::from_array(lighting.ambient).extend(1.).to_array(),
+            // Combine the two authored factors once, retaining one multiply per sky sample.
+            sky: Vec3::from_array(lighting.sky)
+                .extend(lighting.sky_texture_intensity * self.surface_uniform.sky[1])
+                .to_array(),
+            fog: Vec3::from_array(lighting.fog_colour)
+                .extend(lighting.fog_density)
                 .to_array(),
             grade: self.look.grade.map(|r| [r[0], r[1], r[2], 0.]),
             params: [
-                self.look.exposure,
+                lighting.exposure,
                 (self.look.tone_map == ToneMap::Aces) as u32 as f32,
                 if self.metalfx.is_some() {
                     self.scale.log2()
@@ -1235,6 +1242,16 @@ impl Renderer {
             viewport: [width, height, 1. / width, 1. / height],
             splits: [15., 50., 150., 1. / SHADOW_SIZE as f32],
         };
+        let shadow_views: [_; 3] = std::array::from_fn(|i| {
+            ShadowCasterVolume::new(
+                cascades[i],
+                unjittered,
+                camera.eye,
+                camera.target - camera.eye,
+                f.splits[i],
+                SHADOW_SIZE as u32,
+            )
+        });
         let effects = self.effects.take();
         let fx = self
             .fx_pass
@@ -1293,13 +1310,9 @@ impl Renderer {
                 bounds = bounds.padded(0.2 + self.look.wind_strength * 0.12);
             }
             let scene = view.intersects(bounds);
-            let swept = Bounds {
-                center: bounds.center - sun * 50.,
-                half: bounds.half + sun.abs() * 50.,
-            };
-            let shadows = shadow_views
-                .each_ref()
-                .map(|v| v.intersects(bounds) && view.intersects(swept));
+            let shadows = std::array::from_fn(|cascade| {
+                shadow_views[cascade].intersects(bounds, sun, cascade > 0)
+            });
             if !scene && !shadows.iter().any(|v| *v) {
                 culled += 1;
                 continue;
@@ -1433,7 +1446,6 @@ impl Renderer {
             let enc = cb
                 .renderCommandEncoderWithDescriptor(&pass)
                 .context("cascade encoder")?;
-            enc.setRenderPipelineState(&self.shadow_pipeline);
             enc.setDepthStencilState(Some(&self.depth_state));
             enc.setDepthBias_slopeScale_clamp(0.001, 1.25, 0.01);
             calls += self.encode(
@@ -1833,6 +1845,19 @@ impl Renderer {
             let blended = self.blended(d);
             if cascade.is_some() && (blended || m.name == "__water_placeholder") {
                 continue;
+            }
+            if cascade.is_some() {
+                // Every instance in a batch shares its material. Blended draws were
+                // excluded above, so this matches DrawUniform.flags.z == 1 exactly.
+                let masked = m.alpha_mode == 1;
+                if last_pipeline != Some(masked) {
+                    enc.setRenderPipelineState(if masked {
+                        &self.shadow_mask_pipeline
+                    } else {
+                        &self.shadow_pipeline
+                    });
+                    last_pipeline = Some(masked);
+                }
             }
             if cascade.is_none() && last_pipeline != Some(blended) {
                 enc.setRenderPipelineState(if blended { &self.blend } else { &self.opaque });
