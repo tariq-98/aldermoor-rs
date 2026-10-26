@@ -44,19 +44,30 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Walls and ruins can be climbed too. A `world::Solid` with a `top` is ground, not an
     obstacle: its sides are faces like any cliff's, so one that tops out within 1.5 m is climbed
     and stood on, and a taller one stops you a body's width short of it, as a building's wall
-    does (#216; `world::Valley::off_faces`). Buildings and trees have no top and only block.
+    does (#216; `world::Valley::off_faces`). It stops rolls, leaps, charges, knockbacks and
+    blinks the same way, rather than carrying you over it (#311; `world::Valley::slide_below`).
+    Buildings and trees have no top and only block.
     A top may rise along the box (`rise`), so a wall following a slope is walked up, not climbed
     a step at a time.
   - The dry-stone field walls along the north road stand about a metre high and 0.9 m wide on
     top: climb on and walk along them. The ruined hall on the hill south-west of the village
     (#160) breaks down in steps along its east wall, each a climb from the last, up to a lookout
-    4.2 m up under its gable; the gable, its buttresses and the door's jambs are too tall to climb
-    (`crates/world/src/masonry.rs`).
+    4.2 m up under its gable; the gable's buttresses and the door's jambs are too tall to climb
+    (`crates/world/src/masonry.rs`). The gable itself climbs (#249): from the lookout a jump pulls
+    you onto its raked coping, 2.5 m up, which you walk up (at 40°) to the empty bellcote on its
+    apex. A jump at the bellcote pulls you onto its top, 10 to 10.8 m up, the highest point in
+    the ruin. The gable's outer face climbs too, by its grips (below).
 - **Climbing** on handholds (#245, part of the climbing epic #251;
   `crates/sim/src/climbing.rs`). A hold is an edge the hands close on: `world::Valley::holds`,
-  today every top edge of a `Solid` with a top that drops at least 1.6 m (`world::HANG_MIN_DROP`),
-  joined along straight walls. In the valley that's the ruined hall's taller broken walls; sills,
-  beams, eaves and cliff ledges come with the routes in #249.
+  every top edge of a `Solid` with a top that drops at least 1.6 m (`world::HANG_MIN_DROP`),
+  joined along straight walls, and every grip on the masonry (`world::Grip`): a dressed stone
+  standing proud of a face, held by its top, with no room above it to climb onto. Grips don't
+  stand in anyone's way. In the valley that's the ruined hall's taller broken walls, its gable's
+  coping and bellcote, and a line of grips up the gable's outer face: the lancet's sill (2.6 m,
+  caught in a jump from the ground), two jamb stones and a label stop up the window's east side
+  (each a climb from the last), the keystone over its arch (a climb leap), the oculus's sill, and
+  the bell's sill in the bellcote (a climb leap), from which a last climb leap reaches the
+  bellcote's coping. Beams, eaves and cliff ledges come with the rest of the routes in #249.
   - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
     higher, the body out from the wall by its radius and facing it. Pose `Hang`.
   - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at

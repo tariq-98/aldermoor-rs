@@ -113,7 +113,9 @@ mod tests {
     #[test]
     fn every_hang_in_the_valley_finds_its_hold() {
         // Wherever the sim would hang a player along each of the valley's holds, the hold comes
-        // back; and not standing on its top, nor a stride back from its wall.
+        // back; and not standing on its top, nor a stride back from its wall. On its top another
+        // hold may stand in reach above (the bellcote's, over the gable's coping), so a body there
+        // could as well be hanging from that one; the renderer doesn't ask about a body on top.
         let valley = Arc::new(Valley::new());
         let holds = Holds::new(Arc::clone(&valley));
         assert!(!valley.holds.is_empty());
@@ -123,7 +125,7 @@ mod tests {
                 let hang = sim::climbing::hang_point(&valley, h, at, 0.4);
                 assert_eq!(holds.hung_from(hang), Some(*h), "hanging at {hang}");
                 let top = h.at(at) - Vec3::new(h.out.x, 0., h.out.y) * 0.3;
-                assert_eq!(holds.hung_from(top), None, "standing on top at {top}");
+                assert_ne!(holds.hung_from(top), Some(*h), "standing on top at {top}");
                 let back = hang + Vec3::new(h.out.x, 0., h.out.y) * 0.6;
                 assert_eq!(holds.hung_from(back), None, "standing back at {back}");
             }
