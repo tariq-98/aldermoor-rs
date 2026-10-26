@@ -305,8 +305,9 @@ same kit the Swift village used, remade at the characters' quality.
   - `scatter` lists, by kind, the props for scattering: rocks, grass, flowers, bushes, riverbank
     reeds and forest pines. Where each one goes comes from Claude with the valley's dressing
     data (still to do); the renderer draws what it's given and doesn't place things itself.
-- **Masonry** (`kind` "masonry": the dry-stone field walls `wall.field.<n>` and the ruined hall
-  `ruin.hall`) stands where `world::Valley::masonry` puts it, at its `origin` turned by its
+- **Masonry** (`kind` "masonry": the dry-stone field walls `wall.field.<n>`, the ruined hall
+  `ruin.hall`, and the ledges up two cliffs, `terrace.ledges.west` and `terrace.ledges.mill`)
+  stands where `world::Valley::masonry` puts it, at its `origin` turned by its
   `yaw`, and adds that list's solids to the valley: boxes you climb onto (a `top`, which may rise
   along the box so a wall follows a slope) and masonry too tall to climb, which blocks. The
   `world` crate owns the list (`crates/world/src/masonry.rs`); `ground_fields` writes it out
@@ -580,7 +581,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
-| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile; nine pieces of dry-stone field wall along the north road and a ruined hall on the hill (#160) |
+| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile; nine pieces of dry-stone field wall along the north road, a ruined hall on the hill (#160), and pale bands of ledges up two of the cliffs (#249) |
 | Ground, water, sky | Lush grass, meadow, packed earth and limestone, blended across the valley by its roads, slopes, river, trees and houses; river ripples; a fair-weather sky; the valley's light (25 October 2026) |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 

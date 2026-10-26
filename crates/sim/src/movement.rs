@@ -140,14 +140,16 @@ pub(crate) fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, rad
         }
         // The top: the ground levels out again above the feet. Stand a little past the edge, or
         // right on it if that's where the body fits (a top as narrow as a gable's coping, with a
-        // buttress beyond).
+        // buttress beyond), or nearer the front still if the last sample was on it too (a cliff's
+        // ledge, with the next one up overhanging it).
         if i > 1 && h - prev <= MAX_SLOPE * STEP && h > y + 0.2 {
             let stand = p + dir * 0.3;
             let top = land.ground(stand.x, stand.y);
             if top - y > reach {
                 return None;
             }
-            return [(stand, top), (p, h)].into_iter().find(|&(at, top)| room(land, at, top, radius)).map(|(at, top)| Vec3::new(at.x, top, at.y));
+            let front = ((h - prev).abs() < 0.05).then_some((p - dir * STEP, prev));
+            return [(stand, top), (p, h)].into_iter().chain(front).find(|&(at, top)| room(land, at, top, radius)).map(|(at, top)| Vec3::new(at.x, top, at.y));
         }
         prev = h;
     }

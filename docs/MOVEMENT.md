@@ -27,7 +27,9 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     a face that tops out within **2.2 m** of your feet at that moment is caught and pulled up
     onto in 0.5 s (a mantle, `ForcedKind::Mantle`), as long as you aren't yet falling faster than
     3 m/s. So a jump at the right moment gets you up a ledge about 3.3 m high. A climb or mantle
-    needs room on the top for the body: not a sill's top against the wall it stands out from.
+    needs room on the top for the body: not a sill's top against the wall it stands out from,
+    nor a cliff's ledge too narrow to stand on below the next. On a narrow top it stands you as
+    near its front as you fit.
   - **Vaulting:** running (faster than a walk) at a wall no higher than **1.2 m** and shallower
     than **0.7 m**, with clear, level ground beyond, hops it at the speed you ran in (0.2 to
     0.45 s) and lands you running at that speed (`ForcedKind::Vault`). Deeper walls, such as the
@@ -36,7 +38,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - Not while guarding, casting, swimming or downed. Mantles and vaults are forced moves, so no
     skills meanwhile.
   - The valley has few low faces yet: a few ledges in the limestone terraces west of the
-    village. Most of the terraces and the east terrace are tall cliffs.
+    village. Most of the terraces and the east terrace are tall cliffs; two stretches of them
+    climb by their ledges (below).
   - Walking or running off the top of a cliff is a fall (see below), not a slide down it. You
     only stay on the ground going down ground no steeper than 2:1.
   - The bridge has stone parapets along both sides (solids in `world`), so you can't climb onto
@@ -80,7 +83,17 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   (each a climb from the last), the keystone over its arch (a climb leap), the oculus's sill, and
   the bell's sill in the bellcote (a climb leap), from which a last climb leap reaches the
   bellcote's coping. The cottages add their eaves and verges and the timbers up their gable ends
-  (above); cliff ledges come with the last of the routes in #249.
+  (above), and two cliffs their ledges:
+  - **Cliff ledges** (#249; `crates/world/src/ledges.rs`): bands of pale, harder stone along the
+    strata of two cliffs, 1.7 to 1.8 m apart, so each front is a hold: the west terrace's face
+    behind the village (16 m) and the east terrace's below the windmill (26 m). The rest of the
+    cliffs stay sheer. Each ledge runs back into the rock, and its front stands right above where
+    the cliff meets the ledge below, so the next ledge up overhangs it. A jump catches the first
+    from the foot of the cliff. Where a ledge is deep enough to stand on (about half a metre),
+    you climb onto it, and a jump at the cliff pulls you onto the next or catches it. Where the
+    cliff is steeper and the ledges are narrower, you hang, and a climb leap reaches the next
+    ledge. The last is a course of capstones along the edge of the terrace, which you climb onto
+    and walk off onto the terrace.
   - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
     higher, the body out from the wall by its radius and facing it. Pose `Hang`.
   - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at

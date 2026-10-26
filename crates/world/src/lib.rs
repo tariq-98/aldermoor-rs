@@ -9,6 +9,7 @@ use glam::{Vec2, Vec3};
 
 pub mod cottage;
 mod holds;
+pub mod ledges;
 mod masonry;
 mod noise;
 pub use holds::{Hold, Holds, HANG_MIN_DROP};
@@ -44,14 +45,14 @@ impl Solid {
         Turned::new(*self).top_at(p)
     }
 
-    /// `p` in the box's own frame.
-    #[inline]
+    /// `p` in the box's own frame (the valley's lookups use [`Turned`]).
+    #[cfg(test)]
     fn local(&self, p: Vec2) -> Vec2 {
         Turned::new(*self).local(p)
     }
 
     /// A direction in the box's own frame, turned back into the world's.
-    #[inline]
+    #[cfg(test)]
     fn unturn(&self, v: Vec2) -> Vec2 {
         Turned::new(*self).unturn(v)
     }
@@ -255,10 +256,12 @@ impl Valley {
         for side in [-1.0, 1.0] {
             solids.push(Solid { center: Vec2::new(BRIDGE_X + side * 2.45, river_z(BRIDGE_X)), half: Vec2::new(0.2, 9.2), yaw: 0.0, top: None, rise: 0.0 });
         }
-        // Then the walls and the ruin, standing on the drawn ground.
+        // Then the walls, the ruin and the ledges up two of the cliffs, standing on the drawn
+        // ground.
         let heights = Heights::build();
         let mut masonry = masonry::field_walls(|x, z| heights.at(x, z));
         masonry.push(masonry::ruin(|x, z| heights.at(x, z)));
+        masonry.extend(ledges::ledges(|x, z| heights.at(x, z)));
         solids.extend(masonry.iter().flat_map(Masonry::solids));
         let (grid, tops) = Grid::split(&solids);
         let tops_box = tops_box(&solids);

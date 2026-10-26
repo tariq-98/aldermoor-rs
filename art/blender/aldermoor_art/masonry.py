@@ -291,6 +291,85 @@ def field_wall(piece, heads, lod, seed):
     return [env.join(parts, "wall")]
 
 
+# Cliff ledges: each a band of pale stone this thick, its front worn round over this much.
+LEDGE_THICK = 0.34
+LEDGE_LIP = 0.07
+
+
+def terrace_ledges(piece, lod, seed):
+    """Ledges up a limestone cliff at a level of detail (0, 1 or 2): bands of pale, harder stone
+    along the strata, each laid on its blocks (`world::ledges`) from the front edge you hang from
+    back into the rock, its top the ledge you stand on, its front worn round and its underside in
+    shadow. The rock between them is the cliff itself, the terrain. Returns its objects."""
+    rng = random.Random(seed)
+    ground = Ground(piece["ground"])
+    dressed = env.surface("dressed")[0]
+    step = (0.25, 0.5, 1.5)[lod]
+    bands = {}
+    for b in piece["blocks"]:
+        bands.setdefault(round(b["top"], 4), []).append(_rect(b))
+    parts = []
+    for k, (top, rects) in enumerate(sorted(bands.items())):
+        rects.sort()
+        x0, x1 = rects[0][0], rects[-1][1]
+        n = max(2, math.ceil((x1 - x0) / step))
+        xs = [x0 + (x1 - x0) * i / n for i in range(n + 1)]
+
+        def edge(x, i):
+            """The front (i = 2) or back (i = 3) at x: the block's own, eased into the next one's
+            over the last 0.3 m before their joint, so the band reads as one stratum."""
+            j = next((j for j, r in enumerate(rects) if x <= r[1] + 1e-6), len(rects) - 1)
+            y = rects[j][i]
+            for jj in (j - 1, j + 1):
+                if 0 <= jj < len(rects):
+                    joint = rects[j][0] if jj < j else rects[j][1]
+                    w = max(0.0, 1.0 - abs(x - joint) / 0.3) * 0.5
+                    y += (rects[jj][i] - rects[j][i]) * w
+            return y
+
+        rows = []
+        for i, x in enumerate(xs):
+            # The front wanders a few centimetres either side of the edge you hang from.
+            wobble = 0.0 if lod == 2 else 0.045 * (_noise(x * 0.9, top * 0.37, seed + k) - 0.5) * 2
+            front, back = edge(x, 2) + wobble, edge(x, 3)
+            under = LEDGE_THICK * (0.85 + 0.3 * _noise(x * 0.6, top, seed + 11 + k)) if lod < 2 else LEDGE_THICK
+            lip = LEDGE_LIP if lod < 2 else 0.0
+            # Its cross-section, from the top at the back round the worn front to the underside,
+            # which tucks back under the lip.
+            prof = [(back, top), (front + lip, top), (front + lip * 0.3, top - lip * 0.3), (front, top - lip),
+                    (front + 0.03, top - under * 0.7), (front + 0.08, top - under), (back, top - under)]
+            if lod == 2:
+                prof = [(back, top), (front, top), (front + 0.05, top - under), (back, top - under)]
+            rows.append([(x, y, z) for y, z in prof])
+        bm = bmesh.new()
+        verts = [[bm.verts.new(p) for p in row] for row in rows]
+        m = len(verts[0])
+        for a, b in zip(verts, verts[1:]):
+            for i in range(m):
+                bm.faces.new((a[i], a[(i + 1) % m], b[(i + 1) % m], b[i]))
+        bm.faces.new(verts[0])
+        bm.faces.new(verts[-1][::-1])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        parts.append(env.mesh("ledge", bm, dressed))
+    origin = blender(piece["origin"])
+    _uvs_in_world(parts, origin)
+    for ob in parts:
+        env.shade(ob, _ledge_shade(seed))
+    # One mesh, so the renderer draws it a material at a time.
+    return [env.join(parts, "ledges")]
+
+
+def _ledge_shade(seed):
+    """COLOR_0 for cliff ledges: the worn top pale, catching the light (a pale edge is always a
+    hold), the front a little darker, the underside in shadow; broad patches of weathering."""
+    def fn(co, n):
+        patch = 0.9 + 0.12 * _noise(co.x * 0.35, co.z * 0.5, seed + 3)
+        k = 0.96 if n.z > 0.5 else (0.5 if n.z < -0.5 else 0.8)
+        k *= patch
+        return k, k * 0.99, k * 0.95
+    return fn
+
+
 def _wall_shade(ground, seed, kind):
     """COLOR_0 for walling: darker and greener toward the damp ground, broad patches of
     weathering. A slab's worn top stays at full brightness, the lip you climb onto; the footings

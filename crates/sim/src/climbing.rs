@@ -149,13 +149,16 @@ pub fn onto(kind: ForcedKind) -> Option<Hang> {
 }
 
 /// The top to stand on above the hands, if there's room for the body: the point to climb to.
+/// Not against a face too tall to step onto: a ledge with the next one overhanging it, too narrow
+/// to stand on, is only hung from.
 fn room_on_top(land: &Valley, hold: &Hold, at: f32, radius: f32) -> Option<Vec3> {
     let hands = hold.at(at);
     // Deep tops take the whole body; a thin wall's top is stood on in its middle.
     [radius + 0.1, 0.3, 0.15].into_iter().find_map(|d| {
         let p = hands.xz() - hold.out * d;
         let top = land.ground(p.x, p.y);
-        ((top - hands.y).abs() < 0.3 && !land.blocked(p, radius * 0.9)).then(|| Vec3::new(p.x, top, p.y))
+        let r = radius * 0.9;
+        ((top - hands.y).abs() < 0.3 && !land.blocked(p, r) && land.off_faces(p, r, top + CLIMB_HEIGHT) == p).then(|| Vec3::new(p.x, top, p.y))
     })
 }
 
