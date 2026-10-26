@@ -31,7 +31,7 @@ Median and p95 in ms, averaged over each setting's two runs (run 07 is shown on 
 | same, repeat (07, outlier: every pass slower) | 15.80 | 17.94 | 2.52 | |
 
 - **Trusted shaders** (`create_shader_module_trusted` with `ShaderRuntimeChecks::unchecked()`)
-  save 2.0 ms. That confirms naga's default bounds checks and loop guards caused about 45% of the
+  save 2.0 ms. That confirms naga's default bounds checks and loop guards caused over 40% of the
   #95 gap.
 - **One scene pass** saves about 0.6 ms on wgpu and 0.5 ms on Metal, so it doesn't change the
   ratio.
@@ -40,7 +40,7 @@ Median and p95 in ms, averaged over each setting's two runs (run 07 is shown on 
 - **Where the rest goes.** Pass spans are running totals from the start of the scene pass on both
   backends, so only their differences mean anything. With one scene pass, the scene ends about
   1.1 ms later on wgpu (7.0 against 5.9 ms), and TAA takes another 1.2 ms more (3.1 against
-  1.8 ms between scene end and TAA end). Shadows match within 0.1 ms.
+  1.9 ms between scene end and TAA end). Shadows match within 0.1 ms.
 
 ## Visual check
 
