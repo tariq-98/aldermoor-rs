@@ -41,10 +41,10 @@ fn run(players: usize, monsters: usize, seconds: f64) -> String {
     let stop = Arc::new(AtomicBool::new(false));
     let bots: Vec<_> = (0..players)
         .map(|i| {
-            let (addr, stop) = (listener.addr(), stop.clone());
+            let (addr, cert, stop) = (listener.addr(), listener.certificate().clone(), stop.clone());
             std::thread::Builder::new()
                 .stack_size(256 << 10)
-                .spawn(move || bots::run(addr, &format!("Bot {i}"), i as u64, stop))
+                .spawn(move || bots::run(addr, &cert, &format!("Bot {i}"), i as u64, stop))
                 .expect("bot thread starts")
         })
         .collect();
