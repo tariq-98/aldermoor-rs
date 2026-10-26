@@ -7,6 +7,7 @@
 
 use glam::{Vec2, Vec3};
 
+pub mod cottage;
 mod holds;
 mod masonry;
 mod noise;
@@ -154,9 +155,13 @@ impl Valley {
         let mut solids = Vec::with_capacity(128);
         let houses: Vec<Placement> =
             HOUSES.iter().enumerate().map(|(variant, &(x, z, yaw, scale))| Placement { position: Vec2::new(x, z), yaw, scale, variant }).collect();
+        // Each house a cottage whose roof you can climb onto and walk (#249): the roof's slopes come
+        // down to the ground round the walls, so the house is masonry, not an obstacle.
         for h in &houses {
-            solids.push(Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 });
+            solids.extend(cottage::solids(h));
         }
+        // Where the houses stand, plinth and all, for keeping trees away from them.
+        let footprints: Vec<Solid> = houses.iter().map(|h| Solid { center: h.position, half: Vec2::new(3.5, 3.1) * h.scale, yaw: h.yaw, top: None, rise: 0.0 }).collect();
         // The windmill and the shed by the north fence.
         solids.push(Solid { center: Vec2::new(49.0, -84.0), half: Vec2::splat(2.5), yaw: 0.0, top: None, rise: 0.0 });
         solids.push(Solid { center: Vec2::new(-26.0, -48.0), half: Vec2::new(4.4, 3.7), yaw: 0.0, top: None, rise: 0.0 });
@@ -184,6 +189,7 @@ impl Valley {
             if (p.y - river_z(p.x)).abs() < 12.0
                 || path_distance(p.x, p.y) < 5.0
                 || blocked_by(&solids, p, 3.0)
+                || footprints.iter().any(|f| f.overlaps(p, 3.0))
             {
                 continue;
             }
@@ -636,10 +642,11 @@ mod tests {
         // 106 from the Swift sequence, less the 19 on cliff faces (#40), which still take their
         // draws so the rest keep their sizes and turns.
         assert_eq!(v.trees.len(), 87);
-        // 9 buildings, 87 trees, the bridge's two parapets, then the walls and the ruin.
+        // 7 cottages of 5 blocks each, the windmill and the shed, 87 trees, the bridge's two
+        // parapets, then the walls and the ruin.
         let masonry: usize = v.masonry.iter().map(|m| m.blocks.len()).sum();
-        assert_eq!(v.solids.len(), 98 + masonry);
-        let last = v.solids[95];
+        assert_eq!(v.solids.len(), 7 * 5 + 2 + 87 + 2 + masonry);
+        let last = v.solids[7 * 5 + 2 + 86];
         assert!((last.center - Vec2::new(-52.010445, -2.722763)).length() < 1e-3);
         assert!((last.half.x - 0.3776364).abs() < 1e-4);
         // Each tree keeps the art it had before the cliff trees went: its place in the 106.
@@ -724,11 +731,11 @@ mod tests {
         assert!(v.wall_ahead(at, into, 0.4, 0.25, ground + 3.5).is_none());
         assert!(v.wall_ahead(at - into, into, 0.4, 0.25, ground + 1.5).is_none());
         assert!(v.wall_ahead(at, wall.unturn(Vec2::Y), 0.4, 0.25, ground + 1.5).is_none());
-        // A cottage's side is a wall; a tree and the bridge's parapet aren't.
+        // The shed's side is a wall; a tree and the bridge's parapet aren't.
         let side = |s: &Solid| (s.center + s.unturn(Vec2::new(0.0, -(s.half.y + 0.45))), s.unturn(Vec2::Y));
-        let cottage = v.solids[0];
-        let (p, d) = side(&cottage);
-        assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_some(), "no wall at the cottage");
+        let shed = *v.solids.iter().find(|s| (s.center - Vec2::new(-26.0, -48.0)).length() < 0.01).unwrap();
+        let (p, d) = side(&shed);
+        assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_some(), "no wall at the shed");
         let tree = v.solids.iter().find(|s| s.top.is_none() && s.half.x < 0.7).unwrap();
         let (p, d) = side(tree);
         assert!(v.wall_ahead(p, d, 0.4, 0.25, f32::INFINITY).is_none(), "a tree is a wall");
@@ -740,9 +747,9 @@ mod tests {
     #[test]
     fn walls_stop_walkers_and_the_bridge_crosses_the_river() {
         let v = Valley::new();
-        // Walking north into the first cottage stops at its wall.
+        // Walking north into the first cottage stops at its roof's verge, too tall to step onto.
         let start = Vec2::new(-12.0, 0.0);
-        let end = v.slide(start, Vec2::new(0.0, -20.0), 0.4);
+        let end = v.slide_below(start, Vec2::new(0.0, -20.0), 0.4, v.ground(start.x, start.y) + 1.5);
         assert!(end.y > -9.5 && end.y < -5.0, "stopped at {end}");
         // The river is deep in the middle and dry on the bridge.
         assert!(v.water_depth(20.0, river_z(20.0)) > 0.7);
