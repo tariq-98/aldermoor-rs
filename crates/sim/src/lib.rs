@@ -10,6 +10,7 @@
 //! and warned blows, guarding and parrying, threat, and being downed (docs/DESIGN.md).
 
 mod brain;
+pub mod climbing;
 pub mod combat;
 mod components;
 mod consumables;
@@ -17,6 +18,7 @@ pub mod content;
 mod crafting;
 mod loot;
 mod movement;
+mod net_view;
 mod progress;
 mod queries;
 pub mod region;
@@ -38,6 +40,7 @@ pub use components::*;
 pub use consumables::PotionCooldown;
 pub use content::Specialty;
 pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
+pub use net_view::NetFrame;
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
 pub use rewind::{Trail, HISTORY, MAX_REWIND};
 pub use progress::{Credit, Progress, SHARE_FLOOR};
@@ -489,6 +492,7 @@ impl Sim {
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
                 traversal: movement::traversal(m),
+                aim_pitch: m.aim_pitch,
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,
@@ -520,6 +524,7 @@ impl Sim {
                 pose: a.pose,
                 pose_time: (time - a.since) as f32,
                 traversal: g.traversal,
+                aim_pitch: 0,
                 health: v.health,
                 max_health: v.max_health,
                 hostile: u.faction == Faction::Hostile,

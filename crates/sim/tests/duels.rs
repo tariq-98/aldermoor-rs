@@ -6,13 +6,15 @@
 //! well-played one does what a good player does with human timing: it raises its guard just
 //! before blows land (sometimes too early, sometimes too late), ripostes after a parry, holds its
 //! heavy blows when one is about to land on it, heals when hurt, and breaks free when dazed.
+//!
+//! Both fighters are players, so every duel here is fought with the PvP numbers (#200).
 
 use std::f32::consts::PI;
 
 use glam::Vec2;
 use protocol::Command;
 use sim::content::catalog;
-use sim::{Auras, Faction, Fighter, Sim, Specialty, Transform, Unit, Vitals};
+use sim::{Auras, Faction, Fighter, Sim, Specialty, Stats, Transform, Unit, Vitals};
 
 const ROAD: Vec2 = Vec2::new(5.0, 10.0);
 
@@ -223,6 +225,70 @@ fn ten_levels_beat_skill() {
     let (wins, length) = series(N, (Play::Skilled, 5), (Play::Unskilled, 15));
     println!("ten levels down: skill won {wins} of {N}, fights lasting {length:.1} s");
     assert!(wins <= 1, "skill won {wins} of {N} against ten levels");
+}
+
+/// A player and an enemy at the same level, a step apart and facing each other. With
+/// `player` false the enemy counts as a monster (same body, same armour).
+fn squared_up(player: bool) -> (Sim, u32, u32) {
+    let mut sim = Sim::new(3);
+    let a = sim.spawn_hero("A", Specialty::Warrior, 10, ROAD, 0.0);
+    let b = sim.spawn_hero("B", Specialty::Warrior, 10, ROAD + Vec2::new(0.0, 1.6), PI);
+    sim.get_mut::<Unit>(b).unwrap().faction = Faction::Hostile;
+    if !player {
+        sim.get_mut::<Unit>(b).unwrap().kind = protocol::UnitKind::Monster;
+    }
+    sim.get_mut::<Stats>(a).unwrap().crit = 0.0;
+    (sim, a, b)
+}
+
+/// The biggest blow `a` lands on `b` in a second of using `ability`.
+fn hardest_blow(player: bool, ability: &str) -> (f32, Sim, u32) {
+    use protocol::Event;
+    let (mut sim, a, b) = squared_up(player);
+    sim.get_mut::<Fighter>(a).unwrap().bar[1] = catalog().ability_id(ability);
+    sim.command(a, Command::SetTarget(Some(b)));
+    sim.command(a, Command::UseSlot { slot: 1, ground: None });
+    let mut hardest = 0.0f32;
+    for _ in 0..60 {
+        sim.step();
+        for e in std::mem::take(&mut sim.world.resource_mut::<sim::Outbox>().0) {
+            if let Event::Damage { target, source, amount, .. } = e && target == b && source == a {
+                hardest = hardest.max(amount);
+            }
+        }
+    }
+    (hardest, sim, b)
+}
+
+#[test]
+fn pvp_numbers_apply_only_between_players() {
+    let split = catalog().ability(catalog().ability_id("gs_execution").unwrap()).pvp.damage;
+    assert!(split < 1.0, "Execution has a PvP split to test");
+    let (on_monster, sim, b) = hardest_blow(false, "gs_execution");
+    assert!(sim.get::<Fighter>(b).unwrap().pvp_until < sim.time(), "hitting a monster isn't a PvP fight");
+    let (on_player, sim, b) = hardest_blow(true, "gs_execution");
+    assert!(on_monster > 0.0 && on_player > 0.0, "both blows land: {on_monster} and {on_player}");
+    let ratio = on_player / on_monster;
+    assert!((ratio - split).abs() < 0.03, "a player takes {on_player} where a monster takes {on_monster} ({ratio:.2}, want {split})");
+    // The player is now in a PvP fight: heals on them take PvP numbers for a few seconds.
+    let until = sim.get::<Fighter>(b).unwrap().pvp_until;
+    assert!(until > sim.time() && until <= sim.time() + sim::stats::PVP_COMBAT, "in a PvP fight until {until}");
+}
+
+#[test]
+fn players_control_each_other_with_longer_diminishing_returns() {
+    use sim::combat::{auras::apply_key, source};
+    use sim::content::Cc;
+    let window = |player: bool| {
+        let (mut sim, a, b) = squared_up(player);
+        let (ae, be) = (sim.entity(a).unwrap(), sim.entity(b).unwrap());
+        let src = source(&sim.world, ae, None).unwrap();
+        assert!(apply_key(&mut sim.world, "stunned", be, &src));
+        sim.get::<Auras>(b).unwrap().dr[Cc::Stun.category().unwrap()].reset_at - sim.time()
+    };
+    assert!((window(false) - sim::stats::DR_WINDOW).abs() < 1e-6, "against monsters: {}", window(false));
+    assert!((window(true) - sim::stats::PVP_DR_WINDOW).abs() < 1e-6, "between players: {}", window(true));
+    assert!(sim::stats::PVP_DR_WINDOW > sim::stats::DR_WINDOW);
 }
 
 /// For tuning: what happens in skilled-against-unskilled duels at three level gaps (blows,

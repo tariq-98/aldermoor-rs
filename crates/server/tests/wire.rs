@@ -18,6 +18,10 @@ fn fight(seed: u64) -> (Sim, u32) {
 fn act(sim: &mut Sim, hero: u32, step: u64) {
     let a = step as f32 / 200.0;
     sim.command(hero, Command::Move { direction: Vec2::new(a.cos(), a.sin()), walk: false, sprint: false, face_yaw: None });
+    // The hero looks up and down: others see its aim pitch (#244).
+    if step % 15 == 0 {
+        sim.command(hero, Command::Aim { pitch: ((step / 15 % 200) as i32 - 100) as i8 });
+    }
     if step % 40 == 0 {
         sim.command(hero, Command::UseSlot { slot: (step / 40 % 5) as u8, ground: None });
     }
@@ -30,7 +34,7 @@ fn near(a: f32, b: f32, by: f32, what: &str) {
 /// Whether `b` is `a` to within the quantising, `ago` seconds later.
 fn unit_close(a: &UnitState, b: &UnitState, ago: f32) -> Result<(), String> {
     let close = |x: f32, y: f32, by: f32, what: &str| if (x - y).abs() <= by || x == y { Ok(()) } else { Err(format!("unit {} {what}: {x} against {y}", a.id)) };
-    if (a.id, a.kind, &a.body, &a.name, a.level, a.pose, a.traversal) != (b.id, b.kind, &b.body, &b.name, b.level, b.pose, b.traversal) {
+    if (a.id, a.kind, &a.body, &a.name, a.level, a.pose, a.traversal, a.aim_pitch) != (b.id, b.kind, &b.body, &b.name, b.level, b.pose, b.traversal, b.aim_pitch) {
         return Err(format!("unit {}: {:?} against {:?}", a.id, (a.level, a.pose, a.traversal), (b.level, b.pose, b.traversal)));
     }
     if (a.max_health, a.hostile, a.target, &*a.look) != (b.max_health, b.hostile, b.target, &*b.look) {
@@ -238,3 +242,65 @@ fn a_view_against_a_base_the_client_lost_is_refused() {
     assert_eq!(encoder.encode(&sim.snapshot(Some(hero)), &sim.combat_view(Some(hero))).base, Some(first.tick));
 }
 
+
+#[test]
+fn views_from_the_frame_match_views_from_snapshots() {
+    // The server picks views out of a frame a step (#286): the player must end up with what their
+    // own snapshot and combat view would have given them, view after view, with late acks.
+    let (mut sim, hero) = fight(5);
+    let (mut whole, mut picked) = (Encoder::new(), Encoder::new());
+    let (mut from_whole, mut from_frame) = (Decoder::new(), Decoder::new());
+    let (mut frame, mut events, mut sizes) = (None, Vec::new(), (0, 0));
+    for step in 0..600u64 {
+        act(&mut sim, hero, step);
+        sim.step();
+        events.extend(sim.take_events());
+        // A frame every step, as the server builds them, though this player's view is every third.
+        frame = Some(sim.net_frame(frame.as_ref()));
+        if step % 3 != 0 {
+            continue;
+        }
+        let mut snapshot = sim.snapshot(Some(hero));
+        snapshot.events = std::mem::take(&mut events);
+        let a = whole.encode(&snapshot, &sim.combat_view(Some(hero)));
+        let b = sim.encode_view(frame.as_ref().unwrap(), hero, &mut picked, &snapshot.events);
+        sizes.0 += postcard::to_stdvec(&a).unwrap().len();
+        sizes.1 += postcard::to_stdvec(&b).unwrap().len();
+        let tick = a.tick;
+        assert_eq!(from_whole.decode(a).unwrap(), from_frame.decode(b).unwrap(), "view {tick}");
+        if step / 3 % 2 == 0 {
+            whole.ack(tick);
+            picked.ack(tick);
+        }
+    }
+    // Detail that changed and changed back between views may go again from the frame, no more.
+    assert!(sizes.1 <= sizes.0 + sizes.0 / 20, "{} bytes from the frame against {}", sizes.1, sizes.0);
+}
+
+#[test]
+fn players_get_only_the_events_they_can_see() {
+    // A fight at one end of the valley, and a player too far away to see it (#292).
+    let (mut sim, hero) = fight(6);
+    let far = sim.spawn_player("Far", Vec2::new(6.0, -160.0), 0.0);
+    let frame = sim.net_frame(None);
+    let (mut near_view, mut far_view) = (Encoder::new(), Encoder::new());
+    let _ = sim.encode_view(&frame, hero, &mut near_view, &[]);
+    let _ = sim.encode_view(&frame, far, &mut far_view, &[]);
+    let (mut frame, mut fought) = (frame, false);
+    for step in 0..300 {
+        act(&mut sim, hero, step);
+        sim.step();
+        let events = sim.take_events();
+        frame = sim.net_frame(Some(&frame));
+        let (a, b) = (sim.encode_view(&frame, hero, &mut near_view, &events), sim.encode_view(&frame, far, &mut far_view, &events));
+        // The fighter sees all of it.
+        assert_eq!(a.events, events);
+        fought |= events.iter().any(|e| matches!(e, protocol::Event::Damage { .. }));
+        // The other sees nothing but what's about themselves, or messages.
+        for e in &b.events {
+            let about = e.units();
+            assert!(about.contains(&Some(far)) || (about == [None, None] && e.at().is_none()), "{e:?} reached a player 180 m away");
+        }
+    }
+    assert!(fought, "the fight never got going");
+}

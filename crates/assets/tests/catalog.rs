@@ -179,6 +179,12 @@ fn masonry_is_built_for_the_blocks_world_stands_it_on() {
                 };
             assert!(same, "{}'s {} block moved in world: rebuild the environment art", m.prop, b.part);
         }
+        assert_eq!(prop.grips.len(), m.grips.len(), "{} was built for other grips: rebuild the environment art", m.prop);
+        for (a, g) in prop.grips.iter().zip(&m.grips) {
+            let near = |x: &[f32], y: &[f32]| x.iter().zip(y).all(|(x, y)| (x - y).abs() < 0.002);
+            let same = near(&a.a, &g.a.to_array()) && near(&a.b, &g.b.to_array()) && near(&a.out, &g.out.to_array());
+            assert!(same, "{}'s {} grip moved in world: rebuild the environment art", m.prop, g.part);
+        }
     }
     for p in env.props.iter().filter(|p| p.kind == "masonry") {
         assert!(valley.masonry.iter().any(|m| m.prop == p.id), "world no longer places {}", p.id);

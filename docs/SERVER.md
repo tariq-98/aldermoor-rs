@@ -36,6 +36,22 @@ What this says:
 - **History for lag compensation costs almost nothing** in time; its memory is per region, not
   per player.
 
+### Over QUIC
+
+Linux server in an arm64 container on the M1 Air (8 cores), release build, 26 October 2026,
+`cargo run -p server --release --example load_test -- --players 1,50,200 --monsters 2000`
+(bots over QUIC on loopback; "out" is view payload before QUIC's own headers):
+
+| Players | Ticks/s | Tick p50 / p99 ms | Out per player | Out total |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 60.0 | 3.25 / 8.06 | 13 KB/s | 0.0 MB/s |
+| 50 | 60.0 | 5.73 / 22.01 | 24 KB/s | 1.2 MB/s |
+| 200 | 60.0 | 8.84 / 14.97 | 68 KB/s | 13.6 MB/s |
+
+The Mac client against that server (`--connect`, the smoke route with its wolf fight, a few wolves
+nearby): 186 KB sent by the server's network interface over a 45 s run including start-up, all
+QUIC headers, acks and keep-alives counted, so about 6 KB/s while connected.
+
 ## Regions
 
 The world is split into **regions**: designed areas such as Brambleford, the river valley north
@@ -67,8 +83,11 @@ in exactly one region at a time, and only that region changes it.
   second (wandering, respawns) instead of 60 times (#33).
 - **Layers** (#170): when a region passes its player cap (a capital on launch night), the world
   opens another copy of its ground, a layer, and new arrivals go there. A layer is a region like
-  any other: its own thread, its own monsters, its own region ID and block of unit IDs (never
-  reused, so a unit's ID still never changes). Players in different layers of a ground don't see
+  any other: its own thread, its own monsters, its own region ID and block of unit IDs, so a
+  unit's ID never changes while it's in the world. Unit IDs leave room for 256 regions, so a
+  closed layer's ID is taken again by a later layer (#274), but only once a minute has passed
+  (long after clients forget units they saw, ten seconds) and no unit from its block is left
+  in any region. With none free, a full ground turns new arrivals back, as the Wilderness does. Players in different layers of a ground don't see
   each other. Next door, layer *n* pairs with the neighbour's layer *n*, and the last layer of
   the ground with fewer pairs with all the rest, so open country beside a layered town sees every
   layer's side of the border. Crossing over, a player goes to the layer paired with the one they
@@ -182,26 +201,44 @@ A player sees others where they were about 100 ms ago: the view is interpolated 
 
 `cargo run -p server --release -- --bind 0.0.0.0:7878` runs the valley headless on Linux (or a
 Mac): no window, GPU or Metal, stepping at 60 Hz and printing step and view times every ten
-seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks the world.
+seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks the world;
+`--regions 2` or `4` runs it as a realm of regions (#208).
 
-- **Transport:** plain TCP, each message a 4-byte little-endian length then postcard
-  (`server::net`). A client says `Hello` with its name and `protocol::VERSION`, gets `Welcome`
-  (or `Refused` for another version), sends `Command`s and gets a `View` every third step (20 a
-  second, each player on their own third of the steps), which it answers with `Ack`. QUIC (#86)
-  replaces the transport and keeps the messages.
+- **Transport:** QUIC over UDP (`quinn`, #86), with the same postcard messages as before.
+  A client opens one reliable stream and says `Hello` with its name and `protocol::VERSION`, gets
+  `Welcome` (or `Refused` for another version), then sends `Command`s and `Ack`s on it, each a
+  4-byte little-endian length then postcard. Views go the other way unreliably, a `View` every
+  third step (20 a second, each player on their own third of the steps): one datagram when it
+  fits, which is nearly always, else a one-way stream of its own (the first view, a crowd
+  arriving). A lost or late view costs only its own update, because the next is a delta against
+  the last view the client acknowledged, not the last one sent. One small runtime (two threads)
+  carries every connection in a process.
+- **Certificates:** the server's identity is a self-signed certificate for `aldermoor` and its
+  private key, made the first time (`--cert aldermoor.der`, key beside it as `aldermoor.key`,
+  readable only by its owner). Players get the `.der` file, never the key, and the client trusts
+  exactly it with ordinary TLS checks (`--server-cert`); a server with another certificate is
+  refused. A certificate from a real authority waits for accounts and a host name (#88).
+- **Playing on a server:** `client --connect HOST:PORT --server-cert aldermoor.der --name NAME`
+  plays the same as solo, through the same `server::Host` interface (`Host::connect`). Over the
+  network the host's clock is the views' arrival, so it carries the network's jitter.
 - **Views on the wire** (`protocol::wire`, #34): a unit's kind, body, name and look go once, in an
   intro, when it comes into view or changes (and are remembered for ten seconds after it leaves,
   so a unit wandering along the edge of view doesn't send them again). After that a view carries
   only what changed since the last view the client acknowledged: per unit, one byte saying which
-  parts follow, then positions as centimetre deltas, velocity to 5 cm/s, yaw to 1/65536 of a
-  turn, health to a tenth. Timers (cooldowns, auras, casts, poses) go as the tick they end or
+  parts follow, then the position as centimetres from where the base's velocity was taking it,
+  the change in velocity (to 5 cm/s) and in yaw (to 1/65536 of a turn), health to a tenth. Timers (cooldowns, auras, casts, poses) go as the tick they end or
   began, so they don't change while they run. The player's own state goes in five parts that
   each go only when they change. Units further from the player go out less often (#278): every
   view they change within 30 m, every second view out to 60 m, every fourth to 100 m and every
   eighth beyond, taking turns by ID so each view carries a share. One that's off its turn stays as
   the last view had it, so a late ack never makes it jump back. `server::net::Client` rebuilds whole `Snapshot`s and
   `CombatView`s (`protocol::wire::Decoder`), so bots and later the client see what they saw
-  before. `cargo run -p server --release --example wire_bench` times one player's views.
+  before. Each step that some player is due a view, the server puts everyone into one
+  `protocol::wire::Frame` (`Sim::net_frame`), quantised once, and each player's encoder picks
+  their view out of it (`Sim::encode_view`, #286): nothing is built twice, no unit's strings are
+  copied unless its look or name changed, and an unchanged unit's look and combat detail are known
+  by a version number. `cargo run -p server --release --example wire_bench` times one player's
+  views both ways and checks they're the same.
 - **Players:** joining with a name already in the world takes that character back; a player who
   leaves stays standing where they were (until accounts, #88). A connection more than two
   seconds of views behind is dropped.
@@ -211,8 +248,9 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
   takes 1.1 to 1.4 ms, inside the 2 ms budget. Before #34 each player's view cost about 1.1 ms
   to build and encode and was about 10 MB/s, a full snapshot every step. With wire views at 20 Hz
   one player among the 2,000 monsters (1,037 in view) costs 0.28 ms to build, 0.18 ms to encode
-  and 0.24 ms to decode a view, at 166 bytes a view (3.2 KB/s) standing still. Building still
-  scans the whole world; taking views from the grid is #278.
+  and 0.24 ms to decode a view, at 166 bytes a view (3.2 KB/s) standing still. Picked from the
+  step's frame (#286), a view costs 0.1 ms, and the frame 0.6 ms a step however many players
+  share it; 116 bytes a view.
 
 ## Load test
 
@@ -250,8 +288,39 @@ What's left is CPU per view, not finding who's in it. Scanning the whole valley'
 costs a snapshot 0.008 ms and a combat view 0.015 ms (a viewer with nobody near), so taking views
 from the spatial grid would save almost nothing at region sizes and isn't done. The cost is in the
 units actually in view: with 1,000 of them, about 0.3 ms to build the snapshot and combat view
-and 0.2 ms to encode, on cores the bots share here. #286 builds views straight into the wire
-form. The `players` scene in
+and 0.2 ms to encode, on cores the bots share here.
+
+Building views straight into the wire form from one shared frame a step (#286; same box, 10 s a
+row, 26 October 2026):
+
+| Players | Ticks/s | Step p50 / p99 ms | Build views p50 / p99 | Encode p50 / p99 | Tick p50 / p99 | Out per player | Out total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 50 | 60.0 | 1.08 / 2.66 | 1.18 / 3.36 | 2.68 / 7.05 | 5.12 / 10.65 | 23 KB/s | 1.1 MB/s |
+| 200 | 36.7 | 1.46 / 5.39 | 7.78 / 18.82 | 16.62 / 26.56 | 26.65 / 38.64 | 42 KB/s | 8.3 MB/s |
+| 500 | 9.0 | 1.83 / 4.88 | 22.13 / 64.12 | 80.55 / 136.16 | 107.85 / 161.29 | 64 KB/s | 31.8 MB/s |
+
+50 players keep the full 60 ticks a second and 200 four times the rate before. Out per player
+grows with the tick rate the server keeps (it's about the same per tick). "Build views" is now the
+frame (about 1 ms) and handing each view to its connection's thread; here those threads and the
+200 bots' own share the server's 4 cores, so the next measure wants the bots on another machine.
+
+Since #292 each player gets only the events about units in their view (or, for those with a place
+and no unit, within sight), and a step's views are encoded across up to `server::MAX_ENCODERS`
+threads (the cores left beside the sim's). The load test can't show that, because the bots already
+fill this box: 200 of them kept 37 ticks a second with 3.4 of its 4 cores busy. Without bots,
+`cargo run -p server --release --example crowd_bench` steps the perf gate's `players` scene and
+encodes each player's view every third step, as the server does (same box, 26 October 2026):
+
+| Players | Encoding on | Step ms | Frame ms | Views ms | Tick ms | Out per player |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 200 | 1 thread | 1.26 | 0.91 | 14.69 | 16.87 | 65 KB/s |
+| 200 | 3 threads | 1.10 | 0.74 | 6.00 | 7.84 | 65 KB/s |
+| 500 | 1 thread | 1.98 | 1.38 | 46.61 | 49.97 | 115 KB/s |
+| 500 | 3 threads | 1.78 | 1.17 | 19.76 | 22.71 | 115 KB/s |
+
+So 200 players fighting in one area fit a 60 Hz tick with room to spare, and about 400 would on
+these 4 cores. Here everyone is in everyone's view, so it's the worst case: about 0.22 ms a view.
+The `players` scene in
 `crates/sim/examples/perf_gate.rs` (200 players and 2,000 monsters, a view each per step) is in
 the CI instruction-count gate, so per-player view costs can't creep back up unnoticed.
 
@@ -270,9 +339,19 @@ name, body and look only when they don't have it yet; after that, only what move
   their crowds packed against the borders, so about 500 ghosts go each way every tick. Cloud
   Linux, 25 October 2026: tick 1.8 ms mean, slowest region step 0.75 ms, ghosts and handoffs
   0.46 ms mean and 1.5 ms p99 a region, about 19 handoffs a second.
-- Not yet (#208): the headless server and solo host still run one region; the combat view
-  leaves ghosts out; a hit across a border doesn't build the attacker's rage or count toward
-  their XP, because the attacker is only a ghost where it lands.
+- **Serving a realm** (#208): `Server::start_realm` (and `server --regions 2` or `4`, which cut
+  the valley into halves or quarters) runs a `Realm` behind the same `Host` and network players
+  as one sim. A player joins the region at the spawn point; their commands go to the region they
+  live in and their views come from it, across borders, each region's views built on its own
+  thread from its own frame.
+- **Ghosts in the combat view:** a ghost carries its action, cast, auras and defiance as its
+  region published them, aged to the viewer's step, and its side, so a unit that changes side
+  changes for its neighbours too. With about 2,000 ghosts a tick in the realm example, that
+  takes ghosts and handoffs from 0.21 to 0.31 ms mean a region (0.42 to 0.73 ms p99; Linux in
+  a container on the M1 Air, 26 October 2026, main and this change ABAB).
+- Not yet (#208): a hit across a border doesn't build the attacker's rage or count toward
+  their XP, because the attacker is only a ghost where it lands; quiet regions still step
+  60 times a second.
 
 ## Follow-up work
 

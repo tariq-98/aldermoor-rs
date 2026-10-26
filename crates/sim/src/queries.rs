@@ -26,6 +26,7 @@ pub(crate) type PublishQuery = QueryState<
         Has<PlayerControl>,
         Option<&'static Motion>,
         Option<&'static Fighter>,
+        Option<&'static Auras>,
     ),
     Without<Ghost>,
 >;

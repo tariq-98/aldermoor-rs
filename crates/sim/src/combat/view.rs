@@ -108,6 +108,12 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
         xp: progress.zip(f.specialty).map_or(0, |(p, s)| p.xp[s.index()]),
         xp_next: progress.zip(f.specialty).and_then(|(p, s)| crate::content::progression::to_next(p.level(s))).unwrap_or(0),
         unassigned_xp: progress.map_or(0, |p| p.unassigned),
+        specialties: progress.map_or_else(Vec::new, |p| {
+            crate::Specialty::ALL
+                .into_iter()
+                .map(|s| protocol::SpecialtyLevel { specialty: s.key().to_string(), level: p.level(s) })
+                .collect()
+        }),
         coins,
         inventory,
         loot,
@@ -120,10 +126,52 @@ pub fn player_state(world: &World, id: UnitId) -> Option<PlayerState> {
     })
 }
 
+/// One unit's combat detail.
+#[inline]
+pub(crate) fn unit_combat(u: &Unit, v: &Vitals, f: &Fighter, a: Option<&Auras>, t: f64) -> UnitCombat {
+    UnitCombat {
+        id: u.id,
+        action: f.action,
+        action_time: (t - f.action_time).max(0.0) as f32,
+        cast: cast_bar(f, t),
+        auras: aura_list(a, t),
+        resource_kind: f.resource_kind,
+        resource: f.resource,
+        max_resource: f.max_resource,
+        guarding: f.guard_since.is_some(),
+        downed: v.downed,
+        defiance: a.filter(|a| a.defiance_max > 0.0).map(|a| (a.defiance, a.defiance_max)),
+    }
+}
+
+/// A big blow winding up: the warning of where it will land, for everyone. `hostile` is left
+/// for the viewer's side.
+#[inline]
+fn telegraph(u: &Unit, f: &Fighter, at: Vec3, t: f64) -> Option<AreaView> {
+    let c = f.cast.filter(|c| !c.channel)?;
+    let def = catalog().ability(c.ability);
+    if !def.telegraph {
+        return None;
+    }
+    let shape = effects::shape_of(def)?;
+    let at = if matches!(def.targeting, Targeting::Ground { .. }) { c.ground.unwrap_or(at) } else { at };
+    Some(AreaView {
+        id: 0x8000_0000 | u.id,
+        warning: true,
+        shape,
+        center: at,
+        yaw: c.yaw,
+        elapsed: (t - c.start).max(0.0) as f32,
+        duration: c.duration as f32,
+        hostile: false,
+        school: def.school,
+        field: None,
+    })
+}
+
 /// Combat detail for everything within sight of `viewer` (everything, without one).
 pub fn combat_view(world: &World, viewer: Option<UnitId>) -> CombatView {
     let t = now(world);
-    let cat = catalog();
     let units = world.resource::<Units>();
     let me = viewer.and_then(|id| units.entity(id));
     let center = me.and_then(|e| world.get::<Transform>(e)).map(|t| t.pos);
@@ -142,50 +190,35 @@ pub fn combat_view(world: &World, viewer: Option<UnitId>) -> CombatView {
         if v.dead && t - v.died_at > 8.0 && world.get::<crate::PlayerControl>(e).is_none() {
             continue;
         }
-        let a = world.get::<Auras>(e);
-        view.units.push(UnitCombat {
-            id: u.id,
-            action: f.action,
-            action_time: (t - f.action_time).max(0.0) as f32,
-            cast: cast_bar(f, t),
-            auras: aura_list(a, t),
-            resource_kind: f.resource_kind,
-            resource: f.resource,
-            max_resource: f.max_resource,
-            guarding: f.guard_since.is_some(),
-            downed: v.downed,
-            defiance: a.filter(|a| a.defiance_max > 0.0).map(|a| (a.defiance, a.defiance_max)),
-        });
-        // A big blow winding up: warn everyone where it will land.
-        if let Some(c) = f.cast.filter(|c| !c.channel) {
-            let def = cat.ability(c.ability);
-            if def.telegraph && let Some(shape) = effects::shape_of(def) {
-                let at = if matches!(def.targeting, Targeting::Ground { .. }) { c.ground.unwrap_or(tr.pos) } else { tr.pos };
-                view.areas.push(AreaView {
-                    id: 0x8000_0000 | u.id,
-                    warning: true,
-                    shape,
-                    center: at,
-                    yaw: c.yaw,
-                    elapsed: (t - c.start).max(0.0) as f32,
-                    duration: c.duration as f32,
-                    hostile: u.faction.is_enemy(side),
-                    school: def.school,
-                    field: None,
-                });
-            }
+        view.units.push(unit_combat(u, v, f, world.get::<Auras>(e), t));
+        if let Some(area) = telegraph(u, f, tr.pos, t) {
+            view.areas.push(AreaView { hostile: u.faction.is_enemy(side), ..area });
         }
     }
+    if !units.ghosts.is_empty() {
+        view.units.extend(ghost_combat(world, t).filter(|(p, _)| near(*p)).map(|(_, c)| c));
+        view.units.sort_unstable_by_key(|c| c.id);
+    }
+    let (projectiles, areas) = in_flight(world, near, side, t);
+    view.projectiles = projectiles;
+    view.areas.extend(areas);
+    view
+}
+
+/// The projectiles and areas on the ground that `near` keeps, as `side` sees them.
+fn in_flight(world: &World, near: impl Fn(Vec3) -> bool, side: Faction, t: f64) -> (Vec<ProjectileView>, Vec<AreaView>) {
+    let mut projectiles = Vec::new();
     for p in &world.resource::<super::missiles::Missiles>().list {
         if near(p.pos) {
-            view.projectiles.push(ProjectileView { id: p.id, position: p.pos, velocity: p.vel, visual: p.visual.to_string(), school: p.src.school });
+            projectiles.push(ProjectileView { id: p.id, position: p.pos, velocity: p.vel, visual: p.visual.to_string(), school: p.src.school });
         }
     }
+    let mut areas = Vec::new();
     for a in &world.resource::<super::missiles::Areas>().list {
         if !near(a.center) {
             continue;
         }
-        view.areas.push(AreaView {
+        areas.push(AreaView {
             id: a.id,
             warning: a.warning,
             shape: Shape::Circle { radius: a.radius },
@@ -198,5 +231,53 @@ pub fn combat_view(world: &World, viewer: Option<UnitId>) -> CombatView {
             field: a.field.map(|f| f.name().to_string()),
         });
     }
-    view
+    (projectiles, areas)
+}
+
+/// A warned blow winding up: where the caster stands, its side, and the warning.
+pub(crate) type Warning = (Vec3, Faction, AreaView);
+
+/// Everyone's combat detail, wherever they are, for a network frame (#286): each entry with
+/// where its unit stands, and the warnings their casts put down, with the caster's side and
+/// where it stands.
+pub(crate) fn combat_all(world: &World) -> (Vec<(Vec3, UnitCombat)>, Vec<Warning>) {
+    let t = now(world);
+    let units = world.resource::<Units>();
+    let mut list = Vec::with_capacity(units.entities.len() + units.foreign.len());
+    let mut warnings = Vec::new();
+    for e in units.all() {
+        let (Some(tr), Some(u), Some(v), Some(f)) = (world.get::<Transform>(e), world.get::<Unit>(e), world.get::<Vitals>(e), world.get::<Fighter>(e)) else {
+            continue;
+        };
+        if v.dead && t - v.died_at > 8.0 && world.get::<crate::PlayerControl>(e).is_none() {
+            continue;
+        }
+        list.push((tr.pos, unit_combat(u, v, f, world.get::<Auras>(e), t)));
+        if let Some(area) = telegraph(u, f, tr.pos, t) {
+            warnings.push((tr.pos, u.faction, area));
+        }
+    }
+    if !units.ghosts.is_empty() {
+        list.extend(ghost_combat(world, t));
+        list.sort_unstable_by_key(|(_, c)| c.id);
+    }
+    (list, warnings)
+}
+
+/// The neighbours' units at the border, as their regions published them (#208).
+fn ghost_combat(world: &World, t: f64) -> impl Iterator<Item = (Vec3, UnitCombat)> + '_ {
+    world.resource::<Units>().ghosts.values().filter_map(move |&e| {
+        let (tr, g) = (world.get::<Transform>(e)?, world.get::<crate::region::GhostCombat>(e)?);
+        Some((tr.pos, g.at(t)))
+    })
+}
+
+/// What a viewer at `center` on `side` sees in flight and on the ground, with `warnings` from
+/// [`combat_all`]: the same as [`combat_view`]'s.
+pub(crate) fn areas_seen(world: &World, center: Option<Vec3>, side: Faction, warnings: &[Warning]) -> (Vec<ProjectileView>, Vec<AreaView>) {
+    let near = |p: Vec3| center.is_none_or(|c| (p - c).length_squared() <= VIEW_RANGE * VIEW_RANGE);
+    let mut areas: Vec<AreaView> = warnings.iter().filter(|w| near(w.0)).map(|(_, faction, a)| AreaView { hostile: faction.is_enemy(side), ..a.clone() }).collect();
+    let (projectiles, more) = in_flight(world, near, side, now(world));
+    areas.extend(more);
+    (projectiles, areas)
 }
