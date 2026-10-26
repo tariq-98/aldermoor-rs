@@ -221,6 +221,16 @@ seconds (#85). `--crowd 2000` adds wandering monsters to load it; `--seed` picks
 - **Playing on a server:** `client --connect HOST:PORT --server-cert aldermoor.der --name NAME`
   plays the same as solo, through the same `server::Host` interface (`Host::connect`). Over the
   network the host's clock is the views' arrival, so it carries the network's jitter.
+- **Accounts** (#88): `server --accounts aldermoor.db` keeps accounts and characters in that
+  SQLite file. Clients then log in instead of saying hello: `ALDERMOOR_PASSWORD=... client
+  --connect HOST:PORT --server-cert aldermoor.der --account ACCOUNT --name CHARACTER` (add
+  `--new-account` the first time). Passwords are kept only as Argon2id hashes; a character
+  belongs to the account that made it, and names (3 to 20 letters, digits, spaces, hyphens or
+  apostrophes) are unique, ignoring case. A character is saved when its player logs in and
+  leaves, and every ten seconds, and comes back as it was: specialty, levels and XP, quest XP,
+  pack, coins and where it stood. Not kept yet: crafting skills, health, auras and cooldowns
+  (it comes back fresh). A server with accounts refuses plain `Hello`, and one without refuses
+  `Login`.
 - **Views on the wire** (`protocol::wire`, #34): a unit's kind, body, name and look go once, in an
   intro, when it comes into view or changes (and are remembered for ten seconds after it leaves,
   so a unit wandering along the edge of view doesn't send them again). After that a view carries
