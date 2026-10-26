@@ -97,15 +97,17 @@ fn hang_from_the_west_face(sim: &mut Sim, id: u32) -> Hang {
 }
 
 #[test]
-fn the_ruins_tall_broken_walls_have_holds_and_the_field_walls_none() {
+fn the_ruin_and_the_cottages_have_holds_and_the_field_walls_none() {
     let sim = Sim::new(7);
     let land = sim.land();
     let ruin = land.masonry.iter().find(|m| m.prop == "ruin.hall").unwrap().origin;
     assert!(!land.holds.is_empty());
     for h in land.holds.iter() {
-        // Only the ruin stands tall enough to hang from; the field walls are climbed onto.
+        // Only the ruin and the cottages stand tall enough to hang from; the field walls are
+        // climbed onto.
         let mid = h.at(h.len() / 2.0);
-        assert!((Vec2::new(mid.x, mid.z) - Vec2::new(ruin.x, ruin.z)).length() < 8.0, "hold at {mid}");
+        let on_a_cottage = land.houses.iter().any(|c| (Vec2::new(mid.x, mid.z) - c.position).length() < 5.0 * c.scale);
+        assert!(on_a_cottage || (Vec2::new(mid.x, mid.z) - Vec2::new(ruin.x, ruin.z)).length() < 8.0, "hold at {mid}");
         let below = Vec2::new(mid.x, mid.z) + h.out * 0.3;
         assert!(mid.y - land.ground(below.x, below.y) >= world::HANG_MIN_DROP - 1e-3, "shallow hold at {mid}");
         // `a` to `b` runs to the right of a climber facing the wall.
@@ -523,10 +525,10 @@ fn space_on_a_wall_run_kicks_off_it_backwards() {
 }
 
 #[test]
-fn a_wall_run_up_a_cottage_drops_back_off_and_none_starts_up_a_tree() {
+fn a_wall_run_up_the_shed_drops_back_off_and_none_starts_up_a_tree() {
     let mut sim = Sim::new(7);
     let land = sim.land();
-    let cottage = land.solids[0];
+    let shed = *land.solids.iter().find(|s| (s.center - Vec2::new(-26.0, -48.0)).length() < 0.01).unwrap();
     let tree = *land.solids.iter().find(|s| s.top.is_none() && s.half.x < 0.7).unwrap();
     // 3 m out from the middle of a side, facing it.
     let before = |s: &world::Solid| {
@@ -534,11 +536,11 @@ fn a_wall_run_up_a_cottage_drops_back_off_and_none_starts_up_a_tree() {
         let turn = |v: Vec2| Vec2::new(cos * v.x + sin * v.y, -sin * v.x + cos * v.y);
         (s.center + turn(Vec2::new(0.0, -(s.half.y + 3.0))), turn(Vec2::Y))
     };
-    let (at, into) = before(&cottage);
+    let (at, into) = before(&shed);
     let id = sim.spawn_player("Hero", at, into.x.atan2(into.y));
     sim.step();
     let health = sim.get::<Vitals>(id).unwrap().health;
-    assert!(wall_run(&mut sim, id, into), "never ran up the cottage");
+    assert!(wall_run(&mut sim, id, into), "never ran up the shed");
     sim.run_for(1.5);
     let m = motion(&sim, id);
     assert!(m.grounded && m.hang.is_none(), "{m:?}");
@@ -733,4 +735,143 @@ fn from_the_ruins_lookout_a_jump_reaches_the_coping_and_it_climbs_to_the_bellcot
     sim.run_for(1.0);
     let p = pos(&sim, id);
     assert!(motion(&sim, id).grounded && p.y - o.y > 10.1, "ended {} m up", p.y - o.y);
+}
+
+/// The `i`th house in the valley, and a point in its cottage's own frame (x across, y up from the
+/// ground under its middle, z along its ridge toward its door: `world::cottage`) in the world's.
+fn cottage(sim: &Sim, i: usize) -> (&'static world::cottage::Cottage, f32, impl Fn(f32, f32, f32) -> Vec3 + use<>) {
+    let h = sim.land().houses[i];
+    (world::cottage::of(&h), h.scale, move |x: f32, y: f32, z: f32| world::cottage::place(&h, Vec3::new(x, y, z)))
+}
+
+fn level(p: Vec3) -> Vec2 {
+    Vec2::new(p.x, p.z)
+}
+
+/// Walks `id` to `to` (up to `seconds`), then stops; the highest its feet got on the way, and
+/// whether it got there.
+fn walk_to(sim: &mut Sim, id: u32, to: Vec2, seconds: f32) -> (f32, bool) {
+    let mut highest = pos(sim, id).y;
+    let mut there = false;
+    for _ in 0..(seconds * 60.0) as u32 {
+        let d = to - level(pos(sim, id));
+        if d.length() < 0.1 {
+            there = true;
+            break;
+        }
+        go(sim, id, d.normalize(), false);
+        sim.step();
+        assert!(motion(sim, id).grounded, "fell walking to {to}, at {}", pos(sim, id));
+        highest = highest.max(pos(sim, id).y);
+    }
+    go(sim, id, Vec2::ZERO, false);
+    sim.run_for(0.3);
+    (highest, there)
+}
+
+#[test]
+fn a_jump_or_a_wall_run_at_a_cottages_eaves_gets_onto_its_roof_and_it_walks_up_to_the_ridge() {
+    // One cottage of each kind: thatch, tiles and stone.
+    for i in 0..3 {
+        for run in [false, true] {
+            let mut sim = Sim::new(7);
+            let (c, scale, at) = cottage(&sim, i);
+            let eaves = world::cottage::WIDTH / 2.0 + world::cottage::EAVES;
+            let into = (level(at(0.0, 0.0, 0.5)) - level(at(1.0, 0.0, 0.5))).normalize();
+            // Facing the east eaves: a step short of them for a jump, further back for a run up.
+            let start = level(at(eaves + (if run { 3.0 } else { 0.8 }) / scale, 0.0, 0.5));
+            let id = sim.spawn_player("Hero", start, into.x.atan2(into.y));
+            sim.step();
+            let how = if run { "run" } else { "jump" };
+            if run {
+                assert!(wall_run(&mut sim, id, into), "house {i} ({}): never ran up its eaves", c.prop);
+            } else {
+                go(&mut sim, id, into, true);
+                sim.command(id, Command::Jump);
+                let caught = until(&mut sim, id, 1.0, |k| matches!(k, ForcedKind::Mantle | ForcedKind::ToHold { .. }));
+                assert!(caught, "house {i} ({}): the jump caught nothing", c.prop);
+                go(&mut sim, id, Vec2::ZERO, false);
+            }
+            sim.run_for(1.0);
+            // Pulled straight up onto the roof, or hanging from the eaves to climb up onto it.
+            if motion(&sim, id).hang.is_some() {
+                go(&mut sim, id, into, false);
+                sim.step();
+                go(&mut sim, id, Vec2::ZERO, false);
+                sim.run_for(1.0);
+            }
+            let p = pos(&sim, id);
+            let roof = sim.land().top_at(level(p));
+            assert!(motion(&sim, id).grounded && roof.is_some_and(|r| (p.y - r).abs() < 0.02), "house {i} ({}), {how}: not on the roof but at {p}", c.prop);
+            // Up the roof and over the top of its ridge.
+            let (highest, there) = walk_to(&mut sim, id, level(at(-1.0, 0.0, 0.5)), 4.0);
+            let peak = at(0.0, c.ridge_top() + c.ridge.1, 0.0).y;
+            assert!(there && (highest - peak).abs() < 0.15, "house {i} ({}), {how}: got {highest} m up its {peak} m ridge", c.prop);
+        }
+    }
+}
+
+#[test]
+fn a_cottages_front_gable_climbs_by_its_timbers_onto_its_roof_and_on_up_its_chimney() {
+    for i in 0..3 {
+        let mut sim = Sim::new(7);
+        let (c, scale, at) = cottage(&sim, i);
+        let base = at(0.0, 0.0, 0.0).y;
+        let up = (level(at(0.0, 0.0, 0.0)) - level(at(0.0, 0.0, 1.0))).normalize();
+        // At the door, a step back from the lintel over it, and a jump with Shift held to catch it.
+        let lintel = c.grips().into_iter().find(|g| g.part == "lintel").unwrap();
+        let id = sim.spawn_player("Hero", level(at(0.0, 0.0, lintel.a.z + 0.9 / scale)), up.x.atan2(up.y));
+        sim.step();
+        go(&mut sim, id, up, true);
+        sim.command(id, Command::Jump);
+        let caught = until(&mut sim, id, 1.0, |k| matches!(k, ForcedKind::ToHold { .. }));
+        go(&mut sim, id, Vec2::ZERO, false);
+        sim.run_for(0.5);
+        let height = |sim: &Sim| sim.get::<Motion>(id).unwrap().hang.map(|h| (sim.land().holds.get(h.hold).at(h.at).y - base) / scale);
+        let first = height(&sim).filter(|_| caught).unwrap_or_else(|| panic!("house {i} ({}): didn't catch the lintel", c.prop));
+        assert!((first - lintel.a.y).abs() < 0.01, "house {i} ({}): caught the hold {first} m up", c.prop);
+        // Hand over hand up the timbers, with a climb leap where the next is out of reach, then up
+        // from the verge onto the roof.
+        let mut holds = vec![first];
+        for _ in 0..8 {
+            for leap in [false, true] {
+                go(&mut sim, id, up, false);
+                if leap {
+                    sim.command(id, Command::Jump);
+                }
+                sim.step();
+                go(&mut sim, id, Vec2::ZERO, false);
+                sim.run_for(0.9);
+                if height(&sim) != holds.last().copied() {
+                    break;
+                }
+            }
+            match height(&sim) {
+                Some(h) => {
+                    assert!(h > *holds.last().unwrap(), "house {i} ({}): climbed down to {h} m from {holds:?}", c.prop);
+                    holds.push(h);
+                }
+                None => break,
+            }
+        }
+        let p = pos(&sim, id);
+        let roof = sim.land().top_at(level(p));
+        assert!(motion(&sim, id).grounded && roof.is_some_and(|r| (p.y - r).abs() < 0.02), "house {i} ({}): climbed {holds:?}, then ended at {p}", c.prop);
+        assert!(holds.len() >= 5, "house {i} ({}): climbed only {holds:?}", c.prop);
+        // Across the roof, up beside the chimney, and a jump onto it.
+        let stack = c.blocks()[4];
+        let beside = at(stack.center.x - c.chimney * (stack.half.x + 0.5 / scale), 0.0, stack.center.y);
+        let (_, there) = walk_to(&mut sim, id, level(beside), 6.0);
+        assert!(there, "house {i} ({}): couldn't get beside the chimney, stopped at {}", c.prop, pos(&sim, id));
+        let toward = (level(at(stack.center.x, 0.0, stack.center.y)) - level(beside)).normalize();
+        go(&mut sim, id, toward, false);
+        sim.run_for(0.3);
+        sim.command(id, Command::Jump);
+        assert!(until(&mut sim, id, 1.0, |k| *k == ForcedKind::Mantle), "house {i} ({}): didn't pull up onto the chimney", c.prop);
+        go(&mut sim, id, Vec2::ZERO, false);
+        sim.run_for(1.0);
+        let p = pos(&sim, id);
+        let top = at(0.0, stack.top.unwrap(), 0.0).y;
+        assert!(motion(&sim, id).grounded && (p.y - top).abs() < 0.02, "house {i} ({}): ended at {p}, not on the chimney's top at {top}", c.prop);
+    }
 }
