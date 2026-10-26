@@ -43,7 +43,7 @@ pub const CLIMB_TIME: f64 = 0.6;
 /// In a jump, a ledge this high above the feet can be caught and pulled up onto (a mantle), as
 /// long as you aren't yet falling faster than `MANTLE_FALLING` (m/s).
 pub const MANTLE_HEIGHT: f32 = 2.2;
-const MANTLE_FALLING: f32 = -3.0;
+pub(crate) const MANTLE_FALLING: f32 = -3.0;
 pub const MANTLE_TIME: f64 = 0.5;
 /// Running (faster than a walk) at a wall up to this high and shallower than this, with clear
 /// ground beyond, hops it in stride, at the speed you ran in, taking between `VAULT_MIN` and
@@ -65,6 +65,11 @@ pub const WADE_DEPTH: f32 = 0.2;
 /// Falls up to this many metres don't hurt; past it each metre costs a share of max health.
 pub const SAFE_FALL: f32 = 4.0;
 pub const FALL_DAMAGE: f32 = 0.06;
+/// Roll pressed in the air this long before landing rolls the fall off: falls up to
+/// `ROLL_SAFE_FALL` don't hurt, and the body rolls on `LANDING_ROLL_DISTANCE` the way it was going.
+pub const LANDING_ROLL: f64 = 0.2;
+pub const ROLL_SAFE_FALL: f32 = 8.0;
+const LANDING_ROLL_DISTANCE: f32 = 3.0;
 /// Overlapping bodies are pushed apart by this share of the overlap each step, so a crowd eases
 /// apart over a few steps rather than jumping.
 const SEPARATE: f32 = 0.5;
@@ -102,6 +107,8 @@ pub fn traversal(m: &Motion) -> protocol::Traversal {
             ForcedKind::Mantle => protocol::ForcedKind::Mantle,
             ForcedKind::Vault { .. } => protocol::ForcedKind::Vault,
             ForcedKind::ToHold { .. } => protocol::ForcedKind::Hold,
+            ForcedKind::Corner { .. } => protocol::ForcedKind::Corner,
+            ForcedKind::WallRun { .. } => protocol::ForcedKind::WallRun,
         };
         return Traversal::Forced(ForcedMove { kind, from: f.from, to: f.to, start: f.start, duration: f.duration as f32 });
     }
@@ -118,7 +125,7 @@ pub fn traversal(m: &Motion) -> protocol::Traversal {
 
 /// Where a walker at `from` (feet at `y`) going along `dir` ends up after climbing the face
 /// ahead, or `None` if it is taller than `reach` or there's no room on top.
-fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, radius: f32, reach: f32) -> Option<Vec3> {
+pub(crate) fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, radius: f32, reach: f32) -> Option<Vec3> {
     let dir = dir.normalize_or_zero();
     if dir == Vec2::ZERO {
         return None;
@@ -135,7 +142,7 @@ fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, radius: f32, r
         if i > 1 && h - prev <= MAX_SLOPE * STEP && h > y + 0.2 {
             let stand = p + dir * 0.3;
             let top = land.ground(stand.x, stand.y);
-            if land.blocked(stand, radius) || top - y > reach {
+            if !room(land, stand, top, radius) || top - y > reach {
                 return None;
             }
             return Some(Vec3::new(stand.x, top, stand.y));
@@ -146,11 +153,17 @@ fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, radius: f32, r
     if let Some((p, h)) = land.top_ahead(from, dir, 0.6)
         && h > y + 0.2
         && h - y <= reach
-        && !land.blocked(p, radius)
+        && room(land, p, h, radius)
     {
         return Some(Vec3::new(p.x, h, p.y));
     }
     None
+}
+
+/// Whether a body of `radius` fits standing at `p` with its feet at `y`: no obstacle there, nor a
+/// face too tall to step onto (a sill's top against the wall it stands out from).
+fn room(land: &world::Valley, p: Vec2, y: f32, radius: f32) -> bool {
+    !land.blocked(p, radius) && land.off_faces(p, radius, y + CLIMB_HEIGHT) == p
 }
 
 /// Where a runner at `from` (feet at `y`) going along `dir` lands after hopping the wall just
@@ -219,7 +232,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
     for (e, u, mut t, mut m, body, v, ctl, fighter) in &mut q {
         let start = t.pos;
         if v.dead {
-            m.vel = Vec3::ZERO;
+            // The dead drop where they are: off a wall, out of a jump or a climb.
+            let mut fall = 0.0;
+            if !m.grounded || m.hang.is_some() || m.forced.is_some() {
+                let ground = land.ground(t.pos.x, t.pos.z);
+                let floor = if land.water_depth(t.pos.x, t.pos.z) > SWIM_DEPTH { (world::WATER_LEVEL - SWIM_FLOAT).max(ground) } else { ground };
+                fall = m.vel.y.min(0.0) - GRAVITY * DT;
+                t.pos.y = (t.pos.y + fall * DT).max(floor);
+                m.grounded = t.pos.y <= floor;
+            }
+            m.vel = Vec3::new(0.0, if m.grounded { 0.0 } else { fall }, 0.0);
             m.observed = Vec3::ZERO;
             m.jump_until = f64::NEG_INFINITY;
             m.dodge_queued = None;
@@ -242,6 +264,12 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         if let Some(f) = m.forced {
             // Carried through a roll, leap or throw: ease out, with a hop in the middle.
             let k = ((clock.time - f.start) / f.duration).clamp(0.0, 1.0) as f32;
+            if let ForcedKind::WallRun { .. } = f.kind {
+                // Up a wall, until a hold is caught, a top climbed onto, or the run gives out.
+                climbing::wall_run_step(land, clock.time, &mut t, &mut m, body.radius, f);
+                m.observed = (t.pos - start) / DT;
+                continue;
+            }
             if matches!(f.kind, ForcedKind::Climb | ForcedKind::Mantle) {
                 // Up the face first, then over the edge, so the body never sinks into it.
                 let up = 1.0 - (1.0 - (k * 1.6).min(1.0)).powi(2);
@@ -256,6 +284,9 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 t.pos = climbing::carry(&f, k);
                 // Turning to face the wall on the way there, rather than in one snap.
                 t.yaw = approach_angle(t.yaw, heading(-land.holds.get(hold).out), DT * 14.0);
+            } else if let ForcedKind::Corner { hold, corner, .. } = f.kind {
+                t.pos = climbing::corner_carry(&f, corner, k);
+                t.yaw = approach_angle(t.yaw, heading(-land.holds.get(hold).out), DT * 4.0);
             } else {
                 let eased = 1.0 - (1.0 - k) * (1.0 - k);
                 let p = f.from.lerp(f.to, eased);
@@ -276,8 +307,8 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 if let ForcedKind::Charge { target, ability } = f.kind {
                     arrivals.0.push((e, target, ability));
                 }
-                if let ForcedKind::ToHold { hold, at } = f.kind {
-                    m.hang = Some(crate::Hang { hold, at });
+                if let Some(hang) = climbing::onto(f.kind) {
+                    m.hang = Some(hang);
                     m.grounded = false;
                 }
             }
@@ -368,11 +399,20 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             out.0.push(Event::Jumped { unit: u.id });
         }
 
+        // Sprinting (Shift, out of combat: parkour up) into a wall too tall to climb runs up it.
+        if m.sprinting && m.grounded && u.kind == UnitKind::Player && ctl.can_move() && climbing::wall_run(land, clock.time, &mut t, &mut m, body.radius, dir) {
+            m.observed = Vec3::ZERO;
+            continue;
+        }
         let from = Vec2::new(t.pos.x, t.pos.z);
         let mut xz = land.slide(from, Vec2::new(m.vel.x, m.vel.z) * DT, body.radius);
-        // Too steep to walk up: hop it if it's a low wall and you're running, climb over it if
-        // it's low enough (or, in a jump, catch its edge), or slide along it.
-        if steep(land, from, t.pos.y, xz) {
+        // A face too tall to step onto stops the body a radius short of it, as obstacles do (#216).
+        let tall = t.pos.y + CLIMB_HEIGHT;
+        let mut off = land.off_faces(xz, body.radius, tall);
+        // Too steep to walk up, or up against a face too tall to step onto: hop it if it's a low
+        // wall and you're running, climb over it if it's low enough (or, in a jump, catch its
+        // edge), or slide along it.
+        if steep(land, from, t.pos.y, xz) || off != xz {
             let able = ctl.can_move() && !v.downed;
             let ahead = xz - from;
             let speed = Vec2::new(m.vel.x, m.vel.z).length();
@@ -396,8 +436,12 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 m.sprinting = false;
                 continue;
             }
-            xz = [Vec2::new(xz.x, from.y), Vec2::new(from.x, xz.y)].into_iter().find(|p| !steep(land, from, t.pos.y, *p)).unwrap_or(from);
+            if steep(land, from, t.pos.y, xz) {
+                xz = [Vec2::new(xz.x, from.y), Vec2::new(from.x, xz.y)].into_iter().find(|p| !steep(land, from, t.pos.y, *p)).unwrap_or(from);
+                off = land.off_faces(xz, body.radius, tall);
+            }
         }
+        let xz = off;
         t.pos.x = xz.x;
         t.pos.z = xz.y;
 
@@ -433,8 +477,9 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 m.vel.y -= GRAVITY * DT;
                 t.pos.y += m.vel.y * DT;
                 m.fall_from = m.fall_from.max(t.pos.y);
-                // Shift held out of combat (parkour up) catches the holds the hands pass.
-                let catching = u.kind == UnitKind::Player && m.intent.sprint && !in_combat && ctl.can_move() && !v.downed;
+                // Shift held out of combat (parkour up) catches the holds the hands pass, as does
+                // a moment after jumping off a wall.
+                let catching = u.kind == UnitKind::Player && (m.intent.sprint || clock.time < m.catch_until) && !in_combat && ctl.can_move() && !v.downed;
                 if catching && climbing::catch(land, clock.time, &mut t, &mut m, body.radius, before) {
                     m.observed = (t.pos - start) / DT;
                     continue;
@@ -454,9 +499,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                     if !cliff {
                         m.grounded = true;
                         let fell = m.fall_from - ground;
-                        if fell > SAFE_FALL {
-                            landings.falls.push((e, fell));
+                        let rolled = clock.time <= m.landing_roll_until;
+                        let safe = if rolled { ROLL_SAFE_FALL } else { SAFE_FALL };
+                        if fell > safe {
+                            landings.falls.push((e, fell - (safe - SAFE_FALL)));
                         }
+                        if rolled {
+                            landing_roll(land, clock.time, &mut t, &mut m, body.radius);
+                        }
+                        m.catch_until = f64::NEG_INFINITY;
+                        m.landing_roll_until = f64::NEG_INFINITY;
                     }
                 }
             }
@@ -473,6 +525,16 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         m.wading = m.grounded && !m.swimming && depth > WADE_DEPTH;
         m.observed = (t.pos - start) / DT;
     }
+}
+
+/// A roll landing: on along the ground the way the body was going (or facing), taking the fall.
+fn landing_roll(land: &world::Valley, now: f64, t: &mut Transform, m: &mut Motion, radius: f32) {
+    let going = Vec2::new(m.vel.x, m.vel.z);
+    let dir = if going.length_squared() > 0.25 { going.normalize() } else { t.forward() };
+    let end = land.slide(Vec2::new(t.pos.x, t.pos.z), dir * LANDING_ROLL_DISTANCE, radius);
+    m.forced = Some(Forced { kind: ForcedKind::Dodge, from: t.pos, to: Vec3::new(end.x, t.pos.y, end.y), start: now, duration: DODGE_DURATION, arc: 0.15 });
+    m.vel = Vec3::ZERO;
+    t.yaw = heading(dir);
 }
 
 /// One step of on-foot speed toward `desired`: the part of the velocity along the wished
@@ -636,7 +698,7 @@ pub fn separate(crowd: &mut Crowd) {
 /// carry it up a wall or off a cliff.
 pub fn shift(land: &world::Valley, t: &mut Transform, m: &Motion, from: Vec2, push: Vec2, radius: f32) {
     let grounded = m.grounded && !m.swimming;
-    let to = land.slide(from, push, radius);
+    let to = land.off_faces(land.slide(from, push, radius), radius, t.pos.y + CLIMB_HEIGHT);
     let drop = t.pos.y - land.ground(to.x, to.y);
     if steep(land, from, t.pos.y, to) || (grounded && drop > MAX_SLOPE * (to - from).length() + 0.01) {
         return;
@@ -683,8 +745,8 @@ pub fn update_poses(clock: Res<Clock>, mut q: Query<(&Motion, &Vitals, &mut Anim
                 ForcedKind::Knockback => Pose::Hit,
                 ForcedKind::Leap => Pose::Jump,
                 ForcedKind::Charge { .. } => Pose::Run,
-                ForcedKind::Climb | ForcedKind::Mantle | ForcedKind::Vault { .. } => Pose::Jump,
-                ForcedKind::ToHold { .. } => Pose::Hang,
+                ForcedKind::Climb | ForcedKind::Mantle | ForcedKind::Vault { .. } | ForcedKind::WallRun { .. } => Pose::Jump,
+                ForcedKind::ToHold { .. } | ForcedKind::Corner { .. } => Pose::Hang,
             }
         } else if m.hang.is_some() {
             Pose::Hang

@@ -52,9 +52,11 @@ Each `Snapshot` (protocol version 6) has:
   - position, velocity, yaw, `pose` with `pose_time`;
   - `traversal`, how the body is getting about: `Ground`, `Wading` (feet in water deeper than
     0.2 m), `Swimming`, `Hanging` (from a hold, between moves), or `Forced` for a move that
-    ignores the controls, with its `kind` (roll, leap, charge, climb, hold or knockback; `Hold`
-    is a move onto a hold: a catch, lowering over an edge, or climbing or hopping to the next
-    hold), `from` and `to` points, `start` (sim time, as `Snapshot::time`) and `duration`, so a
+    ignores the controls, with its `kind` (roll, leap, charge, climb, mantle, vault, hold,
+    corner, wall run or knockback; `Hold` is a move onto a hold: a catch, lowering over an edge,
+    or climbing, hopping, leaping or ejecting to the next hold; `Corner` wraps round a corner
+    onto the next hold; `WallRun` runs up a wall to catch a hold or pull up onto its top),
+    `from` and `to` points, `start` (sim time, as `Snapshot::time`) and `duration`, so a
     clip can be fitted to it. Every unit has it, so remote swimmers swim and remote climbers
     climb. One byte when not forced;
   - health, name, level, `hostile` and target.
@@ -123,7 +125,7 @@ How long each pose lasts in the simulation (the clips themselves are listed per 
 |---|---|
 | Idle, Walk, Run | Walk below 3.2 m/s; scale playback by speed. Charging is Run |
 | Jump, Fall | Rising, then falling. A skill's leap or vault is Jump |
-| Hang | Hanging from a hold by the hands: still, shimmying along it, or carried onto it (docs/MOVEMENT.md, "Climbing"). The body faces the wall with the hands on the hold and the feet 1.9 m below it. Climbing from a hang onto the top is Jump, as pulling up over a ledge is |
+| Hang | Hanging from a hold by the hands: still, shimmying along it, carried onto it or round a corner (docs/MOVEMENT.md, "Climbing"). The body faces the wall with the hands on the hold and the feet 1.9 m below it. Climbing from a hang onto the top is Jump, as pulling up over a ledge is, and so is a wall run until it has a clip |
 | Dodge | A roll: 0.45 s, about 5 m |
 | Attack | Holds 0.5 s after a blow or a release. A heavy blow's pose starts with its 0.4 s wind-up and runs on unbroken through the blow (0.9 s in all): time the clip so its strike lands when the wind-up ends (the cast bar gives the wind-up). Every attack clip marks its strike with a `hit` event, and spells and throws their release with `cast`; combos have one `hit` per blow |
 | Cast | While casting or channelling |
@@ -201,7 +203,7 @@ Humanoid clips by pose, from `anims.glb`:
 | Walk | `Walk_Loop`; with weapons drawn, the item's idle on the upper body over it |
 | Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 7 m/s of ground speed (ignore the vertical part: a normal run is 6 m/s, and slopes add to the full speed), for swiftness and charges (the same layering when drawn) |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
-| Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold above or below) or `Hang_Hop_L` / `_R` (across a gap). Each one-off is stretched to the move's `duration` |
+| Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold mostly above or below: a climb or a climb leap) or `Hang_Hop_L` / `_R` (mostly across: a gap or a side eject). A `Corner` plays `Hang_Hop_L` / `_R`, the way the body last shimmied. Each one-off is stretched to the move's `duration` |
 | Jump, climbing from a hang | A `Climb` move that starts from `Hanging` plays `Hang_ClimbUp`, stretched to the move |
 | Dodge | `Roll` |
 | Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |

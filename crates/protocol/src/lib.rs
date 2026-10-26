@@ -238,9 +238,13 @@ pub enum ForcedKind {
     Mantle,
     /// Hopping a low wall in stride.
     Vault,
-    /// Onto a hold to hang from it: caught in the air, lowered over the edge above, or climbing
-    /// or hopping to the next hold.
+    /// Onto a hold to hang from it: caught in the air, lowered over the edge above, or climbing,
+    /// hopping, leaping or ejecting to the next hold.
     Hold,
+    /// Round a corner onto the hold that meets the one hung from there.
+    Corner,
+    /// Running up a wall too tall to climb, to catch a hold or pull up onto its top.
+    WallRun,
 }
 
 /// How a unit looks, in the art catalogue's terms (docs/ASSETS.md): the renderer assembles it
