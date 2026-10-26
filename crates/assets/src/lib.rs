@@ -100,8 +100,10 @@ pub struct BodyType {
 pub const CURVES: [&str; 4] = ["off_hand", "reach", "string", "arrow"];
 
 /// The moments a clip may mark: an item moves to the hand (`grab`) or back to where it rides
-/// (`stow`); an arrow leaves (`release`); a blow lands (`hit`); a spell leaves (`cast`).
-pub const EVENTS: [&str; 5] = ["grab", "stow", "release", "hit", "cast"];
+/// (`stow`); an arrow leaves (`release`); a blow lands (`hit`); a spell leaves (`cast`); and in
+/// climbing, the hands take a hold (`hold`), press down over a top (`push`) or a foot lands on
+/// it (`land`).
+pub const EVENTS: [&str; 8] = ["grab", "stow", "release", "hit", "cast", "hold", "push", "land"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Event {

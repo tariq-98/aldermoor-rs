@@ -201,7 +201,8 @@ Humanoid clips by pose, from `anims.glb`:
 | Walk | `Walk_Loop`; with weapons drawn, the item's idle on the upper body over it |
 | Run | `Jog_Fwd_Loop`; `Sprint_Loop` above 7 m/s of ground speed (ignore the vertical part: a normal run is 6 m/s, and slopes add to the full speed), for swiftness and charges (the same layering when drawn) |
 | Jump, Fall | `Jump_Start`, `Jump_Loop`, `Jump_Land` |
-| Hang | `Jump_Loop` until the climbing clips land (#247) |
+| Hang | By `traversal`: `Hanging` plays `Hang_Idle_Loop`, or `Hang_Shimmy_L_Loop` / `_R_Loop` while the body slides along the wall faster than 0.3 m/s. A `Hold` move plays `Hang_Drop` from standing, `Hang_Catch` from a jump or a fall, and from a hang `Hang_Climb_Up` / `_Down` (a hold above or below) or `Hang_Hop_L` / `_R` (across a gap). Each one-off is stretched to the move's `duration` |
+| Jump, climbing from a hang | A `Climb` move that starts from `Hanging` plays `Hang_ClimbUp`, stretched to the move |
 | Dodge | `Roll` |
 | Attack | The main-hand item's `clips.attacks`, in turn (e.g. `Sword_Regular_A`, `B`, `C`; `Bow_Shoot`; `Spear_Thrust`, `Spear_Sweep`; `GreatSword_Slash`, `Swing`, `Overhead`) |
 | Cast | A staff's `clips.attacks` (`Staff_Cast`); otherwise `Spell_Simple_Shoot` |
