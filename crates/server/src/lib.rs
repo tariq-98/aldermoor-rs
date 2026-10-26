@@ -48,9 +48,10 @@ pub struct HostStats {
 pub struct TickTime {
     /// Stepping the sim.
     pub step_ms: f64,
-    /// Building every player's snapshot and combat view.
+    /// Building in-process players' snapshots and combat views, and the frame network players'
+    /// views are picked from.
     pub build_ms: f64,
-    /// Encoding views for network players.
+    /// Picking network players' views out of the frame and encoding them.
     pub encode_ms: f64,
     /// Bytes of views encoded this tick.
     pub bytes: usize,
@@ -221,6 +222,8 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
     // The last few steps' events, for network players who get a view every few steps.
     let mut recent: std::collections::VecDeque<Vec<protocol::Event>> = std::collections::VecDeque::new();
     let mut joined = 0u64;
+    // The last frame built, to lend the next what hasn't changed.
+    let mut frame: Option<sim::NetFrame> = None;
     while shared.running.load(Ordering::Acquire) {
         let now = Instant::now();
         if now < next {
@@ -265,6 +268,12 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
         let tick = world.tick();
         let mut gone = Vec::new();
         let (mut encoding, mut bytes) = (Duration::ZERO, 0);
+        // Everyone, once, for the network players whose turn it is (#286).
+        let due = viewers.iter().any(|(_, v)| matches!(v, Viewer::Remote(r) if tick % SEND_EVERY == r.phase));
+        let since: Vec<protocol::Event> = if due { recent.iter().flatten().cloned().collect() } else { Vec::new() };
+        if due {
+            frame = Some(world.net_frame(frame.as_ref()));
+        }
         viewers.retain_mut(|(id, viewer)| {
             let kept = match viewer {
                 Viewer::Local(latest) => {
@@ -278,15 +287,13 @@ fn run(mut world: Sim, commands: Receiver<(UnitId, Command)>, control: Receiver<
                     true
                 }
                 Viewer::Remote(remote) if tick % SEND_EVERY == remote.phase => {
-                    let mut snapshot = world.snapshot(Some(*id));
-                    snapshot.events = recent.iter().flatten().cloned().collect();
-                    let combat = world.combat_view(Some(*id));
                     let t = Instant::now();
                     let acked = remote.acked.load(Ordering::Acquire);
                     if acked > 0 {
                         remote.encoder.ack(acked - 1);
                     }
-                    let frame = net::encode(&net::ServerMsg::View(remote.encoder.encode(&snapshot, &combat)));
+                    let view = world.encode_view(frame.as_ref().expect("built for whoever's due"), *id, &mut remote.encoder, &since);
+                    let frame = net::encode(&net::ServerMsg::View(view));
                     encoding += t.elapsed();
                     bytes += frame.len();
                     match remote.frames.try_send(frame) {

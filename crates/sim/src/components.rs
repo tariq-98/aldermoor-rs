@@ -534,7 +534,12 @@ impl Appearance {
 
     /// The look to send, weapons drawn or not.
     pub fn shared(&self, drawn: bool) -> Arc<protocol::Look> {
-        Arc::clone(if drawn { &self.drawn } else { &self.put_away })
+        Arc::clone(self.shown(drawn))
+    }
+
+    /// The same, borrowed.
+    pub fn shown(&self, drawn: bool) -> &Arc<protocol::Look> {
+        if drawn { &self.drawn } else { &self.put_away }
     }
 
     /// What a unit with no look of its own is sent: the body type's defaults.
