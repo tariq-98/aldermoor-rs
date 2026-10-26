@@ -37,6 +37,21 @@ pub const SHIMMY_STRIDE: f32 = 0.48;
 /// [`LET_GO`]: a hand on its way between holds plays as the clip has it.
 pub const HOLD: f32 = 0.1;
 pub const LET_GO: f32 = 0.25;
+/// Moves onto a hold that take longer than this are a climb leap (0.5 s,
+/// `sim::climbing::LEAP_TIME`) or a side eject (0.55 s, `EJECT_TIME`), not a climb hand over hand
+/// (0.4 s) or a hop across (0.3 s): they have clips of their own (#305).
+pub const LONG_MOVE: f32 = 0.45;
+/// Round an outer corner the body comes on at least 0.2 m ahead of where it hung, the hands having
+/// stopped that short of the corner; into an inner one it turns where it is, or backs off the wall
+/// it leaves. Half of that tells the two apart (#305).
+pub const CORNER_AHEAD: f32 = 0.1;
+/// A body leaving the wall rising, and away from it faster than this, has kicked off it: a back
+/// eject throws it out at 5 m/s (`sim::climbing::BACK_EJECT`), a side eject into the air at 1
+/// and along the wall at 4, and letting go drops it at 1 (#305). The sim's step off the wall
+/// doesn't move the body across yet: until it does, for up to [`KICK_SEEN`] seconds, it may be
+/// kicking off.
+pub const KICK: f32 = 2.5;
+pub const KICK_SEEN: f32 = 0.1;
 /// A body hanging from a hold is moved by its reach this quickly, halving what's left every this
 /// many seconds, and moved back as quickly once off the wall.
 pub const RAISE_HALF_LIFE: f32 = 0.05;
@@ -109,6 +124,14 @@ pub fn progress(from: Vec3, to: Vec3, at: Vec3) -> Option<f32> {
     // Where the path stands still just ahead, the body could be anywhere along that stretch.
     let ahead = seen(carry(from, to, (k + 1. / STEPS as f32).min(1.)));
     (ahead.distance(seen(carry(from, to, k))) >= 1e-4).then_some(k)
+}
+
+/// How far through a wall run from `from` to `to` a body at `at` is, from 0 to 1: the sim carries
+/// it straight up the face, easing out (`sim::climbing::wall_run_step`), so the share of the time
+/// is read from the share of the height (#305). `None` if the run is too short to tell.
+pub fn run_progress(from: Vec3, to: Vec3, at: Vec3) -> Option<f32> {
+    let rise = to.y - from.y;
+    (rise >= SHORTEST).then(|| 1. - (1. - ((at.y - from.y) / rise).clamp(0., 1.)).sqrt())
 }
 
 /// A hold as the hands find it: a straight edge from `a` to `b` (its top, where the hands go),
@@ -302,6 +325,21 @@ mod tests {
         assert_eq!(progress(from, to, carry(from, to, 0.8)), None);
         // And a move too short to measure.
         assert_eq!(progress(from, from + Vec3::X * 0.01, from), None);
+    }
+
+    #[test]
+    fn a_wall_run_reads_by_how_high_the_body_has_run() {
+        // 1.8 m up the face, easing out as the sim carries it: the share of the time comes back
+        // from the height, quick at first and slowing.
+        let (from, to) = (Vec3::new(1., 0.2, 0.4), Vec3::new(1., 2., 0.4));
+        for i in 0..=40 {
+            let k = i as f32 / 40.;
+            let at = from.lerp(to, 1. - (1. - k) * (1. - k));
+            let got = run_progress(from, to, at).unwrap();
+            assert!((got - k).abs() < 1e-3, "{got} at {k}");
+        }
+        assert_eq!(run_progress(from, to, to + Vec3::Y), Some(1.));
+        assert_eq!(run_progress(from, from + Vec3::Y * 0.01, from), None);
     }
 
     #[test]

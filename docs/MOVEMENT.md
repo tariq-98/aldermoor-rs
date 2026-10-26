@@ -92,8 +92,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     feet rise 1.8 m in 0.5 s, slowing (`WALL_RUN_RISE`, `WALL_RUN_TIME`). A top the hands reach,
     up to 4.2 m above where the feet set off, is pulled straight up onto if there's room on it;
     otherwise the hands catch the first hold they pass, up to that height. Space kicks off
-    backwards, as a back eject. With nothing caught, you drop back off at the end. Pose `Jump`
-    until it has a clip.
+    backwards, as a back eject. With nothing caught, you drop back off at the end. Pose `Jump`;
+    it plays `Wall_Run` (#305).
   - **Roll landing:** Roll in the air readies a roll landing instead of rolling. Pressed up to
     0.2 s before you land (`LANDING_ROLL`), you roll on 3 m the way you were going, and falls up
     to 8 m don't hurt (`ROLL_SAFE_FALL`; past that each metre costs as usual). Pressed earlier,
@@ -101,7 +101,7 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - No skills or guard while climbing ("You can't fight while climbing."). A knockback throws
     you off the wall; being downed makes you let go, and the dead drop where they are. Hanging
     bodies neither push nor are pushed.
-  - Leaps, ejects and corners play the hang's climbing clips (#247) until they have their own.
+  - Leaps, ejects, corners, wall runs and the roll landing play clips of their own (#305).
 - A low wall too thin for the climb's ground samples (under about 0.5 m deep) is climbed onto
   like a deep one (#238).
 - **Swimming:** the river is no longer a wall.
@@ -147,5 +147,4 @@ feet on the wall (#248). The climb's height comes in faster than its way across,
 hands only grab the edge before the shoulders rise out of reach; a climb that rose more slowly, or
 mantle clips matched to this one (#108), would let them hang on.
 
-Not yet: free climbing anywhere (holds only, by design), mounts, and clips for leaps, ejects, wall
-runs and corners.
+Not yet: free climbing anywhere (holds only, by design), and mounts.

@@ -210,7 +210,7 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 
 ## Clips, curves and events
 
-The library is the Universal Animation Library's 84 clips, one swing cut from them, and 39 of
+The library is the Universal Animation Library's 84 clips, one swing cut from them, and 49 of
 our own, built by
 `art/blender/build_clips.py`. Ours are keyed in code on the broad frame's skeleton: each pose
 places the item and the hands follow their sockets, so on that body every grip is exact.
@@ -223,7 +223,8 @@ places the item and the hands follow their sockets, so on that body every grip i
 | Greatsword | `GreatSword_Idle_Loop`, `GreatSword_Slash`, `GreatSword_Swing`, `GreatSword_Overhead` |
 | Drawing | `Draw_Hip` / `Sheathe_Hip` (right hand, left hip), `Draw_Hip_L` / `Sheathe_Hip_L` (the mirror), `Draw_Side` / `Sheathe_Side` (right hand, right hip), `Draw_Back` / `Sheathe_Back` (blades over the right shoulder), `Draw_Pole` / `Sheathe_Pole` (poles over the right shoulder), `Draw_Bow` / `Sheathe_Bow` (the left hand, over the left shoulder) |
 | Robes | `Idle_Robe_Loop`: the idle with the arms held a little out, clear of a skirt |
-| Climbing | `Hang_Idle_Loop` (the braced hang), `Hang_Shimmy_L_Loop` / `Hang_Shimmy_R_Loop` (one step of each hand, 0.4 s at 1.2 m/s), `Hang_ClimbUp` (onto the top, 0.8 s), `Hang_Drop` (lowering over an edge to hang, 0.6 s), `Hang_Catch` (0.2 s), `Hang_Climb_Up` / `Hang_Climb_Down` (to a hold 0.8 m up or down, 0.4 s), `Hang_Hop_L` / `Hang_Hop_R` (across a gap, 0.3 s) |
+| Climbing | `Hang_Idle_Loop` (the braced hang), `Hang_Shimmy_L_Loop` / `Hang_Shimmy_R_Loop` (one step of each hand, 0.4 s at 1.2 m/s), `Hang_ClimbUp` (onto the top, 0.8 s), `Hang_Drop` (lowering over an edge to hang, 0.6 s), `Hang_Catch` (0.2 s), `Hang_Climb_Up` / `Hang_Climb_Down` (to a hold 0.8 m up or down, 0.4 s), `Hang_Hop_L` / `Hang_Hop_R` (across a gap, 0.3 s), `Hang_Leap_Up` (a climb leap to a hold 1.4 m up, 0.5 s), `Hang_Eject_L` / `Hang_Eject_R` (a side eject 2 m along, with a 0.35 m hop, 0.55 s), `Hang_Corner_Out_L` / `_R` and `Hang_Corner_In_L` / `_R` (round an outer corner onto the wall's side, or into an inner one turning where it hangs, 0.5 s), `Hang_Eject_Back` (kicking off the wall backwards into the falling loop, 0.5 s), `Wall_Run` (three steps 1.8 m up a wall, slowing, the hands reaching for the top, 0.5 s) |
+| Landing | `Roll_Land` (out of a fall, touching down and rolling 3 m in 0.45 s, then standing as `Roll` does; its `travel` is the 3 m) |
 
 **Climbing clips** are keyed on the sim's own numbers (docs/MOVEMENT.md, "Climbing"): the hands
 over an edge 1.9 m up and 0.4 m ahead of the root, the feet on the wall below. A move onto, off
@@ -530,7 +531,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Script | Builds | Writes |
 |---|---|---|
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
-| `build_clips.py` | The clip library: the 84 vendor clips (with their strikes measured), a swing cut from one, and our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
+| `build_clips.py` | The clip library: the 84 vendor clips (with their strikes measured), a swing cut from one, and our 49 | `humanoid/anims.glb`, the catalogue's `animations` |
 | `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`); the dwarven beard, grown as locks from each dwarf's face into two braids with bronze rings (`aldermoor_art/beard.py`) | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig. The golem's hewn stones are fields (`aldermoor_art/golem.py`) painted with lichen, moss and glowing runes | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |

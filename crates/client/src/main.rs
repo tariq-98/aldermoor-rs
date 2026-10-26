@@ -1220,7 +1220,8 @@ impl Game {
             .filter(|u| u.hostile && u.health > 0.)
             .map(|u| (u.id, u.position))
             .collect();
-        let commands = self.course.update(now, me.position, &foes);
+        let above = me.position.y - self.valley.ground(me.position.x, me.position.z);
+        let commands = self.course.update(now, me.position, above, &foes);
         if let Some((step, name)) = self.course.step()
             && self.course_step != Some(step)
         {
