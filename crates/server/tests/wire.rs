@@ -18,6 +18,10 @@ fn fight(seed: u64) -> (Sim, u32) {
 fn act(sim: &mut Sim, hero: u32, step: u64) {
     let a = step as f32 / 200.0;
     sim.command(hero, Command::Move { direction: Vec2::new(a.cos(), a.sin()), walk: false, sprint: false, face_yaw: None });
+    // The hero looks up and down: others see its aim pitch (#244).
+    if step % 15 == 0 {
+        sim.command(hero, Command::Aim { pitch: ((step / 15 % 200) as i32 - 100) as i8 });
+    }
     if step % 40 == 0 {
         sim.command(hero, Command::UseSlot { slot: (step / 40 % 5) as u8, ground: None });
     }
@@ -30,7 +34,7 @@ fn near(a: f32, b: f32, by: f32, what: &str) {
 /// Whether `b` is `a` to within the quantising, `ago` seconds later.
 fn unit_close(a: &UnitState, b: &UnitState, ago: f32) -> Result<(), String> {
     let close = |x: f32, y: f32, by: f32, what: &str| if (x - y).abs() <= by || x == y { Ok(()) } else { Err(format!("unit {} {what}: {x} against {y}", a.id)) };
-    if (a.id, a.kind, &a.body, &a.name, a.level, a.pose, a.traversal) != (b.id, b.kind, &b.body, &b.name, b.level, b.pose, b.traversal) {
+    if (a.id, a.kind, &a.body, &a.name, a.level, a.pose, a.traversal, a.aim_pitch) != (b.id, b.kind, &b.body, &b.name, b.level, b.pose, b.traversal, b.aim_pitch) {
         return Err(format!("unit {}: {:?} against {:?}", a.id, (a.level, a.pose, a.traversal), (b.level, b.pose, b.traversal)));
     }
     if (a.max_health, a.hostile, a.target, &*a.look) != (b.max_health, b.hostile, b.target, &*b.look) {

@@ -50,6 +50,10 @@ Each `Snapshot` (protocol version 6) has:
   - `body` (the simulation's body name: `"player"`, `"wolf"`, `"goblin"` or `"humanoid"`);
   - `look`, which says exactly what to draw (see "Art for each unit" below);
   - position, velocity, yaw, `pose` with `pose_time`;
+  - `aim_pitch`, where a player aims up (+) or down (-) with the crosshair, as an `i8` in
+    127ths of a right angle (about 0.7° steps; `protocol::aim_pitch_radians`), and 0 for
+    monsters and for players across a region border. Point a remote player's bow, wand or
+    gaze along its yaw and this pitch;
   - `traversal`, how the body is getting about: `Ground`, `Wading` (feet in water deeper than
     0.2 m), `Swimming`, `Hanging` (from a hold, between moves), or `Forced` for a move that
     ignores the controls, with its `kind` (roll, leap, charge, climb, mantle, vault, hold,
@@ -248,6 +252,8 @@ always carry the jaw closed (the bind pose's mouth is a little open), so draw th
   any) and `UseSlot` for the basic attack, again every 0.1 s while held (presses mid-swing are
   ignored), then `SetAutoAttack(false)` when released. The right button is `Guard(true)` while
   held, like the guard key.
+- **Aim:** `Aim { pitch }` with the crosshair's pitch (`protocol::aim_pitch_byte`) whenever
+  it changes, so other players see where you aim.
 - **1–9 and 0:** `UseSlot` 0–9. Send `ground` with the point under the crosshair (the centre of
   the screen) while the mouse is looking, otherwise under the cursor: ground skills land there, and straight-flying shots fly at it, so
   a player can lead a moving target. Show slots with `ground` as a circle of the skill's radius
