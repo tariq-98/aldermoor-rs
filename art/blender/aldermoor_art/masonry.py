@@ -32,11 +32,20 @@ BASE_WIDTH = 1.0
 SINK = 0.3
 
 
-def pieces():
-    """The masonry `world` places, keyed by prop id (run the ground_fields example first)."""
+def places():
+    """What `world` places and how it's built, from its ground_fields example (run it first)."""
+    run = "run `cargo run -p world --release --example ground_fields -- art/out/world`"
     if not PLACES.exists():
-        raise SystemExit(f"{PLACES} is missing: run `cargo run -p world --release --example ground_fields -- art/out/world`")
-    return {m["prop"]: m for m in json.loads(PLACES.read_text())["masonry"]}
+        raise SystemExit(f"{PLACES} is missing: {run}")
+    places = json.loads(PLACES.read_text())
+    if "cottages" not in places:
+        raise SystemExit(f"{PLACES} is out of date: {run}")
+    return places
+
+
+def pieces():
+    """The masonry `world` places, keyed by prop id."""
+    return {m["prop"]: m for m in places()["masonry"]}
 
 
 def blender(p):

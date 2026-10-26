@@ -1353,7 +1353,11 @@ impl Renderer {
         let valid = self.history_valid && !cut;
         self.stats.history_resets += usize::from(!valid);
         let previous_vp = if valid { self.previous_vp } else { unjittered };
-        let sun = Vec3::from_array(self.look.sun_direction).normalize();
+        let time = self
+            .scene_time
+            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
+        let lighting = self.look.lighting_at(f64::from(time));
+        let sun = Vec3::from_array(lighting.sun_direction).normalize();
         let cascades = stable_cascades(
             camera.eye,
             camera.target,
@@ -1363,9 +1367,6 @@ impl Renderer {
             SHADOW_SIZE as u32,
         );
         let view = Frustum::new(unjittered);
-        let time = self
-            .scene_time
-            .unwrap_or_else(|| self.started.elapsed().as_secs_f32());
         let f = Frame {
             vp: unjittered.to_cols_array_2d(),
             previous_vp: previous_vp.to_cols_array_2d(),
@@ -1373,16 +1374,19 @@ impl Renderer {
             jitter: [jitter.x, jitter.y, jitter.x * 0.5, -jitter.y * 0.5],
             shadows: cascades.map(|m| m.to_cols_array_2d()),
             eye: camera.eye.extend(1.).to_array(),
-            sun: sun.extend(self.look.sun_intensity).to_array(),
-            sun_colour: Vec3::from_array(self.look.sun_colour).extend(1.).to_array(),
-            ambient: Vec3::from_array(self.look.ambient).extend(1.).to_array(),
-            sky: Vec3::from_array(self.look.sky).extend(1.).to_array(),
-            fog: Vec3::from_array(self.look.fog_colour)
-                .extend(self.look.fog_density)
+            sun: sun.extend(lighting.sun_intensity).to_array(),
+            sun_colour: Vec3::from_array(lighting.sun_colour).extend(1.).to_array(),
+            ambient: Vec3::from_array(lighting.ambient).extend(1.).to_array(),
+            // Combine the two authored factors once, retaining one multiply per sky sample.
+            sky: Vec3::from_array(lighting.sky)
+                .extend(lighting.sky_texture_intensity * self.surface_uniform.sky[1])
+                .to_array(),
+            fog: Vec3::from_array(lighting.fog_colour)
+                .extend(lighting.fog_density)
                 .to_array(),
             grade: self.look.grade.map(|r| [r[0], r[1], r[2], 0.]),
             params: [
-                self.look.exposure,
+                lighting.exposure,
                 (self.look.tone_map == ToneMap::Aces) as u32 as f32,
                 if self.metalfx.is_some() {
                     self.scale.log2()

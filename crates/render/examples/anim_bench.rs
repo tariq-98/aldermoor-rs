@@ -1,14 +1,37 @@
-//! CPU cost of animating characters: `Character::update_combat` (pose) and `Character::draws`
+//! CPU cost of animating characters: `Character::animate` (pose) and `Character::draws`
 //! (skinning palettes) per character per frame, for a few typical looks and poses.
 //!
-//!     cargo run --release -p render --example anim_bench -- [characters] [frames] [case]
+//!     cargo run --release -p render --example anim_bench -- [characters] [frames] [case] [tier]
 //!
-//! The cases are listed in `main`; without one, it runs them all.
+//! The cases are listed in `main`; without one, it runs them all. The tiers (#215) are `full`
+//! (every LOD), `half` and `quarter` (LOD 0); without one, it runs them all.
+use anim::Tier;
 use glam::Vec3;
 use protocol::{Action, Look, Pose, ResourceKind, UnitCombat, UnitKind, UnitState};
 use render::character::Character;
 use render::model::ModelCache;
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Instant;
+
+/// Counts allocations, to show that posing a character allocates nothing once it is going.
+struct Counting;
+static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCATIONS.fetch_add(1, Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        ALLOCATIONS.fetch_add(1, Relaxed);
+        unsafe { System.realloc(ptr, layout, size) }
+    }
+}
+#[global_allocator]
+static COUNTING: Counting = Counting;
 
 fn look(i: usize) -> Look {
     let gear = |items: &[(&str, &str)]| {
@@ -84,7 +107,15 @@ fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let count: usize = args.next().map_or(Ok(30), |a| a.parse())?;
     let frames: usize = args.next().map_or(Ok(600), |a| a.parse())?;
-    let only = args.next();
+    let only = args.next().filter(|case| case != "all");
+    let full = [(0, Tier::Full), (1, Tier::Full), (2, Tier::Full)];
+    let runs = match args.next().as_deref() {
+        None => [&full[..], &[(0, Tier::Half), (0, Tier::Quarter)]].concat(),
+        Some("full") => full.to_vec(),
+        Some("half") => vec![(0, Tier::Half)],
+        Some("quarter") => vec![(0, Tier::Quarter)],
+        Some(other) => anyhow::bail!("the tier is full, half or quarter, not {other}"),
+    };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     let cat = assets::Catalog::load(&root)?;
     let mut cache = ModelCache::default();
@@ -107,10 +138,13 @@ fn main() -> anyhow::Result<()> {
         if only.as_ref().is_some_and(|o| o != label) {
             continue;
         }
-        for lod in 0..3 {
+        for &(lod, tier) in &runs {
             let mut characters = (0..count)
                 .map(|i| Character::load_lod(&cat, &mut cache, &look(i), lod))
                 .collect::<anyhow::Result<Vec<_>>>()?;
+            for c in &mut characters {
+                c.set_tier(tier);
+            }
             let mut units: Vec<_> = (0..count)
                 .map(|i| unit(i as u32, look(i), pose, speed))
                 .collect();
@@ -132,9 +166,11 @@ fn main() -> anyhow::Result<()> {
                 downed: false,
                 defiance: None,
             };
-            let (mut pose_ns, mut draw_ns, mut draws) = (0u128, 0u128, 0usize);
+            let (mut pose_ns, mut draw_ns, mut draws, mut allocations) = (0u128, 0u128, 0usize, 0);
+            let mut rebuilds = 0;
             for frame in 0..frames {
                 let t = frame as f32 / 60.;
+                let before = ALLOCATIONS.load(Relaxed);
                 let started = Instant::now();
                 for (c, u) in characters.iter_mut().zip(&mut units) {
                     if label == "start-stop" {
@@ -152,9 +188,13 @@ fn main() -> anyhow::Result<()> {
                         cycle
                     };
                     let f = fight(u.id, if action == Action::None { t } else { cycle });
-                    c.update_combat(u, Some(&f), 1. / 60.);
+                    rebuilds += c.animate(u, Some(&f), 1. / 60., frame as u64) as usize;
                 }
                 let posed = Instant::now();
+                // The first frames set up buffers that later frames reuse.
+                if frame >= 10 {
+                    allocations += ALLOCATIONS.load(Relaxed) - before;
+                }
                 for (c, u) in characters.iter().zip(&units) {
                     draws += c.draws(u.position, c.body_yaw()).len();
                 }
@@ -163,11 +203,19 @@ fn main() -> anyhow::Result<()> {
                 draw_ns += (drawn - posed).as_nanos();
             }
             let per = (frames * count) as f64 * 1000.;
+            let posed = (frames.saturating_sub(10) * count).max(1) as f64;
+            let run = match tier {
+                Tier::Full => format!("lod{lod}"),
+                Tier::Half => "half".into(),
+                Tier::Quarter => "quarter".into(),
+            };
             println!(
-                "{label:12} lod{lod}: pose {:6.2} us, palettes {:6.2} us per character per frame ({} draws each)",
+                "{label:12} {run:7}: pose {:6.2} us, palettes {:6.2} us per character per frame ({:.2} rebuilds, {} draws each, {:.2} allocations a pose)",
                 pose_ns as f64 / per,
                 draw_ns as f64 / per,
-                draws / (frames * count)
+                rebuilds as f64 / (frames * count) as f64,
+                draws / (frames * count),
+                allocations as f64 / posed
             );
         }
     }
