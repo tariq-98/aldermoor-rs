@@ -5,6 +5,7 @@ mod effects;
 mod hud;
 mod interpolate;
 mod menu;
+mod pacing;
 mod perf_overlay;
 mod stage;
 use anyhow::{Context, Result, ensure};
@@ -26,7 +27,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
     event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
@@ -311,6 +312,18 @@ struct Game {
     kick: controls::camera::Kick,
     last: Instant,
     start: Instant,
+    /// Frame pacing (#223): the client's own clock starts here.
+    epoch: Instant,
+    frame_clock: pacing::FrameClock,
+    sim_clock: pacing::SimClock,
+    pacing: pacing::Stats,
+    /// The last frame's time on that clock, and the newest step it showed.
+    paced: Option<(f64, u64)>,
+    /// The last frame's clock reading and the sim times it drew, by this pacing and by
+    /// arrival time as before #223, for the judder comparison printed at exit.
+    judder: Option<(f64, f64, f64)>,
+    /// Seconds per frame when frames come from the display's refresh (capped by `--fps`).
+    frame_period: Option<f64>,
     frame: u64,
     gpu: Vec<f64>,
     frame_times: Vec<f64>,
@@ -401,6 +414,13 @@ impl Game {
             kick: controls::camera::Kick::default(),
             last: Instant::now(),
             start: Instant::now(),
+            epoch: Instant::now(),
+            frame_clock: pacing::FrameClock::default(),
+            sim_clock: pacing::SimClock::default(),
+            pacing: pacing::Stats::default(),
+            paced: None,
+            judder: None,
+            frame_period: None,
             frame: 0,
             gpu: Vec::new(),
             frame_times: Vec::new(),
@@ -1042,6 +1062,38 @@ impl Game {
                 break;
             }
         }
+        // Draw the world at a steady sim time on evenly spaced frame times.
+        let local = (now - self.epoch).as_secs_f64();
+        let frame_time = self.frame_clock.tick(local, self.frame_period);
+        if let Some((sim_time, due)) = self.host.clock() {
+            self.sim_clock
+                .observe(sim_time, seconds_between(self.epoch, due));
+        }
+        self.snaps.draw_time = self.sim_clock.draw_time(frame_time);
+        let tick = self.snaps.current.tick;
+        if let Some((last_time, last_tick)) = self.paced {
+            self.pacing
+                .frame(frame_time - last_time, tick.saturating_sub(last_tick));
+        }
+        self.paced = Some((frame_time, tick));
+        if let Some(drawn) = self.snaps.draw_time {
+            let s = &self.snaps;
+            let gap = (s.current.time - s.previous.time).max(1. / 60.);
+            let by_arrival = s.previous.time + s.received.elapsed().as_secs_f64().min(gap + 0.1);
+            // Loading stalls aren't judder.
+            if let Some((last_local, last_drawn, last_arrival)) = self.judder
+                && local - last_local < 0.1
+            {
+                // What the display shows between these frames: whole refreshes.
+                let period = self.frame_period.unwrap_or(1. / 60.);
+                let shown = ((local - last_local) / period).round() * period;
+                self.pacing.judder(
+                    drawn - last_drawn - shown,
+                    by_arrival - last_arrival - shown,
+                );
+            }
+            self.judder = Some((local, drawn, by_arrival));
+        }
         self.feedback.update(dt);
         for m in &mut self.messages {
             m.1 -= dt;
@@ -1182,8 +1234,7 @@ impl Game {
         let scene_time = if self.options.showcase {
             time
         } else {
-            self.snaps.current.time as f32
-                + self.snaps.received.elapsed().as_secs_f32().min(1. / 60.)
+            self.snaps.current.time as f32 + self.snaps.since().min(1. / 60.)
         };
         if let Some(scenery) = &mut self.scenery {
             draws.extend(scenery.draws(
@@ -1327,7 +1378,7 @@ impl Game {
                 since: if staged.is_some() {
                     0.
                 } else {
-                    self.snaps.received.elapsed().as_secs_f32()
+                    self.snaps.since()
                 },
                 time: staged.as_ref().map_or(scene_time, |f| f.clock),
                 aim: staged.as_ref().map_or(aim.zip(radius), |f| f.aim),
@@ -1396,8 +1447,12 @@ impl Game {
             if crosshair {
                 paint_crosshair(ctx, reticle);
             }
-            self.perf
-                .draw(ctx, self.host.stats().step_ms, r.gpu_counters_enabled());
+            self.perf.draw(
+                ctx,
+                self.host.stats().step_ms,
+                r.gpu_counters_enabled(),
+                &self.pacing,
+            );
             if let Some(m) = &self.menu {
                 changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
             }
@@ -1430,7 +1485,11 @@ impl Game {
         r.scene_time = Some(scene_time);
         r.inline_constants = self.options.inline_constants;
         r.direct_drawable = self.options.direct_drawable;
-        r.target_fps = self.options.fps.unwrap_or(60.);
+        r.target_fps = self
+            .options
+            .fps
+            .or(self.frame_period.map(|p| 1. / p))
+            .unwrap_or(60.);
         let mut stats = r.draw(self.camera(player.position), &draws, capture)?;
         if self.options.benchmark && self.options.in_flight == 1 {
             r.wait()?;
@@ -1477,6 +1536,12 @@ impl Game {
                 self.perf.report(r.gpu_counters_enabled());
             }
             eprintln!("HISTORY resets={}", r.stats.history_resets);
+            let [none, one, more] = self.pacing.total;
+            eprintln!("PACING steps_per_frame 0={none} 1={one} 2+={more}");
+            let (paced, by_arrival) = self.pacing.judder_ms();
+            eprintln!(
+                "PACING judder_rms paced={paced:.3}ms by_arrival={by_arrival:.3}ms (sim time drawn vs refreshes shown)"
+            );
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
                 let mut intervals: Vec<_> = presentations
@@ -1486,8 +1551,11 @@ impl Game {
                     .collect();
                 let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
                 intervals.sort_by(f64::total_cmp);
+                let sd = (intervals.iter().map(|i| (i - mean).powi(2)).sum::<f64>()
+                    / intervals.len() as f64)
+                    .sqrt();
                 eprintln!(
-                    "PRESENT mean_fps={:.3} p95={:.3}ms samples={}",
+                    "PRESENT mean_fps={:.3} p95={:.3}ms sd={sd:.3}ms samples={}",
                     1000. / mean,
                     intervals[intervals.len() * 95 / 100],
                     intervals.len()
@@ -1738,6 +1806,9 @@ struct App {
     next_redraw: Instant,
     egui_state: Option<egui_winit::State>,
     focused: bool,
+    proxy: EventLoopProxy<()>,
+    /// Starts frames on the window's display refresh; without one, a timer does.
+    display_link: Option<pacing::DisplayLink>,
 }
 impl App {
     /// A key or mouse button 3-5 going down or up: does whatever it is bound to.
@@ -1952,6 +2023,20 @@ impl ApplicationHandler for App {
                 None,
             ));
             w.focus_window();
+            {
+                use winit::platform::macos::MonitorHandleExtMacOS;
+                let display = w.current_monitor().map_or(0, |m| m.native_id());
+                self.display_link = pacing::DisplayLink::start(self.proxy.clone(), display);
+                match &self.display_link {
+                    Some(link) => {
+                        // `--fps` caps the rate; the display sets it otherwise.
+                        let cap = self.game.options.fps.map_or(0., |f| 1. / f);
+                        self.game.frame_period = Some(link.period.max(cap));
+                        eprintln!("PACING display {:.2} Hz", 1. / link.period);
+                    }
+                    None => eprintln!("PACING timer (no display link)"),
+                }
+            }
             self.renderer = Some(r);
             self.window = Some(w);
             self.sync_pointer(true);
@@ -2129,7 +2214,32 @@ impl ApplicationHandler for App {
             }
         }
     }
+    /// A refresh of the window's display: draw, unless `--fps` caps below the refresh rate
+    /// and this one comes too soon.
+    fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        let Some(link) = &self.display_link else {
+            return;
+        };
+        link.taken();
+        let now = Instant::now();
+        if let Some(fps) = self.game.options.fps
+            && 1. / fps > link.period * 1.05
+        {
+            // Allow for the refresh landing a little early.
+            if now + Duration::from_secs_f64(link.period * 0.5) < self.next_redraw {
+                return;
+            }
+            self.next_redraw = (self.next_redraw + Duration::from_secs_f64(1. / fps)).max(now);
+        }
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+    }
     fn about_to_wait(&mut self, e: &ActiveEventLoop) {
+        if self.display_link.is_some() {
+            e.set_control_flow(ControlFlow::Wait);
+            return;
+        }
         let now = Instant::now();
         let period = Duration::from_secs_f64(1. / self.game.options.fps.unwrap_or(60.));
         if now >= self.next_redraw {
@@ -2190,6 +2300,7 @@ fn main() -> Result<()> {
         }
     } else {
         let event_loop = EventLoop::new()?;
+        let proxy = event_loop.create_proxy();
         let mut app = App {
             game,
             renderer: None,
@@ -2201,6 +2312,8 @@ fn main() -> Result<()> {
             next_redraw: Instant::now(),
             egui_state: None,
             focused: true,
+            proxy,
+            display_link: None,
         };
         event_loop.run_app(&mut app)?;
         if let Some(e) = app.error {
@@ -2223,6 +2336,14 @@ fn reserved(input: &controls::Input) -> Option<String> {
             input.label()
         )
     })
+}
+
+/// Seconds from `from` to `to`, negative if `to` came first.
+fn seconds_between(from: Instant, to: Instant) -> f64 {
+    match to.checked_duration_since(from) {
+        Some(d) => d.as_secs_f64(),
+        None => -(from - to).as_secs_f64(),
+    }
 }
 
 /// How far a blow kicks the camera, in metres, if it does: the player's own heavy, critical

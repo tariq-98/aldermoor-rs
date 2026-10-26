@@ -85,7 +85,13 @@ impl Overlay {
             }
         }
     }
-    pub fn draw(&self, ctx: &egui::Context, sim_ms: f64, enabled: bool) {
+    pub fn draw(
+        &self,
+        ctx: &egui::Context,
+        sim_ms: f64,
+        enabled: bool,
+        pacing: &crate::pacing::Stats,
+    ) {
         if !self.visible {
             return;
         }
@@ -95,6 +101,12 @@ impl Overlay {
             .show(ctx, |ui| {
                 ui.label(format!("CPU encode + slot wait: {:.3} ms", self.cpu_ms));
                 ui.label(format!("Sim step (rolling mean): {sim_ms:.3} ms"));
+                let (mean, spread) = pacing.interval_ms();
+                let [none, one, more] = pacing.steps();
+                ui.label(format!("Frame interval: {mean:.2} ms ± {spread:.2} ms"));
+                ui.label(format!(
+                    "Sim steps per frame (last 2 s): 0 × {none} · 1 × {one} · 2+ × {more}"
+                ));
                 if let Some(frame) = self.latest {
                     ui.label(format!("GPU frame: {:.3} ms / 12 ms", frame.gpu_ms));
                     ui.label(format!(
@@ -263,7 +275,9 @@ mod tests {
             latest: Some(GpuFrame::default()),
             ..Default::default()
         };
-        let output = ctx.run(egui::RawInput::default(), |ctx| overlay.draw(ctx, 1., true));
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            overlay.draw(ctx, 1., true, &crate::pacing::Stats::default())
+        });
         assert!(!output.shapes.is_empty());
     }
 }

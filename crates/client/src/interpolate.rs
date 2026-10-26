@@ -5,6 +5,9 @@ pub struct Snapshots {
     pub previous: Arc<Snapshot>,
     pub current: Arc<Snapshot>,
     pub received: Instant,
+    /// The sim time this frame draws (`pacing::SimClock`). Without it, time is measured from
+    /// when the newest snapshot arrived, which jitters with arrival.
+    pub draw_time: Option<f64>,
 }
 impl Snapshots {
     pub fn new(s: Arc<Snapshot>) -> Self {
@@ -12,6 +15,15 @@ impl Snapshots {
             previous: s.clone(),
             current: s,
             received: Instant::now(),
+            draw_time: None,
+        }
+    }
+    /// How far past the previous snapshot this frame draws, in seconds: a step's length when
+    /// it shows the newest one.
+    pub fn since(&self) -> f32 {
+        match self.draw_time {
+            Some(t) => (t - self.previous.time).max(0.) as f32,
+            None => self.received.elapsed().as_secs_f32(),
         }
     }
     pub fn push(&mut self, s: Arc<Snapshot>) {
@@ -22,12 +34,7 @@ impl Snapshots {
         }
     }
     pub fn units(&self, indexed: bool) -> Vec<UnitState> {
-        interpolate(
-            &self.previous,
-            &self.current,
-            self.received.elapsed().as_secs_f32(),
-            indexed,
-        )
+        interpolate(&self.previous, &self.current, self.since(), indexed)
     }
 }
 fn interpolate(
