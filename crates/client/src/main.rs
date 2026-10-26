@@ -2454,6 +2454,9 @@ impl ApplicationHandler for App {
                 anyhow::bail!("Aldermoor requires macOS")
             };
             r.set_frames_in_flight(self.game.options.in_flight)?;
+            if self.game.resolution.is_some() {
+                r.reserve_render_scales(render::settings::DynamicResolution::MAX_SCALE)?;
+            }
             perf_overlay::Overlay::configure(&mut r, &self.game.options.perf);
             r.enable_metalfx(self.game.options.metalfx)?;
             if let Some(path) = &self.game.options.look_settings {
@@ -2721,6 +2724,9 @@ fn main() -> Result<()> {
             game.options.samples,
         )?;
         renderer.set_frames_in_flight(game.options.in_flight)?;
+        if game.resolution.is_some() {
+            renderer.reserve_render_scales(render::settings::DynamicResolution::MAX_SCALE)?;
+        }
         perf_overlay::Overlay::configure(&mut renderer, &game.options.perf);
         renderer.enable_metalfx(game.options.metalfx)?;
         if let Some(path) = &game.options.look_settings {

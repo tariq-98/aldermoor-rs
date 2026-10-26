@@ -88,29 +88,38 @@ struct PostTargets {
     colour: Obj<dyn MTLTexture>,
 }
 impl PostTargets {
+    /// AO, three bloom targets, then colour.
+    fn descs(
+        w: usize,
+        h: usize,
+        colour_usage: MTLTextureUsage,
+    ) -> [Retained<MTLTextureDescriptor>; 5] {
+        let usage = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
+        let half = |format| target_desc(w.div_ceil(2), h.div_ceil(2), format, 1, usage);
+        [
+            half(MTLPixelFormat::RG16Float),
+            half(MTLPixelFormat::RGBA16Float),
+            half(MTLPixelFormat::RGBA16Float),
+            half(MTLPixelFormat::RGBA16Float),
+            target_desc(w, h, MTLPixelFormat::RGBA16Float, 1, usage | colour_usage),
+        ]
+    }
     fn new(
         device: &ProtocolObject<dyn MTLDevice>,
+        heap: Option<&ProtocolObject<dyn MTLHeap>>,
         w: usize,
         h: usize,
         colour_usage: MTLTextureUsage,
     ) -> Result<Self> {
-        let usage = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
-        let half = |format| texture(device, w.div_ceil(2), h.div_ceil(2), format, 1, usage);
+        let [ao, b0, b1, b2, colour] = Self::descs(w, h, colour_usage);
         Ok(Self {
-            ao: half(MTLPixelFormat::RG16Float)?,
+            ao: target(device, heap, &ao)?,
             bloom: [
-                half(MTLPixelFormat::RGBA16Float)?,
-                half(MTLPixelFormat::RGBA16Float)?,
-                half(MTLPixelFormat::RGBA16Float)?,
+                target(device, heap, &b0)?,
+                target(device, heap, &b1)?,
+                target(device, heap, &b2)?,
             ],
-            colour: texture(
-                device,
-                w,
-                h,
-                MTLPixelFormat::RGBA16Float,
-                1,
-                usage | colour_usage,
-            )?,
+            colour: target(device, heap, &colour)?,
         })
     }
 }
@@ -378,6 +387,7 @@ pub struct Renderer {
     composite: Obj<dyn MTLRenderPipelineState>,
     post_pipelines: [Obj<dyn MTLRenderPipelineState>; 4],
     post_targets: Option<PostTargets>,
+    target_heaps: Option<TargetHeaps>,
     post_config: [[f32; 4]; 3],
     depth_state: Obj<dyn MTLDepthStencilState>,
     read_depth: Obj<dyn MTLDepthStencilState>,
@@ -440,14 +450,13 @@ fn buffer<T: bytemuck::Pod>(
         .context("Metal buffer allocation")
     }
 }
-fn texture(
-    d: &ProtocolObject<dyn MTLDevice>,
+fn target_desc(
     w: usize,
     h: usize,
     format: MTLPixelFormat,
     samples: usize,
     usage: MTLTextureUsage,
-) -> Result<Obj<dyn MTLTexture>> {
+) -> Retained<MTLTextureDescriptor> {
     let desc = MTLTextureDescriptor::new();
     unsafe { desc.setWidth(w) };
     unsafe { desc.setHeight(h) };
@@ -458,8 +467,102 @@ fn texture(
     if samples > 1 {
         desc.setTextureType(MTLTextureType::Type2DMultisample);
     }
-    d.newTextureWithDescriptor(&desc)
+    desc
+}
+fn texture(
+    d: &ProtocolObject<dyn MTLDevice>,
+    w: usize,
+    h: usize,
+    format: MTLPixelFormat,
+    samples: usize,
+    usage: MTLTextureUsage,
+) -> Result<Obj<dyn MTLTexture>> {
+    d.newTextureWithDescriptor(&target_desc(w, h, format, samples, usage))
         .context("Metal texture allocation")
+}
+/// Places a render target in `heap` when it has room, otherwise allocates from the device.
+fn target(
+    d: &ProtocolObject<dyn MTLDevice>,
+    heap: Option<&ProtocolObject<dyn MTLHeap>>,
+    desc: &MTLTextureDescriptor,
+) -> Result<Obj<dyn MTLTexture>> {
+    if let Some(texture) = heap.and_then(|heap| heap.newTextureWithDescriptor(desc)) {
+        return Ok(texture);
+    }
+    if heap.is_some() {
+        eprintln!("render target heap full; allocating from the device");
+    }
+    d.newTextureWithDescriptor(desc)
+        .context("Metal texture allocation")
+}
+/// Every texture sized by the render scale: hdr, MSAA colour, motion, MSAA motion, depth,
+/// two history targets, then the post targets (`PostTargets::descs`).
+fn scaled_target_descs(w: usize, h: usize, samples: usize) -> Vec<Retained<MTLTextureDescriptor>> {
+    let rt = MTLTextureUsage::RenderTarget;
+    let read = MTLTextureUsage::ShaderRead;
+    let colour = MTLPixelFormat::RGBA16Float;
+    let mut descs = vec![
+        target_desc(w, h, colour, 1, rt | read),
+        target_desc(w, h, colour, samples, rt),
+        target_desc(w, h, colour, 1, rt | read),
+        target_desc(w, h, colour, samples, rt),
+        target_desc(w, h, MTLPixelFormat::Depth32Float, samples, rt | read),
+        target_desc(w, h, colour, 1, rt | read),
+        target_desc(w, h, colour, 1, rt | read),
+    ];
+    descs.extend(PostTargets::descs(w, h, rt | read));
+    descs
+}
+/// Scale-dependent targets live in two heaps used in turn. A dynamic-resolution step then
+/// places textures in memory that is already allocated, instead of asking the system for
+/// ~150 MB mid-game, which hitched for hundreds of milliseconds under memory pressure.
+/// Frames still in flight keep the other heap's textures; steps are a second apart.
+struct TargetHeaps {
+    /// The largest render scale the heaps are sized for.
+    max_scale: f32,
+    heaps: [Option<Obj<dyn MTLHeap>>; 2],
+    current: usize,
+}
+impl TargetHeaps {
+    fn current(&self) -> Option<&ProtocolObject<dyn MTLHeap>> {
+        self.heaps[self.current].as_deref()
+    }
+    /// Grows both heaps to hold a full set at `bytes`, then returns the one not in use.
+    fn spare(
+        &mut self,
+        d: &ProtocolObject<dyn MTLDevice>,
+        bytes: usize,
+    ) -> Result<&ProtocolObject<dyn MTLHeap>> {
+        for heap in &mut self.heaps {
+            if heap.as_ref().is_none_or(|h| h.size() < bytes) {
+                // Textures in a replaced heap keep it alive until they are released.
+                let desc = MTLHeapDescriptor::new();
+                desc.setSize(bytes);
+                desc.setStorageMode(MTLStorageMode::Private);
+                desc.setType(MTLHeapType::Automatic);
+                desc.setHazardTrackingMode(MTLHazardTrackingMode::Tracked);
+                *heap = Some(
+                    d.newHeapWithDescriptor(&desc)
+                        .context("render target heap")?,
+                );
+            }
+        }
+        self.current = 1 - self.current;
+        Ok(self.heaps[self.current].as_deref().unwrap())
+    }
+}
+fn heap_bytes(
+    d: &ProtocolObject<dyn MTLDevice>,
+    descs: &[Retained<MTLTextureDescriptor>],
+) -> usize {
+    let mut bytes = 0;
+    let mut largest_align = 1;
+    for desc in descs {
+        let MTLSizeAndAlign { size, align } = d.heapTextureSizeAndAlignWithDescriptor(desc);
+        bytes = bytes.next_multiple_of(align.max(1)) + size;
+        largest_align = largest_align.max(align);
+    }
+    bytes + largest_align
 }
 fn image_texture(
     d: &ProtocolObject<dyn MTLDevice>,
@@ -856,6 +959,7 @@ impl Renderer {
             composite,
             post_pipelines,
             post_targets: None,
+            target_heaps: None,
             post_config: [[0.; 4]; 3],
             depth_state,
             read_depth,
@@ -1139,6 +1243,22 @@ impl Renderer {
         }
         self.resize_at_scale(self.width, self.height, scale)
     }
+    /// Moves the scale-dependent targets into two heaps sized for `max_scale`, so later
+    /// `set_render_scale` calls up to it allocate nothing from the system. This costs one
+    /// spare set of targets; call it only when the scale will change during play.
+    pub fn reserve_render_scales(&mut self, max_scale: f32) -> Result<()> {
+        ensure!(
+            max_scale.is_finite() && (0.25..=1.).contains(&max_scale),
+            "invalid render scale"
+        );
+        self.target_heaps = Some(TargetHeaps {
+            max_scale,
+            heaps: [None, None],
+            current: 0,
+        });
+        self.post_targets = None;
+        self.resize_at_scale(self.width, self.height, self.scale)
+    }
     fn resize_at_scale(&mut self, width: u32, height: u32, scale: f32) -> Result<()> {
         if width == 0 || height == 0 {
             return Ok(());
@@ -1153,66 +1273,33 @@ impl Renderer {
             (width as f32 * scale).round().max(1.) as usize,
             (height as f32 * scale).round().max(1.) as usize,
         );
+        let descs = scaled_target_descs(w, h, self.samples);
+        let heap = match &mut self.target_heaps {
+            Some(heaps) => {
+                let cap = heaps.max_scale.max(scale);
+                let cap = (
+                    (width as f32 * cap).round().max(1.) as usize,
+                    (height as f32 * cap).round().max(1.) as usize,
+                );
+                let bytes = heap_bytes(
+                    &self.device,
+                    &scaled_target_descs(cap.0, cap.1, self.samples),
+                );
+                Some(heaps.spare(&self.device, bytes)?)
+            }
+            None => None,
+        };
+        let hdr = target(&self.device, heap, &descs[0])?;
+        let msaa = target(&self.device, heap, &descs[1])?;
+        let motion = target(&self.device, heap, &descs[2])?;
+        let motion_msaa = target(&self.device, heap, &descs[3])?;
+        let depth = target(&self.device, heap, &descs[4])?;
+        let history = [
+            target(&self.device, heap, &descs[5])?,
+            target(&self.device, heap, &descs[6])?,
+        ];
         let rt = MTLTextureUsage::RenderTarget;
         let read = MTLTextureUsage::ShaderRead;
-        let hdr = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            1,
-            rt | read,
-        )?;
-        let msaa = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            self.samples,
-            rt,
-        )?;
-        let motion = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            1,
-            rt | read,
-        )?;
-        let motion_msaa = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            self.samples,
-            rt,
-        )?;
-        let depth = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::Depth32Float,
-            self.samples,
-            rt | read,
-        )?;
-        let history = [
-            texture(
-                &self.device,
-                w,
-                h,
-                MTLPixelFormat::RGBA16Float,
-                1,
-                rt | read,
-            )?,
-            texture(
-                &self.device,
-                w,
-                h,
-                MTLPixelFormat::RGBA16Float,
-                1,
-                rt | read,
-            )?,
-        ];
         let output = if output_changed {
             Some(texture(
                 &self.device,
@@ -1371,6 +1458,7 @@ impl Renderer {
             // In-flight frames retain the old targets, as in `resize_at_scale`.
             self.post_targets = Some(PostTargets::new(
                 &self.device,
+                self.target_heaps.as_ref().and_then(TargetHeaps::current),
                 self.hdr.width(),
                 self.hdr.height(),
                 self.hdr.usage(),
@@ -2552,6 +2640,54 @@ mod temporal_tests {
         assert!(!r.history_valid);
         r.draw(camera, &[], None).unwrap();
         r.wait().unwrap();
+    }
+
+    #[test]
+    fn reserved_render_scales_step_between_two_heaps_without_growing_them() {
+        let mut r = Renderer::new(64, 64, 0.75).unwrap();
+        r.set_frames_in_flight(3).unwrap();
+        r.reserve_render_scales(0.75).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        let sizes = |r: &Renderer| {
+            let heaps = &r.target_heaps.as_ref().unwrap().heaps;
+            heaps.each_ref().map(|h| h.as_ref().unwrap().size())
+        };
+        let reserved = sizes(&r);
+        let mut previous = None;
+        for scale in [0.75, 0.725, 0.7, 0.725, 0.75, 0.55] {
+            r.set_render_scale(scale).unwrap();
+            r.draw(camera, &[], None).unwrap();
+            // Steps are a second apart, so frames that used the other heap have finished.
+            r.wait().unwrap();
+            let heaps = r.target_heaps.as_ref().unwrap();
+            let current = heaps.current().unwrap();
+            let mut targets = vec![&r.hdr, &r.msaa, &r.motion, &r.motion_msaa, &r.depth];
+            targets.extend(&r.history);
+            if let Some(post) = &r.post_targets {
+                targets.extend([&post.ao, &post.colour]);
+                targets.extend(&post.bloom);
+            }
+            for t in targets {
+                let heap = t.heap().expect("scale-dependent target outside the heaps");
+                assert!(std::ptr::eq(&*heap, current));
+            }
+            if let Some(previous) = previous {
+                assert_ne!(previous, heaps.current, "each step uses the other heap");
+            }
+            previous = Some(heaps.current);
+            assert_eq!(sizes(&r), reserved);
+        }
+        // A larger output grows both heaps once; later steps fit again.
+        r.resize(96, 80).unwrap();
+        let grown = sizes(&r);
+        assert!(grown.iter().zip(reserved).all(|(g, r)| *g > r));
+        r.set_render_scale(0.6).unwrap();
+        assert_eq!(sizes(&r), grown);
+        assert!(r.reserve_render_scales(f32::NAN).is_err());
     }
 
     #[test]

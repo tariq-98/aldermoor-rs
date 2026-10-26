@@ -687,6 +687,11 @@ impl Default for DynamicResolution {
 impl DynamicResolution {
     pub const MIN_SCALE: f32 = 0.55;
     pub const MAX_SCALE: f32 = 0.75;
+    /// Frames ignored after a resize: the first frames at a new size can be slow once.
+    const SETTLE_FRAMES: usize = 2;
+    /// Twice the 12 ms budget. A single hitch is capped so it cannot step the scale down
+    /// a second later; sustained overload still reads well above the budget.
+    const SPIKE_MS: f64 = 24.;
 
     pub fn scale(&self) -> f32 {
         self.scale
@@ -706,6 +711,7 @@ impl DynamicResolution {
         {
             return None;
         }
+        let gpu_ms = gpu_ms.min(Self::SPIKE_MS);
         let filtered = match (self.filtered_ms, self.last_seconds) {
             (Some(previous), Some(last)) => {
                 // A quarter-second time constant, regardless of submission/frame rate.
@@ -749,7 +755,8 @@ impl DynamicResolution {
     }
 
     /// Start the cooldown after allocation/draining finishes, and discard measurements
-    /// from submissions made at the old scale. A backend only supplies an ID and a clock.
+    /// from submissions made at the old scale and the first frames at the new one.
+    /// A backend only supplies the last frame it submitted at the old scale and a clock.
     pub fn resize_completed(&mut self, last_completed_frame: usize, seconds: f64) {
         if !seconds.is_finite()
             || seconds < 0.
@@ -757,10 +764,8 @@ impl DynamicResolution {
         {
             return;
         }
-        self.last_frame = Some(
-            self.last_frame
-                .map_or(last_completed_frame, |last| last.max(last_completed_frame)),
-        );
+        let settled = last_completed_frame + Self::SETTLE_FRAMES;
+        self.last_frame = Some(self.last_frame.map_or(settled, |last| last.max(settled)));
         self.last_seconds = Some(seconds);
         self.filtered_ms = None;
         self.headroom_since = None;
@@ -851,5 +856,37 @@ mod resolution_tests {
         assert_eq!(controller.scale(), DynamicResolution::MAX_SCALE);
         assert!((controller.observe(2, 2., 20.).unwrap() - 0.725).abs() < 1e-6);
         assert_eq!(controller.observe(3, 2.5, 20.), None);
+    }
+
+    #[test]
+    fn a_single_hitch_or_slow_first_frames_do_not_step_the_scale() {
+        let mut controller = DynamicResolution::default();
+        let mut scales = Vec::new();
+        for frame in 0..600 {
+            let seconds = frame as f64 / 60.;
+            // A 400 ms hitch at 1.5 s, and a step to 0.725 at 4 s whose first frames are slow.
+            let gpu = if matches!(frame, 90 | 241 | 242) {
+                400.
+            } else {
+                11.
+            };
+            if frame == 240 {
+                controller.scale = 0.725;
+                controller.resize_completed(240, seconds);
+                continue;
+            }
+            if let Some(scale) = controller.observe(frame, seconds, gpu) {
+                scales.push(scale);
+            }
+        }
+        assert!(scales.is_empty(), "hitches stepped the scale: {scales:?}");
+        assert_eq!(controller.scale(), 0.725);
+        // Sustained overload still steps down.
+        for frame in 600..700 {
+            if let Some(scale) = controller.observe(frame, frame as f64 / 60., 30.) {
+                scales.push(scale);
+            }
+        }
+        assert_eq!(scales, [0.7]);
     }
 }
