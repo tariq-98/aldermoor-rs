@@ -300,7 +300,7 @@ pub fn victims(world: &World, shape: Shape, origin: Vec3, yaw: f32, src: &HitSou
             if u.faction != src.faction {
                 continue;
             }
-        } else if !u.faction.is_enemy(src.faction) || v.dead {
+        } else if !(u.faction.is_enemy(src.faction) || crate::wilderness::may_hit(world, src.unit, e)) || v.dead {
             continue;
         }
         if !line_of_sight(world, origin + Vec3::Y, chest(world, e) - t.pos + at) {
