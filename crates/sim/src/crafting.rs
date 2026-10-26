@@ -545,7 +545,7 @@ pub(crate) fn player_view(world: &World, e: Entity) -> (Vec<SkillView>, Option<W
         .list
         .iter()
         .filter(|n| flat(n.at - p) <= NODE_SEEN)
-        .map(|n| NodeView { id: n.id, node: n.def.key.to_string(), name: n.def.name.to_string(), position: n.at, level: n.def.level, ready: n.left(t) > 0 })
+        .map(|n| NodeView { id: n.id, node: n.def.key.to_string(), name: n.def.name.to_string(), position: n.at, level: n.def.level, ready: n.left(t) > 0, reach: n.def.reach })
         .collect();
     let station = station_at(p, None).map(|s| {
         let inv = world.get::<Inventory>(e);

@@ -748,6 +748,7 @@ mod tests {
                 target: None,
                 look: Default::default(),
                 traversal: Default::default(),
+                aim_pitch: 0,
             })
             .collect()
     }

@@ -24,6 +24,11 @@ const PIVOT_EASE: f32 = 20.;
 /// How fast the eye slides back out once nothing is in the way, in metres a second. Pulling
 /// in is instant so walls never come between the camera and the player.
 const REACH_SPEED: f32 = 4.;
+/// While climbing, the camera stands this much further back and looks this much higher, so the
+/// wall and the holds above are in view, easing there and back at this rate (#250).
+const CLIMB_OUT: f32 = 1.5;
+const CLIMB_LIFT: f32 = 0.5;
+const CLIMB_EASE: f32 = 4.;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Orbit {
@@ -119,6 +124,8 @@ pub struct View {
 pub struct Follow {
     /// None until the first frame, which snaps straight to the orbit.
     eased: Option<Eased>,
+    /// The player is hanging from a hold or running up a wall: frame the wall.
+    pub climbing: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,6 +134,8 @@ struct Eased {
     feet_y: f32,
     /// How far out the eye may go this frame.
     reach: f32,
+    /// 0 on the ground, 1 framing a climb.
+    climb: f32,
 }
 
 fn ease(from: f32, to: f32, rate: f32, dt: f32) -> f32 {
@@ -148,18 +157,21 @@ impl Follow {
                 distance: orbit.distance,
                 feet_y: feet.y,
                 reach: f32::INFINITY,
+                climb: if self.climbing { 1. } else { 0. },
             },
             Some(e) => Eased {
                 distance: ease(e.distance, orbit.distance, ZOOM_EASE, dt),
                 feet_y: ease(e.feet_y, feet.y, PIVOT_EASE, dt),
+                climb: ease(e.climb, if self.climbing { 1. } else { 0. }, CLIMB_EASE, dt),
                 ..e
             },
         };
         let shown = Orbit {
-            distance: e.distance,
+            distance: e.distance + CLIMB_OUT * e.climb,
             ..*orbit
         };
-        let target = shown.target(Vec3::new(feet.x, e.feet_y, feet.z));
+        let target =
+            shown.target(Vec3::new(feet.x, e.feet_y, feet.z)) + Vec3::Y * CLIMB_LIFT * e.climb;
         let clear = shown.eye(target, blocked);
         let room = clear.distance(target);
         let reach = if room <= e.reach {
@@ -178,9 +190,130 @@ impl Follow {
     }
 }
 
+/// How hard blows shake the camera.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenShake {
+    Off,
+    Low,
+    #[default]
+    Full,
+}
+
+impl ScreenShake {
+    fn scale(self) -> f32 {
+        match self {
+            Self::Off => 0.,
+            Self::Low => 0.4,
+            Self::Full => 1.,
+        }
+    }
+}
+
+/// The furthest kicks can add up to, in metres.
+const KICK_CAP: f32 = 0.09;
+/// Kicks die away by e every this many seconds: about 5% is left after 150 ms.
+const KICK_DECAY: f32 = 0.05;
+/// The look point moves this share of the eye's kick, which tips the view by a degree or so.
+const KICK_LOOK: f32 = 0.4;
+
+/// A short jolt of the camera when a blow lands, along the way the blow travelled. Kicks add
+/// up to a cap and die away quickly, so a pack of wolves can't keep the screen shaking.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Kick {
+    push: Vec3,
+}
+
+impl Kick {
+    /// Adds a jolt of `metres` (before the setting) along `dir` on the ground.
+    pub fn add(&mut self, dir: glam::Vec2, metres: f32, shake: ScreenShake) {
+        let push =
+            self.push + Vec3::new(dir.x, 0., dir.y).normalize_or_zero() * metres * shake.scale();
+        self.push = push.clamp_length_max(KICK_CAP);
+    }
+
+    /// Dies away by `dt` seconds and moves `view` by what is left.
+    pub fn apply(&mut self, view: View, dt: f32) -> View {
+        self.push *= (-dt / KICK_DECAY).exp();
+        View {
+            eye: view.eye + self.push,
+            target: view.target + self.push * KICK_LOOK,
+        }
+    }
+
+    pub fn size(&self) -> f32 {
+        self.push.length()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn climbing_eases_the_camera_back_and_up_and_leaving_eases_it_home() {
+        // Open meadow north of the village, clear of the terrain behind the camera.
+        let feet = Vec3::new(5., world::height(5., 10.), 10.);
+        let orbit = Orbit::default();
+        let mut f = Follow::default();
+        let open = |_: Vec3, eye: Vec3| eye;
+        let ground = f.update(&orbit, feet, 1. / 60., open);
+        f.climbing = true;
+        let mut v = ground;
+        for _ in 0..120 {
+            v = f.update(&orbit, feet, 1. / 60., open);
+        }
+        let out = v.eye.distance(v.target) - ground.eye.distance(ground.target);
+        assert!((out - CLIMB_OUT).abs() < 0.05, "eased out {out} m");
+        assert!((v.target.y - ground.target.y - CLIMB_LIFT).abs() < 0.02);
+        assert!(v.eye.y > ground.eye.y);
+        f.climbing = false;
+        for _ in 0..120 {
+            v = f.update(&orbit, feet, 1. / 60., open);
+        }
+        assert!(v.eye.distance(ground.eye) < 0.05, "didn't come home");
+    }
+
+    #[test]
+    fn kicks_add_up_to_a_cap_and_die_away_in_a_moment() {
+        let mut k = Kick::default();
+        let east = glam::Vec2::X;
+        k.add(east, 0.04, ScreenShake::Full);
+        assert!((k.size() - 0.04).abs() < 1e-6);
+        let view = View {
+            eye: Vec3::ZERO,
+            target: Vec3::Z,
+        };
+        let moved = k.apply(view, 0.);
+        assert!(moved.eye.x > 0.039 && moved.target.x > 0.01 && moved.target.x < moved.eye.x);
+        for _ in 0..20 {
+            k.add(east, 0.04, ScreenShake::Full);
+        }
+        assert!(
+            (k.size() - KICK_CAP).abs() < 1e-6,
+            "a crowd's blows went past the cap"
+        );
+        for _ in 0..9 {
+            k.apply(view, 1. / 60.);
+        }
+        assert!(
+            k.size() < KICK_CAP * 0.06,
+            "still {} m after 150 ms",
+            k.size()
+        );
+    }
+
+    #[test]
+    fn the_setting_scales_kicks() {
+        let size = |shake| {
+            let mut k = Kick::default();
+            k.add(glam::Vec2::Y, 0.05, shake);
+            k.size()
+        };
+        assert_eq!(size(ScreenShake::Off), 0.);
+        assert!((size(ScreenShake::Low) - 0.02).abs() < 1e-6);
+        assert!((size(ScreenShake::Full) - 0.05).abs() < 1e-6);
+    }
 
     fn standing_at(x: f32, z: f32) -> Vec3 {
         Orbit::default().target(Vec3::new(x, world::height(x, z), z))

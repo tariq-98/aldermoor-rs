@@ -1,9 +1,14 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
+mod bag;
 mod combat;
+mod craft;
 mod effects;
+mod gait;
 mod hud;
 mod interpolate;
+mod latency;
 mod menu;
+mod pacing;
 mod perf_overlay;
 mod stage;
 use anyhow::{Context, Result, ensure};
@@ -25,7 +30,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
     event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
@@ -41,6 +46,12 @@ struct Options {
     offscreen: bool,
     showcase: bool,
     smoke: bool,
+    /// Play on a server across the network (`--connect ADDR`), trusting the certificate at
+    /// `server_cert`, instead of the built-in one.
+    connect: Option<String>,
+    server_cert: PathBuf,
+    /// The character's name on the server.
+    name: String,
     effects_review: bool,
     /// The effects review as a captioned reel of close shots, one effect at a time, from this
     /// many seconds in.
@@ -53,6 +64,8 @@ struct Options {
     /// (for review videos and contact sheets).
     sequence: Option<PathBuf>,
     sequence_step: u64,
+    /// Plays the scripted run in `gait.rs` instead of taking input, for animation captures.
+    gait: bool,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -88,16 +101,22 @@ impl Options {
             offscreen: false,
             showcase: false,
             smoke: false,
+            connect: None,
+            server_cert: PathBuf::from("aldermoor.der"),
+            name: "Traveller".into(),
             effects_review: false,
             reel: false,
             reel_from: 0.,
             view: 0,
             sequence: None,
             sequence_step: 1,
+            gait: false,
             inspect: None,
             warmup: 120,
             samples: 0,
-            in_flight: 2,
+            // One frame in flight: a frame sooner on screen, and on the M1 Air it held the
+            // same frame rate as two with a lower GPU p95 (#219).
+            in_flight: 1,
             fps: None,
             benchmark: false,
             inline_constants: true,
@@ -195,6 +214,11 @@ impl Options {
                 "--warmup" => o.warmup = args.next().context("--warmup needs a count")?.parse()?,
                 "--showcase" => o.showcase = true,
                 "--smoke" => o.smoke = true,
+                "--connect" => o.connect = Some(args.next().context("--connect needs HOST:PORT")?),
+                "--server-cert" => {
+                    o.server_cert = args.next().context("--server-cert needs a file")?.into()
+                }
+                "--name" => o.name = args.next().context("--name needs a name")?,
                 "--effects-review" => {
                     o.effects_review = true;
                     o.showcase = true;
@@ -207,6 +231,7 @@ impl Options {
                 "--reel-from" => {
                     o.reel_from = args.next().context("--reel-from needs seconds")?.parse()?
                 }
+                "--gait" => o.gait = true,
                 "--scheme" => {
                     o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
@@ -231,7 +256,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 (fixed; interactive default adapts 0.55..0.75, captures/scripted runs use 0.75) --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 (fixed; interactive default adapts 0.55..0.75, captures/scripted runs use 0.75) --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -254,6 +279,7 @@ impl Options {
                 || o.offscreen
                 || o.sequence.is_some()
                 || o.smoke
+                || o.gait
                 || o.showcase
                 || o.effects_review
                 || o.reel
@@ -315,14 +341,41 @@ struct Game {
     orbiting: bool,
     /// Ctrl held in the Action scheme: the pointer is out for the HUD and the mouse doesn't look.
     pointer_free: bool,
+    /// The Specialties screen is open, and how much quest XP its Give buttons send.
+    specialties: bool,
+    assign_xp: u32,
+    /// The bag is open (it also opens at a shop's counter).
+    bag: bool,
+    /// The gathering and crafting skills panel is open.
+    skills_panel: bool,
+    /// The local player's last level up (specialty, level, seconds left on its banner).
+    level_up: Option<(String, u8, f32)>,
     /// The left button held in the Action scheme: keep swinging, and when the next press of the
     /// basic attack goes out.
     attacking: Option<f32>,
     /// The right button holds the guard in the Action scheme.
     guard_button: bool,
     last_move: Option<Command>,
+    /// The aim pitch last sent.
+    last_aim: Option<i8>,
+    /// The camera's jolt from blows landing.
+    kick: controls::camera::Kick,
     last: Instant,
     start: Instant,
+    /// Frame pacing (#223): the client's own clock starts here.
+    epoch: Instant,
+    frame_clock: pacing::FrameClock,
+    sim_clock: pacing::SimClock,
+    pacing: pacing::Stats,
+    /// The last frame's time on that clock, and the newest step it showed.
+    paced: Option<(f64, u64)>,
+    /// The last frame's clock reading and the sim times it drew, by this pacing and by
+    /// arrival time as before #223, for the judder comparison printed at exit.
+    judder: Option<(f64, f64, f64)>,
+    /// Press-to-photon times for jumps, rolls and skills (#219).
+    latency: latency::Latency,
+    /// Seconds per frame when frames come from the display's refresh (capped by `--fps`).
+    frame_period: Option<f64>,
     frame: u64,
     gpu: Vec<f64>,
     frame_times: Vec<f64>,
@@ -335,6 +388,9 @@ struct Game {
     events: usize,
     smoke_start: Vec3,
     smoke_checks: [bool; 4],
+    /// Sim tick the `--gait` run started on, and the leg it is on.
+    gait_tick: Option<u64>,
+    gait_leg: Option<usize>,
     perf: perf_overlay::Overlay,
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
@@ -346,6 +402,8 @@ struct Game {
     cursor: Vec2,
     viewport: Vec2,
     aim_slot: Option<u8>,
+    /// A ground skill's key held down with Hold to aim: it casts on release.
+    held_ground: Option<u8>,
     valley: world::Valley,
     effects: Option<effects::Effects>,
     /// The effects' art, for each renderer to upload.
@@ -358,7 +416,23 @@ struct Game {
 impl Game {
     fn new(options: Options) -> Result<Self> {
         let catalog = assets::Catalog::load(&options.assets)?;
-        let host = server::Host::start(0xa1de, "Traveller");
+        let host = match &options.connect {
+            None => server::Host::start(0xa1de, &options.name),
+            Some(addr) => {
+                let cert = std::fs::read(&options.server_cert).with_context(|| {
+                    format!(
+                        "the server's certificate {} (--server-cert)",
+                        options.server_cert.display()
+                    )
+                })?;
+                server::Host::connect(
+                    addr.as_str(),
+                    &server::net::CertificateDer::from(cert),
+                    &options.name,
+                )
+                .with_context(|| format!("connecting to {addr}"))?
+            }
+        };
         let settings_path = options.controls.clone().unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
                 .join("Library/Application Support/Aldermoor/controls.json")
@@ -406,11 +480,26 @@ impl Game {
             mouse_look: false,
             orbiting: false,
             pointer_free: false,
+            specialties: false,
+            assign_xp: 0,
+            bag: false,
+            skills_panel: false,
+            level_up: None,
             attacking: None,
             guard_button: false,
             last_move: None,
+            last_aim: None,
+            kick: controls::camera::Kick::default(),
             last: Instant::now(),
             start: Instant::now(),
+            epoch: Instant::now(),
+            frame_clock: pacing::FrameClock::default(),
+            sim_clock: pacing::SimClock::default(),
+            pacing: pacing::Stats::default(),
+            paced: None,
+            judder: None,
+            latency: latency::Latency::default(),
+            frame_period: None,
             frame: 0,
             gpu: Vec::new(),
             frame_times: Vec::new(),
@@ -421,6 +510,8 @@ impl Game {
             events: 0,
             smoke_start,
             smoke_checks: [false; 4],
+            gait_tick: None,
+            gait_leg: None,
             hud_context: egui::Context::default(),
             hud_input: None,
             platform_output: None,
@@ -430,6 +521,7 @@ impl Game {
             cursor: Vec2::ZERO,
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
+            held_ground: None,
             valley: world::Valley::new(),
             effects,
             effects_art,
@@ -511,9 +603,24 @@ impl Game {
             orbiting: self.orbiting,
         }
     }
+    /// The ability on bar slot `slot` now, if any.
+    fn slot_ability(&self, slot: u8) -> Option<String> {
+        let s = self.snaps.current.player.as_ref()?.bar.get(slot as usize)?;
+        (!s.ability.is_empty()).then(|| s.ability.clone())
+    }
     /// Does what a bound control does when its key goes down.
     fn press(&mut self, control: controls::Control) {
         use controls::Control as C;
+        let pressed = match control {
+            C::Jump => Some((latency::Kind::Jump, None)),
+            C::Roll => Some((latency::Kind::Roll, None)),
+            c => c
+                .slot()
+                .map(|slot| (latency::Kind::Skill, self.slot_ability(slot))),
+        };
+        if let Some((kind, ability)) = pressed {
+            self.latency.pressed(kind, ability, latency::now());
+        }
         let command = match control {
             C::Jump => Some(Command::Jump),
             C::Roll => Some(Command::Dodge {
@@ -538,7 +645,52 @@ impl Game {
                 .revive_target()
                 .map(|target| Command::Revive { target }),
             C::Respawn => Some(Command::Respawn),
-            c => c.slot().map(|slot| self.use_slot(slot)),
+            C::Specialties => {
+                self.specialties = !self.specialties;
+                None
+            }
+            C::Bag => {
+                self.bag = !self.bag;
+                None
+            }
+            C::Skills => {
+                self.skills_panel = !self.skills_panel;
+                None
+            }
+            C::Interact => {
+                let snapshot = &self.snaps.current;
+                let player = snapshot.player.as_ref();
+                if player
+                    .and_then(|p| p.work.as_ref())
+                    .is_some_and(|w| w.sweet_to > w.sweet_from)
+                {
+                    Some(Command::Strike)
+                } else {
+                    snapshot
+                        .unit(self.host.player)
+                        .zip(player)
+                        .and_then(|(me, p)| craft::interact(snapshot, p, me.position))
+                        .map(|i| i.command())
+                }
+            }
+            C::Loot => self
+                .snaps
+                .current
+                .unit(self.host.player)
+                .zip(self.snaps.current.player.as_ref())
+                .and_then(|(me, player)| bag::nearest_pile(player, me.position))
+                .map(|pile| Command::Loot { pile: pile.id }),
+            c => c.slot().and_then(|slot| {
+                if self.settings.ground_cast == controls::GroundCast::HoldToAim
+                    && self.ground_slot(slot)
+                {
+                    self.held_ground = Some(slot);
+                    self.aim_slot = Some(slot);
+                    None
+                } else {
+                    Some(self.use_slot(slot))
+                }
+            }),
         };
         if let Some(c) = command {
             self.host.send(c);
@@ -551,8 +703,52 @@ impl Game {
                 self.host.send(Command::Guard(false))
             }
             controls::Control::FreePointer => self.pointer_free = self.down(control),
+            c if c.slot().is_some() && c.slot() == self.held_ground && !self.down(c) => {
+                self.held_ground = None;
+                let cast = self.use_slot(c.slot().unwrap());
+                self.host.send(cast);
+            }
             _ => {}
         }
+    }
+    /// The crosshair's state, from your target or the enemy under the crosshair and the reach
+    /// of the basic attack (the bar's auto-attack slot, else its first).
+    fn reticle(&self) -> Reticle {
+        let snapshot = &self.snaps.current;
+        let Some(me) = snapshot.unit(self.host.player) else {
+            return Reticle::Free;
+        };
+        let reach = snapshot.player.as_ref().map_or(0., |p| {
+            p.bar
+                .iter()
+                .find(|s| s.auto)
+                .or(p.bar.first())
+                .map_or(0., |s| s.range)
+        });
+        let enemy = |id| {
+            snapshot
+                .unit(id)
+                .filter(|u| u.hostile && u.health > 0.)
+                .map(|u| u.position.distance(me.position))
+        };
+        let target = me.target.and_then(enemy);
+        let under = if target.is_none() {
+            let (w, h) = (self.viewport.x as u32, self.viewport.y as u32);
+            self.pick(w as f64 / 2., h as f64 / 2., w, h)
+                .and_then(enemy)
+        } else {
+            None
+        };
+        reticle(target, under, reach)
+    }
+    /// Is this bar slot aimed at the ground?
+    fn ground_slot(&self, slot: u8) -> bool {
+        self.snaps
+            .current
+            .player
+            .as_ref()
+            .and_then(|p| p.bar.get(slot as usize))
+            .is_some_and(|s| s.ground)
     }
     /// Lets go of everything, for losing focus or opening the menu.
     fn release_all(&mut self) {
@@ -562,6 +758,7 @@ impl Game {
         self.orbiting = false;
         self.pointer_free = false;
         self.attacking = None;
+        self.held_ground = None;
         self.guard_button = false;
         self.controls(0.);
     }
@@ -637,6 +834,15 @@ impl Game {
                 self.orbit.shoulder = self.settings.shoulder();
                 m.notice = None;
             }
+            menu::Change::GroundCast(cast) => {
+                self.settings.ground_cast = cast;
+                self.held_ground = None;
+                m.notice = None;
+            }
+            menu::Change::ScreenShake(shake) => {
+                self.settings.screen_shake = shake;
+                m.notice = None;
+            }
             menu::Change::Close => {
                 self.menu = None;
                 return;
@@ -653,6 +859,11 @@ impl Game {
         let Some(m) = &mut self.menu else {
             return;
         };
+        if let Some(why) = reserved(&input) {
+            // Keep waiting for a key the game will actually see.
+            m.notice = Some(why);
+            return;
+        }
         let Some(control) = m.capture.take() else {
             return;
         };
@@ -721,6 +932,9 @@ impl Game {
             target: l(C::Target),
             swap: l(C::SwapWeapons),
             respawn: l(C::Respawn),
+            specialties: l(C::Specialties),
+            loot: l(C::Loot),
+            interact: l(C::Interact),
         }
     }
     fn direction(&self) -> Vec2 {
@@ -732,6 +946,15 @@ impl Game {
         if self.last_move.as_ref() != Some(&c) {
             self.host.send(c.clone());
             self.last_move = Some(c);
+        }
+        // The crosshair's pitch, for others to see where this player aims (#244).
+        if let Some(v) = self.view {
+            let d = v.target - v.eye;
+            let pitch = protocol::aim_pitch_byte(d.y.atan2(Vec2::new(d.x, d.z).length()));
+            if self.last_aim != Some(pitch) {
+                self.host.send(Command::Aim { pitch });
+                self.last_aim = Some(pitch);
+            }
         }
         self.keep_swinging(dt);
     }
@@ -827,11 +1050,25 @@ impl Game {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|v| v.1)
     }
+    /// A screen that wants the pointer is open: Specialties, the bag, or a shop's counter.
+    fn screen_open(&self) -> bool {
+        self.specialties
+            || self.bag
+            || self.skills_panel
+            || self
+                .snaps
+                .current
+                .player
+                .as_ref()
+                .is_some_and(|p| p.shop.is_some() || p.station.is_some())
+    }
     /// Aiming at the crosshair in the middle of the screen, rather than at the pointer.
     fn aiming(&self) -> bool {
         self.menu.is_none()
             && (self.mouse_look
-                || (self.pilot.scheme == controls::Scheme::Action && !self.pointer_free))
+                || (self.pilot.scheme == controls::Scheme::Action
+                    && !self.pointer_free
+                    && !self.screen_open()))
     }
     fn aim_point(&self) -> Option<Vec3> {
         let me = self.snaps.current.unit(self.host.player)?;
@@ -904,18 +1141,31 @@ impl Game {
                     sprint: false,
                     face_yaw: None,
                 }),
-                1 => self.host.send(Command::Jump),
-                2 => self.host.send(Command::Dodge {
-                    direction: Vec2::new(-1., 0.),
-                }),
+                1 => {
+                    self.latency
+                        .pressed(latency::Kind::Jump, None, latency::now());
+                    self.host.send(Command::Jump)
+                }
+                2 => {
+                    self.latency
+                        .pressed(latency::Kind::Roll, None, latency::now());
+                    self.host.send(Command::Dodge {
+                        direction: Vec2::new(-1., 0.),
+                    })
+                }
                 3 => {
                     self.host.send(Command::SetTarget(self.target(false)));
                     self.host.send(Command::SetAutoAttack(true));
                 }
-                4 | 5 => self.host.send(Command::UseSlot {
-                    slot: 1,
-                    ground: None,
-                }),
+                4 | 5 => {
+                    let ability = self.slot_ability(1);
+                    self.latency
+                        .pressed(latency::Kind::Skill, ability, latency::now());
+                    self.host.send(Command::UseSlot {
+                        slot: 1,
+                        ground: None,
+                    })
+                }
                 7 => self.host.send(Command::SwapWeapons),
                 _ => self.host.send(Command::Move {
                     direction: Vec2::ZERO,
@@ -935,8 +1185,34 @@ impl Game {
             self.host.send(Command::SwapWeapons);
         }
     }
+    /// Seconds of sim time since the `--gait` run started.
+    fn gait_time(&self) -> f32 {
+        let tick = self.snaps.current.tick;
+        self.gait_tick
+            .map_or(0., |t| tick.saturating_sub(t) as f32 / 60.)
+    }
+    /// Sends the `--gait` run's move for this frame, and logs each leg as it starts so captures
+    /// can be cut by frame.
+    fn gait(&mut self) {
+        self.gait_tick.get_or_insert(self.snaps.current.tick);
+        let Some((leg, command)) = gait::at(self.gait_time()) else {
+            return;
+        };
+        if self.gait_leg != Some(leg) {
+            self.gait_leg = Some(leg);
+            eprintln!("gait: {} from frame {}", gait::name(leg), self.frame);
+            if gait::draws(leg) {
+                self.host.send(Command::SetTarget(self.target(false)));
+            }
+        }
+        if self.last_move.as_ref() != Some(&command) {
+            self.host.send(command.clone());
+            self.last_move = Some(command);
+        }
+    }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
         perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
+        self.latency.presented(|frame| r.presented_at(frame));
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f32().min(0.1);
         self.last = now;
@@ -952,13 +1228,51 @@ impl Game {
                 break;
             }
         }
+        // Draw the world at a steady sim time on evenly spaced frame times.
+        let local = (now - self.epoch).as_secs_f64();
+        let frame_time = self.frame_clock.tick(local, self.frame_period);
+        if let Some((sim_time, due)) = self.host.clock() {
+            self.sim_clock
+                .observe(sim_time, seconds_between(self.epoch, due));
+        }
+        self.snaps.draw_time = self.sim_clock.draw_time(frame_time);
+        let tick = self.snaps.current.tick;
+        if let Some((last_time, last_tick)) = self.paced {
+            self.pacing
+                .frame(frame_time - last_time, tick.saturating_sub(last_tick));
+        }
+        self.paced = Some((frame_time, tick));
+        if let Some(drawn) = self.snaps.draw_time {
+            let s = &self.snaps;
+            let gap = (s.current.time - s.previous.time).max(1. / 60.);
+            let by_arrival = s.previous.time + s.received.elapsed().as_secs_f64().min(gap + 0.1);
+            // Loading stalls aren't judder.
+            if let Some((last_local, last_drawn, last_arrival)) = self.judder
+                && local - last_local < 0.1
+            {
+                // What the display shows between these frames: whole refreshes.
+                let period = self.frame_period.unwrap_or(1. / 60.);
+                let shown = ((local - last_local) / period).round() * period;
+                self.pacing.judder(
+                    drawn - last_drawn - shown,
+                    by_arrival - last_arrival - shown,
+                );
+            }
+            self.judder = Some((local, drawn, by_arrival));
+        }
         self.feedback.update(dt);
         for m in &mut self.messages {
             m.1 -= dt;
         }
         self.messages.retain(|m| m.1 > 0.);
+        if let Some(b) = &mut self.level_up {
+            b.2 -= dt;
+        }
+        self.level_up.take_if(|b| b.2 <= 0.);
         if self.options.smoke {
             self.smoke()
+        } else if self.options.gait {
+            self.gait()
         } else {
             self.controls(dt)
         }
@@ -968,6 +1282,45 @@ impl Game {
         for e in self.host.take_events() {
             self.events += 1;
             self.feedback.event(&e, &unit_index);
+            let me = self.host.player;
+            let shown = match &e {
+                protocol::Event::Jumped { unit } if *unit == me => {
+                    Some((latency::Kind::Jump, None))
+                }
+                protocol::Event::Dodged { unit } if *unit == me => {
+                    Some((latency::Kind::Roll, None))
+                }
+                protocol::Event::AbilityUsed { unit, ability, .. }
+                | protocol::Event::CastStarted { unit, ability, .. }
+                    if *unit == me =>
+                {
+                    Some((latency::Kind::Skill, Some(ability.as_str())))
+                }
+                _ => None,
+            };
+            if let Some((kind, ability)) = shown {
+                self.latency.stepped(kind, ability, self.snaps.current.time);
+            }
+            if let protocol::Event::Hit {
+                attacker,
+                victim,
+                dir,
+                weight,
+                ..
+            } = e
+                && let Some(metres) = kick_for(
+                    weight,
+                    attacker == self.host.player,
+                    victim == self.host.player,
+                )
+            {
+                let yaw = dir as f32 / 256. * std::f32::consts::TAU;
+                self.kick.add(
+                    Vec2::new(yaw.sin(), yaw.cos()),
+                    metres,
+                    self.settings.screen_shake,
+                );
+            }
             // A staged fight makes its own events.
             if let Some(fx) = &mut self.effects
                 && self.stage.is_none()
@@ -997,6 +1350,16 @@ impl Game {
                 protocol::Event::WeaponsSwapped { unit } if *unit == self.host.player => {
                     self.smoke_checks[3] = true;
                 }
+                protocol::Event::LevelUp {
+                    unit,
+                    specialty,
+                    level,
+                } if *unit == self.host.player => {
+                    self.level_up = Some((specialty.clone(), *level, 4.));
+                }
+                protocol::Event::SkillUp { unit, skill, level } if *unit == self.host.player => {
+                    self.level_up = Some((skill.clone(), *level, 4.));
+                }
                 protocol::Event::Damage { source, .. } if *source == self.host.player => {
                     self.smoke_checks[2] = true
                 }
@@ -1009,7 +1372,14 @@ impl Game {
         let mut units = if self.options.showcase {
             self.review.clone()
         } else {
-            self.snaps.units(!self.options.legacy_cpu)
+            let own = OWN_AHEAD.then_some(self.host.player);
+            let lead = if OWN_AHEAD { pacing::DRAW_DELAY } else { 0. };
+            self.latency.drew(
+                r.next_frame(),
+                self.snaps.previous.time + self.snaps.since() as f64 + lead,
+                latency::now(),
+            );
+            self.snaps.units(!self.options.legacy_cpu, own)
         };
         let time = self.frame as f32 / 60.;
         self.reel_time =
@@ -1034,14 +1404,25 @@ impl Game {
             .iter()
             .find(|u| u.id == self.host.player)
             .context("no local player")?;
+        // Hanging, moving between holds or running up a wall: frame the wall (#250).
+        self.follow.climbing = match me.traversal {
+            protocol::Traversal::Hanging => true,
+            protocol::Traversal::Forced(f) => matches!(
+                f.kind,
+                protocol::ForcedKind::Hold
+                    | protocol::ForcedKind::Corner
+                    | protocol::ForcedKind::WallRun
+            ),
+            _ => false,
+        };
         let scenery = &self.scenery;
-        self.view = Some(
-            self.follow
-                .update(&self.orbit, me.position, dt, |target, eye| match scenery {
-                    Some(scenery) => scenery.camera_eye(target, eye, 0.25),
-                    None => eye,
-                }),
-        );
+        let view = self
+            .follow
+            .update(&self.orbit, me.position, dt, |target, eye| match scenery {
+                Some(scenery) => scenery.camera_eye(target, eye, 0.25),
+                None => eye,
+            });
+        self.view = Some(self.kick.apply(view, dt));
         let camera = self.camera(me.position);
         let mut draws = Vec::new();
         for i in 0..self.terrain.primitives.len() {
@@ -1061,8 +1442,7 @@ impl Game {
         let scene_time = if self.options.showcase {
             time
         } else {
-            self.snaps.current.time as f32
-                + self.snaps.received.elapsed().as_secs_f32().min(1. / 60.)
+            self.snaps.current.time as f32 + self.snaps.since().min(1. / 60.)
         };
         if let Some(scenery) = &mut self.scenery {
             draws.extend(scenery.draws(
@@ -1141,9 +1521,12 @@ impl Game {
             .context("no local player in snapshot")?;
         self.frame += 1;
         // A smoke run also lasts until its schedule has played out, plus a second for the last
-        // events, so a short --frames or slow frames can't end it early.
+        // events, so a short --frames or slow frames can't end it early; a gait run until its
+        // script has.
         let done = self.options.frames.is_some_and(|n| self.frame >= n)
-            && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.);
+            && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.)
+            && (!self.options.gait
+                || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none());
         let frame_file = self
             .options
             .sequence
@@ -1206,7 +1589,7 @@ impl Game {
                 since: if staged.is_some() {
                     0.
                 } else {
-                    self.snaps.received.elapsed().as_secs_f32()
+                    self.snaps.since()
                 },
                 time: staged.as_ref().map_or(scene_time, |f| f.clock),
                 aim: staged.as_ref().map_or(aim.zip(radius), |f| f.aim),
@@ -1224,8 +1607,15 @@ impl Game {
                     .unwrap_or(1.),
         };
         let crosshair = self.aiming() && !self.options.showcase;
+        let reticle = if crosshair {
+            self.reticle()
+        } else {
+            Reticle::Free
+        };
         let keys = self.key_labels();
         let mut changes = Vec::new();
+        let mut bag_actions = Vec::new();
+        let mut craft_actions = Vec::new();
         let output = ctx.run(raw, |ctx| {
             if !self.options.showcase {
                 combat::paint(
@@ -1244,12 +1634,54 @@ impl Game {
             } else {
                 actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
                 hud::messages(ctx, &self.messages);
+                if let Some(banner) = &self.level_up {
+                    hud::level_up(ctx, banner);
+                }
+                if self.specialties {
+                    actions.extend(hud::specialties(
+                        ctx,
+                        &self.snaps.current,
+                        &mut self.assign_xp,
+                    ));
+                }
+            }
+            if let Some(player) = &self.snaps.current.player
+                && let Some(me) = self.snaps.current.unit(self.host.player)
+                && !self.options.showcase
+            {
+                bag::loot(ctx, &projection, player, me.position, &keys.loot);
+                let at_shop = player.shop.is_some();
+                if self.bag || at_shop {
+                    bag_actions.extend(bag::bag(ctx, player));
+                }
+                bag_actions.extend(bag::shop(ctx, player));
+                let interact = craft::interact(&self.snaps.current, player, me.position);
+                craft::world(
+                    ctx,
+                    &projection,
+                    &player.nodes,
+                    me.position,
+                    interact.as_ref(),
+                    &keys.interact,
+                );
+                if let Some(w) = &player.work {
+                    craft_actions.extend(craft::work(ctx, w, &keys.interact));
+                }
+                craft_actions.extend(craft::station(ctx, player));
+                if self.skills_panel {
+                    craft_actions.extend(craft::skills(ctx, player));
+                }
             }
             if crosshair {
-                paint_crosshair(ctx);
+                paint_crosshair(ctx, reticle);
             }
-            self.perf
-                .draw(ctx, self.host.stats().step_ms, r.gpu_counters_enabled());
+            self.perf.draw(
+                ctx,
+                self.host.stats().step_ms,
+                r.gpu_counters_enabled(),
+                &self.pacing,
+                &self.latency,
+            );
             if let Some(m) = &self.menu {
                 changes = menu::draw(ctx, m, &self.settings, &self.settings_path);
             }
@@ -1264,6 +1696,19 @@ impl Game {
                 }
                 hud::Action::AimSlot(slot) => self.aim_slot = Some(slot),
                 hud::Action::CycleTarget => self.host.send(Command::SetTarget(self.target(true))),
+                hud::Action::CloseSpecialties => self.specialties = false,
+            }
+        }
+        for action in bag_actions {
+            match action {
+                bag::Action::Command(c) => self.host.send(c),
+                bag::Action::Close => self.bag = false,
+            }
+        }
+        for action in craft_actions {
+            match action {
+                craft::Action::Command(c) => self.host.send(c),
+                craft::Action::CloseSkills => self.skills_panel = false,
             }
         }
         r.hud = Some(render::gui::HudFrame {
@@ -1275,7 +1720,11 @@ impl Game {
         r.scene_time = Some(scene_time);
         r.inline_constants = self.options.inline_constants;
         r.direct_drawable = self.options.direct_drawable;
-        r.target_fps = self.options.fps.unwrap_or(60.);
+        r.target_fps = self
+            .options
+            .fps
+            .or(self.frame_period.map(|p| 1. / p))
+            .unwrap_or(60.);
         let mut stats = r.draw(self.camera(player.position), &draws, capture)?;
         if self.options.benchmark && self.options.in_flight == 1 {
             r.wait()?;
@@ -1345,6 +1794,26 @@ impl Game {
                 self.perf.report(r.gpu_counters_enabled());
             }
             eprintln!("HISTORY resets={}", r.stats.history_resets);
+            for kind in latency::Kind::ALL {
+                if let Some((median, p95, n)) = self.latency.summary(kind) {
+                    eprintln!(
+                        "LATENCY {} press_to_photon median={median:.1}ms p95={p95:.1}ms samples={n}",
+                        kind.name()
+                    );
+                }
+                if let Some((median, p95, n)) = self.latency.to_frame(kind) {
+                    eprintln!(
+                        "LATENCY {} press_to_frame median={median:.1}ms p95={p95:.1}ms samples={n}",
+                        kind.name()
+                    );
+                }
+            }
+            let [none, one, more] = self.pacing.total;
+            eprintln!("PACING steps_per_frame 0={none} 1={one} 2+={more}");
+            let (paced, by_arrival) = self.pacing.judder_ms();
+            eprintln!(
+                "PACING judder_rms paced={paced:.3}ms by_arrival={by_arrival:.3}ms (sim time drawn vs refreshes shown)"
+            );
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
                 let mut intervals: Vec<_> = presentations
@@ -1354,8 +1823,11 @@ impl Game {
                     .collect();
                 let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
                 intervals.sort_by(f64::total_cmp);
+                let sd = (intervals.iter().map(|i| (i - mean).powi(2)).sum::<f64>()
+                    / intervals.len() as f64)
+                    .sqrt();
                 eprintln!(
-                    "PRESENT mean_fps={:.3} p95={:.3}ms samples={}",
+                    "PRESENT mean_fps={:.3} p95={:.3}ms sd={sd:.3}ms samples={}",
                     1000. / mean,
                     intervals[intervals.len() * 95 / 100],
                     intervals.len()
@@ -1510,14 +1982,49 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     units
 }
 /// A small ring with four ticks at the centre of the screen, where aimed skills go.
-fn paint_crosshair(ctx: &egui::Context) {
+/// What the crosshair says about your attacks, so you know before pressing a key whether a
+/// skill goes to your target or to the crosshair.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Reticle {
+    /// No target: skills fire at the crosshair.
+    Free,
+    /// No target, but an enemy under the crosshair is within the basic attack's reach.
+    EnemyInReach,
+    /// Your target is within the basic attack's reach.
+    TargetInRange,
+    /// Your target is further away than that.
+    TargetOutOfRange,
+}
+
+/// The reticle from how far away your target is (if you have one), how far away a living
+/// enemy under the crosshair is (if any), and the basic attack's reach.
+fn reticle(target: Option<f32>, under: Option<f32>, reach: f32) -> Reticle {
+    match (target, under) {
+        (Some(d), _) if d <= reach => Reticle::TargetInRange,
+        (Some(_), _) => Reticle::TargetOutOfRange,
+        (None, Some(d)) if d <= reach => Reticle::EnemyInReach,
+        _ => Reticle::Free,
+    }
+}
+
+fn paint_crosshair(ctx: &egui::Context, reticle: Reticle) {
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
         egui::Id::new("crosshair"),
     ));
     let c = ctx.content_rect().center();
+    // Colour, and how far out the ticks start and end.
+    let (colour, ticks) = match reticle {
+        Reticle::Free => (egui::Color32::from_white_alpha(220), (7., 13.)),
+        Reticle::EnemyInReach => (egui::Color32::from_rgb(250, 190, 70), (6., 12.)),
+        Reticle::TargetInRange => (egui::Color32::from_rgb(240, 70, 55), (5., 11.)),
+        Reticle::TargetOutOfRange => (
+            egui::Color32::from_rgb(240, 70, 55).gamma_multiply(0.55),
+            (11., 16.),
+        ),
+    };
     let shadow = egui::Stroke::new(3f32, egui::Color32::from_black_alpha(110));
-    let line = egui::Stroke::new(1.5f32, egui::Color32::from_white_alpha(220));
+    let line = egui::Stroke::new(1.5f32, colour);
     for stroke in [shadow, line] {
         painter.circle_stroke(c, 3., stroke);
         for d in [
@@ -1526,8 +2033,11 @@ fn paint_crosshair(ctx: &egui::Context) {
             egui::vec2(0., 1.),
             egui::vec2(0., -1.),
         ] {
-            painter.line_segment([c + d * 7., c + d * 13.], stroke);
+            painter.line_segment([c + d * ticks.0, c + d * ticks.1], stroke);
         }
+    }
+    if reticle == Reticle::TargetInRange {
+        painter.circle_filled(c, 1.8, colour);
     }
 }
 /// The reel's caption, top centre on a dark plate.
@@ -1548,6 +2058,8 @@ fn paint_caption(ctx: &egui::Context, text: &str) {
 }
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
+/// Your own character is drawn at the newest sim time rather than a step behind (#219).
+const OWN_AHEAD: bool = true;
 /// How often a held attack button presses the basic attack again, in seconds.
 const SWING_REPEAT: f32 = 0.1;
 /// A press of the left or right button, until both are up again.
@@ -1568,6 +2080,9 @@ struct App {
     next_redraw: Instant,
     egui_state: Option<egui_winit::State>,
     focused: bool,
+    proxy: EventLoopProxy<()>,
+    /// Starts frames on the window's display refresh; without one, a timer does.
+    display_link: Option<pacing::DisplayLink>,
 }
 impl App {
     /// A key or mouse button 3-5 going down or up: does whatever it is bound to.
@@ -1591,9 +2106,14 @@ impl App {
         }
         self.sync_pointer(self.focused);
     }
-    /// Esc closes the menu (or stops it waiting for a key), and opens it otherwise.
+    /// Esc closes the menu (or stops it waiting for a key) or the Specialties screen, and opens
+    /// the menu otherwise.
     fn escape(&mut self) {
         match &mut self.game.menu {
+            None if self.game.held_ground.is_some() => self.game.held_ground = None,
+            None if self.game.specialties => self.game.specialties = false,
+            None if self.game.bag => self.game.bag = false,
+            None if self.game.skills_panel => self.game.skills_panel = false,
             Some(m) if m.capture.is_some() => {
                 m.capture = None;
                 m.notice = None;
@@ -1611,6 +2131,10 @@ impl App {
     /// instead, which targets (and with the right button, attacks) the unit under the cursor.
     /// The middle and thumb buttons are bindable inputs like keys.
     fn button(&mut self, button: MouseButton, pressed: bool) {
+        // The right button cancels a held ground skill instead of guarding or steering.
+        if button == MouseButton::Right && pressed && self.game.held_ground.take().is_some() {
+            return;
+        }
         match button {
             MouseButton::Left | MouseButton::Right if pressed && self.game.menu.is_some() => {
                 return;
@@ -1675,6 +2199,7 @@ impl App {
         let want = focused
             && self.game.pilot.scheme == controls::Scheme::Action
             && !self.game.pointer_free
+            && !self.game.screen_open()
             && self.game.menu.is_none()
             && !self.game.options.showcase;
         if want == self.pointer_held {
@@ -1776,6 +2301,20 @@ impl ApplicationHandler for App {
                 None,
             ));
             w.focus_window();
+            {
+                use winit::platform::macos::MonitorHandleExtMacOS;
+                let display = w.current_monitor().map_or(0, |m| m.native_id());
+                self.display_link = pacing::DisplayLink::start(self.proxy.clone(), display);
+                match &self.display_link {
+                    Some(link) => {
+                        // `--fps` caps the rate; the display sets it otherwise.
+                        let cap = self.game.options.fps.map_or(0., |f| 1. / f);
+                        self.game.frame_period = Some(link.period.max(cap));
+                        eprintln!("PACING display {:.2} Hz", 1. / link.period);
+                    }
+                    None => eprintln!("PACING timer (no display link)"),
+                }
+            }
             self.renderer = Some(r);
             self.window = Some(w);
             self.sync_pointer(true);
@@ -1953,7 +2492,32 @@ impl ApplicationHandler for App {
             }
         }
     }
+    /// A refresh of the window's display: draw, unless `--fps` caps below the refresh rate
+    /// and this one comes too soon.
+    fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        let Some(link) = &self.display_link else {
+            return;
+        };
+        link.taken();
+        let now = Instant::now();
+        if let Some(fps) = self.game.options.fps
+            && 1. / fps > link.period * 1.05
+        {
+            // Allow for the refresh landing a little early.
+            if now + Duration::from_secs_f64(link.period * 0.5) < self.next_redraw {
+                return;
+            }
+            self.next_redraw = (self.next_redraw + Duration::from_secs_f64(1. / fps)).max(now);
+        }
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+    }
     fn about_to_wait(&mut self, e: &ActiveEventLoop) {
+        if self.display_link.is_some() {
+            e.set_control_flow(ControlFlow::Wait);
+            return;
+        }
         let now = Instant::now();
         let period = Duration::from_secs_f64(1. / self.game.options.fps.unwrap_or(60.));
         if now >= self.next_redraw {
@@ -2010,12 +2574,13 @@ fn main() -> Result<()> {
                 } else if now - deadline > period {
                     deadline = now;
                 }
-            } else if game.options.smoke {
+            } else if game.options.smoke || game.options.gait {
                 std::thread::sleep(Duration::from_millis(16).saturating_sub(start.elapsed()));
             }
         }
     } else {
         let event_loop = EventLoop::new()?;
+        let proxy = event_loop.create_proxy();
         let mut app = App {
             game,
             renderer: None,
@@ -2027,6 +2592,8 @@ fn main() -> Result<()> {
             next_redraw: Instant::now(),
             egui_state: None,
             focused: true,
+            proxy,
+            display_link: None,
         };
         event_loop.run_app(&mut app)?;
         if let Some(e) = app.error {
@@ -2039,6 +2606,40 @@ fn main() -> Result<()> {
 /// A key by its winit name, which is how the bindings name it.
 fn key_input(key: KeyCode) -> controls::Input {
     controls::Input(format!("{key:?}"))
+}
+
+/// Why a key can't be bound, for keys something else takes before the game sees them.
+fn reserved(input: &controls::Input) -> Option<String> {
+    (*input == key_input(KeyCode::F3)).then(|| {
+        format!(
+            "{} is the performance overlay. Press another key.",
+            input.label()
+        )
+    })
+}
+
+/// Seconds from `from` to `to`, negative if `to` came first.
+fn seconds_between(from: Instant, to: Instant) -> f64 {
+    match to.checked_duration_since(from) {
+        Some(d) => d.as_secs_f64(),
+        None => -(from - to).as_secs_f64(),
+    }
+}
+
+/// How far a blow kicks the camera, in metres, if it does: the player's own heavy, critical
+/// and parried blows, and every blow they take. Other people's fights and the player's light
+/// blows leave it still.
+fn kick_for(weight: protocol::HitWeight, mine: bool, on_me: bool) -> Option<f32> {
+    use protocol::HitWeight::*;
+    match (weight, mine, on_me) {
+        (Light, false, true) => Some(0.02),
+        (Blocked, false, true) => Some(0.015),
+        (Heavy, _, true) | (Heavy, true, _) => Some(0.04),
+        (Critical, _, true) | (Critical, true, _) => Some(0.05),
+        (Parried, _, true) | (Parried, true, _) => Some(0.045),
+        (Big, _, true) | (Big, true, _) => Some(0.07),
+        _ => None,
+    }
 }
 
 /// The middle and thumb buttons; the left and right ones aren't bindable.
@@ -2056,6 +2657,23 @@ fn mouse_input(button: MouseButton) -> Option<controls::Input> {
 #[cfg(test)]
 mod catalog_defaults_tests {
     use super::*;
+    #[test]
+    fn reticle_follows_target_and_reach() {
+        assert_eq!(reticle(None, None, 3.), Reticle::Free);
+        assert_eq!(reticle(None, Some(2.), 3.), Reticle::EnemyInReach);
+        assert_eq!(reticle(None, Some(9.), 3.), Reticle::Free);
+        assert_eq!(reticle(Some(2.5), None, 3.), Reticle::TargetInRange);
+        assert_eq!(reticle(Some(12.), Some(1.), 3.), Reticle::TargetOutOfRange);
+    }
+    #[test]
+    fn the_overlay_key_cannot_be_bound() {
+        assert_eq!(
+            reserved(&key_input(KeyCode::F3)).as_deref(),
+            Some("F3 is the performance overlay. Press another key.")
+        );
+        assert_eq!(reserved(&key_input(KeyCode::F4)), None);
+        assert_eq!(reserved(&controls::Input::new("Mouse4")), None);
+    }
     #[test]
     fn optional_catalog_defaults_preserve_explicit_overrides() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
