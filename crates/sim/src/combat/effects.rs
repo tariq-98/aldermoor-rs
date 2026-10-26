@@ -98,7 +98,10 @@ pub fn deal_damage(world: &mut World, src: &HitSource, te: Entity, raw: f32, cri
         // A share of the kill for hurting a monster, or for taking its blows.
         crate::progress::credit(world, a, te, counted);
         crate::progress::credit(world, te, a, counted);
-        if let Some(mut v) = world.get_mut::<Vitals>(a) {
+        // A blow from across the border: the attacker's own region notes it was in a fight.
+        if let Some(region) = crate::region::ghost_region(world, a) {
+            crate::region::send(world, region, a, Landing::Struck { victim: target, pvp });
+        } else if let Some(mut v) = world.get_mut::<Vitals>(a) {
             v.last_combat = t;
         }
         if let Some(mut f) = world.get_mut::<Fighter>(a) {
@@ -467,6 +470,24 @@ pub(crate) fn land_request(world: &mut World, te: Entity, landing: Landing) {
         }
         Landing::Effect { effect, src, ability, crit, center, mult } => {
             apply(world, &effect, te, &src, ability.map(|a| cat.ability(a)), crit, center, mult);
+        }
+        Landing::Struck { victim, pvp } => {
+            let t = now(world);
+            if let Some(mut v) = world.get_mut::<Vitals>(te) {
+                v.last_combat = t;
+            }
+            if let Some(mut f) = world.get_mut::<Fighter>(te) {
+                if pvp {
+                    f.pvp_until = t + PVP_COMBAT;
+                }
+                match f.recent_victims.iter_mut().find(|(id, _)| *id == victim) {
+                    Some(r) => r.1 = t,
+                    None => f.recent_victims.push((victim, t)),
+                }
+            }
+        }
+        Landing::KillXp { spec, mob_level, rank, share } => {
+            crate::progress::pay_share(world, te, spec, mob_level, rank, share);
         }
     }
     super::life::release_deaths(world);

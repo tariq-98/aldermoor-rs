@@ -407,7 +407,7 @@ fn every_node_and_station_can_be_reached() {
             (1..=8).any(|k| {
                 let a = i as f32 / 48.0 * std::f32::consts::TAU;
                 let p = Vec2::new(x, z) + Vec2::from_angle(a) * reach * k as f32 / 8.0 * 0.95;
-                !land.blocked(p, 0.4) && land.water_depth(p.x, p.y) <= 0.0
+                !land.blocked(p, 0.4) && !land.on_face(p, 0.4, land.surface(p.x, p.y) + 1.5) && land.water_depth(p.x, p.y) <= 0.0
             })
         });
         assert!(ok, "nowhere to stand within reach of {what} at ({x}, {z})");

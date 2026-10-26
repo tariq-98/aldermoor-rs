@@ -78,6 +78,9 @@ impl Region {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Ghost {
     pub region: u32,
+    /// The specialty it fights with, so a player's blows across the border earn its share of
+    /// a kill (#208).
+    pub specialty: Option<crate::Specialty>,
     pub velocity: Vec3,
     pub traversal: protocol::Traversal,
     pub target: Option<UnitId>,
@@ -116,6 +119,9 @@ pub struct GhostState {
     pub level: u8,
     /// Its side now, which can change (a charmed monster, a duel).
     pub faction: crate::Faction,
+    pub specialty: Option<crate::Specialty>,
+    /// A player: a region with one of these at its border stays awake.
+    pub player: bool,
     pub transform: Transform,
     pub vitals: Vitals,
     pub anim: Anim,
@@ -153,6 +159,12 @@ pub enum Landing {
     Effects { effects: Vec<Effect>, src: HitSource, ability: Option<AbilityId>, center: Vec3, delivery: Delivery },
     /// One effect on its own (a combo going off).
     Effect { effect: Effect, src: HitSource, ability: Option<AbilityId>, crit: bool, center: Vec3, mult: f32 },
+    /// The target's blow landed on `victim` in another region: it's in combat (and in PvP
+    /// combat) as if the blow had landed here, and remembers whom it hit.
+    Struck { victim: UnitId, pvp: bool },
+    /// The target earned a share of a kill in another region, which pays it here, at its own
+    /// level: `share` of what a `rank` monster of `mob_level` is worth, to `spec`.
+    KillXp { spec: crate::Specialty, mob_level: u8, rank: crate::content::Rank, share: f32 },
 }
 
 /// Requests made this step, for the host to collect.
@@ -166,6 +178,12 @@ pub(crate) fn ghost_region(world: &World, e: Entity) -> Option<u32> {
 
 pub(crate) fn send(world: &mut World, region: u32, target: Entity, landing: Landing) {
     let Some(target) = world.get::<Unit>(target).map(|u| u.id) else { return };
+    send_to(world, region, target, landing);
+}
+
+/// Sends `landing` to unit `target` in `region`, its last known home: the host delivers it
+/// wherever the unit lives now.
+pub(crate) fn send_to(world: &mut World, region: u32, target: UnitId, landing: Landing) {
     world.resource_mut::<Outgoing>().0.push(Request { region, target, landing });
 }
 
@@ -252,6 +270,8 @@ impl UnitRecord {
             region,
             level: unit.level,
             faction: unit.faction,
+            specialty: self.fighter.as_ref().and_then(|f| f.specialty),
+            player: self.player.is_some(),
             combat,
             transform,
             vitals,
@@ -303,6 +323,15 @@ impl Sim {
 
     /// Puts a region that hasn't stepped yet at `tick`, so a layer opened later steps with the
     /// rest of its world.
+    /// Moves the clock on one tick without stepping: what a quiet region does between its
+    /// once-a-second steps, so it stays on the same tick as its neighbours (#208). Monsters
+    /// there wander and regain health at a sixtieth of the pace while nobody's near.
+    pub fn idle(&mut self) {
+        let mut clock = self.world.resource_mut::<crate::Clock>();
+        clock.tick += 1;
+        clock.time = clock.tick as f64 / crate::TICK_RATE as f64;
+    }
+
     pub fn set_tick(&mut self, tick: u64) {
         let mut clock = self.world.resource_mut::<crate::Clock>();
         assert!(clock.tick == 0, "only a new region is set to a tick");
@@ -379,6 +408,8 @@ impl Sim {
                         region,
                         level: u.level,
                         faction: u.faction,
+                        specialty: f.and_then(|f| f.specialty),
+                        player,
                         transform,
                         vitals,
                         anim: anim.copied().unwrap_or_default(),
@@ -417,7 +448,7 @@ impl Sim {
             if kept.contains_key(&id) || (existing.is_none() && self.world.resource::<Units>().entity(id).is_some()) {
                 continue;
             }
-            let ghost = Ghost { region: g.region, velocity: g.velocity, traversal: g.traversal, target: g.target, drawn: g.drawn };
+            let ghost = Ghost { region: g.region, specialty: g.specialty, velocity: g.velocity, traversal: g.traversal, target: g.target, drawn: g.drawn };
             let combat = g.combat.map(|combat| GhostCombat { at: now, combat });
             let e = match (existing, g.first) {
                 (Some(e), first) => {

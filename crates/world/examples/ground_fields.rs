@@ -5,9 +5,10 @@
 //! column 0 the west edge), as little-endian f32 planes in this order: height, the normal's x,
 //! y and z, distance to the nearest road, and the signed distance south of the river's centre
 //! line. And `places.json`: the trees and houses, which the art build turns into the terrain's
-//! layer weights (art/blender/build_world.py), and the masonry, which it builds props to fill
-//! (art/blender/build_environment.py): each piece's blocks and coping line in its own frame, and
-//! the drawn ground under it every half metre, measured from its origin.
+//! layer weights (art/blender/build_world.py); the masonry, which it builds props to fill
+//! (art/blender/build_environment.py): each piece's blocks, grips and coping line in its own
+//! frame, and the drawn ground under it every half metre, measured from its origin; and the
+//! cottages' measurements, blocks and grips, which it builds the cottages to match.
 
 use glam::Vec2;
 use std::io::Write;
@@ -51,11 +52,12 @@ fn main() -> std::io::Result<()> {
     std::fs::write(
         out.join("places.json"),
         format!(
-            "{{\"size\": {size}, \"bounds\": {}, \"trees\": [{}], \"houses\": [{}], \"masonry\": [\n{}\n]}}\n",
+            "{{\"size\": {size}, \"bounds\": {}, \"trees\": [{}], \"houses\": [{}], \"masonry\": [\n{}\n], \"cottages\": {}}}\n",
             world::BOUNDS,
             list(&valley.trees),
             list(&valley.houses),
-            masonry.join(",\n")
+            masonry.join(",\n"),
+            cottages()
         ),
     )?;
     println!(
@@ -68,12 +70,13 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-/// A piece of masonry as JSON: its blocks and line, and the ground round it (a grid every half
-/// metre over its blocks and 2 m beyond, rows of increasing z, in its own frame).
-fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
-    let f = |v: f32| format!("{:.4}", v);
-    let blocks: Vec<String> = m
-        .blocks
+fn f(v: f32) -> String {
+    format!("{:.4}", v)
+}
+
+/// Blocks as JSON, in their piece's frame.
+fn blocks(blocks: &[world::Block]) -> String {
+    let list: Vec<String> = blocks
         .iter()
         .map(|b| {
             format!(
@@ -89,8 +92,12 @@ fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
             )
         })
         .collect();
-    let grips: Vec<String> = m
-        .grips
+    list.join(", ")
+}
+
+/// Grips as JSON, in their piece's frame.
+fn grips(grips: &[world::Grip]) -> String {
+    let list: Vec<String> = grips
         .iter()
         .map(|g| {
             format!(
@@ -107,6 +114,44 @@ fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
             )
         })
         .collect();
+    list.join(", ")
+}
+
+/// The cottages as JSON (`world::cottage`): the measurements they share, and each one's own, with
+/// its blocks and grips in its own frame.
+fn cottages() -> String {
+    use world::cottage::*;
+    let each: Vec<String> = COTTAGES
+        .iter()
+        .map(|c| {
+            format!(
+                "{{\"prop\": \"{}\", \"rise\": {}, \"thick\": {}, \"ridge\": [{}, {}], \"chimney\": {}, \"blocks\": [{}], \"grips\": [{}]}}",
+                c.prop,
+                f(c.rise),
+                f(c.thick),
+                f(c.ridge.0),
+                f(c.ridge.1),
+                f(c.chimney),
+                blocks(&c.blocks()),
+                grips(&c.grips())
+            )
+        })
+        .collect();
+    format!(
+        "{{\"width\": {}, \"depth\": {}, \"wall0\": {}, \"wall1\": {}, \"eaves\": {}, \"verge\": {}, \"kinds\": [\n{}\n]}}",
+        f(WIDTH),
+        f(DEPTH),
+        f(WALL0),
+        f(WALL1),
+        f(EAVES),
+        f(VERGE),
+        each.join(",\n")
+    )
+}
+
+/// A piece of masonry as JSON: its blocks and line, and the ground round it (a grid every half
+/// metre over its blocks and 2 m beyond, rows of increasing z, in its own frame).
+fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
     let line: Vec<String> = m.line.iter().map(|p| format!("[{}, {}, {}]", f(p.x), f(p.y), f(p.z))).collect();
     let reach = m.blocks.iter().map(|b| b.center.abs() + Vec2::splat(b.half.length())).fold(Vec2::ZERO, Vec2::max) + Vec2::splat(2.0);
     let (nx, nz) = ((reach.x * 2.0).ceil() as i32, (reach.y * 2.0).ceil() as i32);
@@ -125,8 +170,8 @@ fn piece(valley: &world::Valley, m: &world::Masonry) -> String {
         f(m.origin.y),
         f(m.origin.z),
         f(m.yaw),
-        blocks.join(", "),
-        grips.join(", "),
+        blocks(&m.blocks),
+        grips(&m.grips),
         line.join(", "),
         f(-nx as f32 * 0.5),
         f(-nz as f32 * 0.5),
