@@ -252,8 +252,10 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 let p = f.from.lerp(f.to, k);
                 let rise = (f.arc - (f.to.y - f.from.y) * 0.5).max(0.0);
                 t.pos = Vec3::new(p.x, p.y + (k * std::f32::consts::PI).sin() * rise, p.z);
-            } else if let ForcedKind::ToHold { .. } = f.kind {
+            } else if let ForcedKind::ToHold { hold, .. } = f.kind {
                 t.pos = climbing::carry(&f, k);
+                // Turning to face the wall on the way there, rather than in one snap.
+                t.yaw = approach_angle(t.yaw, heading(-land.holds.get(hold).out), DT * 14.0);
             } else {
                 let eased = 1.0 - (1.0 - k) * (1.0 - k);
                 let p = f.from.lerp(f.to, eased);

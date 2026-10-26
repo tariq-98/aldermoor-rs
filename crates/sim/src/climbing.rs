@@ -68,7 +68,6 @@ fn to_hold(land: &Valley, now: f64, t: &mut Transform, m: &mut Motion, radius: f
     m.vel = Vec3::ZERO;
     m.grounded = false;
     m.sprinting = false;
-    t.yaw = heading(-h.out);
 }
 
 /// Where a carry onto a hold has got to, `k` of the way through: over the edge before dropping

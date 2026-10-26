@@ -8494,6 +8494,162 @@
     ]
    },
    {
+    "name": "Hang_Catch",
+    "seconds": 0.2,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.0,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_ClimbUp",
+    "seconds": 0.8,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.24,
+      "name": "push"
+     },
+     {
+      "t": 0.4,
+      "name": "land"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Climb_Down",
+    "seconds": 0.4,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Climb_Up",
+    "seconds": 0.4,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.2,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Drop",
+    "seconds": 0.6,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.15,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Hop_L",
+    "seconds": 0.3,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.16,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Hop_R",
+    "seconds": 0.3,
+    "loop": false,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored",
+    "events": [
+     {
+      "t": 0.16,
+      "name": "hold"
+     }
+    ]
+   },
+   {
+    "name": "Hang_Idle_Loop",
+    "seconds": 2.4,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored"
+   },
+   {
+    "name": "Hang_Shimmy_L_Loop",
+    "seconds": 0.4,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored"
+   },
+   {
+    "name": "Hang_Shimmy_R_Loop",
+    "seconds": 0.4,
+    "loop": true,
+    "group": "locomotion",
+    "tags": [
+     "locomotion",
+     "climb"
+    ],
+    "source": "authored"
+   },
+   {
     "name": "Hit_Chest",
     "seconds": 0.333,
     "loop": false,
