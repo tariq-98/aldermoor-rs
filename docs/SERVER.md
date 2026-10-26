@@ -67,8 +67,11 @@ in exactly one region at a time, and only that region changes it.
   second (wandering, respawns) instead of 60 times (#33).
 - **Layers** (#170): when a region passes its player cap (a capital on launch night), the world
   opens another copy of its ground, a layer, and new arrivals go there. A layer is a region like
-  any other: its own thread, its own monsters, its own region ID and block of unit IDs (never
-  reused, so a unit's ID still never changes). Players in different layers of a ground don't see
+  any other: its own thread, its own monsters, its own region ID and block of unit IDs, so a
+  unit's ID never changes while it's in the world. Unit IDs leave room for 256 regions, so a
+  closed layer's ID is taken again by a later layer (#274), but only once a minute has passed
+  (long after clients forget units they saw, ten seconds) and no unit from its block is left
+  in any region. With none free, a full ground turns new arrivals back, as the Wilderness does. Players in different layers of a ground don't see
   each other. Next door, layer *n* pairs with the neighbour's layer *n*, and the last layer of
   the ground with fewer pairs with all the rest, so open country beside a layered town sees every
   layer's side of the border. Crossing over, a player goes to the layer paired with the one they

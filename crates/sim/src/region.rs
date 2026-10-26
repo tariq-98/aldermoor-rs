@@ -28,6 +28,8 @@ const DEFAULT_BODY: Body = Body { radius: 0.4, height: 1.8 };
 
 /// Unit IDs in each region's block.
 pub const BLOCK: UnitId = 1 << 24;
+/// Region IDs there's room for, with blocks that size.
+pub const REGIONS: u32 = (UnitId::MAX / BLOCK) + 1;
 /// Units this close to a neighbour's ground show there as ghosts.
 pub const GHOST_BAND: f32 = 32.0;
 /// How far past its region's edge a unit's centre goes before it hands over, so one strolling
@@ -240,13 +242,20 @@ impl UnitRecord {
 impl Sim {
     /// Region `id` of a world, owning `bounds` of `land`. Its units take IDs from its own block.
     pub fn region(land: Arc<world::Valley>, seed: u64, id: u32, bounds: Bounds) -> Sim {
-        assert!(id < 256, "unit IDs have room for 256 regions");
+        assert!(id < REGIONS, "unit IDs have room for {REGIONS} regions");
         let mut sim = Sim::on(land, seed);
         sim.world.insert_resource(Region { id, bounds: Some(bounds) });
         let mut units = sim.world.resource_mut::<Units>();
         assert!(units.next == 0, "a region is set before anything is in it");
         units.base = id * BLOCK;
         sim
+    }
+
+    /// Whether any unit with an ID from `region`'s block lives here, or is a ghost here.
+    pub fn holds_block(&self, region: u32) -> bool {
+        let units = self.world.resource::<Units>();
+        let ids = region * BLOCK..=region * BLOCK + (BLOCK - 1);
+        units.foreign.range(ids.clone()).next().is_some() || units.ghosts.range(ids).next().is_some() || (units.base == region * BLOCK && units.entities.iter().any(Option::is_some))
     }
 
     pub fn region_info(&self) -> Region {
