@@ -106,7 +106,7 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     Away from the wall climbs down to a hold up to 1 m lower, and does nothing if there isn't
     one, so you never fall by accident.
   - **Leaps and ejects:** Space while hanging, by the direction pressed (#246). Into the wall or
-    none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, in 0.5 s
+    none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, or in or out (a ledge set back up a sloping cliff), in 0.5 s
     (`LEAP_REACH`, `LEAP_SIDE`, `LEAP_TIME`); with none in reach, Space adds nothing to the
     direction. Along the wall: a side eject to a hold 0.8 to 2.5 m that way and up to 1 m up or
     down (`EJECT_REACH`, `EJECT_RISE`), in 0.55 s with a hop, or, with none there, a jump off the

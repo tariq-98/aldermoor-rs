@@ -163,7 +163,8 @@ fn room_on_top(land: &Valley, hold: &Hold, at: f32, radius: f32) -> Option<Vec3>
 }
 
 /// The nearest other hold the hands could reach `rise` metres up or down (within the range) and
-/// up to `side` to either side, on the same face: its index and where along it.
+/// up to `side` to either side, or that far in or out (a ledge set back up a sloping cliff), on
+/// the same face: its index and where along it.
 fn hold_beside(land: &Valley, current: u32, at: f32, rise: RangeInclusive<f32>, side: f32, radius: f32) -> Option<(u32, f32)> {
     let hold = land.holds.get(current);
     let hands = hold.at(at);
@@ -176,7 +177,7 @@ fn hold_beside(land: &Valley, current: u32, at: f32, rise: RangeInclusive<f32>, 
         let (s, off) = h.locate(hands.xz());
         let to = on_hold(s, h.len());
         let dy = h.at(to).y - hands.y;
-        if (s - to).abs() > side || off.abs() > 0.5 || !rise.contains(&dy) || !hangable(land, h, to, radius) {
+        if (s - to).abs() > side || off.abs() > side || !rise.contains(&dy) || !hangable(land, h, to, radius) {
             continue;
         }
         if best.is_none_or(|b| dy.abs() < b.0) {

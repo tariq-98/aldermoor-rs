@@ -148,7 +148,15 @@ pub(crate) fn ledge_top(land: &world::Valley, from: Vec2, y: f32, dir: Vec2, rad
             if top - y > reach {
                 return None;
             }
-            let front = ((h - prev).abs() < 0.05).then_some((p - dir * STEP, prev));
+            // The front of the top: back from the last sample while still on it.
+            let front = ((h - prev).abs() < 0.05).then(|| {
+                let on = |q: Vec2| (land.ground(q.x, q.y) - h).abs() < 0.05;
+                let mut q = p - dir * STEP;
+                while on(q - dir * 0.05) && (q - from).dot(dir) > 0.05 {
+                    q -= dir * 0.05;
+                }
+                (q, h)
+            });
             return [(stand, top), (p, h)].into_iter().chain(front).find(|&(at, top)| room(land, at, top, radius)).map(|(at, top)| Vec3::new(at.x, top, at.y));
         }
         prev = h;
