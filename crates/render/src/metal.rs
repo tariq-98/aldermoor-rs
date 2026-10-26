@@ -2552,8 +2552,10 @@ mod temporal_tests {
             let bright = output_bytes(&r);
             assert!(
                 bright
-                    .chunks_exact(4)
-                    .zip(original.chunks_exact(4))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(original.as_chunks::<4>().0)
                     .all(|(a, b)| a[0] > b[0] && a[1] > b[1] && a[2] > b[2])
             );
             if sampled {
