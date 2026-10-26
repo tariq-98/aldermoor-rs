@@ -1,7 +1,7 @@
 //! Handholds: the edges a climber's hands close on (docs/MOVEMENT.md, "Climbing"). Every top edge
 //! of a [`Solid`] with a top that drops far enough to hang from is one, joined along straight
-//! walls. Sills, beams, eaves and cliff ledges join them as the routes through the valley are
-//! built (#249).
+//! walls, and so is every grip on the masonry (a sill, a keystone: [`crate::Grip`]). Beams, eaves
+//! and cliff ledges join them as the routes through the valley are built (#249).
 
 use std::collections::HashMap;
 
@@ -77,6 +77,16 @@ impl Holds {
         for s in valley.solids.iter().filter(|s| s.top.is_some()) {
             for side in 0..4 {
                 edge_holds(valley, s, side, &mut list);
+            }
+        }
+        for m in &valley.masonry {
+            for g in &m.grips {
+                let (mut a, mut b, out) = (m.place(g.a), m.place(g.b), m.turn(g.out));
+                // Run to the right of a climber facing the wall.
+                if (b - a).xz().dot(Vec2::new(out.y, -out.x)) < 0.0 {
+                    std::mem::swap(&mut a, &mut b);
+                }
+                list.push(Hold { a, b, out, braced: true });
             }
         }
         join(&mut list);

@@ -11,7 +11,7 @@ mod holds;
 mod masonry;
 mod noise;
 pub use holds::{Hold, Holds, HANG_MIN_DROP};
-pub use masonry::{Block, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
+pub use masonry::{Block, Grip, Masonry, FIELD_WALL_HEIGHT, FIELD_WALL_WIDTH, RUIN_AT, RUIN_YAW};
 pub use noise::{fbm, hash, mix, noise, smooth, Lcg};
 
 /// Something you can't walk through: a box on the ground, turned by `yaw`.
