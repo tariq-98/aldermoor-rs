@@ -70,13 +70,13 @@ impl Holds {
     }
 
     /// The hold a body with its feet at `p` hangs from: of those it could be hanging from, the
-    /// one it hangs from as the sim does, the feet [`FACE`] out from the wall and [`HANG_DROP`]
-    /// below the hold. `None` if it hangs from none.
+    /// one the sim would hang it nearest to there from. `None` if it hangs from none.
     pub fn hung_from(&self, p: Vec3) -> Option<Hold> {
         let s = (self.squares)
             .binary_search_by_key(&square(p.xz()), |s| s.0)
             .ok()?;
         let end = self.squares.get(s + 1).map_or(self.ids.len(), |n| n.1);
+        let mut ground = None;
         let mut best: Option<(f32, &Hold)> = None;
         for &i in &self.ids[self.squares[s].1..end] {
             let h = self.valley.holds.get(i);
@@ -85,7 +85,8 @@ impl Holds {
                 continue;
             }
             let (along, out) = h.locate(p.xz());
-            let rise = h.at(along).y - p.y;
+            let hands = h.at(along);
+            let rise = hands.y - p.y;
             if !OUT.contains(&out)
                 || !RISE.contains(&rise)
                 || along < -PAST_END
@@ -93,7 +94,18 @@ impl Holds {
             {
                 continue;
             }
-            let off = (out - FACE).abs() + (rise - HANG_DROP).abs();
+            // How far the body is from where the sim would hang it from this hold: [`FACE`] out
+            // from the wall, between the hold's ends, and the feet [`HANG_DROP`] below the hands
+            // or on the ground where that's higher. Where the ground props the feet up, two holds
+            // can hang a body at the same point (a gable's wall plate, and the verge over its
+            // end), so a hundredth of how far the arms are from full stretch picks the one hung
+            // from at full stretch, and is too little to count anywhere else.
+            let ground = *ground.get_or_insert_with(|| self.valley.ground(p.x, p.z));
+            let feet = (hands.y - HANG_DROP).max(ground);
+            let off = (out - FACE).abs()
+                + (along - along.clamp(0., h.len())).abs()
+                + (feet - p.y).abs()
+                + (rise - HANG_DROP).abs() / 100.;
             if best.is_none_or(|b| off < b.0) {
                 best = Some((off, h));
             }
