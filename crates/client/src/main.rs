@@ -3,6 +3,7 @@ mod bag;
 mod combat;
 mod craft;
 mod effects;
+mod gait;
 mod hud;
 mod interpolate;
 mod latency;
@@ -63,6 +64,8 @@ struct Options {
     /// (for review videos and contact sheets).
     sequence: Option<PathBuf>,
     sequence_step: u64,
+    /// Plays the scripted run in `gait.rs` instead of taking input, for animation captures.
+    gait: bool,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -107,6 +110,7 @@ impl Options {
             view: 0,
             sequence: None,
             sequence_step: 1,
+            gait: false,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -225,6 +229,7 @@ impl Options {
                 "--reel-from" => {
                     o.reel_from = args.next().context("--reel-from needs seconds")?.parse()?
                 }
+                "--gait" => o.gait = true,
                 "--scheme" => {
                     o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
@@ -249,7 +254,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
                     );
                     std::process::exit(0)
                 }
@@ -359,6 +364,9 @@ struct Game {
     events: usize,
     smoke_start: Vec3,
     smoke_checks: [bool; 4],
+    /// Sim tick the `--gait` run started on, and the leg it is on.
+    gait_tick: Option<u64>,
+    gait_leg: Option<usize>,
     perf: perf_overlay::Overlay,
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
@@ -474,6 +482,8 @@ impl Game {
             events: 0,
             smoke_start,
             smoke_checks: [false; 4],
+            gait_tick: None,
+            gait_leg: None,
             hud_context: egui::Context::default(),
             hud_input: None,
             platform_output: None,
@@ -1147,6 +1157,31 @@ impl Game {
             self.host.send(Command::SwapWeapons);
         }
     }
+    /// Seconds of sim time since the `--gait` run started.
+    fn gait_time(&self) -> f32 {
+        let tick = self.snaps.current.tick;
+        self.gait_tick
+            .map_or(0., |t| tick.saturating_sub(t) as f32 / 60.)
+    }
+    /// Sends the `--gait` run's move for this frame, and logs each leg as it starts so captures
+    /// can be cut by frame.
+    fn gait(&mut self) {
+        self.gait_tick.get_or_insert(self.snaps.current.tick);
+        let Some((leg, command)) = gait::at(self.gait_time()) else {
+            return;
+        };
+        if self.gait_leg != Some(leg) {
+            self.gait_leg = Some(leg);
+            eprintln!("gait: {} from frame {}", gait::name(leg), self.frame);
+            if gait::draws(leg) {
+                self.host.send(Command::SetTarget(self.target(false)));
+            }
+        }
+        if self.last_move.as_ref() != Some(&command) {
+            self.host.send(command.clone());
+            self.last_move = Some(command);
+        }
+    }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
         perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
         self.latency.presented(|frame| r.presented_at(frame));
@@ -1208,6 +1243,8 @@ impl Game {
         self.level_up.take_if(|b| b.2 <= 0.);
         if self.options.smoke {
             self.smoke()
+        } else if self.options.gait {
+            self.gait()
         } else {
             self.controls(dt)
         }
@@ -1445,7 +1482,8 @@ impl Game {
                 },
                 if self.options.showcase { 1. / 60. } else { dt },
             );
-            draws.extend(c.draws(u.position, u.yaw).into_iter().map(|mut d| {
+            // Drawn at the body's yaw, which lags the sim's while turning on the spot (#211).
+            draws.extend(c.draws(u.position, c.body_yaw()).into_iter().map(|mut d| {
                 d.instance |= (u.id as u64) << 32;
                 d
             }));
@@ -1456,9 +1494,12 @@ impl Game {
             .context("no local player in snapshot")?;
         self.frame += 1;
         // A smoke run also lasts until its schedule has played out, plus a second for the last
-        // events, so a short --frames or slow frames can't end it early.
+        // events, so a short --frames or slow frames can't end it early; a gait run until its
+        // script has.
         let done = self.options.frames.is_some_and(|n| self.frame >= n)
-            && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.);
+            && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.)
+            && (!self.options.gait
+                || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none());
         let frame_file = self
             .options
             .sequence
@@ -2478,7 +2519,7 @@ fn main() -> Result<()> {
                 } else if now - deadline > period {
                     deadline = now;
                 }
-            } else if game.options.smoke {
+            } else if game.options.smoke || game.options.gait {
                 std::thread::sleep(Duration::from_millis(16).saturating_sub(start.elapsed()));
             }
         }
