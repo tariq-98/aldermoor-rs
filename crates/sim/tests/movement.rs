@@ -160,7 +160,9 @@ fn a_jump_pressed_just_before_landing_goes_off_as_you_land() {
 
 /// Runs east off the west terraces' 16 m face and presses jump `late` seconds after the feet
 /// leave the top: whether it jumped.
-fn jump_off_the_edge(late: f32) -> bool {
+/// Jumps `late` seconds after running off an edge: how fast it rises, and whether the double jump
+/// is left.
+fn jump_off_the_edge(late: f32) -> (f32, bool) {
     let mut sim = Sim::new(7);
     let id = sim.spawn_player("Hero", Vec2::new(-50.0, -30.0), std::f32::consts::FRAC_PI_2);
     sim.step();
@@ -175,14 +177,20 @@ fn jump_off_the_edge(late: f32) -> bool {
     sim.run_for(late);
     sim.command(id, Command::Jump);
     sim.step();
-    sim.get::<Motion>(id).unwrap().vel.y > 0.0
+    let m = sim.get::<Motion>(id).unwrap();
+    (m.vel.y, m.air_jump)
 }
 
 #[test]
 fn a_jump_just_after_running_off_an_edge_still_works() {
-    assert!(jump_off_the_edge(0.0), "no jump as the feet left the edge");
-    assert!(jump_off_the_edge(0.07), "no jump 0.07 s after leaving the edge");
-    assert!(!jump_off_the_edge(0.2), "jumped in mid-air 0.2 s after leaving the edge");
+    // A full jump from the ground, with the double jump still to come.
+    for late in [0.0, 0.07] {
+        let (vy, air_jump) = jump_off_the_edge(late);
+        assert!(vy > 6.0 && air_jump, "no ground jump {late} s after leaving the edge: {vy} m/s");
+    }
+    // Later it's the double jump (#347): lower, and only once.
+    let (vy, air_jump) = jump_off_the_edge(0.2);
+    assert!(vy > 4.5 && vy < 6.0 && !air_jump, "0.2 s after leaving the edge: {vy} m/s, double jump left {air_jump}");
 }
 
 fn go(sim: &mut Sim, id: u32, direction: Vec2, sprint: bool) {

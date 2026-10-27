@@ -89,6 +89,9 @@ pub enum ForcedKind {
     /// Running up a wall too tall to climb (Shift into it), catching a hold on the way; `away` is
     /// out of the wall.
     WallRun { away: Vec2 },
+    /// A burst through the air (Roll in a jump, #347): straight from `Forced::from` to `to`, with
+    /// gravity paused, keeping some of its speed when it ends.
+    AirDash,
 }
 
 /// Hanging from a hold (`world::Hold`, by its index in the valley's holds), with the hands `at`
@@ -149,6 +152,10 @@ pub struct Motion {
     pub catch_until: f64,
     /// Roll was pressed in the air: landing before this time rolls the fall off.
     pub landing_roll_until: f64,
+    /// The air dash and the double jump (#347), each unused since the feet or the hands last
+    /// touched the ground or a wall.
+    pub air_dash: bool,
+    pub air_jump: bool,
 }
 
 impl Motion {
@@ -172,6 +179,8 @@ impl Motion {
             released: None,
             catch_until: f64::NEG_INFINITY,
             landing_roll_until: f64::NEG_INFINITY,
+            air_dash: true,
+            air_jump: true,
         }
     }
 

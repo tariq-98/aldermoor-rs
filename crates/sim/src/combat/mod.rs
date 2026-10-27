@@ -256,6 +256,22 @@ fn roll(world: &mut World, e: Entity, id: UnitId, direction: Vec2, now: f64) {
         m.dodge_queued = None;
     }
     let ctl = control(world, e);
+    // In a jump, Roll is an air dash (#347), unless the feet are about to land (then it readies a
+    // roll landing, in `climbing::roll`).
+    if ctl.can_move() && !ctl.stunned {
+        let dashed = world.resource_scope(|world, land: Mut<Land>| {
+            let mut q = world.query::<(&mut Transform, &mut Motion, &mut Vitals)>();
+            match q.get_mut(world, e) {
+                Ok((mut t, mut m, mut v)) => movement::start_air_dash(&land.0, now, &mut t, &mut m, &mut v, direction),
+                Err(_) => false,
+            }
+        });
+        if dashed {
+            guard::lower(world, e);
+            abilities::cancel_standing_cast(world, e);
+            return;
+        }
+    }
     // Hanging, Roll lets go; at an edge, rolling toward the drop lowers you to hang from it.
     if crate::climbing::roll(world, e, direction, now, ctl.can_move() && !ctl.stunned) {
         return;

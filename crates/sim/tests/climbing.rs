@@ -515,6 +515,28 @@ fn a_wall_run_climbs_straight_onto_a_top_in_reach() {
 }
 
 #[test]
+fn touching_a_wall_brings_the_air_dash_and_double_jump_back() {
+    let (mut sim, id, _) = before_a_sheer_wall(None);
+    assert!(wall_run(&mut sim, id, Vec2::X), "never ran up the wall");
+    // As if both were used before the wall was reached.
+    {
+        let mut m = sim.get_mut::<Motion>(id).unwrap();
+        m.air_dash = false;
+        m.air_jump = false;
+    }
+    sim.step();
+    let m = motion(&sim, id);
+    assert!(m.air_dash && m.air_jump, "{m:?}");
+    // Kicked off the wall, the dash goes.
+    sim.run_for(0.15);
+    sim.command(id, Command::Jump);
+    sim.run_for(0.1);
+    sim.command(id, Command::Dodge { direction: -Vec2::X });
+    sim.step();
+    assert!(motion(&sim, id).forced.is_some_and(|f| f.kind == ForcedKind::AirDash), "no dash after kicking off");
+}
+
+#[test]
 fn space_on_a_wall_run_kicks_off_it_backwards() {
     let (mut sim, id, _) = before_a_sheer_wall(None);
     assert!(wall_run(&mut sim, id, Vec2::X), "never ran up the wall");
