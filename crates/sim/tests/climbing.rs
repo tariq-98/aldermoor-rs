@@ -251,45 +251,58 @@ fn climbs_hand_over_hand_between_holds_and_back_up() {
 }
 
 #[test]
-fn shift_held_catches_the_next_hold_down_after_letting_go() {
-    for shift in [true, false] {
+fn pressing_into_the_wall_catches_the_next_hold_down_after_letting_go() {
+    // No Shift needed (#363): pressing into the wall catches, pressing away falls past.
+    for (press, catches) in [(Vec2::X, true), (-Vec2::X, false)] {
         let (mut sim, id, top) = on_a_tall_wall();
         let sill = top - 0.8;
         let ground = sim.land().ground(7.5, 12.0);
         wall(&mut sim, Vec2::new(7.5, 12.0), Vec2::new(0.05, 3.0), sill - ground);
         let upper = hang_from_the_west_face(&mut sim, id);
-        go(&mut sim, id, Vec2::ZERO, shift);
         sim.command(id, Command::Dodge { direction: Vec2::ZERO });
-        sim.run_for(0.8);
+        sim.step();
+        // Pressing until a hold is caught: held on, pressing into the wall would climb.
+        go(&mut sim, id, press, false);
+        for _ in 0..48 {
+            sim.step();
+            if motion(&sim, id).hang.is_some() {
+                go(&mut sim, id, Vec2::ZERO, false);
+                sim.run_for(0.3);
+                break;
+            }
+        }
         let m = motion(&sim, id);
-        if shift {
+        if catches {
             let hang = m.hang.expect("didn't catch the sill");
             assert_ne!(hang.hold, upper.hold);
             assert!((pos(&sim, id).y - (sill - HANG_DROP)).abs() < 0.02);
         } else {
-            assert!(m.hang.is_none() && m.grounded, "caught a hold without Shift: {m:?}");
+            assert!(m.hang.is_none(), "caught a hold pressing away: {m:?}");
         }
     }
 }
 
 #[test]
-fn a_jump_with_shift_held_grabs_a_hold_in_reach_and_without_it_does_not() {
-    for shift in [true, false] {
+fn a_jump_into_the_wall_grabs_a_hold_in_reach_and_a_jump_straight_up_does_not() {
+    // No Shift needed (#363): moving into the wall is enough.
+    for into in [true, false] {
         let mut sim = Sim::new(7);
         // A wall 4.5 m tall with a sill 3 m up: out of reach to pull up, in reach of a jump.
         wall(&mut sim, Vec2::new(8.0, 12.0), Vec2::new(0.45, 3.0), 4.5);
         let sill = wall(&mut sim, Vec2::new(7.5, 12.0), Vec2::new(0.05, 3.0), 3.0);
         let id = sim.spawn_player("Hero", Vec2::new(6.8, 12.0), std::f32::consts::FRAC_PI_2);
         sim.step();
-        go(&mut sim, id, Vec2::X, shift);
+        if into {
+            go(&mut sim, id, Vec2::X, false);
+        }
         sim.command(id, Command::Jump);
         sim.run_for(0.8);
         let m = motion(&sim, id);
-        if shift {
+        if into {
             assert!(m.hang.is_some(), "didn't grab the sill: {m:?} at {}", pos(&sim, id));
             assert!((pos(&sim, id).y - (sill - HANG_DROP)).abs() < 0.02);
         } else {
-            assert!(m.hang.is_none() && m.grounded, "grabbed the sill without Shift");
+            assert!(m.hang.is_none() && m.grounded, "grabbed the sill jumping straight up");
         }
     }
 }
@@ -480,8 +493,8 @@ fn wall_run(sim: &mut Sim, id: u32, dir: Vec2) -> bool {
 }
 
 #[test]
-fn a_wall_run_grabs_a_hold_up_to_4_2_m_above_the_feet() {
-    for (height, grabs) in [(4.0, true), (4.6, false)] {
+fn a_wall_run_grabs_a_hold_up_to_5_4_m_above_the_feet() {
+    for (height, grabs) in [(5.2, true), (5.8, false)] {
         let (mut sim, id, sill) = before_a_sheer_wall(Some(height));
         let health = sim.get::<Vitals>(id).unwrap().health;
         assert!(wall_run(&mut sim, id, Vec2::X), "never ran up the wall");
@@ -647,17 +660,19 @@ fn roll_off(height: f32, roll: Option<f32>) -> (f32, bool) {
 }
 
 #[test]
-fn roll_just_before_landing_and_falls_up_to_8_m_dont_hurt() {
+fn falls_up_to_8_m_dont_hurt_and_a_roll_landing_saves_up_to_16() {
     let (lost, rolled) = roll_off(7.0, None);
-    assert!((lost - 0.18).abs() < 0.02 && !rolled, "lost {lost} from 7 m");
+    assert!(lost == 0.0 && !rolled, "lost {lost} from 7 m");
+    let (lost, rolled) = roll_off(11.0, None);
+    assert!((lost - 0.18).abs() < 0.02 && !rolled, "lost {lost} from 11 m");
     // About a tenth of a second before landing.
-    let (lost, rolled) = roll_off(7.0, Some(1.5));
-    assert!(lost == 0.0 && rolled, "lost {lost} from 7 m with a roll");
-    let (lost, rolled) = roll_off(10.0, Some(1.5));
-    assert!((lost - 0.12).abs() < 0.02 && rolled, "lost {lost} from 10 m with a roll");
-    // Half a second early is too early.
-    let (lost, rolled) = roll_off(7.0, Some(6.0));
-    assert!((lost - 0.18).abs() < 0.02 && !rolled, "lost {lost} from 7 m with an early roll");
+    let (lost, rolled) = roll_off(11.0, Some(1.5));
+    assert!(lost == 0.0 && rolled, "lost {lost} from 11 m with a roll");
+    let (lost, rolled) = roll_off(18.0, Some(1.5));
+    assert!((lost - 0.12).abs() < 0.02 && rolled, "lost {lost} from 18 m with a roll");
+    // Pressed early, Roll is an air dash (#347), not a roll landing.
+    let (_, rolled) = roll_off(11.0, Some(8.0));
+    assert!(!rolled, "an early press rolled on landing");
 }
 
 #[test]
@@ -951,4 +966,62 @@ fn the_terrace_cliffs_climb_ledge_by_ledge_from_the_valley_onto_the_terraces() {
         let p = pos(&sim, id);
         assert!(motion(&sim, id).grounded && p.y > terrace - 0.05, "{prop}: stopped {} m up, short of the terrace at {terrace} m ({heights:?})", p.y);
     }
+}
+
+/// Puts `id` in a fight as of now, as a blow would.
+fn in_a_fight(sim: &mut Sim, id: u32) {
+    let now = sim.time();
+    sim.get_mut::<Vitals>(id).unwrap().last_combat = now;
+}
+
+/// Steps `seconds`, keeping `id` in its fight; whether any of its forced moves was `kind`.
+fn fighting_for(sim: &mut Sim, id: u32, seconds: f32, kind: impl Fn(&ForcedKind) -> bool) -> bool {
+    let mut seen = false;
+    for _ in 0..(seconds * 60.0) as u32 {
+        in_a_fight(sim, id);
+        sim.step();
+        seen |= motion(sim, id).forced.is_some_and(|f| kind(&f.kind));
+    }
+    seen
+}
+
+#[test]
+fn in_a_fight_parkour_starts_only_from_a_jump_and_rolls_and_skills_win() {
+    let wall_run = |k: &ForcedKind| matches!(k, ForcedKind::WallRun { .. });
+    // Running into the wall mid-fight never runs up it or grabs.
+    let (mut sim, id, _) = before_a_sheer_wall(Some(4.0));
+    in_a_fight(&mut sim, id);
+    go(&mut sim, id, Vec2::X, false);
+    assert!(!fighting_for(&mut sim, id, 1.5, wall_run), "ran up the wall without jumping");
+    assert!(motion(&sim, id).hang.is_none(), "grabbed a hold without jumping");
+    // A jump into it does run up it.
+    sim.command(id, Command::Jump);
+    assert!(fighting_for(&mut sim, id, 0.2, wall_run), "a jump into the wall didn't run up it");
+
+    // A roll pressed with the jump wins: no wall run swallows it.
+    let (mut sim, id, _) = before_a_sheer_wall(Some(4.0));
+    in_a_fight(&mut sim, id);
+    go(&mut sim, id, Vec2::X, false);
+    fighting_for(&mut sim, id, 0.4, |_| false);
+    sim.command(id, Command::Jump);
+    sim.command(id, Command::Dodge { direction: Vec2::X });
+    sim.step();
+    assert!(motion(&sim, id).forced.is_some_and(|f| f.kind == ForcedKind::Dodge), "the roll was swallowed");
+
+    // So does a skill: the first slot goes off at a skeleton by the wall, and no wall run starts
+    // that step.
+    let (mut sim, id, _) = before_a_sheer_wall(Some(4.0));
+    let skeleton = sim.spawn_mob("skeleton", Vec2::new(6.0, 12.0)).unwrap();
+    let e = sim.entity(skeleton).unwrap();
+    sim.world.entity_mut(e).remove::<sim::Brain>();
+    sim.command(id, Command::SetTarget(Some(skeleton)));
+    in_a_fight(&mut sim, id);
+    go(&mut sim, id, Vec2::X, false);
+    fighting_for(&mut sim, id, 0.4, |_| false);
+    sim.command(id, Command::Jump);
+    sim.command(id, Command::UseSlot { slot: 0, ground: None });
+    sim.step();
+    let f = sim.get::<sim::Fighter>(id).unwrap();
+    assert!(f.action_time >= sim.time() || f.cast.is_some() || f.queued.is_some(), "the skill didn't go");
+    assert!(!motion(&sim, id).forced.is_some_and(|f| wall_run(&f.kind)), "a wall run swallowed the skill");
 }

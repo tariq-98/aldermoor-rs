@@ -37,10 +37,10 @@ pub const SHIMMY_STRIDE: f32 = 0.48;
 /// [`LET_GO`]: a hand on its way between holds plays as the clip has it.
 pub const HOLD: f32 = 0.1;
 pub const LET_GO: f32 = 0.25;
-/// Moves onto a hold that take longer than this are a climb leap (0.5 s,
-/// `sim::climbing::LEAP_TIME`) or a side eject (0.55 s, `EJECT_TIME`), not a climb hand over hand
-/// (0.4 s) or a hop across (0.3 s): they have clips of their own (#305).
-pub const LONG_MOVE: f32 = 0.45;
+/// Moves onto a hold that take longer than this are a climb leap (0.4 s,
+/// `sim::climbing::LEAP_TIME`) or a side eject (0.45 s, `EJECT_TIME`), not a climb hand over hand
+/// (0.3 s) or a hop across (0.3 s): they have clips of their own (#305, timings from #363).
+pub const LONG_MOVE: f32 = 0.35;
 /// Round an outer corner the body comes on at least 0.2 m ahead of where it hung, the hands having
 /// stopped that short of the corner; into an inner one it turns where it is, or backs off the wall
 /// it leaves. Half of that tells the two apart (#305).

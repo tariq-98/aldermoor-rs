@@ -156,6 +156,9 @@ pub struct Motion {
     /// touched the ground or a wall.
     pub air_dash: bool,
     pub air_jump: bool,
+    /// In a jump the body made itself (from the ground or the air), not a fall or a throw: in
+    /// combat, only a jump starts parkour (#363).
+    pub jumped: bool,
 }
 
 impl Motion {
@@ -181,6 +184,7 @@ impl Motion {
             landing_roll_until: f64::NEG_INFINITY,
             air_dash: true,
             air_jump: true,
+            jumped: false,
         }
     }
 

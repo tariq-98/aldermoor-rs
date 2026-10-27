@@ -418,13 +418,13 @@ and landings to distance:
   once by the squares of ground they can be hung from over, so looking neither allocates nor hashes
   (`crates/client/src/holds.rs`, `Character::set_holds`).
 - **Leaps, ejects, corners, wall runs and roll landings** (#305) have clips of their own, made on
-  the sim's numbers as the others are. From a hang, a move onto a hold that takes longer than 0.45 s
+  the sim's numbers as the others are. From a hang, a move onto a hold that takes longer than 0.35 s
   (`climb::LONG_MOVE`) is a climb leap, mostly up (`Hang_Leap_Up`: a pull on the hold and a push off
   the wall to a hold 1.4 m up), or a side eject (`Hang_Eject_L` / `_R`: a push off along the wall,
   flying 2 m with a 0.35 m hop, the leading hand reaching for the hold), not a climb or a hop. Round
   a corner, a body carried on more than 0.1 m ahead (`CORNER_AHEAD`) wraps round an outer one onto
   the wall's side (`Hang_Corner_Out_L` / `_R`), and otherwise turns into an inner one where it hangs
-  (`Hang_Corner_In_L` / `_R`): the sim turns it a quarter at 4 rad/s, the clips are made turning
+  (`Hang_Corner_In_L` / `_R`): the sim turns it a quarter turn by 0.785 of the move, the clips are made turning
   with it, and the body follows on the carried spring. A wall run plays `Wall_Run` (three steps up
   the face, slowing, the hands reaching for the top) by how high the body has run
   (`climb::run_progress`), its hands and feet as the clip has them: there's no hold. Kicked off a

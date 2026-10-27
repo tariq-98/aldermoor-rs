@@ -20,6 +20,8 @@ pub const DODGE_BUFFER: f64 = 0.2;
 pub const JUMP_BUFFER: f64 = 0.15;
 /// Running off an edge, a jump still works for this long (coyote time).
 pub const COYOTE_TIME: f64 = 0.1;
+/// How quickly steering takes hold in the air (per second).
+pub const AIR_CONTROL: f32 = 10.0;
 /// Downed: a crawl.
 pub const CRAWL_SPEED: f32 = 1.0;
 /// Backpedalling while strafing runs at this fraction of full speed.
@@ -27,7 +29,7 @@ const BACKPEDAL: f32 = 0.6;
 /// The most a walker steps down without leaving the ground.
 const STEP_DOWN: f32 = 0.6;
 /// Sprinting (out of combat, on land) runs this much faster.
-pub const SPRINT: f32 = 1.5;
+pub const SPRINT: f32 = 1.75;
 /// On foot, from standing to full speed takes this long (s), and from run to sprint `SPRINT_UP`.
 /// Short enough to keep dodging sharp, long enough that a body has some weight.
 pub const START_UP: f32 = 0.08;
@@ -39,12 +41,12 @@ pub const MAX_SLOPE: f32 = 2.0;
 /// Walls up to about chest height are climbed over; taller ones stop you.
 pub const CLIMB_HEIGHT: f32 = 1.5;
 /// Seconds to pull up over a ledge.
-pub const CLIMB_TIME: f64 = 0.6;
+pub const CLIMB_TIME: f64 = 0.4;
 /// In a jump, a ledge this high above the feet can be caught and pulled up onto (a mantle), as
 /// long as you aren't yet falling faster than `MANTLE_FALLING` (m/s).
 pub const MANTLE_HEIGHT: f32 = 2.2;
-pub(crate) const MANTLE_FALLING: f32 = -3.0;
-pub const MANTLE_TIME: f64 = 0.5;
+pub(crate) const MANTLE_FALLING: f32 = -6.0;
+pub const MANTLE_TIME: f64 = 0.35;
 /// Running (faster than a walk) at a wall up to this high and shallower than this, with clear
 /// ground beyond, hops it in stride, at the speed you ran in, taking between `VAULT_MIN` and
 /// `VAULT_TIME` seconds. Deeper ones (a 0.8 m wall, the 0.9 m field walls) are climbed onto.
@@ -63,12 +65,12 @@ const WADE: f32 = 0.7;
 /// Water deeper than this is waded through.
 pub const WADE_DEPTH: f32 = 0.2;
 /// Falls up to this many metres don't hurt; past it each metre costs a share of max health.
-pub const SAFE_FALL: f32 = 4.0;
+pub const SAFE_FALL: f32 = 8.0;
 pub const FALL_DAMAGE: f32 = 0.06;
 /// Roll pressed in the air this long before landing rolls the fall off: falls up to
 /// `ROLL_SAFE_FALL` don't hurt, and the body rolls on `LANDING_ROLL_DISTANCE` the way it was going.
 pub const LANDING_ROLL: f64 = 0.2;
-pub const ROLL_SAFE_FALL: f32 = 8.0;
+pub const ROLL_SAFE_FALL: f32 = 16.0;
 const LANDING_ROLL_DISTANCE: f32 = 3.0;
 /// The air dash (#347): this far, this fast, following the aim up or down by at most
 /// `AIR_DASH_PITCH` radians (35°), and keeping this share of its speed when it ends.
@@ -284,6 +286,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         if m.grounded || m.hang.is_some() || on_a_wall {
             m.air_dash = true;
             m.air_jump = true;
+            m.jumped = false;
         }
         // Hanging from a hold: the climb moves the body, unless it's been downed off the wall.
         if m.hang.is_some() && m.forced.is_none() {
@@ -324,7 +327,8 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 t.yaw = approach_angle(t.yaw, heading(-land.holds.get(hold).out), DT * 14.0);
             } else if let ForcedKind::Corner { hold, corner, .. } = f.kind {
                 t.pos = climbing::corner_carry(&f, corner, k);
-                t.yaw = approach_angle(t.yaw, heading(-land.holds.get(hold).out), DT * 4.0);
+                // A quarter turn by 0.785 of the move, as the corner clips are made (2 rad over it).
+                t.yaw = approach_angle(t.yaw, heading(-land.holds.get(hold).out), DT * 2.0 / climbing::CORNER_TIME as f32);
             } else {
                 let eased = 1.0 - (1.0 - k) * (1.0 - k);
                 let p = f.from.lerp(f.to, eased);
@@ -381,6 +385,9 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         }
         let in_combat = clock.time - v.last_combat < crate::vitals::COMBAT_TIMEOUT;
         let busy = fighter.is_some_and(|f| f.guard_since.is_some() || f.cast.is_some());
+        // A skill pressed this step (or waiting on the global cooldown) wins over parkour that
+        // would start on the same step (#363).
+        let acting = busy || fighter.is_some_and(|f| f.queued.is_some() || f.action_time >= clock.time);
         m.sprinting = m.intent.sprint
             && !walk
             && !in_combat
@@ -421,16 +428,35 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.vel.x = v.x;
             m.vel.z = v.y;
         } else {
-            // Limited air control.
-            let k = (DT * 3.0).min(1.0);
+            // Air control: steering answers in about a tenth of a second (#363).
+            let k = (DT * AIR_CONTROL).min(1.0);
             m.vel.x += (desired.x - m.vel.x) * k;
             m.vel.z += (desired.y - m.vel.z) * k;
         }
         // A jump pressed a moment before landing, or a moment after running off an edge, still
         // goes off.
         let footing = m.grounded || clock.time <= m.coyote_until;
+        // In a fight, parkour starts only on intent (#363): a jump into a wall runs up it. A roll
+        // or a skill pressed the same step wins (`busy`, or the roll's forced move, comes first).
+        let player = u.kind == UnitKind::Player;
+        if in_combat
+            && player
+            && clock.time <= m.jump_until
+            && m.grounded
+            && !acting
+            && !m.swimming
+            && ctl.can_move()
+            && !v.downed
+            && dir.length_squared() > 0.01
+            && climbing::wall_run(land, clock.time, &mut t, &mut m, body.radius, dir)
+        {
+            m.jump_until = f64::NEG_INFINITY;
+            m.observed = Vec3::ZERO;
+            continue;
+        }
         if clock.time <= m.jump_until && footing && !m.swimming && ctl.can_move() && !v.downed {
             m.vel.y = JUMP_SPEED;
+            m.jumped = true;
             m.grounded = false;
             m.jump_until = f64::NEG_INFINITY;
             m.coyote_until = f64::NEG_INFINITY;
@@ -447,12 +473,13 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             // to jump from the ground, as the buffer has it.
             m.vel.y = AIR_JUMP_SPEED;
             m.air_jump = false;
+            m.jumped = true;
             m.jump_until = f64::NEG_INFINITY;
             out.0.push(Event::Jumped { unit: u.id });
         }
 
         // Sprinting (Shift, out of combat: parkour up) into a wall too tall to climb runs up it.
-        if m.sprinting && m.grounded && u.kind == UnitKind::Player && ctl.can_move() && climbing::wall_run(land, clock.time, &mut t, &mut m, body.radius, dir) {
+        if m.sprinting && m.grounded && player && !acting && ctl.can_move() && climbing::wall_run(land, clock.time, &mut t, &mut m, body.radius, dir) {
             m.observed = Vec3::ZERO;
             continue;
         }
@@ -477,7 +504,9 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 m.observed = Vec3::ZERO;
                 continue;
             }
-            let mantle = able && !busy && !m.grounded && m.vel.y > MANTLE_FALLING;
+            // Not straight back up onto the top just let go of: letting go drops you.
+            let let_go = m.released.is_some_and(|(_, until)| clock.time < until);
+            let mantle = able && !busy && !m.grounded && !let_go && m.vel.y > MANTLE_FALLING;
             let reach = if mantle { MANTLE_HEIGHT } else { CLIMB_HEIGHT };
             let top = able.then(|| ledge_top(land, from, t.pos.y, ahead, body.radius, reach)).flatten();
             if let Some(top) = top {
@@ -529,10 +558,14 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                 m.vel.y -= GRAVITY * DT;
                 t.pos.y += m.vel.y * DT;
                 m.fall_from = m.fall_from.max(t.pos.y);
-                // Shift held out of combat (parkour up) catches the holds the hands pass, as does
-                // a moment after jumping off a wall.
-                let catching = u.kind == UnitKind::Player && (m.intent.sprint || clock.time < m.catch_until) && !in_combat && ctl.can_move() && !v.downed;
-                if catching && climbing::catch(land, clock.time, &mut t, &mut m, body.radius, before) {
+                // Pressing into a wall catches the holds the hands pass (#363: no Shift needed),
+                // and so does anything a moment after jumping off a wall. In a fight only a jump
+                // you made catches, never a fall or a throw, and a roll or a skill comes first.
+                let window = clock.time < m.catch_until;
+                let pressing = m.intent.direction.length_squared() > 0.01 && (!in_combat || m.jumped);
+                let catching = player && (window || pressing) && !acting && ctl.can_move() && !v.downed;
+                let into = (!window).then_some(m.intent.direction);
+                if catching && climbing::catch(land, clock.time, &mut t, &mut m, body.radius, before, into) {
                     m.observed = (t.pos - start) / DT;
                     continue;
                 }
@@ -550,6 +583,7 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
                     let cliff = along != Vec2::ZERO && ground - land.ground(ahead.x, ahead.y) > MAX_SLOPE * 0.25 + 0.01;
                     if !cliff {
                         m.grounded = true;
+                        m.jumped = false;
                         let fell = m.fall_from - ground;
                         let rolled = clock.time <= m.landing_roll_until;
                         let safe = if rolled { ROLL_SAFE_FALL } else { SAFE_FALL };

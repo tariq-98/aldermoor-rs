@@ -6,7 +6,7 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 
 - **Run** 6 m/s, **walk** 2.5 m/s (the walk toggle), **backpedal** at 0.6× while facing away
   from the way you move.
-- **Sprint** (Shift) at 1.5× the run speed. It works out of combat only (6 s after the last
+- **Sprint** (Shift) at 1.75× the run speed (10.5 m/s, #363). It works out of combat only (6 s after the last
   blow given or taken), on land, and not while guarding, casting, downed or feared. It costs
   nothing.
 - **Getting going** takes a moment, so bodies have some weight without losing the quick starts
@@ -19,6 +19,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 - **Jumps** forgive a little: a jump pressed up to 0.15 s before landing goes off as you land,
   and one pressed up to 0.1 s after running off an edge still jumps (coyote time). The windows are
   `JUMP_BUFFER` and `COYOTE_TIME`; rolls have their own (`DODGE_BUFFER`, in COMBAT.md).
+  In the air you steer freely, the stick taking hold in about a tenth of a second (`AIR_CONTROL`,
+  #363).
 - **Air moves** (#347, everyone has them): in the air, one **air dash** and one **double jump**,
   each ready again once you touch the ground or a wall (a wall run, a climb or pull-up, catching
   or moving between holds).
@@ -34,12 +36,12 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     poses of their own (#353) the dash is drawn as a leap and the double jump as a jump.
 - **Cliffs:** ground steeper than 2:1 (about 63°) is a wall. Walking into one either climbs it
   or slides along it.
-  - A face that tops out within **1.5 m** of your feet (chest height) is climbed: a 0.6 s pull-up
+  - A face that tops out within **1.5 m** of your feet (chest height) is climbed: a 0.4 s pull-up
     onto the top, as a forced move (no skills meanwhile; pose `Jump`, which plays the climb).
   - A taller face stops you, unless you jump at it or run up it (a wall run, below). In a jump,
     a face that tops out within **2.2 m** of your feet at that moment is caught and pulled up
-    onto in 0.5 s (a mantle, `ForcedKind::Mantle`), as long as you aren't yet falling faster than
-    3 m/s. So a jump at the right moment gets you up a ledge about 3.3 m high. A climb or mantle
+    onto in 0.35 s (a mantle, `ForcedKind::Mantle`), as long as you aren't yet falling faster than
+    6 m/s, and not straight back onto a top you just let go of. So a jump at the right moment gets you up a ledge about 3.3 m high. A climb or mantle
     needs room on the top for the body: not a sill's top against the wall it stands out from,
     nor a cliff's ledge too narrow to stand on below the next. On a narrow top it stands you as
     near its front as you fit.
@@ -111,45 +113,50 @@ top of that file. The ground is `world::Valley::ground`, and the river is
   - **Hanging:** hands on the hold, feet 1.9 m below it (`HANG_DROP`) or on the ground if that's
     higher, the body out from the wall by its radius and facing it. Pose `Hang`.
   - **Moving on the wall** goes by the direction pressed, against the wall: along it shimmies at
-    1.2 m/s (`SHIMMY_SPEED`), stopping 0.2 m short of the hold's ends or hopping in 0.3 s to a
+    2 m/s (`SHIMMY_SPEED`), stopping 0.2 m short of the hold's ends or hopping in 0.3 s to a
     hold that carries on within 0.6 m (`HOLD_GAP`). Past the end, or up against a wall across
     it, it wraps round the corner onto a hold meeting this one at a right angle within 0.6 m,
-    round an outer corner or into an inner one, in 0.5 s (`CORNER_TIME`, `ForcedKind::Corner`),
-    swinging round the corner clear of it. Into the wall climbs onto the top in 0.8 s when
-    there's room (`CLIMB_UP_TIME`), or else to a hold up to 1 m higher (`HOLD_CLIMB`, in 0.4 s).
+    round an outer corner or into an inner one, in 0.35 s (`CORNER_TIME`, `ForcedKind::Corner`),
+    swinging round the corner clear of it. Into the wall climbs onto the top in 0.5 s when
+    there's room (`CLIMB_UP_TIME`), or else to a hold up to 1 m higher (`HOLD_CLIMB`, in 0.3 s).
     Away from the wall climbs down to a hold up to 1 m lower, and does nothing if there isn't
     one, so you never fall by accident.
   - **Leaps and ejects:** Space while hanging, by the direction pressed (#246). Into the wall or
     none: a climb leap to a hold 1 to 1.8 m higher and up to 0.8 m to either side, or in or out
-    (a ledge set back up a sloping cliff), in 0.5 s
+    (a ledge set back up a sloping cliff), in 0.4 s
     (`LEAP_REACH`, `LEAP_SIDE`, `LEAP_TIME`); with none in reach, Space adds nothing to the
     direction. Along the wall: a side eject to a hold 0.8 to 2.5 m that way and up to 1 m up or
-    down (`EJECT_REACH`, `EJECT_RISE`), in 0.55 s with a hop, or, with none there, a jump off the
+    down (`EJECT_REACH`, `EJECT_RISE`), in 0.45 s with a hop, or, with none there, a jump off the
     wall that way (4 m/s along it, 4.5 m/s up). Away from the wall: a back eject, kicking off at
     5 m/s out and 5 m/s up (`BACK_EJECT`), about 2.5 m out by the time you're back at the height
     you left if you keep pressing away, turning as you go to catch what's behind you. For a
-    second after any leap or jump off a wall, holds are caught without Shift (`CATCH_WINDOW`), so
-    chains need no key held.
+    second after any leap or jump off a wall, holds are caught whichever way you press
+    (`CATCH_WINDOW`), so chains need no key held.
   - **Roll** lets go: you drop, pushing off the wall. Standing on a top within 1 m of its edge,
     Roll toward the drop (or with no direction, backing onto it) lowers you over the edge to hang
-    from it in 0.6 s. Rolling along the edge or away from it still rolls.
-  - **Catching:** with Shift held out of combat, falling or jumping past a hold grabs it when the
-    hands (2.1 m above the feet) pass within 0.3 m of it, settling in 0.2 s. A hold you just let
-    go of can't be caught again for 0.4 s, so letting go with Shift held catches the next hold
-    down. Without Shift you fall past. Heading into the face of a top this jump can pull up
+    from it in 0.4 s. Rolling along the edge or away from it still rolls.
+  - **Catching** (no Shift needed, #363): falling or jumping past a hold on a wall you're
+    pressing into grabs it when the hands (2.1 m above the feet) pass within 0.3 m of it,
+    settling in 0.2 s. A hold you just let go of can't be caught again for 0.4 s, so letting go
+    and pressing into the wall catches the next hold down; pressing away (or nothing) falls past. Heading into the face of a top this jump can pull up
     onto, with room on it, you mantle it instead of hanging.
-  - **Wall runs:** sprinting (Shift, out of combat) on the ground straight at a wall too tall to
-    climb runs up it (`ForcedKind::WallRun`): a face more than 1.5 m above your feet, or a
+  - **Wall runs:** sprinting (Shift) on the ground straight at a wall too tall to climb, or in a
+    fight a jump at it, runs up it (`ForcedKind::WallRun`): a face more than 1.5 m above your feet, or a
     building's side at least 2 m wide (not a tree or a parapet; `world::Valley::wall_ahead`). The
-    feet rise 1.8 m in 0.5 s, slowing (`WALL_RUN_RISE`, `WALL_RUN_TIME`). A top the hands reach,
-    up to 4.2 m above where the feet set off, is pulled straight up onto if there's room on it;
+    feet rise 3 m in 0.55 s, slowing (`WALL_RUN_RISE`, `WALL_RUN_TIME`). A top the hands reach,
+    up to 5.4 m above where the feet set off, is pulled straight up onto if there's room on it;
     otherwise the hands catch the first hold they pass, up to that height. Space kicks off
     backwards, as a back eject. With nothing caught, you drop back off at the end. Pose `Jump`;
     it plays `Wall_Run` (#305).
   - **Roll landing:** Roll pressed up to 0.2 s before you land (`LANDING_ROLL`) readies a roll
-    landing: you roll on 3 m the way you were going, and falls up to 8 m don't hurt
+    landing: you roll on 3 m the way you were going, and falls up to 16 m don't hurt
     (`ROLL_SAFE_FALL`; past that each metre costs as usual). Pressed earlier, it's an air dash
     (below), or, with the dash used, a roll landing readied that early is lost.
+  - **In a fight** (#363) parkour works too, but only starts on intent: a jump into a wall runs
+    up it or grabs a hold; running or being knocked into a wall never does, and a fall you didn't
+    jump into catches nothing. A roll or a skill pressed the same step always wins over a grab or
+    a wall run. Only the sprint stays out of combat. No skills or guard while climbing, and a
+    knockback still throws you off the wall.
   - No skills or guard while climbing ("You can't fight while climbing."). A knockback throws
     you off the wall; being downed makes you let go, and the dead drop where they are. Hanging
     bodies neither push nor are pushed.
@@ -166,8 +173,8 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     messages at the top of the screen.
   - Monsters don't wander into water or spawn in it.
   - The bridge deck is still a single height over the river, so you can't swim under it.
-- **Falls** of up to 4 m are free. Past that, each metre costs 6% of max health (a 10 m drop
-  costs 36%), which can down or kill you. The fall is measured from the highest point since you
+- **Falls** of up to 8 m are free (#363). Past that, each metre costs 6% of max health (a 14 m
+  drop costs 36%), which can down or kill you. The fall is measured from the highest point since you
   last stood on ground or water. Landing in deep water breaks the fall.
 
 - **Bodies don't overlap.** Two living bodies that overlap are eased apart, half the overlap

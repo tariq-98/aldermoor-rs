@@ -364,6 +364,13 @@ mod tests {
     use super::*;
     use protocol::{ForcedKind, Traversal};
 
+    #[test]
+    fn hold_moves_are_told_apart_by_how_long_they_take() {
+        use sim::climbing::{EJECT_TIME, HOLD_CLIMB_TIME, HOLD_HOP_TIME, LEAP_TIME};
+        let long = anim::climb::LONG_MOVE as f64;
+        assert!(HOLD_CLIMB_TIME.max(HOLD_HOP_TIME) < long && long < LEAP_TIME.min(EJECT_TIME));
+    }
+
     /// The course run against the valley as the client's own server starts it, the player at its
     /// spawn facing north: every step is reached, every place arrived at, and on the way the
     /// player rolls four times, climbs the field wall twice, the ruin's east and rear walls and

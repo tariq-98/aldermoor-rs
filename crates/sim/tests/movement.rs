@@ -198,15 +198,15 @@ fn go(sim: &mut Sim, id: u32, direction: Vec2, sprint: bool) {
 }
 
 #[test]
-fn sprints_half_again_as_fast_out_of_combat_only() {
+fn sprints_three_quarters_again_as_fast_out_of_combat_only() {
     let (mut sim, id) = on_the_road();
     let start = xz(&sim, id);
     go(&mut sim, id, Vec2::new(0.0, -1.0), true);
-    // Up to a run in a moment, then on to a sprint over a third of a second: about 0.7 m short
-    // of a second at full sprint.
+    // Up to a run in a moment, then on to a sprint (10.5 m/s, #363) over a third of a second:
+    // about 1.1 m short of a second at full sprint.
     sim.run_for(1.0);
     let d = (xz(&sim, id) - start).length();
-    assert!((d - 8.3).abs() < 0.3, "sprinted {d} m");
+    assert!((d - 9.4).abs() < 0.3, "sprinted {d} m");
     assert!(sim.get::<Motion>(id).unwrap().sprinting);
     // Just hit: back to running.
     let now = sim.time();
@@ -252,7 +252,7 @@ fn bodies_take_a_moment_to_get_going_and_stop() {
     go(&mut sim, id, Vec2::new(0.0, -1.0), false);
     sim.run_for(0.3);
     go(&mut sim, id, Vec2::new(0.0, -1.0), true);
-    let sprint = time_to(&mut sim, id, run * 1.5);
+    let sprint = time_to(&mut sim, id, run * 1.75);
     assert!((0.25..=0.35).contains(&sprint), "took {sprint} s to reach a sprint");
 }
 
@@ -592,9 +592,10 @@ fn long_falls_hurt_and_short_ones_do_not() {
         1.0 - v.health / v.max_health
     };
     assert_eq!(fall(1.0), 0.0);
-    assert_eq!(fall(3.9), 0.0);
-    let lost = fall(10.0);
-    assert!((lost - 0.36).abs() < 0.02, "lost {lost} of max health from 10 m");
+    // Up to 8 m doesn't hurt (#363); past it each metre costs 6% of max health.
+    assert_eq!(fall(7.9), 0.0);
+    let lost = fall(14.0);
+    assert!((lost - 0.36).abs() < 0.02, "lost {lost} of max health from 14 m");
 }
 
 #[test]
@@ -758,7 +759,7 @@ fn others_see_a_climb_from_its_foot_to_its_top() {
             let protocol::Traversal::Forced(seen) = traversal(&mut sim, watcher, id) else { panic!("the climb wasn't sent") };
             assert_eq!(seen.kind, protocol::ForcedKind::Climb);
             assert_eq!((seen.from, seen.to, seen.start), (f.from, f.to, f.start));
-            assert!((seen.duration - 0.6).abs() < 1e-6);
+            assert!((seen.duration - 0.4).abs() < 1e-6);
             return;
         }
     }

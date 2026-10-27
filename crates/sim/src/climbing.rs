@@ -17,19 +17,19 @@ pub const HANG_DROP: f32 = 1.9;
 /// The hands reach this far above the feet.
 pub const GRAB_REACH: f32 = 2.1;
 /// Shimmying speed along a hold.
-pub const SHIMMY_SPEED: f32 = 1.2;
+pub const SHIMMY_SPEED: f32 = 2.0;
 /// A shimmy carries on to the next hold when it starts within this gap of the end of this one.
 pub const HOLD_GAP: f32 = 0.6;
 /// Seconds to climb from a hang onto the top above.
-pub const CLIMB_UP_TIME: f64 = 0.8;
+pub const CLIMB_UP_TIME: f64 = 0.5;
 /// The next hold up or down is reached hand over hand within this height.
 pub const HOLD_CLIMB: f32 = 1.0;
 /// Seconds to climb hand over hand to the next hold up or down.
-pub const HOLD_CLIMB_TIME: f64 = 0.4;
+pub const HOLD_CLIMB_TIME: f64 = 0.3;
 /// Seconds to cross from the end of one hold to the next.
 pub const HOLD_HOP_TIME: f64 = 0.3;
 /// Seconds to lower yourself over an edge to hang from it.
-pub const DROP_TO_HANG_TIME: f64 = 0.6;
+pub const DROP_TO_HANG_TIME: f64 = 0.4;
 /// Seconds to settle onto a hold caught in the air.
 pub const CATCH_TIME: f64 = 0.2;
 /// A hold is caught when the hands pass within this much of it.
@@ -44,28 +44,29 @@ const STEP: f32 = 0.3;
 /// higher and up to [`LEAP_SIDE`] to either side, in [`LEAP_TIME`] seconds.
 pub const LEAP_REACH: RangeInclusive<f32> = 1.0..=1.8;
 pub const LEAP_SIDE: f32 = 0.8;
-pub const LEAP_TIME: f64 = 0.5;
+pub const LEAP_TIME: f64 = 0.4;
 /// A side eject (Space, pressing along the wall) reaches a hold between 0.8 m and this far along
 /// it, up to [`EJECT_RISE`] up or down, in [`EJECT_TIME`] seconds, hopping [`EJECT_ARC`] high
 /// on the way. With none there it jumps off that way, along the wall at `SIDE_EJECT` m/s.
 pub const EJECT_REACH: f32 = 2.5;
 pub const EJECT_RISE: f32 = 1.0;
-pub const EJECT_TIME: f64 = 0.55;
+pub const EJECT_TIME: f64 = 0.45;
 const EJECT_ARC: f32 = 0.35;
 const SIDE_EJECT: Vec2 = Vec2::new(4.0, 4.5);
 /// A back eject (Space, pressing away from the wall) kicks off it at this speed out and up:
 /// about 2.5 m out by the time the body is back at the height it left.
 pub const BACK_EJECT: Vec2 = Vec2::new(5.0, 5.0);
-/// After a leap or a jump off a wall, holds are caught for this long without Shift held.
+/// After a leap or a jump off a wall, holds are caught for this long whichever way you're
+/// pressing.
 pub const CATCH_WINDOW: f64 = 1.0;
 /// A wall run carries the feet this far up the face, slowing, in [`WALL_RUN_TIME`] seconds: the
-/// hands catch holds up to 4.2 m above where the feet set off.
-pub const WALL_RUN_RISE: f32 = 1.8;
-pub const WALL_RUN_TIME: f64 = 0.5;
+/// hands catch holds up to 5.4 m above where the feet set off.
+pub const WALL_RUN_RISE: f32 = 3.0;
+pub const WALL_RUN_TIME: f64 = 0.55;
 /// A wall run starts with the face this close ahead of the body.
 const WALL_AHEAD: f32 = 0.25;
 /// Seconds to wrap round a corner onto the next hold.
-pub const CORNER_TIME: f64 = 0.5;
+pub const CORNER_TIME: f64 = 0.35;
 /// A shimmy wraps round a corner onto a hold that starts within this of the end of this one.
 const CORNER_GAP: f32 = 0.6;
 
@@ -398,7 +399,9 @@ pub fn knock_off(land: &Valley, now: f64, m: &mut Motion, delta: Vec2, seconds: 
 /// Grabs a hold the hands passed this step, falling or jumping (`before` is where the feet were
 /// at the start of the step): the nearest one in front of the body with room to hang below it.
 /// Starts the carry onto it and says whether it caught one.
-pub fn catch(land: &Valley, now: f64, t: &mut Transform, m: &mut Motion, radius: f32, before: f32) -> bool {
+/// `into`, when given, is the way the body is pressing: only holds on a wall it presses into are
+/// caught, so pressing away (or nothing) lets you fall past them.
+pub fn catch(land: &Valley, now: f64, t: &mut Transform, m: &mut Motion, radius: f32, before: f32, into: Option<Vec2>) -> bool {
     let p = t.pos.xz();
     let (hands, was) = (t.pos.y + GRAB_REACH, before + GRAB_REACH);
     let (lo, hi) = (hands.min(was) - CATCH_REACH, hands.max(was) + CATCH_REACH);
@@ -408,6 +411,9 @@ pub fn catch(land: &Valley, now: f64, t: &mut Transform, m: &mut Motion, radius:
             continue;
         }
         let h = land.holds.get(i);
+        if into.is_some_and(|d| d.normalize_or_zero().dot(-h.out) < 0.3) {
+            continue;
+        }
         let (s, off) = h.locate(p);
         if s < -0.2 || s > h.len() + 0.2 || !(-0.05..=radius + 0.6).contains(&off) {
             continue;
@@ -529,7 +535,7 @@ pub fn wall_run_step(land: &Valley, now: f64, t: &mut Transform, m: &mut Motion,
         m.forced = Some(Forced { kind: ForcedKind::Mantle, from: t.pos, to: top, start: now, duration: MANTLE_TIME, arc: 0.0 });
         return;
     }
-    if catch(land, now, t, m, radius, before) || k < 1.0 {
+    if catch(land, now, t, m, radius, before, None) || k < 1.0 {
         return;
     }
     m.forced = None;
