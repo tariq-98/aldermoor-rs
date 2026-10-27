@@ -82,6 +82,14 @@ Health, power and armour are multipliers on the level's base numbers (below).
   which keep their own shapes and limits. **Monsters' blows** land on their target only; their
   big blows are warned of on the ground instead.
 
+## Charges (#349)
+
+An ability can hold more than one use (`charges` in its table, 1 by default). While it's below
+full, one charge comes back each `cooldown`, one after another, so two used back to back return
+a cooldown apart. With one charge it's an ordinary cooldown. The global cooldown still applies
+between uses as usual. The bar slot shows a pip per charge, filled for those ready
+(`Slot::charges`, `max_charges`, `next_charge`).
+
 ## Casts, wind-ups and channels
 
 - **Casts** take time, shown as a cast bar. Some can be cast on the move; the rest stop if you
