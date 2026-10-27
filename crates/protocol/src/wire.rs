@@ -1037,7 +1037,7 @@ fn split(p: &PlayerState, anchor: u64) -> (Fast, Bar, Bags, Craft, Growth) {
     };
     let bar = Bar {
         cooldowns: cooldowns.iter().map(|&c| countdown(c, anchor)).collect(),
-        bar: bar.iter().map(|s| Slot { cooldown: countdown(s.cooldown, anchor), ..s.clone() }).collect(),
+        bar: bar.iter().map(|s| Slot { cooldown: countdown(s.cooldown, anchor), next_charge: countdown(s.next_charge, anchor), ..s.clone() }).collect(),
         gcd: countdown(*gcd, anchor),
         swap_ready: countdown(*swap_ready, anchor),
         potion_ready: countdown(*potion_ready, anchor),
@@ -1070,7 +1070,7 @@ fn join((f, b, bags, c, g): &(Fast, Bar, Bags, Craft, Growth), anchor: u64) -> P
         resource_kind: f.resource_kind,
         resource: f.resource as f32,
         max_resource: f.max_resource,
-        bar: b.bar.iter().map(|s| Slot { cooldown: from_countdown(s.cooldown, anchor), ..s.clone() }).collect(),
+        bar: b.bar.iter().map(|s| Slot { cooldown: from_countdown(s.cooldown, anchor), next_charge: from_countdown(s.next_charge, anchor), ..s.clone() }).collect(),
         gcd: from_countdown(b.gcd, anchor),
         cast: cast_in(&b.cast, anchor),
         auras: auras_in(&b.auras, anchor),

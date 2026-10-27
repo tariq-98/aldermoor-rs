@@ -383,7 +383,10 @@ pub fn start_cooldown(world: &mut World, e: Entity, id: AbilityId, haste: f64) {
     if cd > 0.0 {
         let t = now(world);
         if let Some(mut f) = world.get_mut::<Fighter>(e) {
-            f.set_cooldown(id, t + cd);
+            // A charge spent comes back a cooldown after the ones before it (#349); with one
+            // charge, a cooldown from now.
+            let full = crate::components::spend_charge(f.full_at(id), t, cd);
+            f.set_cooldown(id, full);
         }
     }
 }
