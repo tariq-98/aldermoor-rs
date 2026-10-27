@@ -296,6 +296,9 @@ pub struct ClipSet {
     /// A humanoid's walk, jog and sprint as this skeleton plays them (#110), measured by the first
     /// character to use the set; `None` if they don't measure.
     pub gaits: OnceLock<Option<[anim::Gait; 3]>>,
+    /// How far a body on this skeleton moves, up and in toward the wall, to reach a hold from its
+    /// hang (#248), measured by the first character to use the set.
+    pub reach: OnceLock<Vec3>,
 }
 impl ClipSet {
     pub fn bind(skeleton: &[Node], clips: &Model, humanoid: bool) -> Self {
@@ -353,6 +356,7 @@ impl ClipSet {
         Self {
             clips,
             gaits: OnceLock::new(),
+            reach: OnceLock::new(),
         }
     }
 }

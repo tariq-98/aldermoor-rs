@@ -19,10 +19,23 @@ top of that file. The ground is `world::Valley::ground`, and the river is
 - **Jumps** forgive a little: a jump pressed up to 0.15 s before landing goes off as you land,
   and one pressed up to 0.1 s after running off an edge still jumps (coyote time). The windows are
   `JUMP_BUFFER` and `COYOTE_TIME`; rolls have their own (`DODGE_BUFFER`, in COMBAT.md).
+- **Air moves** (#347, everyone has them): in the air, one **air dash** and one **double jump**,
+  each ready again once you touch the ground or a wall (a wall run, a climb or pull-up, catching
+  or moving between holds).
+  - **Air dash:** Roll in the air bursts 4 m in 0.18 s the way you steer (or facing), following
+    your aim up or down by up to 35°, so you can dash up to a ledge or down to the ground
+    (`AIR_DASH_DISTANCE`, `AIR_DASH_TIME`, `AIR_DASH_PITCH`). Gravity waits while it lasts, and
+    you fall on with 40% of its speed; a wall or the ground stops it short. It costs a roll's
+    endurance. Within 0.2 s of landing, Roll is a roll landing instead (below).
+  - **Double jump:** Space in the air jumps again, 70% as high as from the ground
+    (`AIR_JUMP_SPEED`). Within 0.15 s of landing the press waits to jump from the ground instead,
+    as the jump buffer has it; within coyote time it's a full jump from the edge.
+  - Neither works while downed, swimming or stunned, as rolls and jumps don't. Until they have
+    poses of their own (#353) the dash is drawn as a leap and the double jump as a jump.
 - **Cliffs:** ground steeper than 2:1 (about 63°) is a wall. Walking into one either climbs it
   or slides along it.
   - A face that tops out within **1.5 m** of your feet (chest height) is climbed: a 0.6 s pull-up
-    onto the top, as a forced move (no skills meanwhile, pose `Jump` until climbing art exists).
+    onto the top, as a forced move (no skills meanwhile; pose `Jump`, which plays the climb).
   - A taller face stops you, unless you jump at it or run up it (a wall run, below). In a jump,
     a face that tops out within **2.2 m** of your feet at that moment is caught and pulled up
     onto in 0.5 s (a mantle, `ForcedKind::Mantle`), as long as you aren't yet falling faster than
@@ -131,16 +144,16 @@ top of that file. The ground is `world::Valley::ground`, and the river is
     feet rise 1.8 m in 0.5 s, slowing (`WALL_RUN_RISE`, `WALL_RUN_TIME`). A top the hands reach,
     up to 4.2 m above where the feet set off, is pulled straight up onto if there's room on it;
     otherwise the hands catch the first hold they pass, up to that height. Space kicks off
-    backwards, as a back eject. With nothing caught, you drop back off at the end. Pose `Jump`
-    until it has a clip.
-  - **Roll landing:** Roll in the air readies a roll landing instead of rolling. Pressed up to
-    0.2 s before you land (`LANDING_ROLL`), you roll on 3 m the way you were going, and falls up
-    to 8 m don't hurt (`ROLL_SAFE_FALL`; past that each metre costs as usual). Pressed earlier,
-    it's lost.
+    backwards, as a back eject. With nothing caught, you drop back off at the end. Pose `Jump`;
+    it plays `Wall_Run` (#305).
+  - **Roll landing:** Roll pressed up to 0.2 s before you land (`LANDING_ROLL`) readies a roll
+    landing: you roll on 3 m the way you were going, and falls up to 8 m don't hurt
+    (`ROLL_SAFE_FALL`; past that each metre costs as usual). Pressed earlier, it's an air dash
+    (below), or, with the dash used, a roll landing readied that early is lost.
   - No skills or guard while climbing ("You can't fight while climbing."). A knockback throws
     you off the wall; being downed makes you let go, and the dead drop where they are. Hanging
     bodies neither push nor are pushed.
-  - Leaps, ejects and corners play the hang's climbing clips (#247) until they have their own.
+  - Leaps, ejects, corners, wall runs and the roll landing play clips of their own (#305).
 - A low wall too thin for the climb's ground samples (under about 0.5 m deep) is climbed onto
   like a deep one (#238).
 - **Swimming:** the river is no longer a wall.
@@ -179,5 +192,11 @@ or in a forced move (roll, leap, charge, climb, a move onto a hold or round a co
 knockback, with where and when it starts and ends), so animation can show it on other players
 and monsters too (CONTRACT.md).
 
-Not yet: free climbing anywhere (holds only, by design), mounts, clips for leaps, ejects, wall
-runs and corners, and swimming animations (walk and idle in water).
+Rolls, leaps, charges and climbs play their clips by how far the body has come through them, and
+swimmers swim (#213, ANIMATION.md, "Traversal"); hanging and the moves between holds play the
+climbing clips (#247), by how far the body has come and slid, with the hands on the hold and the
+feet on the wall (#248). The climb's height comes in faster than its way across, so a climber's
+hands only grab the edge before the shoulders rise out of reach; a climb that rose more slowly, or
+mantle clips matched to this one (#108), would let them hang on.
+
+Not yet: free climbing anywhere (holds only, by design), and mounts.

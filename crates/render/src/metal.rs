@@ -90,29 +90,38 @@ struct PostTargets {
     colour: Obj<dyn MTLTexture>,
 }
 impl PostTargets {
+    /// AO, three bloom targets, then colour.
+    fn descs(
+        w: usize,
+        h: usize,
+        colour_usage: MTLTextureUsage,
+    ) -> [Retained<MTLTextureDescriptor>; 5] {
+        let usage = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
+        let half = |format| target_desc(w.div_ceil(2), h.div_ceil(2), format, 1, usage);
+        [
+            half(MTLPixelFormat::RG16Float),
+            half(MTLPixelFormat::RGBA16Float),
+            half(MTLPixelFormat::RGBA16Float),
+            half(MTLPixelFormat::RGBA16Float),
+            target_desc(w, h, MTLPixelFormat::RGBA16Float, 1, usage | colour_usage),
+        ]
+    }
     fn new(
         device: &ProtocolObject<dyn MTLDevice>,
+        heap: Option<&ProtocolObject<dyn MTLHeap>>,
         w: usize,
         h: usize,
         colour_usage: MTLTextureUsage,
     ) -> Result<Self> {
-        let usage = MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead;
-        let half = |format| texture(device, w.div_ceil(2), h.div_ceil(2), format, 1, usage);
+        let [ao, b0, b1, b2, colour] = Self::descs(w, h, colour_usage);
         Ok(Self {
-            ao: half(MTLPixelFormat::RG16Float)?,
+            ao: target(device, heap, &ao)?,
             bloom: [
-                half(MTLPixelFormat::RGBA16Float)?,
-                half(MTLPixelFormat::RGBA16Float)?,
-                half(MTLPixelFormat::RGBA16Float)?,
+                target(device, heap, &b0)?,
+                target(device, heap, &b1)?,
+                target(device, heap, &b2)?,
             ],
-            colour: texture(
-                device,
-                w,
-                h,
-                MTLPixelFormat::RGBA16Float,
-                1,
-                usage | colour_usage,
-            )?,
+            colour: target(device, heap, &colour)?,
         })
     }
 }
@@ -140,6 +149,38 @@ struct DrawUniform {
     dyes: [[f32; 4]; 2],
     references: [[f32; 4]; 2],
 }
+// Word-packed shadow inputs. Offsets are shared with shadow_vertex in shaders.metal.
+// Positions are always present; unclassified rigid meshes use exactly 12 bytes/vertex.
+// Optional data retains full precision, including uint joints and vertex alpha.
+fn shadow_stream(p: &crate::model::Primitive) -> (Vec<u32>, [u32; 2]) {
+    let region = p.vertices.iter().any(|v| v.position[3] != -1.);
+    let wind = p.vertices.iter().any(|v| v.normal[3].to_bits() != 0);
+    let skin = p.skin.is_some()
+        || p.vertices.iter().any(|v| {
+            v.joints != [0; 4] || v.weights.map(f32::to_bits) != [1f32.to_bits(), 0, 0, 0]
+        });
+    let mask = p.material.alpha_mode == 1;
+    let flags = region as u32 | (wind as u32) << 1 | (skin as u32) << 2 | (mask as u32) << 3;
+    let stride = 3 + region as usize + wind as usize + 8 * skin as usize + 3 * mask as usize;
+    let mut words = Vec::with_capacity(p.vertices.len() * stride);
+    for v in &p.vertices {
+        words.extend(v.position[..3].iter().map(|x| x.to_bits()));
+        if region {
+            words.push(v.position[3].to_bits());
+        }
+        if wind {
+            words.push(v.normal[3].to_bits());
+        }
+        if skin {
+            words.extend(v.joints);
+            words.extend(v.weights.map(f32::to_bits));
+        }
+        if mask {
+            words.extend([v.uv[0].to_bits(), v.uv[1].to_bits(), v.color[3].to_bits()]);
+        }
+    }
+    (words, [stride as u32, flags])
+}
 struct GpuMesh {
     terrain_indices: Vec<(Obj<dyn MTLBuffer>, usize)>,
     vertices: Obj<dyn MTLBuffer>,
@@ -148,6 +189,8 @@ struct GpuMesh {
     count: usize,
     maps: [Obj<dyn MTLTexture>; 5],
     material: Material,
+    shadow_vertices: Obj<dyn MTLBuffer>,
+    shadow_layout: [u32; 2],
 }
 impl GpuMesh {
     fn indices_at(&self, level: usize) -> (&Obj<dyn MTLBuffer>, usize) {
@@ -394,6 +437,7 @@ pub struct Renderer {
     composite: Obj<dyn MTLRenderPipelineState>,
     post_pipelines: [Obj<dyn MTLRenderPipelineState>; 4],
     post_targets: Option<PostTargets>,
+    target_heaps: Option<TargetHeaps>,
     post_config: [[f32; 4]; 3],
     depth_state: Obj<dyn MTLDepthStencilState>,
     read_depth: Obj<dyn MTLDepthStencilState>,
@@ -456,14 +500,13 @@ fn buffer<T: bytemuck::Pod>(
         .context("Metal buffer allocation")
     }
 }
-fn texture(
-    d: &ProtocolObject<dyn MTLDevice>,
+fn target_desc(
     w: usize,
     h: usize,
     format: MTLPixelFormat,
     samples: usize,
     usage: MTLTextureUsage,
-) -> Result<Obj<dyn MTLTexture>> {
+) -> Retained<MTLTextureDescriptor> {
     let desc = MTLTextureDescriptor::new();
     unsafe { desc.setWidth(w) };
     unsafe { desc.setHeight(h) };
@@ -474,8 +517,106 @@ fn texture(
     if samples > 1 {
         desc.setTextureType(MTLTextureType::Type2DMultisample);
     }
-    d.newTextureWithDescriptor(&desc)
+    desc
+}
+fn texture(
+    d: &ProtocolObject<dyn MTLDevice>,
+    w: usize,
+    h: usize,
+    format: MTLPixelFormat,
+    samples: usize,
+    usage: MTLTextureUsage,
+) -> Result<Obj<dyn MTLTexture>> {
+    d.newTextureWithDescriptor(&target_desc(w, h, format, samples, usage))
         .context("Metal texture allocation")
+}
+/// Places a render target in `heap` when it has room, otherwise allocates from the device.
+fn target(
+    d: &ProtocolObject<dyn MTLDevice>,
+    heap: Option<&ProtocolObject<dyn MTLHeap>>,
+    desc: &MTLTextureDescriptor,
+) -> Result<Obj<dyn MTLTexture>> {
+    if let Some(texture) = heap.and_then(|heap| heap.newTextureWithDescriptor(desc)) {
+        return Ok(texture);
+    }
+    if let Some(heap) = heap {
+        eprintln!(
+            "render target heap full ({} of {} bytes used); allocating from the device",
+            heap.usedSize(),
+            heap.size()
+        );
+    }
+    d.newTextureWithDescriptor(desc)
+        .context("Metal texture allocation")
+}
+/// Every texture sized by the render scale: hdr, MSAA colour, motion, MSAA motion, depth,
+/// two history targets, then the post targets (`PostTargets::descs`).
+fn scaled_target_descs(w: usize, h: usize, samples: usize) -> Vec<Retained<MTLTextureDescriptor>> {
+    let rt = MTLTextureUsage::RenderTarget;
+    let read = MTLTextureUsage::ShaderRead;
+    let colour = MTLPixelFormat::RGBA16Float;
+    let mut descs = vec![
+        target_desc(w, h, colour, 1, rt | read),
+        target_desc(w, h, colour, samples, rt),
+        target_desc(w, h, colour, 1, rt | read),
+        target_desc(w, h, colour, samples, rt),
+        target_desc(w, h, MTLPixelFormat::Depth32Float, samples, rt | read),
+        target_desc(w, h, colour, 1, rt | read),
+        target_desc(w, h, colour, 1, rt | read),
+    ];
+    descs.extend(PostTargets::descs(w, h, rt | read));
+    descs
+}
+/// Scale-dependent targets live in two heaps used in turn. A dynamic-resolution step then
+/// places textures in memory that is already allocated, instead of asking the system for
+/// ~150 MB mid-game, which hitched for hundreds of milliseconds under memory pressure.
+/// Frames still in flight keep the other heap's textures; steps are a second apart.
+struct TargetHeaps {
+    /// The largest render scale the heaps are sized for.
+    max_scale: f32,
+    heaps: [Option<Obj<dyn MTLHeap>>; 2],
+    current: usize,
+}
+impl TargetHeaps {
+    fn current(&self) -> Option<&ProtocolObject<dyn MTLHeap>> {
+        self.heaps[self.current].as_deref()
+    }
+    /// Grows both heaps to hold a full set at `bytes`, then returns the one not in use.
+    fn spare(
+        &mut self,
+        d: &ProtocolObject<dyn MTLDevice>,
+        bytes: usize,
+    ) -> Result<&ProtocolObject<dyn MTLHeap>> {
+        for heap in &mut self.heaps {
+            if heap.as_ref().is_none_or(|h| h.size() < bytes) {
+                // Textures in a replaced heap keep it alive until they are released.
+                let desc = MTLHeapDescriptor::new();
+                desc.setSize(bytes);
+                desc.setStorageMode(MTLStorageMode::Private);
+                desc.setType(MTLHeapType::Automatic);
+                desc.setHazardTrackingMode(MTLHazardTrackingMode::Tracked);
+                *heap = Some(
+                    d.newHeapWithDescriptor(&desc)
+                        .context("render target heap")?,
+                );
+            }
+        }
+        self.current = 1 - self.current;
+        Ok(self.heaps[self.current].as_deref().unwrap())
+    }
+}
+fn heap_bytes(
+    d: &ProtocolObject<dyn MTLDevice>,
+    descs: &[Retained<MTLTextureDescriptor>],
+) -> usize {
+    let mut bytes: usize = 0;
+    let mut largest_align: usize = 1;
+    for desc in descs {
+        let MTLSizeAndAlign { size, align } = d.heapTextureSizeAndAlignWithDescriptor(desc);
+        bytes = bytes.next_multiple_of(align.max(1)) + size;
+        largest_align = largest_align.max(align);
+    }
+    bytes + largest_align
 }
 fn image_texture(
     d: &ProtocolObject<dyn MTLDevice>,
@@ -872,6 +1013,7 @@ impl Renderer {
             composite,
             post_pipelines,
             post_targets: None,
+            target_heaps: None,
             post_config: [[0.; 4]; 3],
             depth_state,
             read_depth,
@@ -1142,87 +1284,104 @@ impl Renderer {
         self.layer = Some(layer);
     }
     pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
+        self.resize_at_scale(width, height, self.scale)
+    }
+    /// Resize only the internal targets; presentation and HUD stay at native resolution.
+    pub fn set_render_scale(&mut self, scale: f32) -> Result<()> {
+        ensure!(
+            scale.is_finite() && (0.25..=1.).contains(&scale),
+            "invalid render scale"
+        );
+        if self.scale == scale {
+            return Ok(());
+        }
+        self.resize_at_scale(self.width, self.height, scale)
+    }
+    /// Moves the scale-dependent targets into two heaps sized for `max_scale`, so later
+    /// `set_render_scale` calls up to it allocate nothing from the system. This costs one
+    /// spare set of targets; call it only when the scale will change during play.
+    pub fn reserve_render_scales(&mut self, max_scale: f32) -> Result<()> {
+        ensure!(
+            max_scale.is_finite() && (0.25..=1.).contains(&max_scale),
+            "invalid render scale"
+        );
+        self.target_heaps = Some(TargetHeaps {
+            max_scale,
+            heaps: [None, None],
+            current: 0,
+        });
+        self.post_targets = None;
+        self.resize_at_scale(self.width, self.height, self.scale)
+    }
+    fn resize_at_scale(&mut self, width: u32, height: u32, scale: f32) -> Result<()> {
         if width == 0 || height == 0 {
             return Ok(());
         }
-        self.wait()?;
-        self.width = width;
-        self.height = height;
+        let output_changed = width != self.width || height != self.height;
+        // Command buffers retain the textures they encode, so a scale-only change swaps
+        // targets while earlier frames finish. Draining here stalled a whole GPU frame.
+        if output_changed || self.metalfx_requested {
+            self.wait()?;
+        }
         let (w, h) = (
-            (width as f32 * self.scale).round().max(1.) as usize,
-            (height as f32 * self.scale).round().max(1.) as usize,
+            (width as f32 * scale).round().max(1.) as usize,
+            (height as f32 * scale).round().max(1.) as usize,
         );
+        let descs = scaled_target_descs(w, h, self.samples);
+        let heap = match &mut self.target_heaps {
+            Some(heaps) => {
+                let cap = heaps.max_scale.max(scale);
+                let cap = (
+                    (width as f32 * cap).round().max(1.) as usize,
+                    (height as f32 * cap).round().max(1.) as usize,
+                );
+                let bytes = heap_bytes(
+                    &self.device,
+                    &scaled_target_descs(cap.0, cap.1, self.samples),
+                );
+                Some(heaps.spare(&self.device, bytes)?)
+            }
+            None => None,
+        };
+        let hdr = target(&self.device, heap, &descs[0])?;
+        let msaa = target(&self.device, heap, &descs[1])?;
+        let motion = target(&self.device, heap, &descs[2])?;
+        let motion_msaa = target(&self.device, heap, &descs[3])?;
+        let depth = target(&self.device, heap, &descs[4])?;
+        let history = [
+            target(&self.device, heap, &descs[5])?,
+            target(&self.device, heap, &descs[6])?,
+        ];
         let rt = MTLTextureUsage::RenderTarget;
         let read = MTLTextureUsage::ShaderRead;
-        self.hdr = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            1,
-            rt | read,
-        )?;
-        self.msaa = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            self.samples,
-            rt,
-        )?;
-        self.motion = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            1,
-            rt | read,
-        )?;
-        self.motion_msaa = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::RGBA16Float,
-            self.samples,
-            rt,
-        )?;
-        self.depth = texture(
-            &self.device,
-            w,
-            h,
-            MTLPixelFormat::Depth32Float,
-            self.samples,
-            rt | read,
-        )?;
-        self.history = [
-            texture(
+        let output = if output_changed {
+            Some(texture(
                 &self.device,
-                w,
-                h,
-                MTLPixelFormat::RGBA16Float,
+                width as usize,
+                height as usize,
+                MTLPixelFormat::BGRA8Unorm_sRGB,
                 1,
                 rt | read,
-            )?,
-            texture(
-                &self.device,
-                w,
-                h,
-                MTLPixelFormat::RGBA16Float,
-                1,
-                rt | read,
-            )?,
-        ];
-        self.output = texture(
-            &self.device,
-            width as usize,
-            height as usize,
-            MTLPixelFormat::BGRA8Unorm_sRGB,
-            1,
-            rt | read,
-        )?;
+            )?)
+        } else {
+            None
+        };
+        // All allocations have succeeded; in-flight frames keep their own references.
+        self.hdr = hdr;
+        self.msaa = msaa;
+        self.motion = motion;
+        self.motion_msaa = motion_msaa;
+        self.depth = depth;
+        self.history = history;
+        if let Some(output) = output {
+            self.output = output;
+        }
+        self.width = width;
+        self.height = height;
+        self.scale = scale;
         self.history_valid = false;
         self.previous.clear();
-        if let Some(l) = &self.layer {
+        if output_changed && let Some(l) = &self.layer {
             l.setDrawableSize(objc2_core_foundation::CGSize::new(
                 width as f64,
                 height as f64,
@@ -1271,6 +1430,7 @@ impl Renderer {
             return Ok(());
         }
         let p = &draw.model.primitives[draw.primitive];
+        let (shadow_words, shadow_layout) = shadow_stream(p);
         let mut maps = self.fallbacks.clone();
         for (i, map) in p.material.maps.iter().enumerate() {
             if let Some(t) = map {
@@ -1303,6 +1463,8 @@ impl Renderer {
                 count: p.indices.len(),
                 maps,
                 material: p.material.clone(),
+                shadow_vertices: buffer(&self.device, &shadow_words)?,
+                shadow_layout,
             },
         );
         Ok(())
@@ -1359,9 +1521,10 @@ impl Renderer {
                     || !p.colour.usage().contains(self.hdr.usage())
             })
         {
-            self.wait()?;
+            // In-flight frames retain the old targets, as in `resize_at_scale`.
             self.post_targets = Some(PostTargets::new(
                 &self.device,
+                self.target_heaps.as_ref().and_then(TargetHeaps::current),
                 self.hdr.width(),
                 self.hdr.height(),
                 self.hdr.usage(),
@@ -2233,7 +2396,19 @@ impl Renderer {
                 p.uniform
             };
             unsafe {
-                enc.setVertexBuffer_offset_atIndex(Some(&g.vertices), 0, 0);
+                let compact_shadow = cascade.is_some();
+                enc.setVertexBuffer_offset_atIndex(
+                    Some(if compact_shadow {
+                        &g.shadow_vertices
+                    } else {
+                        &g.vertices
+                    }),
+                    0,
+                    0,
+                );
+                if compact_shadow {
+                    enc.setVertexBytes_length_atIndex(ptr(&g.shadow_layout), 8, 7);
+                }
                 if self.inline_constants && !instanced {
                     enc.setVertexBytes_length_atIndex(
                         NonNull::new(
@@ -2388,6 +2563,10 @@ impl Renderer {
         self.completed_frames.push_back(measured);
         Ok(())
     }
+    /// The newest frame ID handed to the GPU, which completion samples report as `frame`.
+    pub fn last_submitted_frame(&self) -> Option<usize> {
+        self.frame.checked_sub(1)
+    }
     pub fn wait(&mut self) -> Result<()> {
         // Slots may wrap, so completion consumers identify samples by submitted frame number.
         for i in 0..self.slots.len() {
@@ -2519,6 +2698,98 @@ mod temporal_tests {
             r.device.name()
         );
         false
+    }
+
+    #[test]
+    fn resolution_changes_keep_in_flight_frames_preserve_native_output_and_reset_history() {
+        let mut r = Renderer::new(64, 64, 0.75).unwrap();
+        r.set_frames_in_flight(3).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        r.draw(camera, &[], None).unwrap();
+        r.draw(camera, &[], None).unwrap();
+        assert!(r.slots.iter().any(|slot| slot.pending.is_some()));
+        let output = r.output.clone();
+        r.set_render_scale(0.55).unwrap();
+        assert!(
+            r.slots.iter().any(|slot| slot.pending.is_some()),
+            "a scale-only change must not drain in-flight frames"
+        );
+        assert_eq!(r.last_submitted_frame(), Some(1));
+        assert_eq!((r.hdr.width(), r.hdr.height()), (35, 35));
+        assert_eq!((r.history[0].width(), r.history[1].height()), (35, 35));
+        assert_eq!((r.output.width(), r.output.height()), (64, 64));
+        assert!(std::ptr::eq(&*r.output, &*output));
+        assert!(!r.history_valid);
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+        assert!(r.history_valid);
+        let history = r.history[0].clone();
+        r.set_render_scale(0.55).unwrap();
+        assert!(std::ptr::eq(&*r.history[0], &*history));
+        assert!(r.history_valid, "unchanged scale must not discard history");
+        assert!(r.set_render_scale(f32::NAN).is_err());
+        assert!(r.set_render_scale(0.1).is_err());
+        assert_eq!(r.scale, 0.55);
+        r.resize(96, 80).unwrap();
+        assert_eq!((r.hdr.width(), r.hdr.height()), (53, 44));
+        assert_eq!((r.output.width(), r.output.height()), (96, 80));
+        assert!(!r.history_valid);
+        r.draw(camera, &[], None).unwrap();
+        r.wait().unwrap();
+    }
+
+    #[test]
+    fn reserved_render_scales_step_between_two_heaps_without_growing_them() {
+        let mut r = Renderer::new(64, 64, 0.75).unwrap();
+        r.set_frames_in_flight(3).unwrap();
+        r.reserve_render_scales(0.75).unwrap();
+        let camera = Camera {
+            eye: Vec3::new(0., 20., 20.),
+            target: Vec3::ZERO,
+            fov: 1.,
+        };
+        let sizes = |r: &Renderer| {
+            let heaps = &r.target_heaps.as_ref().unwrap().heaps;
+            heaps.each_ref().map(|h| h.as_ref().unwrap().size())
+        };
+        let reserved = sizes(&r);
+        let mut previous = None;
+        for scale in [0.75, 0.725, 0.7, 0.725, 0.75, 0.55] {
+            r.set_render_scale(scale).unwrap();
+            // As in the client, each frame drains its autorelease pool, which releases the
+            // passes' last references to the previous targets.
+            objc2::rc::autoreleasepool(|_| r.draw(camera, &[], None)).unwrap();
+            // Steps are a second apart, so frames that used the other heap have finished.
+            r.wait().unwrap();
+            let heaps = r.target_heaps.as_ref().unwrap();
+            let current = heaps.current().unwrap();
+            let mut targets = vec![&r.hdr, &r.msaa, &r.motion, &r.motion_msaa, &r.depth];
+            targets.extend(&r.history);
+            if let Some(post) = &r.post_targets {
+                targets.extend([&post.ao, &post.colour]);
+                targets.extend(&post.bloom);
+            }
+            for t in targets {
+                let heap = t.heap().expect("scale-dependent target outside the heaps");
+                assert!(std::ptr::eq(&*heap, current));
+            }
+            if let Some(previous) = previous {
+                assert_ne!(previous, heaps.current, "each step uses the other heap");
+            }
+            previous = Some(heaps.current);
+            assert_eq!(sizes(&r), reserved);
+        }
+        // A larger output grows both heaps once; later steps fit again.
+        r.resize(96, 80).unwrap();
+        let grown = sizes(&r);
+        assert!(grown.iter().zip(reserved).all(|(g, before)| *g > before));
+        r.set_render_scale(0.6).unwrap();
+        assert_eq!(sizes(&r), grown);
+        assert!(r.reserve_render_scales(f32::NAN).is_err());
     }
 
     #[test]
@@ -3090,5 +3361,315 @@ mod temporal_tests {
             }
         }
         assert!(covered > 100, "the test must actually rasterise geometry");
+    }
+    // The original interleaved vertex entry point is compiled only by this regression test.
+    const SHADOW_REFERENCE: &str = r#"vertex Vary shadow_vertex_reference(uint id [[vertex_id]],uint instance [[instance_id]],device const Vertex* v [[buffer(0)]],constant Frame& f [[buffer(1)]],constant Draw* instances [[buffer(2)]],device const float4x4* bones [[buffer(3)]],device const float4* morphs [[buffer(4)]],constant uint& cascade [[buffer(5)]],device const float4x4* old_bones [[buffer(6)]]){
+    constant Draw& d=instances[instance];Vary o=deform(id,v,f,d,bones,morphs,old_bones);o.instance=instance;o.position=f.shadows[cascade]*float4(o.world,1);int region=int(round(o.region));if(region>=0&&region<31&&(d.flags.x&(1u<<region)))o.position=float4(2,2,2,1);return o;
+}
+"#;
+
+    fn reference_shadow_pipeline(r: &Renderer, masked: bool) -> Obj<dyn MTLRenderPipelineState> {
+        let source = format!("{}\n{}", include_str!("shaders.metal"), SHADOW_REFERENCE);
+        let library = r
+            .device
+            .newLibraryWithSource_options_error(&NSString::from_str(&source), None)
+            .unwrap();
+        let desc = MTLRenderPipelineDescriptor::new();
+        desc.setVertexFunction(
+            library
+                .newFunctionWithName(&NSString::from_str("shadow_vertex_reference"))
+                .as_deref(),
+        );
+        if masked {
+            desc.setFragmentFunction(
+                library
+                    .newFunctionWithName(&NSString::from_str("shadow_fragment"))
+                    .as_deref(),
+            );
+        }
+        desc.setDepthAttachmentPixelFormat(MTLPixelFormat::Depth32Float);
+        r.device
+            .newRenderPipelineStateWithDescriptor_error(&desc)
+            .unwrap()
+    }
+
+    // Exercise the real upload and pipelines with instanced draws, with a small depth array read into memory.
+    // Each cascade has a different transform; no image files or authored assets are produced.
+    fn shadow_depth_bytes(
+        r: &mut Renderer,
+        draws: &[Draw],
+        time: f32,
+        reference: bool,
+    ) -> Vec<u32> {
+        for d in draws {
+            r.upload(d).unwrap();
+        }
+        let uniforms = buffer(&r.device, &[0u8; 4096]).unwrap();
+        let bones = buffer(
+            &r.device,
+            &[
+                Mat4::from_rotation_z(0.12),
+                Mat4::from_translation(Vec3::new(0.1, 0.03, 0.02)),
+                Mat4::from_rotation_y(-0.09),
+                Mat4::IDENTITY,
+            ]
+            .map(|m| m.to_cols_array_2d()),
+        )
+        .unwrap();
+        for (i, d) in draws.iter().enumerate() {
+            let p = &d.model.primitives[d.primitive];
+            let mut u: DrawUniform = bytemuck::Zeroable::zeroed();
+            u.model = d.transform.to_cols_array_2d();
+            u.previous_model = u.model;
+            u.base = d.base;
+            u.params[3] = p.material.alpha_cutoff;
+            u.flags = [
+                d.hidden,
+                (!d.palette.is_empty()) as u32,
+                p.material.alpha_mode,
+                0,
+            ];
+            u.morph = [
+                d.morph[0],
+                d.morph[1],
+                (!p.morphs.is_empty()) as u32 as f32,
+                0.,
+            ];
+            u.previous_morph = u.morph;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr(&u).as_ptr().cast::<u8>(),
+                    uniforms
+                        .contents()
+                        .as_ptr()
+                        .cast::<u8>()
+                        .add(i * std::mem::size_of::<DrawUniform>()),
+                    std::mem::size_of::<DrawUniform>(),
+                );
+            }
+        }
+        let mut f: Frame = bytemuck::Zeroable::zeroed();
+        f.vp = Mat4::IDENTITY.to_cols_array_2d();
+        f.previous_vp = f.vp;
+        f.clock = [time, time - 0.1, 1.3, 0.];
+        for c in 0..3 {
+            f.shadows[c] = (Mat4::from_translation(Vec3::new(c as f32 * 0.07, 0., 0.))
+                * Mat4::from_scale(Vec3::splat(1. - c as f32 * 0.1)))
+            .to_cols_array_2d();
+        }
+        let desc = MTLTextureDescriptor::new();
+        unsafe {
+            desc.setWidth(64);
+            desc.setHeight(64);
+            desc.setArrayLength(3);
+        }
+        desc.setTextureType(MTLTextureType::Type2DArray);
+        desc.setPixelFormat(MTLPixelFormat::Depth32Float);
+        desc.setStorageMode(MTLStorageMode::Private);
+        desc.setUsage(MTLTextureUsage::RenderTarget);
+        let depth = r.device.newTextureWithDescriptor(&desc).unwrap();
+        let read = buffer(&r.device, &[0u32; 64 * 64 * 3]).unwrap();
+        let cb = r.queue.commandBuffer().unwrap();
+        for cascade in 0..3 {
+            let pass = MTLRenderPassDescriptor::new();
+            let a = pass.depthAttachment();
+            a.setTexture(Some(&depth));
+            a.setSlice(cascade);
+            a.setLoadAction(MTLLoadAction::Clear);
+            a.setStoreAction(MTLStoreAction::Store);
+            a.setClearDepth(1.);
+            let enc = cb.renderCommandEncoderWithDescriptor(&pass).unwrap();
+            enc.setDepthStencilState(Some(&r.depth_state));
+            enc.setDepthBias_slopeScale_clamp(0.001, 1.25, 0.01);
+            let g = &r.meshes[&(draws[0].model.id, draws[0].primitive)];
+            enc.setRenderPipelineState(if g.material.alpha_mode == 1 {
+                &r.shadow_mask_pipeline
+            } else {
+                &r.shadow_pipeline
+            });
+            enc.setCullMode(MTLCullMode::None);
+            unsafe {
+                enc.setVertexBytes_length_atIndex(ptr(&f), std::mem::size_of::<Frame>(), 1);
+                enc.setVertexBytes_length_atIndex(ptr(&(cascade as u32)), 4, 5);
+                enc.setVertexBytes_length_atIndex(ptr(&g.shadow_layout), 8, 7);
+                enc.setVertexBuffer_offset_atIndex(
+                    Some(if reference {
+                        &g.vertices
+                    } else {
+                        &g.shadow_vertices
+                    }),
+                    0,
+                    0,
+                );
+                enc.setVertexBuffer_offset_atIndex(Some(&uniforms), 0, 2);
+                enc.setVertexBuffer_offset_atIndex(Some(&bones), 0, 3);
+                enc.setVertexBuffer_offset_atIndex(Some(&g.morphs), 0, 4);
+                enc.setVertexBuffer_offset_atIndex(Some(&bones), 0, 6);
+                enc.setFragmentBuffer_offset_atIndex(Some(&uniforms), 0, 2);
+                enc.setFragmentTexture_atIndex(Some(&g.maps[0]), 0);
+                enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
+                    MTLPrimitiveType::Triangle,g.count,MTLIndexType::UInt32,&g.indices,0,draws.len());
+            }
+            enc.endEncoding();
+        }
+        let enc = cb.blitCommandEncoder().unwrap();
+        for c in 0..3 {
+            unsafe {
+                enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                &depth,c,0,MTLOrigin{x:0,y:0,z:0},MTLSize{width:64,height:64,depth:1},&read,c*64*64*4,256,64*64*4);
+            }
+        }
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+        assert!(cb.error().is_none());
+        unsafe {
+            std::slice::from_raw_parts(read.contents().as_ptr().cast::<u32>(), 64 * 64 * 3).to_vec()
+        }
+    }
+
+    #[test]
+    fn compact_shadow_streams_match_interleaved_depth_in_every_cascade() {
+        use crate::model::{Model, Primitive, Vertex};
+        let mut r = Renderer::with_samples(64, 64, 1., 1).unwrap();
+        let compact = (r.shadow_pipeline.clone(), r.shadow_mask_pipeline.clone());
+        let reference = (
+            reference_shadow_pipeline(&r, false),
+            reference_shadow_pipeline(&r, true),
+        );
+        // Independent and combined skin/morph/wind/mask inputs, plus hidden-region clipping.
+        for bits in 0..32 {
+            let skinned = bits & 1 != 0;
+            let morphed = bits & 2 != 0;
+            let windy = bits & 4 != 0;
+            let masked = bits & 8 != 0;
+            let hidden = bits & 16 != 0;
+            let mut vertices: Vec<_> = [
+                Vec3::new(-0.7, -0.6, 0.5),
+                Vec3::new(0.7, -0.6, 0.5),
+                Vec3::new(0., 0.7, 0.5),
+            ]
+            .into_iter()
+            .map(|p| Vertex::plain(p, Vec3::Z, [1.; 4]))
+            .collect();
+            for (i, v) in vertices.iter_mut().enumerate() {
+                if skinned {
+                    v.joints = [0, 1, 2, 3];
+                    v.weights = [0.4, 0.3, 0.2, 0.1];
+                }
+                if windy {
+                    v.normal[3] = 0.2 + i as f32 * 0.3;
+                }
+                if hidden {
+                    v.position[3] = 2.;
+                }
+                v.uv = [i as f32 * 0.4, 0.7, 0., 0.];
+                v.color[3] = if i == 0 { 0.05 } else { 1. };
+            }
+            let mut material = Material {
+                alpha_mode: if masked { 1 } else { 0 },
+                double_sided: true,
+                ..Default::default()
+            };
+            if masked {
+                material.maps[0] = Some(Arc::new(Texture {
+                    key: format!("test-shadow-mask:{bits}"),
+                    width: 2,
+                    height: 2,
+                    rgba: Mutex::new(Some(vec![
+                        255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                        255,
+                    ])),
+                    compressed: None,
+                }));
+            }
+            let p = Primitive {
+                bounds: Bounds::from_points(
+                    vertices.iter().map(|v| Vec3::from_slice(&v.position[..3])),
+                ),
+                vertices,
+                indices: vec![0, 1, 2],
+                material,
+                node: 0,
+                skin: skinned.then_some(0),
+                morphs: if morphed {
+                    vec![vec![[0.04, 0.03, 0.01]; 3], vec![[-0.01, 0.06, -0.02]; 3]]
+                } else {
+                    vec![]
+                },
+                morph_names: if morphed {
+                    vec!["arrow".into(), "draw".into()]
+                } else {
+                    vec![]
+                },
+            };
+            let (words, layout) = shadow_stream(&p);
+            assert_eq!(words.len(), p.vertices.len() * layout[0] as usize);
+            assert_eq!(
+                layout[0],
+                3 + hidden as u32 + windy as u32 + 8 * skinned as u32 + 3 * masked as u32
+            );
+            let model = Arc::new(Model {
+                id: 10000 + bits,
+                key: format!("test:{bits}"),
+                nodes: vec![],
+                rest_world: vec![],
+                skins: vec![],
+                primitives: vec![p],
+                clips: HashMap::new(),
+            });
+            let draws: Vec<_> = (0..2)
+                .map(|i| Draw {
+                    model: model.clone(),
+                    primitive: 0,
+                    instance: i,
+                    transform: Mat4::from_translation(Vec3::new(i as f32 * 0.15, 0., 0.))
+                        * Mat4::from_rotation_y(0.07),
+                    palette: if skinned {
+                        Arc::from([Mat4::IDENTITY; 4])
+                    } else {
+                        Arc::from([])
+                    },
+                    hidden: if hidden { 1 << 2 } else { 0 },
+                    base: [1.; 4],
+                    morph: [0.6, 0.3],
+                    dye: None,
+                    base_map: None,
+                })
+                .collect();
+            for time in [0., 1.75] {
+                r.shadow_pipeline = reference.0.clone();
+                r.shadow_mask_pipeline = reference.1.clone();
+                let before = shadow_depth_bytes(&mut r, &draws, time, true);
+                r.shadow_pipeline = compact.0.clone();
+                r.shadow_mask_pipeline = compact.1.clone();
+                let after = shadow_depth_bytes(&mut r, &draws, time, false);
+                for c in 0..3 {
+                    let range = c * 4096..(c + 1) * 4096;
+                    if let Some((pixel, (before, after))) = before[range.clone()]
+                        .iter()
+                        .zip(&after[range.clone()])
+                        .enumerate()
+                        .find(|(_, (a, b))| a != b)
+                    {
+                        panic!(
+                            "shadow depth differs: bits={bits},time={time},cascade={c},pixel={pixel},before={before:#010x},after={after:#010x}"
+                        );
+                    }
+                    let covered = after[range]
+                        .iter()
+                        .filter(|&&z| z != 1f32.to_bits())
+                        .count();
+                    if hidden {
+                        assert_eq!(covered, 0);
+                    } else {
+                        assert!(
+                            covered > 100,
+                            "test must rasterise, bits={bits},cascade={c}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

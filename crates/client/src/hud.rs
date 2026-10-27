@@ -351,6 +351,8 @@ pub fn draw(
                             let mut mesh=egui::Mesh::default();for p in &points{mesh.colored_vertex(*p,egui::Color32::from_black_alpha(95));}for i in 1..points.len()-1{mesh.add_triangle(0,i as u32,i as u32+1);}ui.painter().add(egui::Shape::mesh(mesh));
                             if s.cooldown>0. {ui.painter().text(response.rect.center(),egui::Align2::CENTER_CENTER,format!("{:.1}s",s.cooldown),egui::FontId::proportional(16.),egui::Color32::WHITE);}
                         }
+                        // Charges (#349): a pip each along the top, filled for those ready.
+                        if s.max_charges>1 {for i in 0..s.max_charges {let c=response.rect.right_top()+egui::vec2(-8.-11.*i as f32,8.);if i<s.charges {ui.painter().circle_filled(c,4.,egui::Color32::WHITE);} else {ui.painter().circle_stroke(c,4.,egui::Stroke::new(1.5f32,egui::Color32::from_white_alpha(150)));}}}
                         if response.hovered() && s.ground {actions.push(Action::AimSlot(slot as u8));}
                         if response.clicked() {actions.push(Action::Command(Command::UseSlot{slot:slot as u8,ground}));}
                         response.on_hover_text(format!("{} · range {:.0}m · recharge {:.1}s",s.name,s.range,s.recharge));
