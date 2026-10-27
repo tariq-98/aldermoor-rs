@@ -3096,7 +3096,8 @@ mod temporal_tests {
         for (w, h) in [(1, 1), (63, 47), (512, 512)] {
             let mut r = Renderer::with_samples(w, h, 1., 1).unwrap();
             r.post_targets = Some(
-                PostTargets::new(&r.device, w as usize, h as usize, r.hdr.usage(), true).unwrap(),
+                PostTargets::new(&r.device, None, w as usize, h as usize, r.hdr.usage(), true)
+                    .unwrap(),
             );
             for (half, expected) in [(0, 0_f32), (0x3c00, 1.), (0x4c00, 16.), (0x7bff, 65504.)] {
                 let values = bloom_fixture(&r, 1., |_, _| half);
