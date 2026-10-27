@@ -1381,11 +1381,86 @@ impl Game {
             }
         }
     }
+    /// MAC CHECK PATCH (uncommitted): ALDER_SCRIPT="t:cmd a b [yaw];..." in seconds of sim time
+    /// from the first drawn frame. cmd: run|walk|sprint dx dz [face_yaw], jump, stop [face_yaw].
+    fn mac_script(&mut self) {
+        use std::sync::Mutex;
+        static STATE: Mutex<(Option<f64>, usize)> = Mutex::new((None, 0));
+        let script = std::env::var("ALDER_SCRIPT").unwrap();
+        let steps: Vec<(f64, Vec<String>)> = script
+            .split(';')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                let (t, c) = s.split_once(':').unwrap();
+                (t.trim().parse().unwrap(), c.split_whitespace().map(String::from).collect())
+            })
+            .collect();
+        let now = self.snaps.current.time;
+        // Aim where the crosshair points, as the controls do (#212, #244).
+        self.mouse_look = true;
+        if let Some(view) = self.view {
+            let d = view.target - view.eye;
+            let pitch = protocol::aim_pitch_byte(d.y.atan2(Vec2::new(d.x, d.z).length()));
+            if self.last_aim != Some(pitch) {
+                self.host.send(Command::Aim { pitch });
+                self.last_aim = Some(pitch);
+            }
+        }
+        let mut st = STATE.lock().unwrap();
+        let start = *st.0.get_or_insert(now);
+        while st.1 < steps.len() && now - start >= steps[st.1].0 {
+            let c = &steps[st.1].1;
+            let v = |i: usize| c.get(i).map_or(0., |s: &String| s.parse::<f32>().unwrap());
+            let yaw = |i: usize| c.get(i).map(|s: &String| s.parse::<f32>().unwrap().to_radians());
+            eprintln!("script t={:.2} frame={} {:?}", now - start, self.frame, c);
+            match c[0].as_str() {
+                "cam" | "camto" => {
+                    let cur = mac_cam(now).unwrap_or([self.orbit.yaw, self.orbit.pitch, self.orbit.distance]);
+                    let secs = if c[0] == "camto" { v(4) as f64 } else { 0. };
+                    *MAC_CAM.lock().unwrap() = Some((cur, [v(1), v(2), v(3)], now, secs));
+                }
+                "target" => {
+                    let t = self.target(false);
+                    self.host.send(Command::SetTarget(t));
+                }
+                "untarget" => self.host.send(Command::SetTarget(None)),
+                "slot" => {
+                    let cmd = self.use_slot(v(1) as u8);
+                    self.host.send(cmd);
+                }
+                "swap" => self.host.send(Command::SwapWeapons),
+                "jump" => self.host.send(Command::Jump),
+                "stop" => self.host.send(Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: yaw(1) }),
+                m => self.host.send(Command::Move {
+                    direction: Vec2::new(v(1), v(2)).normalize_or_zero(),
+                    walk: m == "walk",
+                    sprint: m == "sprint",
+                    face_yaw: yaw(3),
+                }),
+            }
+            st.1 += 1;
+        }
+    }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
         perf_overlay::Overlay::begin_frame(r, self.frame, &self.options.perf);
         self.latency.presented(|frame| r.presented_at(frame));
         let now = Instant::now();
-        let dt = (now - self.last).as_secs_f32().min(0.1);
+        let mut dt = (now - self.last).as_secs_f32().min(0.1);
+        if std::env::var("ALDER_LOCKSTEP").is_ok() {
+            // MAC CHECK PATCH: each frame is exactly 1/30 s of sim time.
+            use std::sync::atomic::Ordering;
+            let b = &server::MAC_LOCKSTEP_BUDGET;
+            if b.load(Ordering::Acquire) < 0 {
+                b.store(0, Ordering::Release);
+            }
+            let target = self.snaps.current.tick + 2;
+            b.fetch_add(2, Ordering::AcqRel);
+            let t = Instant::now();
+            while self.host.snapshot().is_none_or(|s| s.tick < target) && t.elapsed().as_secs() < 3 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            dt = 1. / 30.;
+        }
         self.last = now;
         self.viewport = Vec2::new(r.width as f32, r.height as f32);
         // Host publishes under separate locks; accept a matching pair, otherwise retain the
@@ -1442,6 +1517,8 @@ impl Game {
         self.level_up.take_if(|b| b.2 <= 0.);
         if self.options.smoke {
             self.smoke()
+        } else if std::env::var("ALDER_SCRIPT").is_ok() {
+            self.mac_script()
         } else if self.options.gait {
             self.gait()
         } else if self.options.traverse {
@@ -1610,6 +1687,40 @@ impl Game {
             .iter()
             .find(|u| u.id == self.host.player)
             .context("no local player")?;
+        if let Some(v) = mac_cam(self.snaps.current.time) {
+            // MAC CHECK PATCH: yaw,pitch,distance for the follow camera (ALDER_CAM, cam, camto).
+            self.orbit.yaw = v[0];
+            self.orbit.pitch = v[1];
+            self.orbit.distance = v[2];
+        }
+        if let Ok(cams) = std::env::var("ALDER_CAMS") {
+            // MAC CHECK PATCH: a camera schedule keyed by frame, easing over 20 frames.
+            let keys: Vec<(f32, [f32; 3])> = cams
+                .split(';')
+                .filter(|k| !k.trim().is_empty())
+                .map(|k| {
+                    let (f, v) = k.split_once(':').unwrap();
+                    let v: Vec<f32> = v.split(',').map(|x| x.trim().parse().unwrap()).collect();
+                    (f.trim().parse().unwrap(), [v[0], v[1], v[2]])
+                })
+                .collect();
+            let f = self.frame as f32;
+            if let Some(i) = keys.iter().rposition(|k| k.0 <= f) {
+                let to = keys[i].1;
+                let from = if i > 0 { keys[i - 1].1 } else { to };
+                let k = ((f - keys[i].0) / 20.).clamp(0., 1.);
+                let k = k * k * (3. - 2. * k);
+                self.orbit.yaw = from[0] + (to[0] - from[0]) * k;
+                self.orbit.pitch = from[1] + (to[1] - from[1]) * k;
+                self.orbit.distance = from[2] + (to[2] - from[2]) * k;
+            }
+        }
+        if std::env::var("ALDER_SCRIPT").is_ok() {
+            eprintln!(
+                "pos frame={} t={:.3} p=({:.3},{:.3},{:.3}) pose={:?}",
+                self.frame, self.snaps.current.time, me.position.x, me.position.y, me.position.z, me.pose
+            );
+        }
         // Hanging, moving between holds or running up a wall: frame the wall (#250).
         self.follow.climbing = match me.traversal {
             protocol::Traversal::Hanging => true,
@@ -2976,4 +3087,21 @@ mod catalog_defaults_tests {
             assert_eq!(catalog_file(&root.join("absent-root"), name, None), None);
         }
     }
+}
+
+/// MAC CHECK PATCH: the camera's yaw, pitch and distance, easing from one to another.
+type MacCam = Option<([f32; 3], [f32; 3], f64, f64)>;
+static MAC_CAM: std::sync::Mutex<MacCam> = std::sync::Mutex::new(None);
+fn mac_cam(now: f64) -> Option<[f32; 3]> {
+    let mut c = MAC_CAM.lock().unwrap();
+    if c.is_none()
+        && let Ok(s) = std::env::var("ALDER_CAM")
+    {
+        let v: Vec<f32> = s.split(',').map(|x| x.parse().unwrap()).collect();
+        *c = Some(([v[0], v[1], v[2]], [v[0], v[1], v[2]], now, 0.));
+    }
+    c.map(|(a, b, t0, d)| {
+        let k = if d <= 0. { 1. } else { ((now - t0) / d).clamp(0., 1.) as f32 };
+        [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
+    })
 }

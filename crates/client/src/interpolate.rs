@@ -40,7 +40,7 @@ impl Snapshots {
         interpolate(
             &self.previous,
             &self.current,
-            self.since(),
+            if std::env::var("ALDER_LOCKSTEP").is_ok() { 1. / 60. } else { self.since() },
             indexed,
             own.map(|id| (id, crate::pacing::DRAW_DELAY as f32)),
         )
