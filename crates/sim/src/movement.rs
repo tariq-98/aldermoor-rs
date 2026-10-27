@@ -70,6 +70,14 @@ pub const FALL_DAMAGE: f32 = 0.06;
 pub const LANDING_ROLL: f64 = 0.2;
 pub const ROLL_SAFE_FALL: f32 = 8.0;
 const LANDING_ROLL_DISTANCE: f32 = 3.0;
+/// The air dash (#347): this far, this fast, following the aim up or down by at most
+/// `AIR_DASH_PITCH` radians (35°), and keeping this share of its speed when it ends.
+pub const AIR_DASH_DISTANCE: f32 = 4.0;
+pub const AIR_DASH_TIME: f64 = 0.18;
+pub const AIR_DASH_PITCH: f32 = 0.61;
+const AIR_DASH_KEEP: f32 = 0.4;
+/// The double jump rises 70% as high as a jump from the ground (height goes as speed squared).
+pub const AIR_JUMP_SPEED: f32 = JUMP_SPEED * 0.8367;
 /// Overlapping bodies are pushed apart by this share of the overlap each step, so a crowd eases
 /// apart over a few steps rather than jumping.
 const SEPARATE: f32 = 0.5;
@@ -109,6 +117,8 @@ pub fn traversal(m: &Motion) -> protocol::Traversal {
             ForcedKind::ToHold { .. } => protocol::ForcedKind::Hold,
             ForcedKind::Corner { .. } => protocol::ForcedKind::Corner,
             ForcedKind::WallRun { .. } => protocol::ForcedKind::WallRun,
+            // Drawn as a leap until it has poses of its own (#353).
+            ForcedKind::AirDash => protocol::ForcedKind::Leap,
         };
         return Traversal::Forced(ForcedMove { kind, from: f.from, to: f.to, start: f.start, duration: f.duration as f32 });
     }
@@ -269,6 +279,12 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.hang = None;
             continue;
         }
+        // On the ground or a wall, the air dash and the double jump are ready again.
+        let on_a_wall = m.forced.is_some_and(|f| matches!(f.kind, ForcedKind::Climb | ForcedKind::Mantle | ForcedKind::ToHold { .. } | ForcedKind::Corner { .. } | ForcedKind::WallRun { .. }));
+        if m.grounded || m.hang.is_some() || on_a_wall {
+            m.air_dash = true;
+            m.air_jump = true;
+        }
         // Hanging from a hold: the climb moves the body, unless it's been downed off the wall.
         if m.hang.is_some() && m.forced.is_none() {
             if v.downed {
@@ -284,6 +300,11 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             if let ForcedKind::WallRun { .. } = f.kind {
                 // Up a wall, until a hold is caught, a top climbed onto, or the run gives out.
                 climbing::wall_run_step(land, clock.time, &mut t, &mut m, body.radius, f);
+                m.observed = (t.pos - start) / DT;
+                continue;
+            }
+            if let ForcedKind::AirDash = f.kind {
+                air_dash_step(land, clock.time, &mut t, &mut m, body.radius, f);
                 m.observed = (t.pos - start) / DT;
                 continue;
             }
@@ -414,6 +435,20 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
             m.jump_until = f64::NEG_INFINITY;
             m.coyote_until = f64::NEG_INFINITY;
             out.0.push(Event::Jumped { unit: u.id });
+        } else if clock.time <= m.jump_until
+            && !footing
+            && m.air_jump
+            && !m.swimming
+            && ctl.can_move()
+            && !v.downed
+            && time_to_land(land, &t, &m) > JUMP_BUFFER
+        {
+            // A second jump in the air, unless the feet are about to land: then the press waits
+            // to jump from the ground, as the buffer has it.
+            m.vel.y = AIR_JUMP_SPEED;
+            m.air_jump = false;
+            m.jump_until = f64::NEG_INFINITY;
+            out.0.push(Event::Jumped { unit: u.id });
         }
 
         // Sprinting (Shift, out of combat: parkour up) into a wall too tall to climb runs up it.
@@ -541,6 +576,60 @@ pub fn move_units(clock: Res<Clock>, land: Res<Land>, mut out: ResMut<Outbox>, m
         }
         m.wading = m.grounded && !m.swimming && depth > WADE_DEPTH;
         m.observed = (t.pos - start) / DT;
+    }
+}
+
+/// Seconds until a body in the air comes down to the ground below it, falling as it is.
+pub fn time_to_land(land: &world::Valley, t: &Transform, m: &Motion) -> f64 {
+    let h = (t.pos.y - land.ground(t.pos.x, t.pos.z)).max(0.0);
+    let vy = m.vel.y;
+    ((vy + (vy * vy + 2.0 * GRAVITY * h).sqrt()) / GRAVITY) as f64
+}
+
+/// Starts an air dash (#347) along `direction` (or facing), pitched by the aim up to
+/// `AIR_DASH_PITCH`, if the body is in the air with its dash unused and enough endurance. A
+/// roll pressed in the last `LANDING_ROLL` before landing stays a roll landing instead.
+pub fn start_air_dash(land: &world::Valley, now: f64, t: &mut Transform, m: &mut Motion, v: &mut Vitals, direction: Vec2) -> bool {
+    if m.grounded || m.swimming || m.forced.is_some() || m.hang.is_some() || !m.air_dash || !v.alive() || v.downed || v.endurance < DODGE_COST {
+        return false;
+    }
+    if time_to_land(land, t, m) <= LANDING_ROLL {
+        return false;
+    }
+    let dir = if direction.length_squared() > 0.01 { direction.normalize() } else { t.forward() };
+    let pitch = protocol::aim_pitch_radians(m.aim_pitch).clamp(-AIR_DASH_PITCH, AIR_DASH_PITCH);
+    let (sin, cos) = pitch.sin_cos();
+    let to = t.pos + Vec3::new(dir.x * cos, sin, dir.y * cos) * AIR_DASH_DISTANCE;
+    v.endurance -= DODGE_COST;
+    m.air_dash = false;
+    m.landing_roll_until = f64::NEG_INFINITY;
+    m.forced = Some(Forced { kind: ForcedKind::AirDash, from: t.pos, to, start: now, duration: AIR_DASH_TIME, arc: 0.0 });
+    m.vel = Vec3::ZERO;
+    t.yaw = m.intent.face_yaw.unwrap_or(heading(dir));
+    true
+}
+
+/// One step of an air dash: straight on with gravity paused, stopped short by a wall or the
+/// ground. When it ends the body falls on with `AIR_DASH_KEEP` of the dash's speed.
+fn air_dash_step(land: &world::Valley, now: f64, t: &mut Transform, m: &mut Motion, radius: f32, f: Forced) {
+    let k = ((now - f.start) / f.duration).clamp(0.0, 1.0) as f32;
+    let aim = f.from.lerp(f.to, k);
+    let from = Vec2::new(t.pos.x, t.pos.z);
+    let want = Vec2::new(aim.x, aim.z);
+    let xz = land.off_faces(land.slide(from, want - from, radius), radius, aim.y + CLIMB_HEIGHT);
+    let ground = land.ground(xz.x, xz.y);
+    t.pos = Vec3::new(xz.x, aim.y.max(ground), xz.y);
+    m.fall_from = t.pos.y;
+    let blocked = (xz - want).length() > 0.05;
+    let down = aim.y <= ground;
+    if k >= 1.0 || blocked || down {
+        m.forced = None;
+        let speed = (f.to - f.from) / f.duration as f32;
+        m.vel = if blocked { Vec3::new(0.0, speed.y.min(0.0), 0.0) } else { speed } * AIR_DASH_KEEP;
+        m.grounded = down;
+        if down {
+            m.vel.y = 0.0;
+        }
     }
 }
 
@@ -760,7 +849,8 @@ pub fn update_poses(clock: Res<Clock>, mut q: Query<(&Motion, &Vitals, &mut Anim
             match forced.kind {
                 ForcedKind::Dodge => Pose::Dodge,
                 ForcedKind::Knockback => Pose::Hit,
-                ForcedKind::Leap => Pose::Jump,
+                // The air dash's own poses are #353.
+                ForcedKind::Leap | ForcedKind::AirDash => Pose::Jump,
                 ForcedKind::Charge { .. } => Pose::Run,
                 ForcedKind::Climb | ForcedKind::Mantle | ForcedKind::Vault { .. } | ForcedKind::WallRun { .. } => Pose::Jump,
                 ForcedKind::ToHold { .. } | ForcedKind::Corner { .. } => Pose::Hang,

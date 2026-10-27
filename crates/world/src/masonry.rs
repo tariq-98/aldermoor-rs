@@ -73,6 +73,7 @@ impl Masonry {
             yaw: self.yaw + b.yaw,
             top: b.top.map(|t| self.origin.y + t),
             rise: b.rise,
+            roof: None,
         })
     }
 }

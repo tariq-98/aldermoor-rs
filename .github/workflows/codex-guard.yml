@@ -18,11 +18,12 @@ jobs:
         with:
           fetch-depth: 0
           lfs: false
+      # HEAD is the PR merged into main, and its first parent is main as that merge has it. The
+      # event's base sha can be older (main moved while the checks started), and diffing from it
+      # would blame the PR for whatever main changed since (#345).
       - name: Check changed paths
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          blocked=$(git diff --name-only "$BASE"...HEAD | grep -E \
+          blocked=$(git diff --name-only HEAD^1 HEAD | grep -E \
             '^(art|assets|tools)/|^crates/assets/|\.(blend|blend1|glb|gltf|ktx2|png|jpe?g|tga|exr|hdr)$' || true)
           if [ -n "$blocked" ]; then
             echo "::error::Codex must not create or edit assets or Blender files (AGENTS.md, Ownership). Blocked paths:"

@@ -232,7 +232,7 @@ mod tests {
     fn with_box(center: Vec2, half: Vec2, rise: f32) -> (Valley, f32) {
         let mut v = Valley::new();
         let top = v.ground(center.x, center.y) + rise;
-        v.add_solid(Solid { center, half, yaw: 0.0, top: Some(top), rise: 0.0 });
+        v.add_solid(Solid { center, half, yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
         (v, top)
     }
 
@@ -263,7 +263,7 @@ mod tests {
         // taller wall stands, and the taller wall keeps its own hold above the step.
         let (mut v, high) = with_box(Vec2::new(8.0, 12.0), Vec2::new(0.45, 3.0), 3.4);
         let step = high - 1.0;
-        v.add_solid(Solid { center: Vec2::new(7.1, 12.0), half: Vec2::new(0.45, 3.0), yaw: 0.0, top: Some(step), rise: 0.0 });
+        v.add_solid(Solid { center: Vec2::new(7.1, 12.0), half: Vec2::new(0.45, 3.0), yaw: 0.0, top: Some(step), rise: 0.0, roof: None });
         let low = holds_at(&v, step);
         assert!(!low.iter().any(|h| h.out.x > 0.5), "a hold facing the taller wall: {low:?}");
         assert!(low.iter().any(|h| h.out.x < -0.5), "lost the step's west hold");
@@ -275,7 +275,7 @@ mod tests {
         let mut v = Valley::new();
         let top = v.ground(8.0, 12.0) + 3.4;
         for z in [10.0, 12.0, 14.0] {
-            v.add_solid(Solid { center: Vec2::new(8.0, z), half: Vec2::new(0.45, 1.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+            v.add_solid(Solid { center: Vec2::new(8.0, z), half: Vec2::new(0.45, 1.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
         }
         let west: Vec<Hold> = holds_at(&v, top).into_iter().filter(|h| h.out.x < -0.5).collect();
         assert_eq!(west.len(), 1, "{west:?}");

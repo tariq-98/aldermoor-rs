@@ -19,10 +19,14 @@ the unit's combat view and calls `update`, which builds the pose in this order:
    pose's: idle (each unit at its own phase), walk, jog or sprint by speed, the jump's take-off and
    loop on one timeline, roll, hit or death. Beasts map poses to their role clips. Just before it,
    `anim::Landing` notes a touchdown, and a standing body that fell far enough to hurt plays
-   `Jump_Land` (#217, see Weight below).
+   `Jump_Land` (#217, see Weight below). A body that flinches from a blow shows the pose it would
+   have without it (`shown_pose`, #218), and while a hitstop holds, the pose clocks stand still
+   (see Hits below). A move the sim carries the body through (a roll, a leap, a charge, a climb)
+   plays its clip by how far the body has come, and the rest of it after the move by the clock;
+   afloat, the swim loops play (#213, see Traversal below).
 2. **Body yaw** (`anim::Turn`, #211): the yaw the body is drawn at (`body_yaw`), which lags the
    sim's while turning on the spot, and where the upper body aims. The stride reads the travel
-   against it.
+   against it. Carried through a roll or a climb, the body faces the way it goes.
 3. **Sample it** into `local`, starting from the rest pose (`apply_clip` with `Bones::All`). A
    moving humanoid plays two of its walk, jog and sprint loops blended (`apply_step`), picked and
    timed by its stride (see Locomotion below). Each clip's tracks are bound to the skeleton's bones
@@ -56,11 +60,17 @@ the unit's combat view and calls `update`, which builds the pose in this order:
     carrying the old motion into the new, and while a switch settles it changes `local`, so the
     world matrices are rebuilt. It runs after `perform` so that a switch also smooths the hands
     letting go of or taking a grip.
-13. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops (and dips on
+13. **Flinch** (`anim::Flinch`, `flinch_body`, #218): a blow tips the spine, neck and head away
+    from it, and a heavy one the pelvis too, and the world matrices are built again (see Hits
+    below). After the blender, so a switch never smooths a flinch away. Not at quarter detail.
+14. **Hands on the edge** (`grip_edge`, #213): climbing, the hands take hold of the edge while
+    they can reach it (see Traversal below). After the blender, which would only bring them there
+    once the body had been lifted out of reach.
+15. **Feet on the ground** (`place_feet`, #214): at full detail the pelvis drops (and dips on
     landing, #217) and the legs reach for the ground, and planted feet hold still (see Feet on the
     ground below). After the blender, so nothing smooths the feet off the ground, and the blender
-    keeps the pose from before it.
-14. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
+    keeps the pose from before it. Not while the body is carried through a move, nor afloat.
+16. **Spring bones** (capes) settle on top, under the body drawn at its yaw, at full detail only.
 
 ## Locomotion
 
@@ -282,6 +292,177 @@ body its weight (Overgrowth's approach, and Fortnite Chapter 5's procedural laye
   any five at least a seventh. The pace is up to 5% faster or slower (`SPREAD`), so none stay in
   step. The drawn idle layered over a moving upper body is offset the same way.
 
+## Hits
+
+Every blow used to play `Hit_Chest` on the whole body for the quarter second the sim holds
+`Pose::Hit`, whichever way it came from and however hard, with the legs stopped: a runner hit from
+behind skidded to a standstill mid-stride. #218 makes hits read without wrecking the movement. For
+every blow #191's `Event::Hit` says who struck whom, the way it travelled, how hard it was
+(`HitWeight`) and how long both bodies' poses may hold: `hitstop_ms`, from
+`content::combat::HITSTOP`, 40 ms for a light blow up to 120 ms for a big one, half for missiles.
+The client hands it to the victim's `Character::hit` and the attacker's `Character::landed`.
+
+- **The flinch.** `anim::Flinch` kicks a critically damped spring on the chest's tilt (half-life
+  0.085 s, `HALF_LIFE`) with the speed that takes it out as far as the blow was hard and back: it
+  peaks after about 0.06 s and is back within 0.35 s, without bouncing. How far goes with the
+  weight: 0.18 rad for a light blow, 0.28 heavy, 0.32 critical and 0.4 big (`LIGHT` to `BIG`), and
+  0.08 or 0.04 for one a guard stopped or a parry turned. Blows landing together add up to no more
+  than 0.55 (`MOST`). A heavy, critical or big blow kicks the pelvis too, by 0.3 of it (`PELVIS`).
+  The head follows chest and pelvis on a quicker spring of its own (0.06 s), so it lags behind them
+  and then whips past. The spine takes the chest's tilt 25%, 35% and 40% up its three bones
+  (`SPINE`), and the neck and head share the head's lag. A light blow tips the head about 5 cm,
+  and a heavy one from the front takes the hips back 6.5 cm.
+- **Under it, the body carries on.** The flinch goes on after the blender, each bone tipping about
+  its own axis (`tip`, which the lean shares), the pelvis about the ground beneath it so the feet
+  stay put, and the feet go on the ground after it. A blow on a body standing, walking or running
+  shows it standing, walking or running by the sim's speeds (`shown_pose`), so the stride carries
+  on, and attacks and casts play through. Carried through a move or hanging on a wall (#247), it
+  keeps the sim's pose for that, so a roll or the hang plays on under the flinch. A stagger
+  (`Hit_Knockback`, or `Idle_Shield_Break` from a guard), a knockback, a blow that catches the body
+  in the air (`Hit_Chest`) and a body that can't flinch (beasts, with their own hit clip) still play
+  their clips. At quarter detail the springs run but the body doesn't tip.
+- **The hitstop.** As a blow lands, both bodies' pose clocks hold for the hitstop: while it holds,
+  `Flinch::update` hands back no time to move them on, and the spine shakes along the blow at 17 Hz
+  by a fifth of the flinch (`SHAKE`), fading as the hold runs out. Then the clips play on from
+  where they held, at their own pace. Those the sim's clocks time (`pose_time`, `action_time`) run
+  behind them by however long they were held (`Flinch::behind`), until the next switch lets them
+  catch up, so nothing jumps either way. The sim never pauses, so whatever follows the body through
+  the world keeps going: the stride over the ground it covers, the turn, the lean, the feet, the
+  capes and the blender.
+- **To compare and capture.** `--flinch off` plays the hit clip in full on every blow, without the
+  hitstop. `--hit-churn` stages blows every 0.75 s: in the showcase the first character swings and
+  lands on the rest, from the front, behind and either side and light, heavy and big in turn; with
+  `--gait`, the running player takes them.
+
+## Traversal
+
+The sim carries a body through a roll, a leap, a charge, a climb, a mantle, a vault or a knockback
+along a set path (#192's `Traversal::Forced`: where it starts and ends, and when), at a pace of its
+own: a roll starts fast and slows to a stop, and a climb rises up the face before it goes over the
+top. By the clock the clips didn't fit the moves. All of `Roll` (1.47 s, standing up included) was
+squeezed into the 0.45 s roll, so the body stood up while the sim still slid it the last 0.83 m; a
+climb played the jump, legs tucked, while the body was lifted up the wall; the sword's lunge played
+a standing thrust as the body glided 8 m; and swimmers ran through the river. #213
+(`anim::traverse`) fits the clips to the moves, the way Paragon and Lyra match their starts, stops
+and landings to distance:
+
+- **By distance.** Each move's clip marks the stretch of it that covers the path with a `travel`
+  curve (docs/ASSETS.md): the share of the path covered by each moment. `traverse::share` says how
+  much of its path the body has covered (along the ground, or for a climb the height gained and
+  the way across together), and `traverse::clip_time` finds the moment of the clip that covers as
+  much. So a roll's hands touch down as the body passes halfway and its feet plant as the move
+  ends, and a lunge reaches full stretch as the body arrives, at whatever pace and over whatever
+  length the sim moves it. `anim::Progress` only lets the clip play forward through a move,
+  whatever the snapshots do, and starts afresh with the next; a path under 5 cm (`SHORTEST`) goes
+  by the clock.
+- **After the move**, the rest of the clip plays on by the clock (`Carried`): standing up out of a
+  roll, a dash's blow and recovery. Standing, it plays on the whole body; running on, on the upper
+  body over the stride. It ends with the clip, or on a new action, a fall that hurts or the water.
+  While the pose of the action that began a leap or a charge holds, its clip plays on in place of
+  the action's own.
+- **The clips.** A roll plays `Roll`: the dive at 0.1 s, the hands down at 0.43 and the feet at
+  0.87, then 0.6 s standing up. A climb or a mantle 0.4 m or higher (`STEP_UP`) plays `ClimbUp_1m`
+  over the whole move; a lower one hops up with the jump. A charge plays the main item's `dash`
+  (`Sword_Dash`), whatever the blow: the sim lands the blow on arrival, and the clip's lunge ends
+  there (its `hit` marker comes 0.07 s later). A leap ahead plays the sword's or shield's `dash`,
+  and a hop back `NinjaJump_Start`, springing off without lunging. A vault keeps the jump, turned
+  toward the hop, and a knockback plays its hit by the clock, as before. The sim's run or jump pose
+  after a leap or a charge, with the action still in the combat view, is just a run or a jump.
+- **Facing the move.** Strafing, a roll goes sideways or back while the sim's yaw stays on the
+  camera, and `Roll` rolls straight ahead: played under the yaw, it rolled sideways like a log.
+  Carried through a roll, a climb, a mantle or a vault, the body turns to face the way it goes on a
+  0.025 s spring (`Stance::Carried`, `CARRIED_HALF_LIFE`), 85% of the way round within 0.1 s, the
+  upper body with it. Out of a roll it keeps facing that way until it has stood up, then turns back
+  on the moving spring.
+- **Hands on the edge.** Climbing, the hands take hold of the top where the climb goes over it
+  (`traverse::edge`: the first point on the way across where the ground rises to within 0.1 m of
+  the top), 25 cm either side of the climb's line (`HAND_SPREAD`), palms down and fingers over the
+  edge, by two-bone IK. They take hold over 0.05 s (`TAKE_HOLD`), the more firmly the higher the
+  climb (not at all at 0.4 m, fully from 0.7 m, `PULL_UP`), and let go over the last 0.1 m before
+  the body is over the edge (`LET_GO`). The sim lifts a climber faster than it carries them across
+  (the height comes in over the first 60% of the climb, easing out, while the way across eases in),
+  so the shoulders rise out of reach of the edge within 3 to 5 frames. Each hand holds while its
+  place is within 1 to 1.3 arm's lengths of the shoulder (`REACH`), then eases back into the clip,
+  its hold halving every 0.05 s (`RELEASE_HALF_LIFE`). So for now the hands grab the edge and let
+  go as the body rises: to hang on through the pull-up, the sim's climb has to rise more slowly or
+  the mantle clips have to match its timing (#108).
+- **On a wall** (#247), the climbing clips play instead (docs/CONTRACT.md, "Poses to animation"):
+  the hang, shimmying whichever way the body slides along the wall, and the moves onto, between
+  and off holds, climbing up from a hang included. The body isn't carried: no turn on the carried
+  spring (the sim turns it to the wall) and no hands put on the edge. A climb from the ground or a
+  mantle still plays `ClimbUp_1m` (`pulling_up`).
+- **Climbing by distance** (#248, `anim::climb`). Each move's clip is made on the sim's own path
+  for it (`sim::climbing::carry`), `k` of the clip `k` of the way along, so it plays at the share of
+  its move the body has come (`climb::progress`): the nearest point of the path, seen from above
+  for a move mostly across, so an eject's hop doesn't count. Where the path stands still, the clock
+  carries it on: climbing straight up to the next hold, the body arrives with five eighths of the
+  move done and the hands finish it. A wrap round a corner swings round it instead
+  (`sim::climbing::corner_carry`), so it plays by the clock, its clip made on that swing (#305).
+  The shimmy loops slide 0.48 m a loop, made at the sim's 1.2 m/s (`SHIMMY_STRIDE`), and play by
+  the distance slid, so the hands keep still on the hold at any speed.
+- **Hands on the hold, feet on the wall** (#248). The clips are made on the broad human frame, which
+  hangs with its wrists 7 cm out from the wall and 3 cm below the hold (`GRIP_OUT`, `GRIP_DOWN`).
+  Each skeleton measures its own hang once (`Hang_Idle_Loop`'s first frame, `ClipSet::reach`) and
+  moves by the difference, up and in toward the wall: as the clips have them, dwarves and goblins
+  hang 35 to 46 cm short of the hold and 5 to 6 cm back from it, and elves 8 to 12 cm past it. A
+  hold less than 1.9 m above the feet, where the sim stands a climber on the ground under it (over
+  half the valley's hold length), lowers the body by as much: the clips brace the feet half a metre
+  up the wall, so they stay on it. All of it comes in as the body lowers itself or catches the hold,
+  goes as it climbs onto the top, and eases in and out with a 0.05 s half-life (`RAISE_HALF_LIFE`).
+  Then, at full and half detail, two-bone IK closes each hand on the hold nearest it, where the clip
+  has it along the hold: firmly with the clip's wrist within 10 cm of there and not at all past
+  25 cm (`HOLD`, `LET_GO`), lifting off as the clip lifts it. It braces the balls of the feet 1 cm
+  out from the face below (`BALL_OUT`; the nearer face, round a corner), not up at the edge nor
+  under an overhang. The holds are the client's own copy of `world`'s: the one the body hangs from,
+  or the ones its move goes from and to, found from where the sim has it, among the holds filed
+  once by the squares of ground they can be hung from over, so looking neither allocates nor hashes
+  (`crates/client/src/holds.rs`, `Character::set_holds`).
+- **Leaps, ejects, corners, wall runs and roll landings** (#305) have clips of their own, made on
+  the sim's numbers as the others are. From a hang, a move onto a hold that takes longer than 0.45 s
+  (`climb::LONG_MOVE`) is a climb leap, mostly up (`Hang_Leap_Up`: a pull on the hold and a push off
+  the wall to a hold 1.4 m up), or a side eject (`Hang_Eject_L` / `_R`: a push off along the wall,
+  flying 2 m with a 0.35 m hop, the leading hand reaching for the hold), not a climb or a hop. Round
+  a corner, a body carried on more than 0.1 m ahead (`CORNER_AHEAD`) wraps round an outer one onto
+  the wall's side (`Hang_Corner_Out_L` / `_R`), and otherwise turns into an inner one where it hangs
+  (`Hang_Corner_In_L` / `_R`): the sim turns it a quarter at 4 rad/s, the clips are made turning
+  with it, and the body follows on the carried spring. A wall run plays `Wall_Run` (three steps up
+  the face, slowing, the hands reaching for the top) by how high the body has run
+  (`climb::run_progress`), its hands and feet as the clip has them: there's no hold. Kicked off a
+  hang or a wall run backwards, rising and thrown out from the wall faster than 2.5 m/s (`KICK`),
+  `Hang_Eject_Back` (the hands letting go, the feet pushing off, the body opening out into the
+  falling loop) plays by the clock as the body flies, for its 0.5 s. The sim's step off the wall
+  doesn't move the body yet, so it plays from there until the body moves across, for up to 0.1 s
+  (`KICK_SEEN`), and on only if the body is thrown out: a side eject into the air and letting go
+  don't kick. A roll that starts in the air, the roll landing, plays `Roll_Land`: it touches down as
+  `Jump_Land` does, folds over the knees with the hands going down and rolls over the shoulder as
+  the vendor roll does, faster, by the 3 m it covers, its feet under it as the move ends; then it
+  stands as the roll does.
+- **Afloat**, the swim loops play: `Swim_Idle_Loop` treading water, and `Swim_Fwd_Loop` on the
+  move, its strokes paced by the speed (made for 2.7 m/s, the sim's swim at a run, `SWIM_SPEED`;
+  between half and 1.5 times their pace). The clips have the surface at their origin and the sim
+  floats a swimmer with its feet 0.5 m under it, so the body is raised by that much (`SWIM_FLOAT`).
+  Wading, the sim slows the body and the stride follows the ground it covers (#110), so the steps
+  slow with it.
+- **Carried or afloat**, actions play on the whole body, the body doesn't lean, the feet aren't put
+  on the ground and no drawn idle goes over the strokes. Water breaks a fall: landing in it never
+  plays the hard landing. Beasts play their clips as before.
+- **To compare and capture.** `--traversal off` plays the moves by the clock and swimmers as
+  runners, as before, and climbers' clips by the clock with their hands and feet as the clips have
+  them. `--traverse` runs a course for captures (`crates/client/src/course.rs`),
+  facing west as `--gait` does: the player strafes and rolls left, right, back and ahead in turn,
+  running on out of two rolls and standing up out of the other two; climbs onto the field wall west
+  of the north road and drops off its far side; runs through the village and swims across the river
+  east of the bridge and back; climbs the wall from the other side; at the ruined hall, climbs onto
+  its rear wall, lowers itself over the inner edge to hang (a low hold: the feet stand on the
+  ground), shimmies round both corners of the wall's end onto its outer face and lets go; sprints
+  at the hall's stepped east wall, runs up it and pulls onto the lookout; lowers itself over the
+  lookout's edge, shimmies left, ejects right along the hold, shimmies back and climbs up; steps
+  down, drops to hang from the step below and leaps up to the lookout's hold, then kicks off it
+  backwards, turning in the air, and rolls as it lands (#247's clips, #248's timing and hands and
+  feet, #305's corners, wall run, eject, leap, kick and roll landing); and lunges at the nearest
+  wolf in the meadow. It logs each step as it starts, so captures can be cut by step. The valley's
+  holds have no inner corner yet, so `Hang_Corner_In_L` / `_R` can't be seen on it.
+
 ## Switches
 
 A switch is any change in what plays: the base clip's name, the legs' clip, the pose, the upper
@@ -443,7 +624,22 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   speed up to its most, comes back without bouncing and settles; and the legs reach for the ground
   only falling, from 0.2 s out to all the way on touching down, and without a jump when the body
   passes over the edge of a ledge it lands on. Units with ids in a row start their idles well
-  apart, neighbours don't come in step over four loops, and the pace stays within 5%.
+  apart, neighbours don't come in step over four loops, and the pace stays within 5%. For hits: a
+  blow tips the body its way, as far as it was hard, the pelvis only for a heavy one; a flinch
+  comes back within four half-lives, never moving faster than the kick; the head lags the chest,
+  then whips past it; the hitstop holds the pose clock and lets go without a jump; and blows
+  landing together tip no further than the most. For traversal: a roll's, a leap's, a charge's
+  and a low and a high climb's clips play only forward, whatever pace the sim moves the body at,
+  and reach the end of their stretch as the move ends; halfway along a roll the clip is at its
+  hands touching down, and it plays fastest at the start, as the body moves; a climb counts the
+  height gained as much as the way across; a path too short to measure goes by the clock; a new
+  move starts afresh, and a body jumping back between snapshots doesn't wind the clip back; curves
+  hold outside their keys and skip flat stretches; and headings are the sim's yaw. The hands find a
+  wall's edge from the ground (without one, 0.3 m short of where the climber ends up), take hold
+  over 0.05 s, let go coming over it and keep off a step up; they hold within reach and ease off by
+  halves out of it, letting go entirely under a hundredth. Carried into a roll the body faces it
+  within 0.1 s, never turning back on the way, and turns back to the facing after on the moving
+  springs.
 - `cargo test -p render` (macOS): `switches_carry_the_motion_on_instead_of_popping` plays jog,
   attack on the move, guard, stop, roll and run through a real character and checks that every
   bone carries on at every switch, where cuts jump by over 0.5 rad (with the feet left as the
@@ -499,8 +695,38 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   knight beside one that doesn't lean: the head goes forward setting off, back stopping and to the
   inside running round, within the caps. `on_a_wall_the_body_neither_lands_nor_leans_nor_jumps`
   drops one onto a hold (#247), shimmies it along the wall and climbs it up: no dip, no lean and no
-  timeline in the air. `neighbours_spawned_together_idle_out_of_step` checks that
-  knights with ids in a row stand differently, and the same knight twice the same. The model tests
+  timeline in the air. `neighbours_spawned_together_idle_out_of_step` checks that knights with ids
+  in a row stand differently, and the same knight twice the same.
+  `blows_tip_the_body_away_while_the_legs_jog_on` jogs a man taking a light blow from each side
+  beside a twin who takes none: the legs and the stride stay the twin's, the head goes out 2 to 12
+  cm the way the blow went and is back within 5 mm by 50 frames, a heavy blow from the front takes
+  the hips back, and a big one with a hitstop doesn't hold the stride.
+  `a_blow_on_a_wall_or_mid_roll_flinches_over_what_the_body_was_doing` strikes one hanging on a
+  wall (#247) and one rolling: the hang and the roll play on, and the head still goes with the blow.
+  `staggers_knockbacks_and_blows_in_the_air_still_play_their_clips` checks the clips that stay,
+  that a wolf only holds, and that with flinching off a blow plays `Hit_Chest` and holds nothing.
+  `the_hitstop_holds_a_swing_then_lets_it_go_on_without_a_jump` lands a slash with an 80 ms
+  hitstop beside a twin's with none: the sword arm holds still through it, swings on no faster than
+  the twin's, and once the swing ends both stand alike.
+  `a_strafing_roll_turns_into_the_roll_plays_by_distance_and_turns_back_once_up` rolls a knight
+  5 m to the side: the body faces the roll within 3° from the eighth frame, the clip plays only
+  forward, at the hands touching down halfway and the feet planting as the move ends, then stands
+  up by the clock, still facing the roll, and turns back to the sim's yaw.
+  `running_out_of_a_roll_the_legs_run_and_the_roll_recovers_over_them` checks that running on out
+  of a roll the legs jog, and the roll's recovery plays on the upper body for over half a second.
+  `a_charge_plays_the_dash_by_distance_and_its_blow_on_arrival` lunges a swordsman 8 m with a
+  thrust, as the sim's sword lunge does: `Sword_Dash` over the whole body, at full stretch arriving,
+  playing on by the clock while the Attack pose holds, until the next blow. Running on after the
+  greatsword's rush is a run, and with traversal off the dash plays by the clock over sprinting
+  legs, as before. `climbs_and_mantles_play_the_climb_with_the_hands_on_the_edge` climbs a 1.2 m
+  wall: `ClimbUp_1m` by distance, never the jump, the edge found within 5 cm of the wall's top, the
+  nearer hand onto its place on it and the other within 5 cm, both let go of by the top; a 0.3 m
+  step hops up with the hands off it, and a mantle onto 2.2 m caught in a jump climbs.
+  `swimmers_play_the_swim_loops_at_the_surface` checks treading water and stroking, the body raised
+  to the surface within 1 cm, and the run with traversal off.
+  `a_leap_ahead_lunges_and_a_hop_back_springs_off_by_distance` leaps 6 m ahead behind a shield and
+  hops 4 m back: `Shield_Dash` and `NinjaJump_Start`, each ending its stretch as the move ends,
+  within a tenth. The model tests
   check that even keys are indexed and blended exactly (slerp for steps over 30°), uneven keys are
   resampled, a constant track keeps one key and step keys hold.
 - The client's `--crowd` test checks that nobody in the crowd passes through anybody, even at 200,
@@ -511,6 +737,13 @@ frame (median and 95th percentile) and how many characters were at each tier on 
   (a small turn held, a long one, an about face and a spin) and circle-strafes once round; last it
   jumps standing, sets off into a running jump and stops, and runs round a circle the way it faces
   (#217). It logs the frame each leg starts on, so a capture can be cut by leg.
+- The client's `--traverse` run (`crates/client/src/course.rs`, see Traversal) is for captures
+  too. Its test runs the course against the valley as the client's own server starts it: every
+  step is reached and every place arrived at, and on the way the player rolls four times, climbs
+  the field wall twice, the ruin's east and rear walls and back up from a hang, swims, hangs from
+  the rear wall and goes round both its corners, runs up the wall to the lookout and pulls onto it,
+  shimmies and ejects along the lookout's hold, leaps up to it from the step below, kicks off it
+  to land over 2 m out and rolls the landing on 3 m, comes down unhurt, and lunges.
 
 ## Cost
 
@@ -531,18 +764,23 @@ for the ground on the way down and the pelvis dipping on landing.
 Instructions per pose at full detail (`update_combat`, called through `animate` since #215), from
 callgrind (6 characters, 240 frames, every LOD):
 
-| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 |
-| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 |
-| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 |
-| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 |
-| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 |
-| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 |
-| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 |
-| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 |
-| circle | | | | | | | | 61,546 | 63,414 |
-| jump | | | | | | | | 83,542 | 85,944 |
+| Case | Before #210 | After #210 | After #204 | After #110 | After #211 | After #215 | After #214 | After #212 | After #217 | After #218 | After #213 | After #248 | After #305 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| idle | 166,229 | 140,466 | 83,313 | 83,697 | 83,992 | 39,856 | 50,644 | 53,008 | 53,322 | 53,520 | 53,724 | 53,865 | 53,866 |
+| turn | | | | 83,657 | 90,315 | 48,176 | 59,242 | 61,652 | 61,985 | 62,189 | 62,394 | 62,445 | 62,454 |
+| walk | | | 88,445 | 104,860 | 105,340 | 54,396 | 64,644 | 67,144 | 67,403 | 67,602 | 67,800 | 67,936 | 67,943 |
+| run | 210,673 | 184,868 | 88,894 | 93,491 | 93,975 | 46,861 | 58,538 | 61,138 | 61,427 | 61,625 | 61,830 | 61,963 | 61,974 |
+| strafe | | | 88,893 | 93,947 | 95,511 | 47,971 | 59,770 | 62,272 | 62,530 | 62,728 | 62,935 | 63,071 | 63,080 |
+| slash | | 162,570 | 106,448 | 106,852 | 107,122 | 61,480 | 72,667 | 72,724 | 72,739 | 72,931 | 73,132 | 73,275 | 73,269 |
+| run + slash | 228,680 | 222,870 | 113,124 | 115,674 | 116,695 | 68,288 | 80,085 | 80,130 | 80,204 | 80,397 | 80,593 | 80,722 | 80,733 |
+| start-stop | 187,279 | 185,645 | 110,360 | 112,854 | 113,244 | 67,341 | 77,990 | 80,925 | 82,498 | 82,908 | 83,105 | 83,247 | 83,261 |
+| circle | | | | | | | | 61,546 | 63,414 | 63,842 | 64,047 | 64,213 | 64,220 |
+| jump | | | | | | | | 83,542 | 85,944 | 86,151 | 86,346 | 86,484 | 86,505 |
+| run + hits | | | | | | | | | 93,452 | 91,832 | 92,041 | 92,238 | 92,256 |
+| run + rolls | | | | | | | | | | 83,603 | 91,053 | 91,208 | 91,253 |
+| climb | | | | | | | | | | 78,142 | 92,481 | 85,653 | 85,667 |
+| swim | | | | | | | | | | 67,993 | 44,598 | 44,748 | 44,757 |
+| hang | | | | | | | | | | | 60,810 | 83,782 | 83,783 |
 
 On the M1, #210 measured 11 to 16 µs a character a frame. Holding a pose, the blender only keeps
 a copy of the last two poses shown, and it took out the old crossfade, which slerped every bone
@@ -598,6 +836,57 @@ runner is within the noise: the fastest of six runs of each case measured 1% to 
 detail, where runs of the same build differ by up to 15%. At quarter detail the lean and the dip
 are off, and what's left (the jump's timing, the reach and the idle's phase) costs next to nothing.
 
+#218 costs about 150 instructions a pose when nobody is being hit (0.2% to 0.3%): the flinch,
+settled, isn't worked out, and what's left is checking it and the pose the body shows. The cases
+that lean come out about 220 dearer again (`start-stop` 0.4% in all, `circle` 0.6%). A runner taking
+a blow every half second (`run + hits`, new with #218; its After #217 number is #239's code running
+it, each blow playing `Hit_Chest` in full) costs 1,620 fewer (1.7%): the flinch's springs, tipping
+six bones and building the world matrices again while it moves cost less than switching to the hit
+clip and back. The column is against #239's code measured the same way, within 60 instructions of
+the After #217 column throughout.
+
+#213 costs about 200 instructions a pose for a body that isn't carried or afloat (0.2% to 0.4%):
+looking for a move to follow, and the rest of one's clip and the facing, settled. Its three cases
+are new (their After #218 numbers are #218's code running them, the moves' clips by the clock):
+`run + rolls` runs and rolls 5 m to one side and then the other every second, and `climb` climbs a
+1.2 m ledge every second and runs on over its top to the next, so both are carried through moves
+about half the time and then recover from them; `swim` swims at 2.7 m/s. Rolling costs 7,450 more
+(8.9%): the blender settles a switch more each time (4,300), as the legs take up the run under the
+roll's standing up, and that plays on the upper body over the stride, two clips where #218 played
+one (3,800). Climbing costs 14,300 more (18%), nearly all of it the hands holding the edge (13,100:
+the arms' two-bone IK, and rebuilding each arm's bones as each joint turns), from the start of each
+climb until they have let go. Swimming costs 23,400 fewer (34%): the swim loop plays alone, where a
+body running through the river blended the walk and the jog on one stride (15,000), and nothing puts
+the feet on the ground afloat (10,000). Wall clock on the cloud runner (the median of six runs at
+full detail) goes the same way: rolling 15% dearer, climbing 17%, swimming half the cost, and `run`
+within the noise.
+
+#248 costs 33 to 47 instructions a pose for a body that isn't on a wall (under 0.1%): checking for a
+wall, and for a raise still to come down from. Turning comes out 72 cheaper (0.1%) and climbing
+6,960 (7.5%): the arms' two-bone IK now turns the shoulder and the elbow and rebuilds the arm's
+bones once, where it rebuilt them after turning each joint, which pays wherever a hand reaches for
+something (a staff's off hand in `turn`, the hands on the edge in `climb`). Its case is new (its
+After #213 number is #213's code running it, the clips by the clock with the hands and feet where
+they put them): `hang` hangs 1 m off the ground from a 6 m hold, shimmying right, then left, then
+hanging still, 0.8 s each. Hanging costs 22,970 more (38%): moving the body by its reach about
+2,100, as everything on the pelvis moves with it, and the hands on the hold and the feet on the
+wall the other 20,900, two thirds of that the arms' IK (rebuilding each arm's bones, fingers and
+all). The bench's hold is a closure; in the game, finding it in the client's copy of the valley's
+holds costs about 1,440 more a look (860 searching the holds near the body, the rest the ground
+under it), once a frame for a body hanging and twice for one moving between holds, and allocates
+nothing. Wall clock on the cloud runner (the median of nine runs at full
+detail), hanging goes from 8.9 to 12.2 µs a character a frame; at the rate #210 measured on the
+M1, nearly twice the runner's, the difference is under 2 µs. At half detail it's paid every other
+frame, and at quarter detail not at all. The column is against #213's code on today's main measured
+the same way, 86 to 161 instructions above the After #213 column, which was measured on an older
+main.
+
+#305 moves every case by 45 instructions a pose or less, either way (under 0.05%), within the noise:
+off the wall, a look at whether the body has just kicked off it, and on it, which of the moves'
+clips plays. The new clips play as the others do, so a body leaping, ejecting, wrapping round a
+corner or running up a wall costs what a body moving between holds does, and one kicking off or
+rolling a landing what a jump or a roll does.
+
 Where the time goes now (callgrind, `run` at full detail, a third of the characters caped): about
 a third in cape springs, a third in world matrices and a fifth in sampling clips. The palettes are
 the next cost to take on (#243): they're rebuilt every frame at every tier, and half of them are
@@ -605,9 +894,11 @@ copies of another part's.
 
 ## Next
 
-#239 gear changes that keep the character moving (no restart or pop when a look changes), then
-in the plan's order #218 hit flinches and hitstop (once `Event::Hit` is in, #191), #213 traversal
-(after #192), and #244 remote players' real aim in the snapshot.
+In the plan's order: #244, remote players' real aim in the snapshot. Directional hit clips (#106,
+picked by #111) go under the flinch when they land: it adds to whatever plays. Directional rolls
+(#105) and the mantles and swims (#108) go into traversal when they land: a roll picks the clip
+nearest its direction from the facing instead of turning the body, and each new clip brings its
+`travel` curve.
 
 One thing to watch: combat clips take their time from `UnitCombat::action_time` in each snapshot.
 Snapshots go out every tick today; if the send rate drops to 20–30 Hz (#73), attacks would play in

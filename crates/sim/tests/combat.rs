@@ -1284,7 +1284,7 @@ fn arrows_stop_at_a_thin_wall_wherever_their_steps_fall() {
         let mut f = Fight::new();
         let wall_at = ROAD + Vec2::new(0.0, 6.0);
         let ground = f.sim.land().ground(wall_at.x, wall_at.y);
-        f.sim.land_mut().add_solid(world::Solid { center: wall_at, half: Vec2::new(4.0, 0.15), yaw: 0.0, top: Some(ground + 1.4), rise: 0.0 });
+        f.sim.land_mut().add_solid(world::Solid { center: wall_at, half: Vec2::new(4.0, 0.15), yaw: 0.0, top: Some(ground + 1.4), rise: 0.0, roof: None });
         let archer = f.hero(Specialty::Warrior, 10, ROAD - Vec2::new(0.0, back as f32 * 0.1), 0.0);
         let target = f.dummy("skeleton", ROAD + Vec2::new(0.0, 12.0), PI);
         f.step();

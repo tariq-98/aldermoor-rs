@@ -2,7 +2,9 @@
 use crate::model::*;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec3Swizzles};
-use protocol::{Action, ForcedKind, Look, Pose, Traversal, UnitCombat, UnitState};
+use protocol::{
+    Action, ForcedKind, ForcedMove, HitWeight, Look, Pose, Traversal, UnitCombat, UnitState,
+};
 use std::{collections::HashMap, sync::Arc};
 
 pub struct Part {
@@ -44,6 +46,14 @@ pub struct Character {
     pub foot_placement: bool,
     /// Whether the body leans with its acceleration (#217); off to compare.
     pub leaning: bool,
+    /// Whether blows tip the body and hitstops hold its poses (#218); off to compare with the
+    /// hit clip playing in full.
+    pub flinching: bool,
+    /// Whether rolls, leaps, charges and climbs play by how far the body has come through them,
+    /// and swimmers swim (#213), and whether climbers' clips play by how far they have come and
+    /// slid, with their hands on the hold and feet on the wall (#248); off to compare with the
+    /// clips by the clock.
+    pub traversing: bool,
     pub parts: Vec<Part>,
     pub nodes: Vec<Node>,
     pub local: Vec<Transform>,
@@ -78,6 +88,20 @@ pub struct Character {
     last_traversal: Traversal,
     climb: Option<ClimbMove>,
     shimmied_right: bool,
+    /// The way the body last faced on a wall, and seconds into its kick off it backwards while
+    /// that plays, and whether it has been seen thrown out from the wall yet (#305).
+    wall_yaw: f32,
+    kick: Option<(f32, bool)>,
+    /// Where it is on a wall this frame (#248); the shimmy loop's phase, by the distance slid
+    /// along the wall; how far it's moved, up and in toward the wall, for its hands to reach the
+    /// hold; and how firmly each hand holds it, by `Side`.
+    on_wall: Option<OnWall>,
+    shimmy: f32,
+    raised: Vec3,
+    hold_grip: [f32; 2],
+    /// How far this frame moves to reach a hold from its hang (#248), and the client's holds.
+    hang_reach: Vec3,
+    holds: Option<HoldAt>,
     attack: usize,
     transition: Option<(&'static str, f32)>,
     last_drawn: bool,
@@ -126,6 +150,21 @@ pub struct Character {
     air: Option<f32>,
     /// Seconds into `Jump_Land` after a fall that hurt, played in full while standing (#217).
     hard_landing: Option<f32>,
+    /// Flinches away from blows, and the hitstop that holds the pose clocks as they land (#218).
+    flinch: anim::Flinch,
+    /// Whether the blow the sim's `Hit` pose is for caught it in the air, where it plays its hit
+    /// in full as before rather than flinching.
+    hit_in_air: bool,
+    /// How far through the move it is carried through the body has come (#213).
+    progress: anim::Progress,
+    /// The clip of the move the body is carried through, or was last, and how far into it (#213).
+    carried: Option<Carried>,
+    /// When the roll under way began, if it rolls a fall off (#305): it plays `Roll_Land`.
+    rolled_in: Option<f64>,
+    /// Where the climb under way goes over its edge, which the hands take hold of, by the climb's
+    /// start, and how firmly each hand holds it, by `Side`.
+    edge: Option<(f64, Vec3)>,
+    grip: [f32; 2],
     /// Each arm's upper arm, forearm, hand and hand socket, by `Side`, which reach for the
     /// weapon.
     arm_bones: [Option<[usize; 4]>; 2],
@@ -154,15 +193,25 @@ type Stashed = (Vec<Part>, Arc<Model>, Arc<ClipSet>);
 /// The height of the ground at any (x, z), which full-detail characters put their feet on (#214):
 /// `world::Valley::ground` in the game.
 pub type Ground = Arc<dyn Fn(f32, f32) -> f32 + Send + Sync>;
+/// The hold a body hanging at a point hangs from (#248), from the client's copy of the world's
+/// holds: the one `sim::climbing::hang_point` would hang it from there. `None` where there's none.
+pub type HoldAt = Arc<dyn Fn(Vec3) -> Option<world::Hold> + Send + Sync>;
 
 /// A climbing clip under way (#247): the sim's move onto, between or off holds that it plays,
-/// and how far into that move the renderer has got.
+/// what the body does in it (nothing on a hold, running up a wall), and how far through the move
+/// the body has come (#248).
 struct ClimbMove {
     clip: &'static str,
-    /// The move's start, in sim time: a new start is a new move.
-    start: f64,
-    time: f32,
-    duration: f32,
+    wall: Option<anim::climb::Wall>,
+    progress: anim::Progress,
+}
+/// Where a body is on a wall this frame (#248): what it's doing and how far through, and where it
+/// hangs, or where its move goes from and to, which find the holds its hands may be on.
+#[derive(Clone, Copy)]
+struct OnWall {
+    wall: anim::climb::Wall,
+    k: f32,
+    at: [Vec3; 2],
 }
 
 /// Which bones a clip drives. The upper body is `spine_01` and everything under it.
@@ -240,6 +289,20 @@ impl From<&UnitCombat> for Fight {
         }
     }
 }
+/// A move's clip and how far into it (#213). Through the move it plays the moment that matches how
+/// far the body has come; once the move is over, the rest of it plays on by the clock until it ends
+/// or something else plays: standing up out of a roll, a dash's blow and recovery.
+#[derive(Clone, Copy)]
+struct Carried {
+    /// When the move began, in sim time (as `ForcedMove::start`).
+    start: f64,
+    clip: &'static str,
+    /// Seconds into the clip, and where its stretch covering the move ends.
+    time: f32,
+    end: f32,
+    /// The way a roll went, which the body faces until it has stood up out of it.
+    heading: Option<f32>,
+}
 /// A hand, which `perform` reaches with; it indexes `arm_bones`.
 #[derive(Clone, Copy, PartialEq)]
 enum Side {
@@ -273,6 +336,8 @@ const TUCK: f32 = 0.3;
 const LEAN_BODY: f32 = 0.6;
 /// The humanoid locomotion loops, slowest first, which blend by speed (#110).
 const LOOPS: [&str; 3] = ["Walk_Loop", "Jog_Fwd_Loop", "Sprint_Loop"];
+/// How far either side of a climb's line the hands take hold of its edge, in metres (#213).
+const HAND_SPREAD: f32 = 0.25;
 /// The humanoid loop for walking or running at `speed`, which the clip stack's switches and
 /// `perform` go by. What shows is a blend of `LOOPS`.
 fn locomotion_clip(pose: Pose, speed: f32) -> &'static str {
@@ -290,6 +355,10 @@ fn heading(rotation: Quat, rest: Quat) -> f32 {
 }
 fn wrap(angle: f32) -> f32 {
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+/// Whether `u` is being thrown by a blow (#192's traversal state): a knockback plays its clip.
+fn thrown(u: &UnitState) -> bool {
+    matches!(u.traversal, Traversal::Forced(m) if m.kind == ForcedKind::Knockback)
 }
 /// Node indices with every parent before its children.
 fn parent_first(nodes: &[Node]) -> Vec<usize> {
@@ -430,6 +499,8 @@ impl Character {
             partial_updates: true,
             foot_placement: true,
             leaning: true,
+            flinching: true,
+            traversing: true,
             parts: Vec::new(),
             world: world_matrices(&nodes, &local),
             nodes,
@@ -474,6 +545,14 @@ impl Character {
             last_traversal: Traversal::Ground,
             climb: None,
             shimmied_right: true,
+            wall_yaw: 0.,
+            kick: None,
+            on_wall: None,
+            shimmy: 0.,
+            raised: Vec3::ZERO,
+            hold_grip: [0.; 2],
+            hang_reach: Vec3::ZERO,
+            holds: None,
             attack: 0,
             transition: None,
             last_drawn: look.drawn,
@@ -500,6 +579,13 @@ impl Character {
             landing: anim::Landing::default(),
             air: None,
             hard_landing: None,
+            flinch: anim::Flinch::default(),
+            hit_in_air: false,
+            progress: anim::Progress::default(),
+            carried: None,
+            rolled_in: None,
+            edge: None,
+            grip: [0.; 2],
             arm_bones,
             main_sockets: None,
             drawn_now: look.drawn,
@@ -740,6 +826,7 @@ impl Character {
         }
         let set = c.clip_set.clone();
         c.gaits = *set.gaits.get_or_init(|| c.measure_gaits());
+        c.hang_reach = *set.reach.get_or_init(|| c.measure_reach());
         for (n, l) in c.nodes.iter().zip(&mut c.local) {
             *l = n.rest;
         }
@@ -891,8 +978,9 @@ impl Character {
         if look.art != self.look.art {
             (next.partial_updates, next.foot_placement) =
                 (self.partial_updates, self.foot_placement);
-            (next.leaning, next.tier) = (self.leaning, self.tier);
-            next.ground = self.ground.take();
+            (next.leaning, next.flinching, next.tier) = (self.leaning, self.flinching, self.tier);
+            next.traversing = self.traversing;
+            (next.ground, next.holds) = (self.ground.take(), self.holds.take());
             next.blender.set_method(self.blender.method());
             *self = next;
             return Ok(());
@@ -936,6 +1024,7 @@ impl Character {
         (self.order, self.children, self.dropped) = (next.order, next.children, next.dropped);
         (self.clips, self.clip_set, self.skeleton) = (next.clips, next.clip_set, next.skeleton);
         (self.clip_meta, self.gaits, self.idle) = (next.clip_meta, next.gaits, next.idle);
+        self.hang_reach = next.hang_reach;
         (self.main, self.main_clips) = (next.main, next.main_clips);
         (self.off_hand_clips, self.main_sockets) = (next.off_hand_clips, next.main_sockets);
         (self.leg_bones, self.ball_bones) = (next.leg_bones, next.ball_bones);
@@ -1030,17 +1119,37 @@ impl Character {
         if c.guarding || c.action == Action::Block {
             return None;
         } // upper-body layer, keep the legs moving
+        let carried = self.carried_by(u);
+        // Rushing at a target (#213), the main item's dash, whatever the blow: its lunge carries
+        // the body there, and its blow lands as it arrives.
+        if carried.is_some_and(|m| m.kind == ForcedKind::Charge)
+            && let Some(dash) = self.main_clips.get("dash")
+        {
+            return Some(dash);
+        }
+        let pose = self.shown_pose(u);
         if !matches!(
-            u.pose,
+            pose,
             Pose::Attack | Pose::Cast | Pose::Hit | Pose::Jump | Pose::Run
         ) {
             return None;
         }
-        if u.pose == Pose::Run && c.action != Action::Charge
-            || u.pose == Pose::Jump && c.action != Action::Leap
-            || u.pose == Pose::Hit && c.action != Action::Stagger
+        // The sim's pose for a leap or a charge plays its action only while the body is carried
+        // through it (#213), not on a jump or a run after.
+        let stale =
+            |kind| self.traversing && self.humanoid && carried.is_none_or(|m| m.kind != kind);
+        if pose == Pose::Run && (c.action != Action::Charge || stale(ForcedKind::Charge))
+            || pose == Pose::Jump && (c.action != Action::Leap || stale(ForcedKind::Leap))
+            || pose == Pose::Hit && c.action != Action::Stagger
         {
             return None;
+        }
+        // Out of a leap or a charge (#213), its clip plays on while the pose of the action that
+        // began it holds: a new action ends it.
+        if carried.is_none()
+            && let Some(c) = self.carried
+        {
+            return Some(c.clip);
         }
         if !self.humanoid {
             let role = match c.action {
@@ -1094,6 +1203,17 @@ impl Character {
                 }
             }
             Action::Kick => "Punch_Cross",
+            // A hop back (#213) springs off without lunging.
+            Action::Leap
+                if carried.is_some_and(|m| {
+                    (m.to - m.from)
+                        .xz()
+                        .dot(Vec2::new(u.yaw.sin(), u.yaw.cos()))
+                        < 0.
+                }) =>
+            {
+                "NinjaJump_Start"
+            }
             Action::Leap => self.shield_clip("dash", "NinjaJump_Start"),
             Action::Charge => self.item_clip(
                 "dash",
@@ -1119,8 +1239,9 @@ impl Character {
         if let Some(clip) = self.action_clip(u) {
             return clip;
         }
+        let pose = self.shown_pose(u);
         if !self.humanoid {
-            let role = match u.pose {
+            let role = match pose {
                 Pose::Idle => "idle",
                 Pose::Walk => "walk",
                 Pose::Run | Pose::Dodge => "run",
@@ -1131,11 +1252,19 @@ impl Character {
             };
             return self.role_clips.get(role).copied().unwrap_or_default();
         }
-        match u.pose {
+        match pose {
             Pose::Idle if self.hard_landing.is_some() => "Jump_Land",
-            Pose::Idle if u.look.drawn => self.main_clips.get("idle").unwrap_or(self.idle),
-            Pose::Idle => self.idle,
-            Pose::Walk | Pose::Run => locomotion_clip(u.pose, u.velocity.xz().length()),
+            // Afloat (#213), the swim loops.
+            Pose::Idle if self.swimming(u) => "Swim_Idle_Loop",
+            Pose::Walk | Pose::Run if self.swimming(u) => "Swim_Fwd_Loop",
+            Pose::Idle => match self.carried {
+                // Out of a roll or a dash (#213), the rest of its clip.
+                Some(c) => c.clip,
+                None if u.look.drawn => self.main_clips.get("idle").unwrap_or(self.idle),
+                None => self.idle,
+            },
+            Pose::Walk | Pose::Run => locomotion_clip(pose, u.velocity.xz().length()),
+            Pose::Jump if self.pulling_up(u) => "ClimbUp_1m",
             // One timeline through the air (#217): the take-off, then the loop.
             Pose::Jump | Pose::Fall => match self.air {
                 Some(t) if t < self.clip_duration("Jump_Start") => "Jump_Start",
@@ -1143,31 +1272,47 @@ impl Character {
             },
             // Hanging borrows the falling loop until the climbing clips land (#247).
             Pose::Hang => "Jump_Loop",
+            Pose::Dodge if matches!(u.traversal, Traversal::Forced(m) if self.rolled_in == Some(m.start)) => {
+                "Roll_Land"
+            }
             Pose::Dodge => "Roll",
             Pose::Attack | Pose::Cast => {
                 let attacks = self.main_clips.list("attacks");
                 match attacks.get(self.attack % attacks.len().max(1)) {
                     Some(&attack) => attack,
-                    None if u.pose == Pose::Cast => "Spell_Simple_Shoot",
+                    None if pose == Pose::Cast => "Spell_Simple_Shoot",
                     None => "Sword_Regular_A",
                 }
             }
+            Pose::Hit if thrown(u) => "Hit_Knockback",
             Pose::Hit => "Hit_Chest",
             Pose::Dead => "Death01",
         }
     }
     /// What a humanoid on a wall plays (#247; docs/CONTRACT.md, "Poses to animation"), with the
-    /// clip time and whether it loops: the clip for the sim's move onto, between or off holds,
-    /// timed so it ends as the move does, or else the hang, shimmying whichever way the body
-    /// slides along the wall. `None` off the wall.
+    /// clip time and whether it loops: the clip for the sim's move onto, between or off holds, or
+    /// up a wall, at the share of the move the body has come (#248), or else the hang, shimmying
+    /// whichever way the body slides along the wall, by how far it has slid. Kicked off the wall
+    /// backwards, the back eject while the body flies (#305). `None` otherwise.
     fn climbing(&mut self, u: &UnitState, dt: f32) -> Option<(&'static str, f32, bool)> {
+        use anim::climb::Wall;
         let (last, last_pose) = (self.last_traversal, self.last_pose);
         self.last_traversal = u.traversal;
+        self.on_wall = None;
         let (s, c) = u.yaw.sin_cos();
-        let right = Vec3::new(-c, 0., s);
+        let (right, ahead) = (Vec3::new(-c, 0., s), Vec3::new(s, 0., c));
+        if matches!(u.traversal, Traversal::Hanging | Traversal::Forced(_)) {
+            self.kick = None;
+        }
         match u.traversal {
             Traversal::Hanging => {
                 self.climb = None;
+                self.wall_yaw = u.yaw;
+                self.on_wall = Some(OnWall {
+                    wall: Wall::Hanging,
+                    k: 1.,
+                    at: [u.position; 2],
+                });
                 let side = u.velocity.dot(right);
                 if side.abs() > 0.3 {
                     self.shimmied_right = side > 0.;
@@ -1177,24 +1322,45 @@ impl Character {
                 } else if side < -0.3 {
                     "Hang_Shimmy_L_Loop"
                 } else {
-                    "Hang_Idle_Loop"
+                    return Some(("Hang_Idle_Loop", u.pose_time, true));
                 };
-                Some((clip, u.pose_time, true))
+                // The shimmy loops are made sliding at the sim's shimmy speed with the hands
+                // still on the hold, so played by the distance slid they keep still at any speed.
+                if !self.traversing {
+                    return Some((clip, u.pose_time, true));
+                }
+                let slid = side.abs() * dt / anim::climb::SHIMMY_STRIDE;
+                self.shimmy = (self.shimmy + slid).fract();
+                Some((clip, self.shimmy * self.clip_duration(clip), true))
             }
             Traversal::Forced(f) => {
-                if self.climb.as_ref().is_none_or(|m| m.start != f.start) {
+                let new = self
+                    .climb
+                    .as_ref()
+                    .is_none_or(|m| m.progress.start() != Some(f.start));
+                if new {
                     // Which move this is, from how the body got here: a new move is decided
                     // once, on its first frame.
                     let from_hang = matches!(last, Traversal::Hanging)
                         || matches!(last, Traversal::Forced(g) if matches!(g.kind, ForcedKind::Hold | ForcedKind::Corner));
                     let d = f.to - f.from;
-                    let clip = match f.kind {
-                        ForcedKind::Climb if from_hang => "Hang_ClimbUp",
-                        // Up or down to the next hold, or across to one (a side eject's longer
-                        // hop until it has a clip of its own).
+                    let (clip, wall) = match f.kind {
+                        ForcedKind::Climb if from_hang => ("Hang_ClimbUp", Some(Wall::ClimbUp)),
+                        // Up or down to the next hold, or across to one. A climb leap (up) or a
+                        // side eject (across, and up or down as much as a metre) takes longer than
+                        // a climb hand over hand or a hop (#305).
                         ForcedKind::Hold if from_hang => {
                             let across = d.dot(right);
-                            if d.y > 0.3 && d.y > across.abs() {
+                            let up = d.y > 0.3 && d.y > across.abs();
+                            let clip = if f.duration > anim::climb::LONG_MOVE {
+                                if up {
+                                    "Hang_Leap_Up"
+                                } else if across > 0. {
+                                    "Hang_Eject_R"
+                                } else {
+                                    "Hang_Eject_L"
+                                }
+                            } else if up {
                                 "Hang_Climb_Up"
                             } else if d.y < -0.3 && -d.y > across.abs() {
                                 "Hang_Climb_Down"
@@ -1202,14 +1368,27 @@ impl Character {
                                 "Hang_Hop_R"
                             } else {
                                 "Hang_Hop_L"
-                            }
+                            };
+                            (clip, Some(Wall::Between))
                         }
-                        ForcedKind::Corner if self.shimmied_right => "Hang_Hop_R",
-                        ForcedKind::Corner => "Hang_Hop_L",
+                        // Round a corner the way the body shimmied (#305): an outer one carries it
+                        // on ahead, round the wall's end; into an inner one it turns where it is.
+                        ForcedKind::Corner => {
+                            let outer = d.dot(ahead) > anim::climb::CORNER_AHEAD;
+                            let clip = match (outer, self.shimmied_right) {
+                                (true, true) => "Hang_Corner_Out_R",
+                                (true, false) => "Hang_Corner_Out_L",
+                                (false, true) => "Hang_Corner_In_R",
+                                (false, false) => "Hang_Corner_In_L",
+                            };
+                            (clip, Some(Wall::Between))
+                        }
                         ForcedKind::Hold if matches!(last_pose, Pose::Jump | Pose::Fall) => {
-                            "Hang_Catch"
+                            ("Hang_Catch", Some(Wall::Catch))
                         }
-                        ForcedKind::Hold => "Hang_Drop",
+                        ForcedKind::Hold => ("Hang_Drop", Some(Wall::Drop)),
+                        // Up a wall, with no hold to take (#305).
+                        ForcedKind::WallRun => ("Wall_Run", None),
                         _ => {
                             self.climb = None;
                             return None;
@@ -1217,29 +1396,140 @@ impl Character {
                     };
                     self.climb = Some(ClimbMove {
                         clip,
-                        start: f.start,
-                        time: 0.,
-                        duration: f.duration.max(0.05),
+                        wall,
+                        progress: anim::Progress::default(),
                     });
-                } else if let Some(m) = &mut self.climb {
-                    m.time += dt;
                 }
-                let m = self.climb.as_ref()?;
-                let length = self
-                    .clips
-                    .clips
-                    .get(m.clip)
-                    .map_or(m.duration, |a| a.duration);
-                Some((m.clip, (m.time / m.duration).min(1.) * length, false))
+                let m = self.climb.as_mut()?;
+                // Each clip is made on the sim's path for its move, `k` of the clip `k` of the
+                // way along it, so it plays at the share the body has come; where the path
+                // stands still, by the clock. A wrap round a corner swings round it instead
+                // (`sim::climbing::corner_carry`), so it plays by the clock throughout; a wall run
+                // by how high the body has run.
+                let share = match f.kind {
+                    _ if !self.traversing => None,
+                    ForcedKind::Corner => None,
+                    ForcedKind::WallRun => anim::climb::run_progress(f.from, f.to, u.position),
+                    _ => anim::climb::progress(f.from, f.to, u.position),
+                };
+                let k = m.progress.update(f.start, f.duration, share, dt);
+                let (clip, wall) = (m.clip, m.wall);
+                self.on_wall = wall.map(|wall| OnWall {
+                    wall,
+                    k,
+                    at: [f.from, f.to],
+                });
+                self.wall_yaw = u.yaw;
+                Some((clip, k * self.clip_duration(clip), false))
             }
             _ => {
                 self.climb = None;
-                None
+                // Off a hang or a wall run rising, thrown out from the wall: a back eject. It
+                // plays by the clock as the body flies (the sim turning it to the way pressed),
+                // until it comes down or catches a hold. Until the body moves across, it may be
+                // kicking off; once it does, it is if it flies out from the wall.
+                let off_wall = matches!(last, Traversal::Hanging)
+                    || matches!(last, Traversal::Forced(g) if g.kind == ForcedKind::WallRun);
+                if off_wall && u.pose == Pose::Jump {
+                    self.kick = Some((0., false));
+                } else if let Some((t, _)) = &mut self.kick {
+                    *t += dt;
+                }
+                let (t, thrown) = self.kick.take()?;
+                let clip = "Hang_Eject_Back";
+                let (s, c) = self.wall_yaw.sin_cos();
+                let thrown = thrown || u.velocity.dot(-Vec3::new(s, 0., c)) > anim::climb::KICK;
+                let across = u.velocity.xz().length() > anim::climb::KICK;
+                let flying = matches!(u.pose, Pose::Jump | Pose::Fall);
+                if flying
+                    && t < self.clip_duration(clip)
+                    && (thrown || (!across && t < anim::climb::KICK_SEEN))
+                {
+                    self.kick = Some((t, thrown));
+                    Some((clip, t, false))
+                } else {
+                    None
+                }
             }
         }
     }
+    /// The pose the body shows for the sim's (#218). A blow it flinches from leaves it doing what
+    /// it was: walking or running by the sim's own speeds, carried on through a move, or hanging
+    /// on a wall (#247). A stagger or a knockback, a blow that caught it in the air, or one on a
+    /// body that can't flinch still plays its hit in full.
+    fn shown_pose(&self, u: &UnitState) -> Pose {
+        if u.pose != Pose::Hit
+            || !self.flinches()
+            || self.hit_in_air
+            || thrown(u)
+            || self
+                .combat
+                .as_ref()
+                .is_some_and(|c| c.action == Action::Stagger)
+        {
+            return u.pose;
+        }
+        // The sim's pose for what the body was doing (`update_poses`), but for the blow.
+        match u.traversal {
+            Traversal::Hanging => return Pose::Hang,
+            Traversal::Forced(m) => {
+                return match m.kind {
+                    ForcedKind::Roll => Pose::Dodge,
+                    ForcedKind::Charge => Pose::Run,
+                    ForcedKind::Hold | ForcedKind::Corner => Pose::Hang,
+                    ForcedKind::Knockback => Pose::Hit,
+                    ForcedKind::Leap
+                    | ForcedKind::Climb
+                    | ForcedKind::Mantle
+                    | ForcedKind::Vault
+                    | ForcedKind::WallRun => Pose::Jump,
+                };
+            }
+            _ => {}
+        }
+        let speed = u.velocity.xz().length();
+        if speed > 3.2 {
+            Pose::Run
+        } else if speed > 0.3 {
+            Pose::Walk
+        } else {
+            Pose::Idle
+        }
+    }
+    /// Whether blows tip this body (#218): a humanoid, its spine, neck and head found.
+    fn flinches(&self) -> bool {
+        self.flinching
+            && self.humanoid
+            && self.spine_bones.is_some()
+            && self.head_bones.iter().all(Option::is_some)
+    }
+    /// The move `u` is carried through, if this body plays it by how far it has come (#213): a
+    /// roll, a leap, a charge, a climb, a mantle or a vault. A knockback plays its hit by the
+    /// clock, and the climbing clips play the moves onto holds (#247).
+    fn carried_by(&self, u: &UnitState) -> Option<ForcedMove> {
+        match u.traversal {
+            Traversal::Forced(m) if self.traversing && self.humanoid => {
+                (!matches!(m.kind, ForcedKind::Knockback | ForcedKind::Hold)).then_some(m)
+            }
+            _ => None,
+        }
+    }
+    /// Whether `u` pulls up over a ledge (#213), from the ground or caught in a jump (a mantle):
+    /// too high to step up onto, it plays a climb, and the hands take hold of the edge. Lower ones
+    /// hop up.
+    fn pulling_up(&self, u: &UnitState) -> bool {
+        self.carried_by(u).is_some_and(|m| {
+            matches!(m.kind, ForcedKind::Climb | ForcedKind::Mantle)
+                && m.to.y - m.from.y >= anim::traverse::STEP_UP
+        })
+    }
+    /// Whether `u` is afloat (#213), where it plays the swim loops.
+    fn swimming(&self, u: &UnitState) -> bool {
+        self.traversing && self.humanoid && u.traversal == Traversal::Swimming
+    }
     /// The locomotion pose the legs keep while a humanoid attacks or casts on the move, by the
-    /// sim's own speed thresholds (`update_poses`). `None` plays the action on the whole body.
+    /// sim's own speed thresholds (`update_poses`). `None` plays the action on the whole body, as
+    /// it does carried through a move or afloat (#213).
     fn moving_legs(&self, u: &UnitState) -> Option<Pose> {
         let kneeling = self
             .combat
@@ -1248,7 +1538,9 @@ impl Character {
         if !self.humanoid
             || kneeling
             || self.rally_time.is_some()
-            || !matches!(u.pose, Pose::Attack | Pose::Cast)
+            || !matches!(self.shown_pose(u), Pose::Attack | Pose::Cast)
+            || self.carried_by(u).is_some()
+            || self.swimming(u)
         {
             return None;
         }
@@ -1405,37 +1697,81 @@ impl Character {
     /// pelvis tips about the ground beneath it, taking the whole body with it, and the spine bends
     /// the rest of the way, a third at each bone.
     fn lean_body(&mut self, tilt: Vec2) {
-        let Some(bones) = self.spine_bones else {
+        let Some([pelvis, low, mid, chest]) = self.spine_bones else {
             return;
         };
-        let angle = tilt.length();
-        if angle < 1e-6 {
+        if tilt.length() < 1e-6 {
             return;
         }
-        let axis = Vec3::new(tilt.y, 0., -tilt.x) / angle;
+        let spine = tilt * ((1. - LEAN_BODY) / 3.);
+        self.tip(&[
+            (pelvis, tilt * LEAN_BODY),
+            (low, spine),
+            (mid, spine),
+            (chest, spine),
+        ]);
+    }
+    /// Raises the pelvis, and the whole body on it, by `height` in the model's frame.
+    fn raise(&mut self, height: f32) {
+        let Some([pelvis, ..]) = self.spine_bones else {
+            return;
+        };
+        let above = self.nodes[pelvis]
+            .parent
+            .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+        self.local[pelvis].translation += above.inverse() * Vec3::Y * height;
+    }
+    /// Bends the body as a flinch has it (#218): the pelvis, the spine, the neck and the head.
+    fn flinch_body(&mut self, bend: &anim::Bend) {
+        let (Some([pelvis, low, mid, chest]), [Some(neck), Some(head)]) =
+            (self.spine_bones, self.head_bones)
+        else {
+            return;
+        };
+        self.tip(&[
+            (pelvis, bend.pelvis),
+            (low, bend.spine[0]),
+            (mid, bend.spine[1]),
+            (chest, bend.spine[2]),
+            (neck, bend.neck),
+            (head, bend.head),
+        ]);
+    }
+    /// Tips each of `bones`, a chain from the pelvis up, on top of its parent by its tilt: toward
+    /// +x and +z in the model's frame, in radians. The pelvis tips about the ground beneath it,
+    /// taking the whole body with it.
+    fn tip(&mut self, bones: &[(usize, Vec2)]) {
         let mut above = Quat::IDENTITY;
-        for (i, b) in bones.into_iter().enumerate() {
-            if i == 0 || self.nodes[b].parent != Some(bones[i - 1]) {
+        // The lean tips the spine's bones alike, and one turn does for them all.
+        let mut last = (Vec2::ZERO, Quat::IDENTITY);
+        for (i, &(b, tilt)) in bones.iter().enumerate() {
+            if i == 0 || self.nodes[b].parent != Some(bones[i - 1].0) {
                 above = self.nodes[b]
                     .parent
                     .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
             }
-            let share = if i == 0 {
-                LEAN_BODY
-            } else {
-                (1. - LEAN_BODY) / 3.
-            };
-            let turn = Quat::from_axis_angle(axis, share * angle);
-            if i == 0 {
-                // Round the point on the ground beneath the pelvis, so the feet stay about where
-                // they were.
-                let [at] = self.chain([b]);
-                let moved = turn * Vec3::Y * at.y - Vec3::Y * at.y;
-                self.local[b].translation += above.inverse() * moved;
+            if tilt != last.0 {
+                let angle = tilt.length();
+                let turn = if angle > 1e-6 {
+                    Quat::from_axis_angle(Vec3::new(tilt.y, 0., -tilt.x) / angle, angle)
+                } else {
+                    Quat::IDENTITY
+                };
+                last = (tilt, turn);
             }
-            let local = &mut self.local[b];
-            local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
-            above *= local.rotation;
+            let turn = last.1;
+            if turn != Quat::IDENTITY {
+                if i == 0 {
+                    // Round the point on the ground beneath the pelvis, so the feet stay about
+                    // where they were.
+                    let [at] = self.chain([b]);
+                    let moved = turn * Vec3::Y * at.y - Vec3::Y * at.y;
+                    self.local[b].translation += above.inverse() * moved;
+                }
+                let local = &mut self.local[b];
+                local.rotation = (above.inverse() * turn * above * local.rotation).normalize();
+            }
+            above *= self.local[b].rotation;
         }
     }
     /// Turns bone `i` by `angle` round the model's vertical, taking its children with it.
@@ -1656,6 +1992,25 @@ impl Character {
         };
         (walk.speed() < jog.speed() && jog.speed() < sprint.speed()).then_some([walk, jog, sprint])
     }
+    /// How far this frame must move, up and in toward the wall, for its hands to reach a hold
+    /// (#248), from its wrists in its own hang: `Hang_Idle_Loop`'s first frame. Nothing without the
+    /// clip or the arms.
+    fn measure_reach(&mut self) -> Vec3 {
+        let wrists = self.arm_bones.map(|arm| arm.map(|[_, _, hand, _]| hand));
+        let [Some(left), Some(right)] = wrists else {
+            return Vec3::ZERO;
+        };
+        if !self.clip_set.clips.contains_key("Hang_Idle_Loop") {
+            return Vec3::ZERO;
+        }
+        self.world.resize(self.nodes.len(), Mat4::IDENTITY);
+        for (n, l) in self.nodes.iter().zip(&mut self.local) {
+            *l = n.rest;
+        }
+        self.apply_clip("Hang_Idle_Loop", 0., true, Bones::All);
+        self.pose_world();
+        anim::climb::reach([left, right].map(|i| self.world[i].w_axis.truncate()))
+    }
     /// The rotation from `top`'s frame (the model's when `None`) down to bone `i`'s, in the live
     /// pose or the rest pose.
     fn rotation_to(&self, i: usize, top: Option<usize>, rest: bool) -> Quat {
@@ -1731,6 +2086,41 @@ impl Character {
     pub fn rallied(&mut self) {
         self.rally_time = Some(0.);
     }
+    /// A blow landed on this character (#218), travelling over the ground along yaw `way` (0
+    /// toward +z, a quarter turn toward +x, as `Event::Hit` sends it), as hard as `weight`: the
+    /// body tips away from it, if it can, and its pose holds for `hitstop` seconds.
+    pub fn hit(&mut self, way: f32, weight: HitWeight, hitstop: f32) {
+        if !self.flinching {
+            return;
+        }
+        if !self.flinches() {
+            self.flinch.hold(hitstop);
+            return;
+        }
+        use anim::flinch::{BIG, BLOCKED, CRITICAL, HEAVY, LIGHT, PARRIED};
+        let (size, heavy) = match weight {
+            HitWeight::Light => (LIGHT, false),
+            HitWeight::Heavy => (HEAVY, true),
+            HitWeight::Critical => (CRITICAL, true),
+            HitWeight::Big => (BIG, true),
+            HitWeight::Blocked => (BLOCKED, false),
+            HitWeight::Parried => (PARRIED, false),
+        };
+        // Into the frame of the body as it is drawn.
+        let way = way - self.turn.yaw().unwrap_or(0.);
+        let blow = anim::Blow {
+            way: Vec2::new(way.sin(), way.cos()),
+            size,
+            heavy,
+        };
+        self.flinch.hit(blow, hitstop);
+    }
+    /// This character's own blow landed (#218): its pose holds for `hitstop` seconds.
+    pub fn landed(&mut self, hitstop: f32) {
+        if self.flinching {
+            self.flinch.hold(hitstop);
+        }
+    }
     pub fn update_combat(&mut self, u: &UnitState, combat: Option<&UnitCombat>, dt: f32) {
         if let Some(c) = combat {
             let new_action = self
@@ -1741,6 +2131,10 @@ impl Character {
                 self.windup = None;
                 // The same clip may start over: still a switch.
                 self.forced_switch = Some(anim::Switch::Action);
+                // Out of a move, what was left of its clip gives way to the action (#213).
+                if !matches!(u.traversal, Traversal::Forced(_)) {
+                    self.carried = None;
+                }
             }
             if u.pose == Pose::Attack
                 && let Some(cast) = &c.cast
@@ -1756,8 +2150,17 @@ impl Character {
         self.update(u, dt);
     }
     pub fn update(&mut self, u: &UnitState, dt: f32) {
+        // Blows (#218): the hitstop holds the pose clocks, so they move on by `pose_dt`, and the
+        // flinch bends the body over everything else. The sim never pauses, so whatever follows
+        // the body through the world (the stride over the ground covered, the turn, the lean, the
+        // feet, the capes, the blender) keeps to `dt`.
+        let (pose_dt, bend) = self.flinch.update(dt);
+        if u.pose == Pose::Hit && self.last_pose != Pose::Hit {
+            self.hit_in_air = self.air.is_some();
+        }
+        let pose = self.shown_pose(u);
         if let Some(t) = &mut self.rally_time {
-            *t += dt;
+            *t += pose_dt;
             if *t
                 >= self
                     .clips
@@ -1780,22 +2183,22 @@ impl Character {
             self.last_drawn = u.look.drawn;
         }
         if matches!(
-            u.pose,
+            pose,
             Pose::Attack | Pose::Cast | Pose::Dodge | Pose::Hit | Pose::Dead
         ) {
             self.transition = None;
         }
         if let Some((name, time)) = &mut self.transition {
-            *time += dt;
+            *time += pose_dt;
             if *time >= self.clips.clips.get(*name).map_or(0., |a| a.duration) {
                 self.transition = None;
             }
         }
         // Weight (#217). A landing that hurt plays through standing still, and ends on moving.
         if let Some(t) = &mut self.hard_landing {
-            *t += dt;
+            *t += pose_dt;
             if *t >= self.clips.clips.get("Jump_Land").map_or(0., |a| a.duration)
-                || u.pose != Pose::Idle
+                || pose != Pose::Idle
             {
                 self.hard_landing = None;
             }
@@ -1807,11 +2210,15 @@ impl Character {
         } else {
             None
         };
+        // A move the body is carried through (#213), unless it's on a wall, where the climbing
+        // clips play it.
+        let forced = self.carried_by(u).filter(|_| climbing.is_none());
+        let pulling_up = forced.is_some() && self.pulling_up(u);
         // In the air, one timeline runs from take-off through `Jump_Start` and on into
         // `Jump_Loop`: the push-off's crouch left out, and the legs tucked highest at the top of
-        // the jump. Off an edge, it falls straight into the loop.
-        let airborne = matches!(u.pose, Pose::Jump | Pose::Fall) && climbing.is_none();
-        let took_off = airborne && u.pose == Pose::Jump && self.last_pose != Pose::Jump;
+        // the jump. Off an edge, it falls straight into the loop. A climb (#213) isn't in the air.
+        let airborne = matches!(pose, Pose::Jump | Pose::Fall) && climbing.is_none() && !pulling_up;
+        let took_off = airborne && pose == Pose::Jump && self.last_pose != Pose::Jump;
         self.air = match self.air.filter(|_| airborne && !took_off) {
             Some(t) => {
                 let rate = if u.velocity.y > 0. && t < TUCK {
@@ -1819,14 +2226,15 @@ impl Character {
                 } else {
                     1.
                 };
-                Some(t + dt * rate)
+                Some(t + pose_dt * rate)
             }
             None if took_off => Some(TAKEOFF),
             None if airborne => Some(self.clip_duration("Jump_Start")),
             None => None,
         };
         // Touching down, the pelvis dips as far as the fall was fast, or after a fall that hurt,
-        // a body standing still plays its landing in full. Catching a hold isn't touching down.
+        // a body standing still plays its landing in full. Catching a hold isn't touching down,
+        // and water breaks a fall.
         if let Some(down) = self
             .landing
             .update(airborne, u.position.y, u.velocity.y, dt)
@@ -1834,7 +2242,8 @@ impl Character {
         {
             if self.humanoid
                 && down.fell > anim::land::SAFE_FALL
-                && u.pose == Pose::Idle
+                && pose == Pose::Idle
+                && !self.swimming(u)
                 && self.clips.clips.contains_key("Jump_Land")
             {
                 self.hard_landing = Some(0.);
@@ -1842,6 +2251,28 @@ impl Character {
                 self.landing.dip_for(down.speed);
             }
         }
+        // A move's clip (#213). Out of the move, the rest of it plays on by the clock, until it
+        // ends or something else plays; a new move starts afresh.
+        let new_move = forced.is_some_and(|m| self.progress.start() != Some(m.start));
+        // A roll begun in the air rolls a fall off (#305).
+        if new_move && let Some(m) = forced.filter(|m| m.kind == ForcedKind::Roll) {
+            self.rolled_in = matches!(self.last_pose, Pose::Jump | Pose::Fall).then_some(m.start);
+        }
+        self.carried = self.carried.and_then(|mut c| match forced {
+            Some(m) => (m.start == c.start).then_some(c),
+            None => {
+                c.time = c.time.max(c.end) + pose_dt;
+                let goes_on = match self.action_clip(u) {
+                    // The pose of the action that began it holds the clip, to its end.
+                    Some(clip) => clip == c.clip,
+                    None => {
+                        matches!(pose, Pose::Idle | Pose::Walk | Pose::Run)
+                            && c.time < self.clip_duration(c.clip)
+                    }
+                };
+                (goes_on && self.hard_landing.is_none() && !self.swimming(u)).then_some(c)
+            }
+        });
         let name = match climbing {
             Some((clip, _, _)) => clip,
             None => self.clip_for(u),
@@ -1850,54 +2281,104 @@ impl Character {
         let moving = self.moving_legs(u);
         let legs = moving.map(|pose| locomotion_clip(pose, speed));
         let acting = self.action_clip(u).is_some();
+        // The rest of a move's clip, playing on after it.
+        let after = self.carried.filter(|_| forced.is_none());
+        let carrying_on = after.is_some_and(|c| c.clip == name);
+        // Afloat, the swim loops play at the surface (#213).
+        let swimming = matches!(name, "Swim_Idle_Loop" | "Swim_Fwd_Loop");
         let busy = acting
+            || carrying_on
             || matches!(
-                u.pose,
+                pose,
                 Pose::Attack | Pose::Cast | Pose::Dodge | Pose::Hit | Pose::Dead
             );
-        // Any change in what plays is a switch for the blender, even one that looks continuous.
+        // Any change in what plays is a switch for the blender, even one that looks continuous:
+        // the sim's pose changing under a flinch restarts its clock, which the blender smooths. A
+        // move's clip playing on after it doesn't restart, but the next move's does (#213).
         let mut switch = self.forced_switch.take();
-        if name != self.last_clip || legs != self.last_legs || u.pose != self.last_pose {
-            switch = Some(switch_kind(self.last_pose, self.last_busy, u.pose, busy));
+        if name != self.last_clip
+            || legs != self.last_legs
+            || (u.pose != self.last_pose && !carrying_on)
+            || new_move
+        {
+            switch = Some(switch_kind(self.last_pose, self.last_busy, pose, busy));
             self.last_clip = name;
             self.last_legs = legs;
         }
         self.last_pose = u.pose;
         self.last_busy = busy;
+        // Clips timed by the sim's clocks run behind them by however long hitstops held them,
+        // until a switch lets them catch up.
+        if switch.is_some() {
+            self.flinch.switched();
+        }
+        let behind = self.flinch.behind();
+        let pose_time = (u.pose_time - behind).max(0.);
+        let action_time = |c: &Fight| (c.action_time - behind).max(0.);
         for (n, l) in self.nodes.iter().zip(&mut self.local) {
             *l = n.rest;
         }
-        let locomotion = matches!(u.pose, Pose::Walk | Pose::Run);
+        let locomotion = matches!(pose, Pose::Walk | Pose::Run);
         let walking = locomotion && !acting;
-        let looping = match u.pose {
-            Pose::Idle => name != "Jump_Land",
-            Pose::Walk | Pose::Run => true,
-            Pose::Fall => name != "Jump_Start",
-            _ => name == "Jump_Loop",
-        } || self.combat.as_ref().is_some_and(|c| {
-            matches!(c.action, Action::Channel | Action::Revive)
-                || c.action == Action::Spin && c.cast.is_some_and(|(_, channel)| channel)
-        });
-        let rate = match u.pose {
-            Pose::Walk | Pose::Run => self.stride_rate(u.pose, speed),
+        let looping = !carrying_on
+            && match pose {
+                Pose::Idle => name != "Jump_Land",
+                Pose::Walk | Pose::Run => true,
+                Pose::Fall => name != "Jump_Start",
+                _ => name == "Jump_Loop" || LOOPS.contains(&name),
+            }
+            || self.combat.as_ref().is_some_and(|c| {
+                matches!(c.action, Action::Channel | Action::Revive)
+                    || c.action == Action::Spin && c.cast.is_some_and(|(_, channel)| channel)
+            });
+        let rate = match pose {
+            Pose::Walk | Pose::Run if swimming => {
+                (speed / anim::traverse::SWIM_SPEED).clamp(0.5, 1.5)
+            }
+            Pose::Walk | Pose::Run => self.stride_rate(pose, speed),
             Pose::Dodge => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.45),
             Pose::Attack => self.clips.clips.get(name).map_or(1., |a| a.duration / 0.5),
             _ => 1.,
         };
         // The body turns on the spot behind the sim's yaw (#211): standing, the upper body takes
         // up the turn until the feet step round; moving or acting, the body follows on a spring.
-        // Below full detail (#215) the feet don't step: the body follows on the spring.
+        // Below full detail (#215) the feet don't step: the body follows on the spring. Carried
+        // through a roll or a climb (#213) it faces the way it goes, and after a roll until it has
+        // stood up, then turns back.
         let full = self.tier == anim::Tier::Full;
-        let stance = if full && self.humanoid && u.pose == Pose::Idle && !busy {
+        let stance = if full && self.humanoid && pose == Pose::Idle && !busy && !swimming {
             anim::Stance::Standing
         } else {
             anim::Stance::Moving
         };
-        let body = self.turn.update(u.yaw, stance, dt);
+        let way = match forced {
+            Some(m)
+                if matches!(
+                    m.kind,
+                    ForcedKind::Roll | ForcedKind::Climb | ForcedKind::Mantle | ForcedKind::Vault
+                ) =>
+            {
+                anim::traverse::heading(m.from, m.to)
+            }
+            Some(_) => None,
+            None => after
+                .filter(|_| carrying_on && pose == Pose::Idle)
+                .and_then(|c| c.heading),
+        };
+        // Round a corner (#305) the body turns as the sim turns it, as its clip is made turning.
+        let cornering = matches!(u.traversal, Traversal::Forced(m) if m.kind == ForcedKind::Corner);
+        let body = match way {
+            Some(way) => self.turn.update(way, anim::Stance::Carried, dt),
+            None if cornering && climbing.is_some() => {
+                self.turn.update(u.yaw, anim::Stance::Carried, dt)
+            }
+            None => self.turn.update(u.yaw, stance, dt),
+        };
         // The humanoid loops follow the body (#110): blended by speed, the hips turned toward
         // where it travels. One stride phase runs through attacks on the move and every change of
-        // speed or direction, so the feet never restart.
-        let step = match self.gaits.as_ref().filter(|_| walking || moving.is_some()) {
+        // speed or direction, so the feet never restart. Afloat, the strokes play by speed.
+        let striding = (walking || moving.is_some()) && !swimming;
+        let step = match self.gaits.as_ref().filter(|_| striding) {
             Some(gaits) => {
                 let travel = Quat::from_rotation_y(-body) * u.velocity;
                 Some(self.stride.advance(gaits, travel.xz(), dt))
@@ -1933,18 +2414,18 @@ impl Character {
             }
         } else if let (Some(t), "Jump_Land") = (self.hard_landing, name) {
             t
-        } else if u.pose == Pose::Idle && !acting {
+        } else if pose == Pose::Idle && !acting {
             // Crowds out of step (#217): each unit's idle starts at its own phase and pace.
-            anim::idle::time(u.id, u.pose_time, self.clip_duration(name))
+            anim::idle::time(u.id, pose_time, self.clip_duration(name))
         } else {
-            u.pose_time * rate
+            pose_time * rate
         };
         if let Some(c) = &self.combat {
             if c.downed {
                 clip_time = self.clips.clips.get(name).map_or(0., |a| a.duration);
             } else if let Some(t) = self.rally_time {
                 clip_time = t;
-            } else if let Some(windup) = self.windup.filter(|_| u.pose == Pose::Attack) {
+            } else if let Some(windup) = self.windup.filter(|_| pose == Pose::Attack) {
                 // The blow lands on the clip's `hit` marker just as the wind-up ends.
                 let duration = self.clips.clips.get(name).map_or(1., |a| a.duration);
                 let hit = self
@@ -1952,22 +2433,55 @@ impl Character {
                     .get(name)
                     .and_then(|m| m.event("hit"))
                     .unwrap_or(duration * 0.5);
-                clip_time = swing_time(c.action_time, windup, hit, duration);
+                clip_time = swing_time(action_time(c), windup, hit, duration);
             } else if acting {
                 clip_time = if c.action == Action::Parry {
-                    c.action_time * 2.
-                } else if u.pose == Pose::Attack {
-                    c.action_time * rate
+                    action_time(c) * 2.
+                } else if pose == Pose::Attack {
+                    action_time(c) * rate
                 } else {
-                    c.action_time
+                    action_time(c)
                 };
             }
         }
+        // Traversal (#213): through a move, a clip with a `travel` curve plays the moment that
+        // covers as much of the move's path as the body has, so it reaches the end of that stretch
+        // as the move ends; after the move, the rest plays on by the clock.
+        if let Some(m) = forced {
+            let path = match m.kind {
+                ForcedKind::Climb | ForcedKind::Mantle => anim::Path::UpAndOver,
+                _ => anim::Path::Along,
+            };
+            let share = anim::traverse::share(path, m.from, m.to, u.position);
+            let share = self.progress.update(m.start, m.duration, share, dt);
+            let travel = self
+                .clip_meta
+                .get(name)
+                .and_then(|c| c.curves.get("travel"));
+            self.carried = travel.map(|keys| {
+                clip_time = anim::traverse::clip_time(keys, share);
+                Carried {
+                    start: m.start,
+                    clip: name,
+                    time: clip_time,
+                    end: anim::traverse::clip_time(keys, 1.),
+                    heading: anim::traverse::heading(m.from, m.to)
+                        .filter(|_| m.kind == ForcedKind::Roll),
+                }
+            });
+        } else if let Some(c) = after.filter(|_| carrying_on) {
+            clip_time = c.time;
+        }
+        // On a wall (#247), the climbing clip's own time.
         let (clip_time, looping) =
             climbing.map_or((clip_time, looping), |(_, time, looping)| (time, looping));
         match step.filter(|_| walking) {
             Some(step) => self.apply_step(step, Bones::All),
             None => self.apply_clip(name, clip_time, looping, Bones::All),
+        }
+        if swimming {
+            // The swim clips have the surface at their origin; the sim floats the body lower.
+            self.raise(anim::traverse::SWIM_FLOAT);
         }
         // Falling, the legs reach for the ground by when the body will touch down (#217): into
         // `Jump_Land`'s first frame, its feet just meeting the ground.
@@ -1987,19 +2501,25 @@ impl Character {
         if locomotion
             && u.look.drawn
             && self.humanoid
+            && !swimming
             && let Some(idle) = self.main_clips.get("idle")
         {
-            let t = anim::idle::time(u.id, u.pose_time, self.clip_duration(idle));
+            let t = anim::idle::time(u.id, pose_time, self.clip_duration(idle));
             self.apply_clip(idle, t, true, Bones::Upper);
             upper = Some(idle);
         }
+        // Out of a roll or a dash on the move (#213), the rest of its clip on the upper body.
+        if let Some(c) = after.filter(|_| locomotion && !acting && !swimming) {
+            self.apply_clip(c.clip, c.time, false, Bones::Upper);
+            upper = Some(c.clip);
+        }
         if self.humanoid && self.combat.as_ref().is_some_and(|c| c.guarding) {
             let c = self.combat.as_ref().unwrap();
-            let parrying = c.action == Action::Parry && c.action_time < 0.25;
+            let parrying = c.action == Action::Parry && action_time(c) < 0.25;
             let time = if parrying {
-                c.action_time * 2.
+                action_time(c) * 2.
             } else {
-                c.action_time
+                action_time(c)
             };
             let guard = if parrying {
                 "Sword_Block"
@@ -2029,11 +2549,14 @@ impl Character {
             switch = switch.or(Some(anim::Switch::Layer));
         }
         // The body leans with its acceleration (#217): forward setting off, back stopping, and
-        // into turns. Not in the air, on a wall, rolling or down, nor below half detail.
+        // into turns. Not in the air, on a wall, carried through a move, afloat or down, nor below
+        // half detail.
         let down = self.combat.as_ref().is_some_and(|c| c.downed);
         let upright = airborne
             || climbing.is_some()
-            || matches!(u.pose, Pose::Dodge | Pose::Dead)
+            || forced.is_some()
+            || swimming
+            || matches!(pose, Pose::Dodge | Pose::Dead)
             || down
             || self.rally_time.is_some()
             || self.tier == anim::Tier::Quarter;
@@ -2042,7 +2565,7 @@ impl Character {
         self.lean_body(self.leaned);
         // The spine, neck and head follow where it looks (#212). A swing's clip keeps the head,
         // but a shot or a bolt is aimed, and below half detail nobody looks about.
-        let shooting = matches!(u.pose, Pose::Attack | Pose::Cast)
+        let shooting = matches!(pose, Pose::Attack | Pose::Cast)
             && self.combat.as_ref().is_some_and(|c| {
                 !c.downed && matches!(c.action, Action::Shoot | Action::CastBolt | Action::Channel)
             });
@@ -2056,12 +2579,28 @@ impl Character {
         self.perform(active, t);
         // Last, so a switch also smooths the hand reaching and gripping that `perform` adds.
         self.blender.update(&mut self.local, switch, dt);
-        if self.blender.blending() {
+        // Then the flinch, over everything, so the blender never takes it for a switch to smooth.
+        // Below half detail, it doesn't show.
+        let flinched = bend != anim::Bend::default() && self.tier != anim::Tier::Quarter;
+        if flinched {
+            self.flinch_body(&bend);
+        }
+        if self.blender.blending() || flinched {
             self.pose_world();
+        }
+        // Climbing (#213), the hands grab the edge while they reach it: after the blender, which
+        // would only bring them there once the sim had lifted the body out of reach.
+        if let Some(m) = forced.filter(|_| pulling_up) {
+            self.grip_edge(m, u.position, body, dt);
+        }
+        // On a wall (#248), the body hangs from the hold at its own arms' reach, the hands close
+        // on the hold and the feet brace on the wall below.
+        if self.humanoid {
+            self.hang_from_hold(u.position, body, dt);
         }
         // Then the feet go on the ground (#214), so that nothing smooths them off it: at full
         // detail, standing, walking or acting on it, the feet planted in the stride held still.
-        // Not on a wall (#247), even taking a blow there.
+        // Not on a wall (#247), even taking a blow there, carried through a move, nor afloat (#213).
         let kneeling = self
             .combat
             .as_ref()
@@ -2071,8 +2610,10 @@ impl Character {
             && !kneeling
             && self.rally_time.is_none()
             && climbing.is_none()
+            && forced.is_none()
+            && !swimming
             && matches!(
-                u.pose,
+                pose,
                 Pose::Idle | Pose::Walk | Pose::Run | Pose::Attack | Pose::Cast | Pose::Hit
             );
         let contact = grounded.then(|| match step {
@@ -2103,6 +2644,11 @@ impl Character {
     /// Stands the character on `ground` (#214). Without one, the ground is level with the unit.
     pub fn set_ground(&mut self, ground: Ground) {
         self.ground = Some(ground);
+    }
+    /// Hangs the character on walls from the holds `at` finds (#248). Without them, the hands and
+    /// feet on a wall go where the clips put them.
+    pub fn set_holds(&mut self, at: HoldAt) {
+        self.holds = Some(at);
     }
     /// Has the character look at `at`, a point in the world, from its next update (#212): where
     /// the crosshair points, its target, or someone stopping by. `None` looks ahead.
@@ -2180,21 +2726,6 @@ impl Character {
             .get(name)
             .map_or(Mat4::IDENTITY, |i| self.world[*i])
     }
-    pub(crate) fn turn_bone(&mut self, i: usize, from: Vec3, to: Vec3, weight: f32) {
-        if from.length_squared() < 1e-10 || to.length_squared() < 1e-10 {
-            return;
-        }
-        let q = Quat::IDENTITY.slerp(
-            Quat::from_rotation_arc(from.normalize(), to.normalize()),
-            weight,
-        );
-        let world = self.world[i].to_scale_rotation_translation().1;
-        let parent = self.nodes[i].parent.map_or(Quat::IDENTITY, |p| {
-            self.world[p].to_scale_rotation_translation().1
-        });
-        self.local[i].rotation = (parent.inverse() * q * world).normalize();
-        self.update_chain(i);
-    }
     fn arm_to(&mut self, side: Side, target: Mat4, weight: f32) {
         if weight <= 0. {
             return;
@@ -2223,20 +2754,227 @@ impl Character {
         }
         plane = plane.normalize();
         let new_elbow = shoulder + dir * l1 * cos + plane * l1 * (1. - cos * cos).max(0.).sqrt();
-        self.turn_bone(a, elbow - shoulder, new_elbow - shoulder, weight);
-        self.turn_bone(
-            b,
-            self.world[h].w_axis.truncate() - self.world[b].w_axis.truncate(),
-            goal - self.world[b].w_axis.truncate(),
-            weight,
+        // The shoulder turns the elbow to its place and the elbow the wrist to the goal, `weight`
+        // of the way, with the arm's world matrices rebuilt once, at the end: everything on the
+        // forearm turns with both, the rest of the arm with the shoulder alone.
+        let turn = |from: Vec3, to: Vec3| {
+            if from.length_squared() < 1e-10 || to.length_squared() < 1e-10 {
+                return Quat::IDENTITY;
+            }
+            Quat::IDENTITY.slerp(
+                Quat::from_rotation_arc(from.normalize(), to.normalize()),
+                weight,
+            )
+        };
+        let rotation = |i: usize| self.world[i].to_scale_rotation_translation().1;
+        let parent = |i: usize| self.nodes[i].parent.map_or(Quat::IDENTITY, rotation);
+        let upper = turn(elbow - shoulder, new_elbow - shoulder);
+        let (elbow_now, wrist_now) = (
+            shoulder + upper * (elbow - shoulder),
+            shoulder + upper * (wrist - shoulder),
         );
-        let now = self.world[h].to_scale_rotation_translation().1;
+        let lower = turn(wrist_now - elbow_now, goal - elbow_now) * upper;
+        let (above_a, turned_a) = (parent(a), upper * rotation(a));
+        let (above_b, turned_b) = (upper * parent(b), lower * rotation(b));
+        let (above_h, now) = (lower * parent(h), lower * rotation(h));
         let target_q = want.to_scale_rotation_translation().1;
-        let parent = self.world[self.nodes[h].parent.unwrap()]
-            .to_scale_rotation_translation()
-            .1;
-        self.local[h].rotation = (parent.inverse() * now.slerp(target_q, weight)).normalize();
-        self.update_chain(h);
+        self.local[a].rotation = (above_a.inverse() * turned_a).normalize();
+        self.local[b].rotation = (above_b.inverse() * turned_b).normalize();
+        self.local[h].rotation = (above_h.inverse() * now.slerp(target_q, weight)).normalize();
+        self.update_chain(a);
+    }
+    /// Puts the hands on the edge of the climb `m` (#213), the body at `position` turned `body`,
+    /// `dt` seconds on: palms down on the top a shoulder's width apart, fingers over the edge, as
+    /// firmly as `anim::traverse::grip` has them hold it, while they can reach it.
+    fn grip_edge(&mut self, m: ForcedMove, position: Vec3, body: f32, dt: f32) {
+        let edge = match self.edge {
+            Some((start, edge)) if start == m.start => edge,
+            _ => {
+                let edge = match &self.ground {
+                    Some(ground) => anim::traverse::edge(m.from, m.to, |x, z| ground(x, z)),
+                    None => anim::traverse::edge(m.from, m.to, |_, _| m.from.y),
+                };
+                self.edge = Some((m.start, edge));
+                self.grip = [0.; 2];
+                edge
+            }
+        };
+        let elapsed = self.progress.elapsed();
+        let weight = anim::traverse::grip(edge, m.from, m.to, position, elapsed);
+        if weight <= 0. && self.grip == [0.; 2] {
+            return;
+        }
+        // Into the model's frame: the edge, the way over it, and across it toward the left hand.
+        let to_model = Quat::from_rotation_y(-body);
+        let way = to_model * (m.to - m.from).with_y(0.).normalize_or(Vec3::Z);
+        let across = Vec3::new(way.z, 0., -way.x);
+        let edge = to_model * (edge - position);
+        const KNUCKLES: [[&str; 2]; 2] =
+            [["index_01_l", "pinky_01_l"], ["index_01_r", "pinky_01_r"]];
+        for (side, toward) in [(Side::Left, 1.), (Side::Right, -1.)] {
+            let Some([shoulder, elbow, hand, socket]) = self.arm_bones[side as usize] else {
+                continue;
+            };
+            let at = |i: usize| self.world[i].w_axis.truncate();
+            let socket_now = self.world[socket].to_scale_rotation_translation().1;
+            // The turn that puts the palm down, then the fingers over the edge, from the knuckles
+            // and the wrist. Without the knuckles, the hand keeps the clip's turn.
+            let turn = match KNUCKLES[side as usize].map(|n| self.names.get(n).copied()) {
+                [Some(index), Some(pinky)] => {
+                    let (wrist, index, pinky) = (at(hand), at(index), at(pinky));
+                    // Out of the palm: the knuckles run the other way round on the left hand.
+                    let palm = (index - wrist).cross(pinky - wrist) * -toward;
+                    let down = Quat::from_rotation_arc(palm.normalize_or(Vec3::NEG_Y), Vec3::NEG_Y);
+                    let fingers = down * ((index + pinky) * 0.5 - wrist);
+                    let over = way.x.atan2(way.z) - fingers.x.atan2(fingers.z);
+                    Quat::from_rotation_y(over) * down
+                }
+                _ => Quat::IDENTITY,
+            };
+            let target = Mat4::from_rotation_translation(
+                turn * socket_now,
+                edge + across * (toward * HAND_SPREAD) + way * 0.05,
+            );
+            // Held while the wrist can reach its place on the edge, eased off once it can't.
+            let wrist = (target * self.local[socket].matrix().inverse())
+                .w_axis
+                .truncate();
+            let arm = at(shoulder).distance(at(elbow)) + at(elbow).distance(at(hand));
+            let reach = anim::traverse::within_reach(at(shoulder).distance(wrist), arm);
+            let held = &mut self.grip[side as usize];
+            *held = anim::traverse::ease_hold(*held, weight * reach, dt);
+            let held = *held;
+            self.arm_to(side, target, held);
+        }
+    }
+    /// Hangs a body on a wall from its hold (#248), `position` turned `body`, `dt` seconds on:
+    /// moved up or down and in or out so its hands meet the hold where the clips put them (eased
+    /// in and out), by its own reach and by how far short of a full hang the hold is (the sim
+    /// stands a body on the ground under a low one); then, at full and half detail, each hand
+    /// closes on the hold it's near and the feet brace on the wall below, with two-bone IK.
+    fn hang_from_hold(&mut self, position: Vec3, body: f32, dt: f32) {
+        use anim::climb::{self, Wall};
+        // Without traversal, the hands and feet go where the clips put them.
+        let on_wall = self.on_wall.filter(|_| self.traversing);
+        // Off the wall, once the body has come back down from its raise, nothing moves.
+        if on_wall.is_none() && self.raised == Vec3::ZERO {
+            self.hold_grip = [0.; 2];
+            return;
+        }
+        // The holds the hands may be on, in the model's frame: the one the body hangs from, or
+        // the ones its move goes from and to. Only where it hangs: standing on the top it climbs
+        // onto or drops from, or in the air before a catch, it hangs from none, and a hold within
+        // reach above (the bellcote's, over the gable's coping) would pass for one.
+        let to_model = Quat::from_rotation_y(-body);
+        let edge = |h: world::Hold| climb::Edge {
+            a: to_model * (h.a - position),
+            b: to_model * (h.b - position),
+            out: to_model * Vec3::new(h.out.x, 0., h.out.y),
+            braced: h.braced,
+        };
+        let edges = match (on_wall, &self.holds) {
+            (Some(w), Some(holds)) => {
+                let [from, to] = w.at;
+                [
+                    if matches!(w.wall, Wall::Drop | Wall::Catch) {
+                        None
+                    } else {
+                        holds(from).map(edge)
+                    },
+                    if to == from || w.wall == Wall::ClimbUp {
+                        None
+                    } else {
+                        holds(to).map(edge)
+                    },
+                ]
+            }
+            _ => [None; 2],
+        };
+        let want = on_wall.map_or(Vec3::ZERO, |w| {
+            let [from, to] = w.at;
+            // How far the body moves hanging at each end of the move, from the hold there: up, and
+            // in toward the wall (ahead, where there's no hold to say).
+            let raise = |p: Vec3, e: Option<climb::Edge>| {
+                e.map_or(self.hang_reach, |e| {
+                    let p = to_model * (p - position);
+                    let by = climb::raise(self.hang_reach, e.nearest(p).y - p.y, e.out_from(p));
+                    Vec3::Y * by.y - e.out * by.z
+                })
+            };
+            let (start, end) = (
+                raise(from, edges[0]),
+                raise(to, if to == from { edges[0] } else { edges[1] }),
+            );
+            let raised = match w.wall {
+                Wall::Hanging | Wall::ClimbUp => start,
+                Wall::Drop | Wall::Catch => end,
+                Wall::Between => start + (end - start) * w.k,
+            };
+            raised * climb::hanging(w.wall, w.k)
+        });
+        self.raised = climb::ease_raise(self.raised, want, dt);
+        if self.raised != Vec3::ZERO
+            && let Some([pelvis, ..]) = self.spine_bones
+        {
+            let by = self.raised;
+            let above = self.nodes[pelvis]
+                .parent
+                .map_or(Quat::IDENTITY, |p| self.rotation_to(p, None, false));
+            self.local[pelvis].translation += above.inverse() * by;
+            self.shift(pelvis, by);
+        }
+        if on_wall.is_none() || self.tier == anim::Tier::Quarter || edges == [None; 2] {
+            self.hold_grip = [0.; 2];
+            return;
+        }
+        let at = |c: &Self, i: usize| c.world[i].w_axis.truncate();
+        for side in [Side::Left, Side::Right] {
+            let Some([shoulder, elbow, hand, socket]) = self.arm_bones[side as usize] else {
+                continue;
+            };
+            let wrist = at(self, hand);
+            let (goal, firm) = edges
+                .iter()
+                .flatten()
+                .map(|e| climb::grip(e, wrist))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap_or((wrist, 0.));
+            let arm =
+                at(self, shoulder).distance(at(self, elbow)) + at(self, elbow).distance(wrist);
+            let reach = anim::traverse::within_reach(at(self, shoulder).distance(goal), arm);
+            let held = &mut self.hold_grip[side as usize];
+            *held = anim::traverse::ease_hold(*held, firm * reach, dt);
+            let held = *held;
+            // The hand goes where the wrist does, turned as the clip turns it.
+            let target = Mat4::from_translation(goal - wrist) * self.world[socket];
+            self.arm_to(side, target, held);
+        }
+        // The feet brace on the wall the body hangs from, or the nearer of the walls its move goes
+        // between (round a corner, they're square to each other).
+        let (Some(legs), Some(balls)) = (self.leg_bones, self.ball_bones) else {
+            return;
+        };
+        for (leg, ball) in legs.into_iter().zip(balls) {
+            let ball = at(self, ball);
+            let (by, firm) = edges
+                .iter()
+                .flatten()
+                .map(|e| climb::brace(e, ball))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap_or((Vec3::ZERO, 0.));
+            if firm <= 0. {
+                continue;
+            }
+            let joints = leg.map(|i| at(self, i));
+            self.reach(
+                leg,
+                joints,
+                joints[2] + by * firm,
+                Quat::IDENTITY,
+                Quat::IDENTITY,
+            );
+            self.update_chain(leg[0]);
+        }
     }
     fn perform(&mut self, name: &str, t: f32) {
         self.bow_morph = [0.; 2];
@@ -2945,6 +3683,9 @@ mod combat_tests {
         assert_eq!(c.parts.len(), fresh.parts.len(), "no cape comes back");
         assert!(c.springs.is_empty());
         c.foot_placement = false;
+        c.set_ground(Arc::new(|_, _| 0.));
+        c.set_holds(Arc::new(|_| None));
+        let reach = c.hang_reach;
         let female = Look {
             art: "female".into(),
             ..bare.clone()
@@ -2952,6 +3693,14 @@ mod combat_tests {
         c.set_look(&cat, &mut cache, &female).unwrap();
         assert_eq!(c.look.art, "female");
         assert!(!c.foot_placement, "settings carry over to the new body");
+        assert!(
+            c.ground.is_some() && c.holds.is_some(),
+            "and so do the ground and holds"
+        );
+        assert_ne!(
+            c.hang_reach, reach,
+            "the new body reaches for holds as it does"
+        );
         let fresh = Character::load_lod(&cat, &mut cache, &female, 1).unwrap();
         assert_eq!(c.parts.len(), fresh.parts.len());
         assert_eq!(c.nodes.len(), fresh.nodes.len());
@@ -3485,6 +4234,274 @@ mod combat_tests {
             banked > 0.12 && banked < 1.3 * anim::lean::MAX_BANK,
             "leaned {banked} m into the turn"
         );
+    }
+    /// Which way a blow travelling along yaw `way` goes over the ground (x, z).
+    fn along(way: f32) -> Vec2 {
+        Vec2::new(way.sin(), way.cos())
+    }
+    #[test]
+    fn a_blow_on_a_wall_or_mid_roll_flinches_over_what_the_body_was_doing() {
+        // Struck hanging on a wall (#247) or rolling, the sim's `Hit` pose leaves the climbing
+        // clip or the roll playing, not a walk or run by the body's speed, and the head still
+        // goes the way the blow went.
+        use std::f32::consts::PI;
+        let (mut c, mut u, _) = fighter(0.);
+        let (mut twin, mut still, _) = fighter(0.);
+        for v in [&mut u, &mut still] {
+            (v.position.y, v.pose, v.traversal) = (2., Pose::Hang, Traversal::Hanging);
+        }
+        let head = c.names["Head"];
+        let mut most = 0f32;
+        for frame in 0..40 {
+            if frame == 10 {
+                c.hit(PI, HitWeight::Light, 0.);
+            }
+            u.pose = if (10..25).contains(&frame) {
+                Pose::Hit
+            } else {
+                Pose::Hang
+            };
+            c.update(&u, 1. / 60.);
+            twin.update(&still, 1. / 60.);
+            assert_eq!(c.last_clip, "Hang_Idle_Loop", "frame {frame}");
+            let off = (c.world[head].w_axis - twin.world[head].w_axis).truncate();
+            most = most.max(off.length());
+        }
+        assert!(most > 0.02, "on the wall, the head only went {most} m");
+        let (mut c, mut u, _) = fighter(0.);
+        let roll = protocol::ForcedMove {
+            kind: ForcedKind::Roll,
+            from: Vec3::ZERO,
+            to: Vec3::Z * 5.,
+            start: 1.,
+            duration: 0.45,
+        };
+        u.traversal = Traversal::Forced(roll);
+        for frame in 0..27 {
+            if frame == 10 {
+                c.hit(PI, HitWeight::Light, 0.);
+            }
+            let k = frame as f32 / 27.;
+            (u.position, u.velocity) = (Vec3::Z * 5. * (1. - (1. - k) * (1. - k)), Vec3::Z * 11.);
+            (u.pose, u.pose_time) = (
+                if (10..25).contains(&frame) {
+                    Pose::Hit
+                } else {
+                    Pose::Dodge
+                },
+                frame as f32 / 60.,
+            );
+            c.update(&u, 1. / 60.);
+            assert_eq!(c.last_clip, "Roll", "frame {frame}");
+        }
+    }
+    #[test]
+    fn blows_tip_the_body_away_while_the_legs_jog_on() {
+        // A jogger takes a light blow from behind, in front and either side in turn, beside a twin
+        // who takes none. The sim's `Hit` pose lasts a quarter of a second, and used to stop the
+        // legs for `Hit_Chest`: now the legs and the stride jog on as the twin's do, while the
+        // head goes the way the blow went and comes back.
+        use std::f32::consts::{FRAC_PI_2, PI};
+        for way in [0., PI, FRAC_PI_2, -FRAC_PI_2] {
+            let (mut c, mut u, _) = fighter(4.5);
+            let (mut twin, mut jog, _) = fighter(4.5);
+            let head = c.names["Head"];
+            let mut offsets = vec![];
+            for frame in 0..60 {
+                if frame == 20 {
+                    c.hit(way, HitWeight::Light, 0.);
+                }
+                u.pose = if (20..35).contains(&frame) {
+                    Pose::Hit
+                } else {
+                    Pose::Run
+                };
+                c.update(&u, 1. / 60.);
+                twin.update(&jog, 1. / 60.);
+                for leg in ["thigh_l", "calf_l", "foot_r", "thigh_r"] {
+                    let [a, b] = [&c, &twin].map(|c| c.local[c.names[leg]].rotation);
+                    assert!(same(a, b), "frame {frame}: {leg} stopped jogging");
+                }
+                assert!((c.stride.phase - twin.stride.phase).abs() < 1e-6);
+                offsets.push(
+                    (c.world[head].w_axis - twin.world[head].w_axis)
+                        .truncate()
+                        .xz(),
+                );
+                for v in [&mut u, &mut jog] {
+                    v.pose_time += 1. / 60.;
+                    v.position += v.velocity / 60.;
+                }
+            }
+            assert!(offsets[..20].iter().all(|o| *o == Vec2::ZERO));
+            let peak = offsets.iter().copied().fold(Vec2::ZERO, |a, b| {
+                if b.length() > a.length() { b } else { a }
+            });
+            assert!(
+                peak.normalize().dot(along(way)) > 0.95,
+                "from {way}: the head went {peak}"
+            );
+            assert!(
+                peak.length() > 0.02 && peak.length() < 0.12,
+                "from {way}: the head went {} m",
+                peak.length()
+            );
+            assert!(
+                offsets[50..].iter().all(|o| o.length() < 0.005),
+                "from {way}: the head didn't come back"
+            );
+        }
+        // A heavy blow from in front takes the hips back too, the body tipping about its feet.
+        let (mut c, mut u, _) = fighter(0.);
+        let (mut twin, mut still, _) = fighter(0.);
+        let pelvis = c.spine_bones.unwrap()[0];
+        let mut back = 0f32;
+        for frame in 0..40 {
+            if frame == 10 {
+                c.hit(PI, HitWeight::Heavy, 0.);
+            }
+            u.pose = if (10..25).contains(&frame) {
+                Pose::Hit
+            } else {
+                Pose::Idle
+            };
+            c.update(&u, 1. / 60.);
+            twin.update(&still, 1. / 60.);
+            back = back.min(c.world[pelvis].w_axis.z - twin.world[pelvis].w_axis.z);
+            u.pose_time += 1. / 60.;
+            still.pose_time += 1. / 60.;
+        }
+        assert!(back < -0.03, "the hips went {back} m back");
+        // A hitstop as a blow lands on the jogger holds the upper body, but the legs keep up with
+        // the ground it covers.
+        let (mut c, mut u, _) = fighter(4.5);
+        let (mut twin, mut jog, _) = fighter(4.5);
+        for frame in 0..40 {
+            if frame == 10 {
+                c.hit(0., HitWeight::Big, 0.12);
+            }
+            u.pose = if (10..25).contains(&frame) {
+                Pose::Hit
+            } else {
+                Pose::Run
+            };
+            c.update(&u, 1. / 60.);
+            twin.update(&jog, 1. / 60.);
+            assert!((c.stride.phase - twin.stride.phase).abs() < 1e-6);
+            for v in [&mut u, &mut jog] {
+                v.pose_time += 1. / 60.;
+                v.position += v.velocity / 60.;
+            }
+        }
+    }
+    #[test]
+    fn staggers_knockbacks_and_blows_in_the_air_still_play_their_clips() {
+        let (mut c, mut u, mut fight) = fighter(0.);
+        let mut standing = u.clone();
+        standing.pose = Pose::Idle;
+        u.pose = Pose::Hit;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(
+            c.last_clip,
+            c.clip_for(&standing),
+            "a blow it flinches from"
+        );
+        // Flinching off, to compare: the blow plays the hit clip in full and holds nothing.
+        let (mut off, ..) = fighter(0.);
+        off.flinching = false;
+        off.hit(0., HitWeight::Heavy, 0.08);
+        off.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(off.last_clip, "Hit_Chest");
+        assert!(!off.flinch.holding());
+        fight.action = Action::Stagger;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Knockback", "a stagger");
+        fight.action = Action::None;
+        u.traversal = Traversal::Forced(protocol::ForcedMove {
+            kind: ForcedKind::Knockback,
+            from: Vec3::ZERO,
+            to: Vec3::Z * 3.,
+            start: 0.,
+            duration: 0.4,
+        });
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Knockback", "a knockback");
+        // Caught in the air, it plays its hit in full as before.
+        let (mut c, mut u, fight) = fighter(0.);
+        u.pose = Pose::Jump;
+        u.velocity.y = 6.;
+        for _ in 0..5 {
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+        }
+        u.pose = Pose::Hit;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Chest");
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Hit_Chest");
+        // A beast can't flinch: it plays its own hit, and a blow on it only holds its pose.
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let wolf = Look {
+            art: "wolf.grey".into(),
+            ..Default::default()
+        };
+        let mut c = Character::load(&cat, &mut ModelCache::default(), &wolf).unwrap();
+        u.look = wolf.into();
+        u.velocity.y = 0.;
+        u.pose = Pose::Hit;
+        c.hit(0., HitWeight::Heavy, 0.05);
+        c.update(&u, 1. / 60.);
+        assert_eq!(Some(c.last_clip), c.role_clips.get("hit").copied());
+        assert!(c.flinch.holding() && c.flinch.update(0.).1 == anim::Bend::default());
+    }
+    #[test]
+    fn the_hitstop_holds_a_swing_then_lets_it_go_on_without_a_jump() {
+        // A standing slash lands on frame 10 and holds for 80 ms; a twin's lands with none. The
+        // sword arm holds still through the hitstop, swings on from where it held at its own
+        // pace, behind the twin's, and when the swing ends both stand alike again.
+        let (mut c, mut u, mut fight) = fighter(0.);
+        let (mut twin, ..) = fighter(0.);
+        u.pose = Pose::Attack;
+        fight.action = Action::Slash;
+        let arm = c.names["upperarm_r"];
+        let (mut shown, mut twins) = (vec![], vec![]);
+        for frame in 0..40 {
+            if frame == 10 {
+                c.landed(0.08);
+            }
+            if frame == 30 {
+                u.pose = Pose::Idle;
+                u.pose_time = 0.;
+                fight.action = Action::None;
+                fight.action_time = 0.;
+            }
+            c.update_combat(&u, Some(&fight), 1. / 60.);
+            twin.update_combat(&u, Some(&fight), 1. / 60.);
+            shown.push(c.local[arm].rotation);
+            twins.push(twin.local[arm].rotation);
+            fight.action_time += 1. / 60.;
+            u.pose_time += 1. / 60.;
+        }
+        let turned = |a: Quat, b: Quat| a.angle_between(b);
+        assert!(turned(twins[9], twins[14]) > 0.05, "the swing hardly moved");
+        // Held where it was as the blow landed, until 80 ms had gone by...
+        for f in 10..14 {
+            assert!(same(shown[f], shown[9]), "frame {f} moved");
+        }
+        // ...then on, never faster than the swing itself goes.
+        let fastest = (9..29)
+            .map(|f| turned(twins[f], twins[f + 1]))
+            .fold(0., f32::max);
+        for f in 13..29 {
+            let step = turned(shown[f], shown[f + 1]);
+            assert!(step <= fastest + 1e-4, "frame {f}: jumped {step}");
+        }
+        assert!(!same(shown[20], twins[20]), "it caught up during the swing");
+        for f in 30..40 {
+            assert!(same(shown[f], twins[f]), "frame {f}: still behind");
+        }
     }
     #[test]
     fn on_a_wall_the_body_neither_lands_nor_leans_nor_jumps() {
@@ -4032,5 +5049,892 @@ mod combat_tests {
                 }
             }
         }
+    }
+
+    /// The sim carrying `u` through a move of `kind` to `to` over `duration` seconds, hopping
+    /// `arc` on the way (docs/MOVEMENT.md), in `pose`: the unit on each frame from the first after
+    /// the move began (at sim time 10) to the last before it ends. On the next, the sim has let go.
+    fn carried(
+        u: &UnitState,
+        kind: ForcedKind,
+        to: Vec3,
+        duration: f32,
+        arc: f32,
+        pose: Pose,
+    ) -> Vec<UnitState> {
+        let from = u.position;
+        let m = ForcedMove {
+            kind,
+            from,
+            to,
+            start: 10.,
+            duration,
+        };
+        let frames = (duration * 60.).round() as usize;
+        let mut was = from;
+        (1..frames)
+            .map(|f| {
+                let k = f as f32 / frames as f32;
+                let at = if matches!(kind, ForcedKind::Climb | ForcedKind::Mantle) {
+                    let up = 1. - (1. - (k * 1.6).min(1.)).powi(2);
+                    let p = from.lerp(to, k * k);
+                    Vec3::new(p.x, from.y + (to.y - from.y) * up, p.z)
+                } else {
+                    let eased = 1. - (1. - k) * (1. - k);
+                    from.lerp(to, eased) + Vec3::Y * (k * std::f32::consts::PI).sin() * arc
+                };
+                let mut v = u.clone();
+                (v.position, v.velocity) = (at, (at - was) * 60.);
+                was = at;
+                (v.pose, v.pose_time) = (pose, f as f32 / 60.);
+                v.traversal = Traversal::Forced(m);
+                v
+            })
+            .collect()
+    }
+    /// `u` standing or moving on as it was, `frames` frames on from `pose_time` 0.
+    fn going_on(
+        c: &mut Character,
+        u: &mut UnitState,
+        frames: usize,
+        mut each: impl FnMut(&Character, usize),
+    ) {
+        u.traversal = Traversal::Ground;
+        u.pose_time = 0.;
+        for f in 0..frames {
+            c.update(u, 1. / 60.);
+            each(c, f);
+            u.pose_time += 1. / 60.;
+            u.position += u.velocity / 60.;
+        }
+    }
+    #[test]
+    fn a_strafing_roll_turns_into_the_roll_plays_by_distance_and_turns_back_once_up() {
+        // Facing ahead and rolling 5 m to the side in 0.45 s, as the sim dodges while strafing:
+        // the body turns to face the roll within a few frames, and the roll's clip keeps pace with the
+        // ground covered, its hands down halfway and its feet down just as the move ends (by the
+        // clock it would be standing up by then). Standing up it still faces the way it rolled,
+        // then turns back to the sim's yaw.
+        use std::f32::consts::FRAC_PI_2;
+        let (mut c, mut u, _) = fighter(0.);
+        going_on(&mut c, &mut u, 30, |_, _| {});
+        let to = u.position + Vec3::X * 5.;
+        let frames = carried(&u, ForcedKind::Roll, to, 0.45, 0.15, Pose::Dodge);
+        let mut times = vec![];
+        for (f, v) in frames.iter().enumerate() {
+            c.update(v, 1. / 60.);
+            assert_eq!(c.last_clip, "Roll");
+            times.push(c.carried.unwrap().time);
+            if f >= 8 {
+                let off = wrap(c.body_yaw() - FRAC_PI_2);
+                assert!(
+                    off.abs() < 0.05,
+                    "frame {f}: {}° off the roll",
+                    off.to_degrees()
+                );
+            }
+        }
+        assert!(times.windows(2).all(|w| w[1] >= w[0]), "{times:?}");
+        let halfway = frames.iter().position(|v| v.position.x >= 2.5).unwrap();
+        assert!(
+            (times[halfway] - 0.43).abs() < 0.04,
+            "halfway at {}",
+            times[halfway]
+        );
+        let last = times[times.len() - 1];
+        assert!((last - 0.87).abs() < 0.04, "the move ended at {last}");
+        // Standing up, the rest of the roll by the clock, still facing it; then the idle, and the
+        // body turns back.
+        u.position = to;
+        let up = c.clip_duration("Roll") - 0.87;
+        let mut rest = vec![];
+        going_on(&mut c, &mut u, 200, |c, f| {
+            rest.push((c.last_clip, c.body_yaw(), f))
+        });
+        let stood = rest.iter().position(|r| r.0 != "Roll").unwrap();
+        assert!(
+            (stood as f32 / 60. - up).abs() < 2. / 60.,
+            "stood up after {stood} frames"
+        );
+        for (clip, yaw, f) in &rest[..stood] {
+            assert_eq!(*clip, "Roll");
+            assert!(
+                wrap(yaw - FRAC_PI_2).abs() < 0.05,
+                "frame {f} turned back early"
+            );
+        }
+        assert_eq!(rest[stood].0, "Sword_Idle");
+        let (_, yaw, _) = rest[rest.len() - 1];
+        assert!(
+            wrap(yaw).abs() < 0.01,
+            "turned back to {}°",
+            yaw.to_degrees()
+        );
+    }
+    #[test]
+    fn running_out_of_a_roll_the_legs_run_and_the_roll_recovers_over_them() {
+        let (mut c, mut u, _) = fighter(6.);
+        going_on(&mut c, &mut u, 30, |_, _| {});
+        let to = u.position + Vec3::Z * 5.;
+        for v in carried(&u, ForcedKind::Roll, to, 0.45, 0.15, Pose::Dodge) {
+            c.update(&v, 1. / 60.);
+        }
+        u.position = to;
+        let mut seen = vec![];
+        going_on(&mut c, &mut u, 60, |c, _| {
+            seen.push((c.last_clip, c.last_upper))
+        });
+        assert_eq!(seen[0], ("Jog_Fwd_Loop", Some("Roll")));
+        let recovered = seen.iter().position(|s| s.1 != Some("Roll")).unwrap();
+        assert!(
+            recovered > 30,
+            "the recovery stopped after {recovered} frames"
+        );
+        assert_eq!(seen[recovered], ("Jog_Fwd_Loop", Some("Sword_Idle")));
+    }
+    #[test]
+    fn a_charge_plays_the_dash_by_distance_and_its_blow_on_arrival() {
+        // The sword's lunge at a target 8 m off, as the sim plays it: a 0.4 s rush with a 0.3 m
+        // hop, its thrust begun as it sets off and the Attack pose held 0.5 s, the blow landing
+        // on arrival. The sword's dash plays over the whole body, its lunge ending as the body
+        // arrives; the rest of it plays on by the clock while the pose holds, until the next blow.
+        let (mut c, u, mut fight) = fighter(0.);
+        fight.action = Action::Thrust;
+        let frames = carried(&u, ForcedKind::Charge, Vec3::Z * 8., 0.4, 0.3, Pose::Attack);
+        for v in &frames {
+            fight.action_time = v.pose_time;
+            c.update_combat(v, Some(&fight), 1. / 60.);
+            assert_eq!((c.last_clip, c.last_legs), ("Sword_Dash", None));
+        }
+        let last = c.carried.unwrap().time;
+        assert!(
+            (last - 0.25).abs() < 0.03,
+            "the lunge was at {last} arriving"
+        );
+        let mut at = frames[frames.len() - 1].clone();
+        (at.position, at.velocity, at.traversal) = (Vec3::Z * 8., Vec3::ZERO, Traversal::Ground);
+        let held = frames.len() + 1..30;
+        for f in held.clone() {
+            (at.pose_time, fight.action_time) = (f as f32 / 60., f as f32 / 60.);
+            c.update_combat(&at, Some(&fight), 1. / 60.);
+            assert_eq!(c.last_clip, "Sword_Dash", "frame {f}");
+        }
+        let on = c.carried.unwrap().time - last;
+        assert!(
+            on >= held.len() as f32 / 60.,
+            "the dash went on {on} s after"
+        );
+        fight.action_time = 0.;
+        c.update_combat(&at, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Sword_Regular_C");
+        // Running on after the greatsword's rush, whose action is the charge, the sim's Run pose
+        // and its stale action are just a run.
+        let (mut c, u, mut fight) = fighter(6.);
+        fight.action = Action::Charge;
+        fight.action_time = 0.8;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Jog_Fwd_Loop");
+        // Without traversal, as before: the dash by the clock over sprinting legs, and again on
+        // the run after.
+        c.traversing = false;
+        fight.action_time = 0.1;
+        c.update_combat(&frames[5], Some(&fight), 1. / 60.);
+        assert_eq!(
+            (c.last_clip, c.last_legs),
+            ("Sword_Dash", Some("Sprint_Loop"))
+        );
+        fight.action_time = 0.8;
+        c.update_combat(&u, Some(&fight), 1. / 60.);
+        assert_eq!(c.last_clip, "Sword_Dash");
+    }
+    /// Each hand's distance from where it holds the edge `edge` of a climb along `way`, as
+    /// `grip_edge` places them.
+    fn off_the_edge(c: &Character, position: Vec3, edge: Vec3, way: Vec3) -> [f32; 2] {
+        let to_model = Quat::from_rotation_y(-c.body_yaw());
+        let way = to_model * way;
+        let across = Vec3::new(way.z, 0., -way.x);
+        let edge = to_model * (edge - position);
+        [(Side::Left, 1.), (Side::Right, -1.)].map(|(side, toward)| {
+            let socket = c.arm_bones[side as usize].unwrap()[3];
+            let want = edge + across * (toward * HAND_SPREAD) + way * 0.05;
+            c.world[socket].w_axis.truncate().distance(want)
+        })
+    }
+    #[test]
+    fn climbs_and_mantles_play_the_climb_with_the_hands_on_the_edge() {
+        // Up a 1.2 m wall whose face is 0.1 m ahead, onto its top 0.85 m on (where the sim stands
+        // a climber): the climb plays over the whole body by distance, nothing of a jump, and the
+        // hands grab the edge while they reach it, then let go as the sim lifts the body on.
+        let wall = |_: f32, z: f32| if z >= 0.1 { 1.2 } else { 0. };
+        let (mut c, mut u, _) = fighter(0.);
+        c.set_ground(Arc::new(wall));
+        going_on(&mut c, &mut u, 30, |_, _| {});
+        let to = Vec3::new(0., 1.2, 0.85);
+        let frames = carried(&u, ForcedKind::Climb, to, 0.6, 0., Pose::Jump);
+        let mut closest = [f32::MAX; 2];
+        let mut times = vec![];
+        for v in &frames {
+            c.update(v, 1. / 60.);
+            assert_eq!(c.last_clip, "ClimbUp_1m");
+            assert_eq!(c.air, None, "a climb isn't a jump");
+            times.push(c.carried.unwrap().time);
+            let edge = c.edge.unwrap().1;
+            assert!(
+                (edge - Vec3::new(0., 1.2, 0.1)).length() < 0.051,
+                "edge at {edge}"
+            );
+            let off = off_the_edge(&c, v.position, edge, Vec3::Z);
+            for side in 0..2 {
+                closest[side] = closest[side].min(off[side]);
+            }
+        }
+        // The nearer hand onto its place, the other as near as its arm reaches.
+        let [near, far] = [closest[0].min(closest[1]), closest[0].max(closest[1])];
+        assert!(
+            near < 0.01 && far < 0.05,
+            "the hands came {closest:?} m from the edge"
+        );
+        assert_eq!(c.grip, [0.; 2], "the hands let go coming over");
+        assert!(times.windows(2).all(|w| w[1] >= w[0]), "{times:?}");
+        let last = times[times.len() - 1];
+        assert!((last - 0.667).abs() < 0.05, "the climb ended at {last}");
+        // A step up 0.3 m high hops up: the jump, the hands off the top.
+        let (mut c, u, _) = fighter(0.);
+        c.set_ground(Arc::new(|_: f32, z: f32| if z >= 0.1 { 0.3 } else { 0. }));
+        for v in carried(
+            &u,
+            ForcedKind::Climb,
+            Vec3::new(0., 0.3, 0.85),
+            0.6,
+            0.,
+            Pose::Jump,
+        ) {
+            c.update(&v, 1. / 60.);
+            assert!(c.last_clip.starts_with("Jump_"), "{}", c.last_clip);
+            assert_eq!(c.grip, [0.; 2]);
+        }
+        // Caught in a jump a metre up, a ledge 2.2 m high is pulled up onto the same way.
+        let (mut c, mut u, _) = fighter(0.);
+        c.set_ground(Arc::new(|_: f32, z: f32| if z >= 0.1 { 2.2 } else { 0. }));
+        u.position.y = 1.;
+        u.pose = Pose::Jump;
+        u.velocity.y = 2.;
+        c.update(&u, 1. / 60.);
+        u.velocity.y = 0.;
+        for v in carried(
+            &u,
+            ForcedKind::Mantle,
+            Vec3::new(0., 2.2, 0.85),
+            0.5,
+            0.,
+            Pose::Jump,
+        ) {
+            c.update(&v, 1. / 60.);
+            assert_eq!(c.last_clip, "ClimbUp_1m");
+        }
+    }
+    #[test]
+    fn swimmers_play_the_swim_loops_at_the_surface() {
+        // Afloat, the sim's feet 0.5 m under the surface: treading water standing, stroking on
+        // the move, the body raised to the surface the clips have at their origin.
+        let (mut c, mut u, _) = fighter(0.);
+        let pelvis = c.names["pelvis"];
+        u.traversal = Traversal::Swimming;
+        let raised = |c: &mut Character, time: f32| {
+            let shown = c.world[pelvis].w_axis.y;
+            let mut bare = c.local.clone();
+            for (n, l) in c.nodes.iter().zip(&mut bare) {
+                *l = n.rest;
+            }
+            std::mem::swap(&mut c.local, &mut bare);
+            c.apply_clip(c.last_clip, time, true, Bones::All);
+            let clip = world_matrices(&c.nodes, &c.local)[pelvis].w_axis.y;
+            std::mem::swap(&mut c.local, &mut bare);
+            shown - clip
+        };
+        for frame in 0..20 {
+            u.pose_time = frame as f32 / 60.;
+            c.update(&u, 1. / 60.);
+        }
+        assert_eq!(c.last_clip, "Swim_Idle_Loop");
+        let time = anim::idle::time(u.id, u.pose_time, c.clip_duration("Swim_Idle_Loop"));
+        let up = raised(&mut c, time);
+        assert!(
+            (up - anim::traverse::SWIM_FLOAT).abs() < 0.01,
+            "raised {up} m"
+        );
+        u.pose = Pose::Run;
+        u.velocity = Vec3::Z * 2.7;
+        for frame in 0..20 {
+            u.pose_time = frame as f32 / 60.;
+            c.update(&u, 1. / 60.);
+            assert_eq!((c.last_clip, c.last_legs), ("Swim_Fwd_Loop", None));
+        }
+        let time = c.stride.phase * c.clip_duration("Swim_Fwd_Loop");
+        let up = raised(&mut c, time);
+        assert!(
+            (up - anim::traverse::SWIM_FLOAT).abs() < 0.01,
+            "raised {up} m"
+        );
+        // Without traversal, as before: the run.
+        c.traversing = false;
+        c.update(&u, 1. / 60.);
+        assert_eq!(c.last_clip, "Jog_Fwd_Loop");
+    }
+    #[test]
+    fn a_leap_ahead_lunges_and_a_hop_back_springs_off_by_distance() {
+        // The sim's leaps (0.3 s, a 0.4 m hop, the Attack pose held): 6 m ahead behind the shield,
+        // or 4 m back, as a sidestep or a disengage hops.
+        for (to, clip, end) in [
+            (Vec3::Z * 6., "Shield_Dash", 0.27),
+            (Vec3::Z * -4., "NinjaJump_Start", 0.967),
+        ] {
+            let (mut c, u, mut fight) = fighter(0.);
+            fight.action = Action::Leap;
+            let frames = carried(&u, ForcedKind::Leap, to, 0.3, 0.4, Pose::Attack);
+            for v in &frames {
+                fight.action_time = v.pose_time;
+                c.update_combat(v, Some(&fight), 1. / 60.);
+                assert_eq!(c.last_clip, clip);
+            }
+            let last = c.carried.unwrap().time;
+            assert!((last - end).abs() < 0.1 * end, "{clip} ended at {last}");
+        }
+    }
+
+    /// How far above its feet the sim hangs a body's hands (`sim::climbing::HANG_DROP`).
+    const HANG: f32 = anim::climb::HANG_DROP;
+    /// A plain body of `art` hanging at the origin from a hold 1.9 m above its feet, facing it
+    /// (+z), the top of a wall that runs from x 1.5 to -1.5 there (#248).
+    fn climber(art: &str) -> (Character, UnitState) {
+        let (_, mut u, _) = fighter(0.);
+        let cat = assets::Catalog::load(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+        )
+        .unwrap();
+        let look = Look {
+            art: art.into(),
+            ..Default::default()
+        };
+        let mut c = Character::load(&cat, &mut ModelCache::default(), &look).unwrap();
+        c.blender.set_method(anim::Method::Off);
+        c.set_ground(Arc::new(|_, _| -3.));
+        c.set_holds(Arc::new(|p: Vec3| {
+            (p.x.abs() <= 1.5 && p.y.abs() < 0.3 && p.z.abs() < 0.3).then_some(world::Hold {
+                a: Vec3::new(1.5, anim::climb::HANG_DROP, 0.4),
+                b: Vec3::new(-1.5, anim::climb::HANG_DROP, 0.4),
+                out: Vec2::new(0., -1.),
+                braced: true,
+            })
+        }));
+        u.look = look.into();
+        (u.pose, u.traversal) = (Pose::Hang, Traversal::Hanging);
+        (c, u)
+    }
+    /// Where joint `i` of `c` is in the world, the unit at `position`.
+    fn joint_at(c: &Character, position: Vec3, i: usize) -> Vec3 {
+        let root = Mat4::from_rotation_translation(Quat::from_rotation_y(c.body_yaw()), position);
+        root.transform_point3(c.world[i].w_axis.truncate())
+    }
+    /// Where `c`'s wrists are in the world, left and right, the unit at `position`.
+    fn wrists(c: &Character, position: Vec3) -> [Vec3; 2] {
+        c.arm_bones
+            .map(|arm| joint_at(c, position, arm.unwrap()[2]))
+    }
+    /// Where the balls of `c`'s feet are in the world, the unit at `position`.
+    fn balls(c: &Character, position: Vec3) -> [Vec3; 2] {
+        c.ball_bones.unwrap().map(|i| joint_at(c, position, i))
+    }
+    #[test]
+    fn every_frame_hangs_with_its_hands_on_the_hold_and_its_feet_on_the_wall() {
+        // Short, tall and in between, each frame hangs from the hold (1.9 m up, its face 0.4 m
+        // ahead) with its wrists where the clips close the hands on it and the balls of its feet
+        // against the wall below.
+        let grip = Vec3::new(
+            0.,
+            HANG - anim::climb::GRIP_DOWN,
+            0.4 - anim::climb::GRIP_OUT,
+        );
+        for art in [
+            "male",
+            "female",
+            "elf_female",
+            "elf_male",
+            "dwarf_male",
+            "dwarf_female",
+            "goblin_male",
+            "foxfolk_male",
+        ] {
+            let (mut c, mut u) = climber(art);
+            for frame in 0..40 {
+                u.pose_time = frame as f32 / 60.;
+                c.update(&u, 1. / 60.);
+            }
+            assert_eq!(c.last_clip, "Hang_Idle_Loop");
+            for wrist in wrists(&c, u.position) {
+                let off = (wrist - grip).with_x(0.);
+                assert!(off.length() < 0.02, "{art}: wrist off the hold by {off}");
+            }
+            for ball in balls(&c, u.position) {
+                let out = 0.4 - ball.z;
+                assert!(
+                    (out - anim::climb::BALL_OUT).abs() < 0.015 && ball.y > 0.2,
+                    "{art}: a foot at {ball}, {out} m out from the wall"
+                );
+            }
+        }
+    }
+    #[test]
+    fn under_a_low_hold_the_body_sinks_to_it_and_keeps_its_feet_on_the_wall() {
+        // A hold 1.6 m up, too low to hang from at full stretch, so the sim stands the body on
+        // the ground under it: the body sinks the 0.3 m the hold lacks, its hands on the hold and
+        // its feet still on the wall, above the ground.
+        let (mut c, mut u) = climber("male");
+        c.set_ground(Arc::new(|_, _| 0.));
+        c.set_holds(Arc::new(|p: Vec3| {
+            (p.x.abs() <= 1.5 && p.y.abs() < 0.3 && p.z.abs() < 0.3).then_some(world::Hold {
+                a: Vec3::new(1.5, 1.6, 0.4),
+                b: Vec3::new(-1.5, 1.6, 0.4),
+                out: Vec2::new(0., -1.),
+                braced: true,
+            })
+        }));
+        for frame in 0..40 {
+            u.pose_time = frame as f32 / 60.;
+            c.update(&u, 1. / 60.);
+        }
+        let sunk = c.hang_reach - Vec3::Y * 0.3;
+        assert!(c.raised.distance(sunk) < 1e-3, "{}", c.raised);
+        let grip = Vec3::new(
+            0.,
+            1.6 - anim::climb::GRIP_DOWN,
+            0.4 - anim::climb::GRIP_OUT,
+        );
+        for wrist in wrists(&c, u.position) {
+            let off = (wrist - grip).with_x(0.);
+            assert!(off.length() < 0.02, "wrist off the hold by {off}");
+        }
+        for ball in balls(&c, u.position) {
+            let out = 0.4 - ball.z;
+            assert!(
+                ball.y > 0.05 && (out - anim::climb::BALL_OUT).abs() < 0.015,
+                "a foot at {ball}"
+            );
+        }
+    }
+    #[test]
+    fn shimmying_hands_keep_still_on_the_hold_at_any_speed() {
+        // Shimmying right at the sim's speed and at half of it: the hands are in the same places
+        // on the hold at the same distances slid, as the shimmy plays by how far the body slides.
+        let dt = 1. / 60.;
+        let run = |speed: f32| {
+            let (mut c, mut u) = climber("male");
+            for _ in 0..20 {
+                c.update(&u, dt);
+            }
+            u.velocity = Vec3::X * -speed;
+            let mut seen = vec![];
+            // A stretch into the shimmy, then a whole loop, every 4 cm.
+            let per = (0.04 / (speed * dt)).round() as usize;
+            for frame in 1..=(1.08 / (speed * dt)).round() as usize {
+                u.position += u.velocity * dt;
+                c.update(&u, dt);
+                assert_eq!(c.last_clip, "Hang_Shimmy_R_Loop");
+                if frame % per == 0 && u.position.x <= -0.6 + 1e-3 {
+                    seen.push(wrists(&c, u.position));
+                }
+            }
+            seen
+        };
+        let (fast, slow) = (run(1.2), run(0.6));
+        assert_eq!(fast.len(), 13);
+        assert_eq!(fast.len(), slow.len());
+        for (a, b) in fast.iter().zip(&slow) {
+            for side in 0..2 {
+                let apart = a[side].distance(b[side]);
+                assert!(apart < 0.01, "the hands {apart} m apart: {a:?} and {b:?}");
+            }
+        }
+    }
+    #[test]
+    fn a_body_asks_for_its_hold_only_where_it_hangs() {
+        // Climbing onto the top, lowering itself from it and catching a hold out of a fall, the
+        // hold is looked up only at the end of the move where the body hangs: on the top, or in
+        // the air, a hold in reach above (the bellcote's, over the gable's coping) would pass for
+        // the one it hangs from.
+        let dt = 1. / 60.;
+        let top = Vec3::new(0., HANG, 0.7);
+        let air = Vec3::new(0., 0.6, -0.3);
+        for (before, pose, kind, from, to, clip) in [
+            (
+                Pose::Hang,
+                Pose::Jump,
+                ForcedKind::Climb,
+                Vec3::ZERO,
+                top,
+                "Hang_ClimbUp",
+            ),
+            (
+                Pose::Idle,
+                Pose::Hang,
+                ForcedKind::Hold,
+                top,
+                Vec3::ZERO,
+                "Hang_Drop",
+            ),
+            (
+                Pose::Fall,
+                Pose::Hang,
+                ForcedKind::Hold,
+                air,
+                Vec3::ZERO,
+                "Hang_Catch",
+            ),
+        ] {
+            let (mut c, mut u) = climber("male");
+            let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let log = Arc::clone(&asked);
+            c.set_holds(Arc::new(move |p: Vec3| {
+                log.lock().unwrap().push(p);
+                (p.length() < 0.3).then_some(world::Hold {
+                    a: Vec3::new(1.5, HANG, 0.4),
+                    b: Vec3::new(-1.5, HANG, 0.4),
+                    out: Vec2::new(0., -1.),
+                    braced: true,
+                })
+            }));
+            u.position = from;
+            if before != Pose::Hang {
+                (u.pose, u.traversal) = (before, Traversal::Ground);
+            }
+            for _ in 0..10 {
+                c.update(&u, dt);
+            }
+            asked.lock().unwrap().clear();
+            let m = protocol::ForcedMove {
+                kind,
+                from,
+                to,
+                start: 2.,
+                duration: 0.5,
+            };
+            (u.pose, u.traversal) = (pose, Traversal::Forced(m));
+            for frame in 0..=30 {
+                u.position = anim::climb::carry(from, to, frame as f32 / 30.);
+                c.update(&u, dt);
+                assert_eq!(c.last_clip, clip);
+            }
+            let (hangs, stands) = if kind == ForcedKind::Climb {
+                (from, to)
+            } else {
+                (to, from)
+            };
+            let asked = asked.lock().unwrap();
+            assert!(asked.contains(&hangs), "{clip}: never asked where it hangs");
+            assert!(!asked.contains(&stands), "{clip}: asked at {stands}");
+        }
+    }
+    #[test]
+    fn moves_onto_holds_play_by_how_far_the_body_has_come() {
+        // Up to the next hold, 0.8 m above, the drawn body moving every other frame: the clip
+        // follows the body while its path says how far it has come, then the clock takes it to
+        // the end as the hands finish the move.
+        let dt = 1. / 60.;
+        let (mut c, mut u) = climber("male");
+        c.set_holds(Arc::new(|p: Vec3| {
+            let at = |y: f32| world::Hold {
+                a: Vec3::new(1.5, y, 0.4),
+                b: Vec3::new(-1.5, y, 0.4),
+                out: Vec2::new(0., -1.),
+                braced: true,
+            };
+            if p.x.abs() > 1.5 || p.z.abs() > 0.3 {
+                None
+            } else if p.y.abs() < 0.3 {
+                Some(at(HANG))
+            } else if (p.y - 0.8).abs() < 0.3 {
+                Some(at(HANG + 0.8))
+            } else {
+                None
+            }
+        }));
+        for _ in 0..10 {
+            c.update(&u, dt);
+        }
+        let up = protocol::ForcedMove {
+            kind: ForcedKind::Hold,
+            from: Vec3::ZERO,
+            to: Vec3::Y * 0.8,
+            start: 2.,
+            duration: 0.4,
+        };
+        u.traversal = Traversal::Forced(up);
+        let mut drawn = 0.;
+        for frame in 0..=30 {
+            let k = (frame as f32 / 24.).min(1.);
+            if frame % 2 == 0 {
+                drawn = k;
+                u.position = anim::climb::carry(up.from, up.to, k);
+            }
+            c.update(&u, dt);
+            assert_eq!(c.last_clip, "Hang_Climb_Up");
+            let share = c.climb.as_ref().unwrap().progress.share();
+            if drawn < 0.6 {
+                assert!(
+                    (share - drawn).abs() < 0.02,
+                    "frame {frame}: {share} at {drawn}"
+                );
+            }
+        }
+        assert_eq!(c.climb.as_ref().unwrap().progress.share(), 1.);
+        // Lowering itself over the edge from standing on the top, 0.7 m back from the hang.
+        let (mut c, mut u) = climber("male");
+        let top = Vec3::new(0., HANG, 0.7);
+        (u.position, u.pose, u.traversal) = (top, Pose::Idle, Traversal::Ground);
+        for _ in 0..10 {
+            c.update(&u, dt);
+        }
+        let drop = protocol::ForcedMove {
+            kind: ForcedKind::Hold,
+            from: top,
+            to: Vec3::ZERO,
+            start: 2.,
+            duration: 0.6,
+        };
+        (u.pose, u.traversal) = (Pose::Hang, Traversal::Forced(drop));
+        for frame in 0..=36 {
+            let k = frame as f32 / 36.;
+            if frame % 2 == 0 {
+                drawn = k;
+                u.position = anim::climb::carry(drop.from, drop.to, k);
+            }
+            c.update(&u, dt);
+            assert_eq!(c.last_clip, "Hang_Drop");
+            let share = c.climb.as_ref().unwrap().progress.share();
+            assert!(
+                (share - drawn).abs() < 0.02,
+                "frame {frame}: {share} at {drawn}"
+            );
+        }
+    }
+    #[test]
+    fn round_a_corner_the_wrap_plays_by_the_clock_the_way_the_body_shimmied() {
+        // Shimmying to the end of the hold, then wrapping round the corner there (#305): round an
+        // outer one the sim carries the body on 0.6 m ahead, onto the wall's side; into an inner
+        // one it turns where it is. Each plays by the clock wherever the drawn body is, as the sim
+        // swings it round the corner on the easing the clip is made on.
+        let dt = 1. / 60.;
+        for (way, to, clip) in [
+            (1., Vec3::new(-0.6, 0., 0.6), "Hang_Corner_Out_R"),
+            (1., Vec3::new(0.03, 0., 0.), "Hang_Corner_In_R"),
+            (-1., Vec3::new(0.6, 0., 0.6), "Hang_Corner_Out_L"),
+            (-1., Vec3::new(-0.03, 0., -0.1), "Hang_Corner_In_L"),
+        ] {
+            let (mut c, mut u) = climber("male");
+            u.velocity = Vec3::X * -1.2 * way;
+            for _ in 0..10 {
+                u.position += u.velocity * dt;
+                c.update(&u, dt);
+            }
+            let corner = protocol::ForcedMove {
+                kind: ForcedKind::Corner,
+                from: u.position,
+                to: u.position + to,
+                start: 3.,
+                duration: 0.5,
+            };
+            (u.traversal, u.velocity) = (Traversal::Forced(corner), Vec3::ZERO);
+            for frame in 1..=30 {
+                c.update(&u, dt);
+                assert_eq!(c.last_clip, clip);
+                let share = c.climb.as_ref().unwrap().progress.share();
+                let clock = frame as f32 / 30.;
+                assert!(
+                    (share - clock).abs() < 1e-3,
+                    "{clip} frame {frame}: {share}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn a_leap_or_an_eject_takes_longer_than_a_climb_or_a_hop_and_plays_its_own_clip() {
+        // From a hang, the sim's moves to the next hold by where it is and how long the move
+        // takes (#305): a climb leap 1.4 m up in 0.5 s, or a climb 0.8 m up in 0.4; a side eject 2 m
+        // to the right in 0.55 s, or a hop 0.6 m there in 0.3; and an eject a metre down and 0.8 m
+        // to the left, which is still an eject, not a climb down.
+        let dt = 1. / 60.;
+        for (to, duration, clip) in [
+            (Vec3::Y * 1.4, 0.5, "Hang_Leap_Up"),
+            (Vec3::Y * 0.8, 0.4, "Hang_Climb_Up"),
+            (Vec3::X * -2., 0.55, "Hang_Eject_R"),
+            (Vec3::X * -0.6, 0.3, "Hang_Hop_R"),
+            (Vec3::new(0.8, -1., 0.), 0.55, "Hang_Eject_L"),
+            (Vec3::Y * -0.8, 0.4, "Hang_Climb_Down"),
+        ] {
+            let (mut c, mut u) = climber("male");
+            for _ in 0..10 {
+                c.update(&u, dt);
+            }
+            let to_hold = protocol::ForcedMove {
+                kind: ForcedKind::Hold,
+                from: Vec3::ZERO,
+                to,
+                start: 2.,
+                duration,
+            };
+            u.traversal = Traversal::Forced(to_hold);
+            let frames = (duration * 60.).round() as usize;
+            for frame in 0..=frames {
+                u.position =
+                    anim::climb::carry(to_hold.from, to_hold.to, frame as f32 / frames as f32);
+                c.update(&u, dt);
+                assert_eq!(c.last_clip, clip, "frame {frame}");
+            }
+        }
+    }
+    #[test]
+    fn a_wall_run_plays_by_how_high_the_body_has_run() {
+        // Sprinting into a tall wall, the sim runs the body 1.8 m up it in 0.5 s, slowing (#305):
+        // the drawn body moving every other frame, the run plays at the share of the time its
+        // height says, its hands and feet left as the clip has them, with no hold to take.
+        let dt = 1. / 60.;
+        let (mut c, mut u) = climber("male");
+        (u.pose, u.traversal) = (Pose::Run, Traversal::Ground);
+        for _ in 0..10 {
+            c.update(&u, dt);
+        }
+        let run = protocol::ForcedMove {
+            kind: ForcedKind::WallRun,
+            from: Vec3::ZERO,
+            to: Vec3::Y * 1.8,
+            start: 2.,
+            duration: 0.5,
+        };
+        (u.pose, u.traversal) = (Pose::Jump, Traversal::Forced(run));
+        let mut drawn = 0.;
+        for frame in 0..=30 {
+            let k = frame as f32 / 30.;
+            if frame % 2 == 0 {
+                drawn = k;
+                u.position = Vec3::Y * 1.8 * (1. - (1. - k) * (1. - k));
+            }
+            c.update(&u, dt);
+            assert_eq!(c.last_clip, "Wall_Run");
+            assert!(c.on_wall.is_none());
+            let share = c.climb.as_ref().unwrap().progress.share();
+            assert!(
+                (share - drawn).abs() < 0.02,
+                "frame {frame}: {share} at {drawn}"
+            );
+        }
+    }
+    #[test]
+    fn kicking_off_the_wall_backwards_plays_the_back_eject_as_the_body_flies() {
+        // A back eject (#305): the sim lets go and throws the body out from the wall at 5 m/s and
+        // up at 5, though its first step off doesn't move it yet. The back eject plays by the clock
+        // from there as the body flies, rising and falling, and the falling loop after it. A side
+        // eject into the air (4 m/s along the wall) and letting go (1 m/s out, not rising) don't
+        // kick off it.
+        let dt = 1. / 60.;
+        let flight = |velocity: Vec3, pose: Pose| {
+            let (mut c, mut u) = climber("male");
+            for _ in 0..10 {
+                c.update(&u, dt);
+            }
+            (u.pose, u.traversal, u.velocity) = (pose, Traversal::Ground, Vec3::ZERO);
+            let mut seen = vec![];
+            for frame in 0..45 {
+                if frame > 0 {
+                    u.velocity = velocity - Vec3::Y * anim::land::GRAVITY * frame as f32 * dt;
+                    u.position += u.velocity * dt;
+                    u.pose = if u.velocity.y > 0. { pose } else { Pose::Fall };
+                }
+                c.update(&u, dt);
+                seen.push(c.last_clip);
+            }
+            seen
+        };
+        let back = flight(Vec3::new(0., 5., -5.), Pose::Jump);
+        let kicked = back.iter().position(|&c| c != "Hang_Eject_Back").unwrap();
+        assert!((29..=31).contains(&kicked), "{back:?}");
+        assert!(back[kicked..].iter().all(|&c| c == "Jump_Loop"), "{back:?}");
+        let side = flight(Vec3::new(-4., 4.5, -1.), Pose::Jump);
+        assert!(
+            side[1..].iter().all(|&c| c != "Hang_Eject_Back"),
+            "{side:?}"
+        );
+        let dropped = flight(Vec3::new(0., 0., -1.), Pose::Fall);
+        assert!(
+            dropped.iter().all(|&c| c != "Hang_Eject_Back"),
+            "{dropped:?}"
+        );
+    }
+    #[test]
+    fn a_roll_out_of_a_fall_plays_the_roll_landing_and_from_standing_the_roll() {
+        // The sim's roll landing (#305): coming down with the roll pressed, the body rolls 3 m on
+        // in 0.45 s. Out of a fall it lands into the roll, by the distance covered, its feet under
+        // it as the move ends; from standing, the same move is a dodge's roll.
+        for (before, clip) in [(Pose::Fall, "Roll_Land"), (Pose::Idle, "Roll")] {
+            let (mut c, mut u, _) = fighter(0.);
+            going_on(&mut c, &mut u, 10, |_, _| {});
+            u.pose = before;
+            c.update(&u, 1. / 60.);
+            let frames = carried(
+                &u,
+                ForcedKind::Roll,
+                u.position + Vec3::Z * 3.,
+                0.45,
+                0.15,
+                Pose::Dodge,
+            );
+            for v in &frames {
+                c.update(v, 1. / 60.);
+                assert_eq!(c.last_clip, clip);
+            }
+            let last = c.carried.unwrap().time;
+            let end = if clip == "Roll" { 0.87 } else { 0.45 };
+            assert!(
+                (last - end).abs() < 0.04,
+                "{clip}: the move ended at {last}"
+            );
+        }
+    }
+    #[test]
+    fn without_traversal_a_climber_hangs_as_the_clips_have_it() {
+        // `--traversal off`, to compare: a dwarf shimmying hangs where the clips put it, its
+        // hands and feet left alone.
+        let (mut c, mut u) = climber("dwarf_male");
+        c.traversing = false;
+        u.velocity = Vec3::X * -0.6;
+        for frame in 0..30 {
+            u.pose_time = frame as f32 / 60.;
+            u.position += u.velocity / 60.;
+            c.update(&u, 1. / 60.);
+        }
+        assert_eq!(c.last_clip, "Hang_Shimmy_R_Loop");
+        assert_eq!((c.raised, c.hold_grip), (Vec3::ZERO, [0.; 2]));
+    }
+    #[test]
+    fn off_the_wall_a_short_body_eases_down_from_its_reach() {
+        // A dwarf hangs a third of a metre higher than the clips do, to reach the hold. Letting
+        // go, it comes down from there smoothly, all of it within a few tenths of a second.
+        let dt = 1. / 60.;
+        let (mut c, mut u) = climber("dwarf_male");
+        for _ in 0..30 {
+            c.update(&u, dt);
+        }
+        assert!(c.raised.distance(c.hang_reach) < 1e-3, "{}", c.raised);
+        assert!(c.raised.y > 0.3, "{}", c.raised);
+        (u.pose, u.traversal) = (Pose::Fall, Traversal::Ground);
+        let mut last = c.raised;
+        for frame in 0..18 {
+            u.velocity.y = -anim::land::GRAVITY * frame as f32 * dt;
+            u.position.y += u.velocity.y * dt;
+            c.update(&u, dt);
+            let moved = last.distance(c.raised);
+            assert!(moved < 0.1, "frame {frame}: moved {moved}");
+            last = c.raised;
+        }
+        assert!(c.raised.length() < 0.01, "{}", c.raised);
     }
 }
