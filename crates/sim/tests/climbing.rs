@@ -19,7 +19,7 @@ fn wall(sim: &mut Sim, center: Vec2, half: Vec2, rise: f32) -> f32 {
 
 /// A wall as [`wall`], with its top at the height `top`.
 fn wall_to(sim: &mut Sim, center: Vec2, half: Vec2, top: f32) {
-    sim.land_mut().add_solid(world::Solid { center, half, yaw: 0.0, top: Some(top), rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center, half, yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
 }
 
 /// By the field gate east of the road (nothing but the field beyond): a wall 3.4 m tall, 0.9 m
@@ -97,17 +97,19 @@ fn hang_from_the_west_face(sim: &mut Sim, id: u32) -> Hang {
 }
 
 #[test]
-fn the_ruin_and_the_cottages_have_holds_and_the_field_walls_none() {
+fn the_ruin_the_cottages_and_the_cliff_ledges_have_holds_and_the_field_walls_none() {
     let sim = Sim::new(7);
     let land = sim.land();
     let ruin = land.masonry.iter().find(|m| m.prop == "ruin.hall").unwrap().origin;
     assert!(!land.holds.is_empty());
     for h in land.holds.iter() {
-        // Only the ruin and the cottages stand tall enough to hang from; the field walls are
-        // climbed onto.
+        // Only the ruin, the cottages and the ledges up the cliffs stand tall enough to hang from;
+        // the field walls are climbed onto.
         let mid = h.at(h.len() / 2.0);
-        let on_a_cottage = land.houses.iter().any(|c| (Vec2::new(mid.x, mid.z) - c.position).length() < 5.0 * c.scale);
-        assert!(on_a_cottage || (Vec2::new(mid.x, mid.z) - Vec2::new(ruin.x, ruin.z)).length() < 8.0, "hold at {mid}");
+        let at = Vec2::new(mid.x, mid.z);
+        let on_a_cottage = land.houses.iter().any(|c| (at - c.position).length() < 5.0 * c.scale);
+        let on_a_cliff = land.masonry.iter().filter(|m| m.prop.starts_with("terrace.ledges.")).any(|m| (at - Vec2::new(m.origin.x, m.origin.z)).length() < 12.0);
+        assert!(on_a_cottage || on_a_cliff || (at - Vec2::new(ruin.x, ruin.z)).length() < 8.0, "hold at {mid}");
         let below = Vec2::new(mid.x, mid.z) + h.out * 0.3;
         assert!(mid.y - land.ground(below.x, below.y) >= world::HANG_MIN_DROP - 1e-3, "shallow hold at {mid}");
         // `a` to `b` runs to the right of a climber facing the wall.
@@ -513,6 +515,28 @@ fn a_wall_run_climbs_straight_onto_a_top_in_reach() {
 }
 
 #[test]
+fn touching_a_wall_brings_the_air_dash_and_double_jump_back() {
+    let (mut sim, id, _) = before_a_sheer_wall(None);
+    assert!(wall_run(&mut sim, id, Vec2::X), "never ran up the wall");
+    // As if both were used before the wall was reached.
+    {
+        let mut m = sim.get_mut::<Motion>(id).unwrap();
+        m.air_dash = false;
+        m.air_jump = false;
+    }
+    sim.step();
+    let m = motion(&sim, id);
+    assert!(m.air_dash && m.air_jump, "{m:?}");
+    // Kicked off the wall, the dash goes.
+    sim.run_for(0.15);
+    sim.command(id, Command::Jump);
+    sim.run_for(0.1);
+    sim.command(id, Command::Dodge { direction: -Vec2::X });
+    sim.step();
+    assert!(motion(&sim, id).forced.is_some_and(|f| f.kind == ForcedKind::AirDash), "no dash after kicking off");
+}
+
+#[test]
 fn space_on_a_wall_run_kicks_off_it_backwards() {
     let (mut sim, id, _) = before_a_sheer_wall(None);
     assert!(wall_run(&mut sim, id, Vec2::X), "never ran up the wall");
@@ -873,5 +897,58 @@ fn a_cottages_front_gable_climbs_by_its_timbers_onto_its_roof_and_on_up_its_chim
         let p = pos(&sim, id);
         let top = at(0.0, stack.top.unwrap(), 0.0).y;
         assert!(motion(&sim, id).grounded && (p.y - top).abs() < 0.02, "house {i} ({}): ended at {p}, not on the chimney's top at {top}", c.prop);
+    }
+}
+
+#[test]
+fn the_terrace_cliffs_climb_ledge_by_ledge_from_the_valley_onto_the_terraces() {
+    for prop in ["terrace.ledges.west", "terrace.ledges.mill"] {
+        let mut sim = Sim::new(7);
+        let m = sim.land().masonry.iter().find(|m| m.prop == prop).unwrap().clone();
+        let out = m.turn(Vec2::Y);
+        let into = -out;
+        let terrace = m.origin.y + m.blocks.iter().map(|b| b.top.unwrap()).fold(f32::MIN, f32::max);
+        // At the foot of the cliff, halfway along, facing it.
+        let first = &m.blocks[0];
+        let (s, c) = first.yaw.sin_cos();
+        let front = m.place(Vec3::new(first.center.x + s * first.half.y, 0.0, first.center.y + c * first.half.y));
+        let id = sim.spawn_player("Hero", level(front) + out * 0.9, into.x.atan2(into.y));
+        sim.step();
+        let mut heights = vec![pos(&sim, id).y];
+        for _ in 0..40 {
+            let (now, p) = (motion(&sim, id), pos(&sim, id));
+            if now.grounded && p.y > terrace - 0.05 {
+                break;
+            }
+            if now.hang.is_some() {
+                // Up onto the ledge if there's room to stand, or else a climb leap to the next.
+                let held = now.hang;
+                go(&mut sim, id, into, false);
+                sim.step();
+                go(&mut sim, id, Vec2::ZERO, false);
+                sim.run_for(1.0);
+                if motion(&sim, id).hang == held {
+                    go(&mut sim, id, into, false);
+                    sim.command(id, Command::Jump);
+                    sim.step();
+                    go(&mut sim, id, Vec2::ZERO, false);
+                    sim.run_for(1.0);
+                }
+            } else {
+                // On the ground or a ledge: a jump at the cliff, with Shift held, pulls up onto the
+                // ledge above or catches it.
+                go(&mut sim, id, into, true);
+                sim.command(id, Command::Jump);
+                let caught = until(&mut sim, id, 1.2, |k| matches!(k, ForcedKind::Mantle | ForcedKind::ToHold { .. }));
+                go(&mut sim, id, Vec2::ZERO, false);
+                assert!(caught, "{prop}: a jump from {} m caught nothing ({heights:?})", p.y);
+                sim.run_for(1.0);
+            }
+            let y = pos(&sim, id).y;
+            assert!(y > heights.last().unwrap() - 0.05, "{prop}: fell from {} m to {y} m ({heights:?})", heights.last().unwrap());
+            heights.push(y);
+        }
+        let p = pos(&sim, id);
+        assert!(motion(&sim, id).grounded && p.y > terrace - 0.05, "{prop}: stopped {} m up, short of the terrace at {terrace} m ({heights:?})", p.y);
     }
 }

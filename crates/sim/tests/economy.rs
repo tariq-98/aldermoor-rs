@@ -236,3 +236,34 @@ fn the_smith_only_buys_metal() {
     assert_eq!(inv(&sim, hero).count("wolf_pelt"), 1);
     assert_eq!(inv(&sim, hero).coins, 0);
 }
+
+#[test]
+fn a_saved_character_comes_back_as_it_was() {
+    let eco = economy();
+    let mut sim = Sim::brambleford(3);
+    let hero = sim.spawn_hero("Keeper", Specialty::Archer, 7, Vec2::new(5.0, 10.0), 1.0);
+    {
+        let mut bag = sim.get_mut::<Inventory>(hero).unwrap();
+        bag.coins = 321;
+        bag.add(eco.item("wolf_pelt").unwrap(), 4, false);
+    }
+    sim.grant_quest_xp(hero, 55);
+    sim.step();
+    let kept = sim.record(hero).unwrap();
+    assert_eq!(kept.specialty, "archer");
+    assert_eq!(kept.coins, 321);
+
+    let mut later = Sim::brambleford(9);
+    let back = later.spawn_record(&kept);
+    later.step();
+    let again = later.record(back).unwrap();
+    assert_eq!(again.levels, kept.levels);
+    assert_eq!(again.unassigned, 55);
+    assert_eq!(again.slots, kept.slots);
+    assert_eq!(again.coins, 321);
+    assert_eq!(again.specialty, "archer");
+    assert!((Vec2::from(again.at) - Vec2::from(kept.at)).length() < 0.01);
+    assert_eq!(later.get::<Unit>(back).unwrap().level, 7);
+    let v = later.get::<Vitals>(back).unwrap();
+    assert_eq!(v.health, v.max_health);
+}

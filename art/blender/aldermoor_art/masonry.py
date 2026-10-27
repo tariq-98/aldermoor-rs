@@ -291,6 +291,230 @@ def field_wall(piece, heads, lod, seed):
     return [env.join(parts, "wall")]
 
 
+# Cliff ledges: beds of pale stone between these thicknesses (each bed its own), worn round along
+# the front over this much, split by joints into blocks about this long.
+LEDGE_THICK = (0.38, 0.62)
+LEDGE_LIP = 0.055
+LEDGE_STONE = (1.3, 3.0)
+
+
+def terrace_ledges(piece, lod, seed):
+    """Ledges up a limestone cliff at a level of detail (0, 1 or 2): beds of pale, harder stone
+    along the strata, each laid on its block (`world::ledges`) from the front edge you hang from
+    back into the rock. A bed is split by tight joints, a little askew, into blocks that each sit
+    a little differently, with their own thickness and tone. The front is worn round; below a
+    bedding line across it the stone is darker and has weathered back, in hollows here and
+    there. The underside is lumpy and in shadow, and the bed thins a little towards its ends,
+    where its front corner is broken back.
+    Grass grows where a ledge meets the cliff. The rock between the beds is the cliff itself,
+    the terrain. Returns its objects."""
+    rng = random.Random(seed)
+    ground = Ground(piece["ground"])
+    dressed = env.surface("dressed")[0]
+    beds, spots = [], []
+    for k, b in enumerate(sorted(piece["blocks"], key=lambda b: b["top"])):
+        ob, grass = _bed(b, ground, dressed, lod, seed * 31 + k)
+        beds.append(ob)
+        spots += grass
+    _uvs_in_world(beds, blender(piece["origin"]))
+    # One mesh, so the renderer draws it a material at a time.
+    out = [env.join(beds, "ledges")]
+    if spots:
+        mat = env.flat("grass", (0.36, 0.52, 0.16), rough=0.85)
+        mat.use_backface_culling = False
+        ob = env.join([_tuft(at, rng, mat, lod) for at in spots], "grass")
+        tops = sorted(b["top"] for b in piece["blocks"])
+        # Swaying more towards the tips, from the ledge each tuft stands on.
+        env.wind(ob, lambda co: min(1.0, max(0.0, co.z - max([t for t in tops if t <= co.z + 0.05] or [co.z])) / 0.4) ** 1.5)
+        for f in ob.data.polygons:
+            f.use_smooth = True
+        out.append(ob)
+    return out
+
+
+def _bed(b, ground, mat, lod, seed):
+    """One ledge, laid on its block `b`: the bed's mesh, shaded, and where grass grows on it.
+    Every level of detail draws the same stones, so a ledge doesn't change as it nears."""
+    rng = random.Random(seed)
+    top = b["top"]
+    s, c = math.sin(b["yaw"]), math.cos(b["yaw"])
+    # In Blender's frame: the front you hang from runs from `start` along `along`, and `into`
+    # points into the rock. u is along the front, v into the rock, z up from the top.
+    along, into = Vector((c, s)), Vector((-s, c))
+    length, depth = 2 * b["half"][0], 2 * b["half"][1]
+    start = Vector((b["center"][0], -b["center"][1])) - along * (length / 2) - into * (depth / 2)
+
+    def at(u, v):
+        return start + along * u + into * v
+
+    def cliff(u):
+        """How far in the cliff rises above the ledge's top at u."""
+        v = 0.1
+        while v < depth and ground(*at(u, v)) < top - 0.02:
+            v += 0.05
+        return v
+
+    # Joints split the bed into blocks a few metres long (never a sliver at the end), each joint
+    # a little askew.
+    joints = [0.0]
+    while length - joints[-1] > 2 * LEDGE_STONE[0]:
+        step = rng.uniform(*LEDGE_STONE)
+        if length - joints[-1] - step < LEDGE_STONE[0]:
+            step = (length - joints[-1]) / 2
+        joints.append(joints[-1] + step)
+    joints.append(length)
+    skews = [0.0] + [rng.uniform(-0.15, 0.15) for _ in joints[2:]] + [0.0]
+    # Each joint's crack: how wide it opens and how far its edges are worn back.
+    gaps = [(rng.uniform(0.003, 0.012), rng.uniform(0.012, 0.03)) for _ in joints]
+    # Each block's front is set back from the hold by f (a few centimetres either way); it has
+    # its own thickness t and tone, a bedding line at `bed` of its thickness (below it the stone
+    # is darker and weathers back further), and a top that
+    # sits a little high or low (`lift`), leans along the bed and tips in or out (`pitch`). Its
+    # front below the bedding line may have weathered back in a hollow (`hollows`: where along
+    # it, how wide either side and how deep).
+    thick, tone = rng.uniform(*LEDGE_THICK), rng.uniform(0.93, 1.04)
+    stones = []
+    for a, b2 in zip(joints, joints[1:]):
+        hollows = [(rng.uniform(a + 0.4, b2 - 0.4), rng.uniform(0.25, 0.6), rng.uniform(0.02, 0.045)) for _ in range(rng.choice((0, 0, 1)))]
+        stones.append(dict(f=rng.uniform(-0.012, 0.03), t=thick * rng.uniform(0.85, 1.15), tone=tone * rng.uniform(0.94, 1.04),
+                           bed=rng.uniform(0.38, 0.62), lift=rng.uniform(-0.008, 0.004),
+                           lean=rng.uniform(-0.006, 0.006), pitch=rng.uniform(-0.015, 0.01), hollows=hollows))
+    # Towards each end the bed thins a little, and its front corner is broken back (only past
+    # where the hands go, 0.2 m from the end).
+    broken = (rng.uniform(0.06, 0.12), rng.uniform(0.06, 0.12))
+    # Tufts of grass where the ledge meets the cliff, clear of its ends (half of them at LOD 1).
+    tufts = [rng.uniform(0.5, length - 0.5) for _ in range(int(length / 1.7))]
+    if lod == 2:
+        # One stone, the bed's own thickness and tone.
+        joints, skews, gaps = [0.0, length], [0.0, 0.0], [(0.0, 0.0)] * 2
+        stones = [dict(f=0.0, t=thick, tone=tone, bed=0.5, lift=0.0, lean=0.0, pitch=0.0, hollows=[])]
+
+    def ends(u):
+        d = min(u, length - u)
+        back = broken[0] if u < length / 2 else broken[1]
+        return back * (1 - _smooth(0.0, 0.2, d)), 0.82 + 0.18 * _smooth(0.0, 0.7, d)
+
+    r = LEDGE_LIP
+
+    def section(u, j, inset):
+        """Stone j's cross-section at u, as (v, z) from the top at the back round to the
+        underside, pulled in by `inset` at a joint so the joint shows as a groove."""
+        st = stones[j]
+        e, thin = ends(u)
+        f, t = st["f"] + e, st["t"] * thin
+        mid_u = (joints[j] + joints[j + 1]) / 2
+        z0 = st["lift"] + st["lean"] * (u - mid_u) / max(joints[j + 1] - joints[j], 0.1)
+        if lod == 2:
+            return [(depth, z0), (f, z0), (f + 0.05, z0 - t), (depth, z0 - t)]
+        # The top and the round of the front come down at a joint, and a little more at the very
+        # ends of the bed, where it's worn.
+        i = inset + (0.025 if u <= 0.0 or u >= length else 0.0)
+        # Where the cliff rises above the top: the top darkens towards it (for COLOR_0).
+        mid = min(max(cliff(u) - 0.15, f + r + 0.05), depth - 0.05)
+        tip = st["pitch"] * min(1.0, (mid - f) / 0.8)
+        g = inset
+        if lod == 1:
+            top_side = [(depth, st["pitch"] - i), (mid, tip - i), (f + r + g, -i)]
+            front = [(f + g, -r - i), (f + 0.03 + g, -0.55 * t), (f + 0.08 + g, -0.9 * t + g / 2), (f + 0.17 + g, -t + g / 2)]
+        else:
+            # The front wanders a centimetre or so, more below the bedding line, where it has
+            # weathered back in places; the underside is lumpy.
+            w = 0.012 * (_noise(u * 1.7, top * 0.31, seed) - 0.5) * 2
+            w2 = w + 0.02 * (_noise(u * 3.1, top * 0.71, seed + 9) - 0.5) * 2
+            w2 += max([d * (1 - _smooth(0.0, 1.0, abs(u - c) / h)) for c, h, d in st["hollows"]] or [0.0])
+            # (Never standing out past the stone above it, nor stepping back sharply: a thin lip
+            # or step only catches speckles of shadow.)
+            w2 = max(w2, w + 0.012)
+            lo = 0.04 * (_noise(u * 2.3, top * 0.53, seed + 5) - 0.5) * 2
+            bed = st["bed"]
+            top_side = [(depth, st["pitch"] - i), (mid, tip - i), (f + r + g, -i), (f + 0.3 * r + g, -0.3 * r - i)]
+            front = [(f + g + w, -r - i), (f + 0.008 + g + w, -bed * t), (f + 0.03 + g + w2, -0.93 * t + g / 2 + lo),
+                     (f + 0.09 + g + w2, -t + g / 2 + lo)]
+        # Down the front without doubling back, however thin the stone.
+        for k in range(1, len(front)):
+            front[k] = (front[k][0], min(front[k][1], front[k - 1][1] - 0.01))
+        pts = top_side + front + [(depth, front[-1][1])]
+        return [(v, z + z0) for v, z in pts]
+
+    def shift(k, v):
+        """How far joint k runs askew at v into the rock (its ends deep in the rock kept close)."""
+        return max(-0.08, min(0.08, (v - 0.3) * skews[k]))
+
+    every = (0.45, 1.2, 99.0)[lod]
+    bm = bmesh.new()
+    for j in range(len(stones)):
+        # Half each joint's gap either side of it, and its worn edges (none at the far ends of
+        # the bed or at LOD 2, and only the gap at LOD 1).
+        (g0, c0), (g1, c1) = gaps[j], gaps[j + 1]
+        c0, c1 = (c0, c1) if lod == 0 else (0.0, 0.0)
+        u0 = joints[j] + (g0 / 2 if j and lod < 2 else 0.0)
+        u1 = joints[j + 1] - (g1 / 2 if j + 1 < len(stones) and lod < 2 else 0.0)
+        # Rows across the stone: its ends (grooved), a row in from each, and enough between for
+        # the front to wander and the ends of the bed to thin. The rows at each end follow its
+        # joint askew.
+        rows = [(u0, j, c0), (u1, j + 1, c1)]
+        if lod == 0:
+            rows += [(u0 + c0, j, 0.0), (u1 - c1, j + 1, 0.0)]
+        n = max(1, round((u1 - u0) / every))
+        rows += [(u0 + (u1 - u0) * k / n, None, 0.0) for k in range(1, n)]
+        rows += [(u, None, 0.0) for u in (0.1, 0.2, 0.6, length - 0.6, length - 0.2, length - 0.1) if u0 + 0.15 < u < u1 - 0.15]
+        # Enough rows to shape the hollows.
+        if lod == 0:
+            rows += [(c + h * k, None, 0.0) for c, h, _ in stones[j]["hollows"] for k in (-1.0, -0.5, 0.0, 0.5, 1.0)
+                     if u0 + 0.12 < c + h * k < u1 - 0.12]
+        rows.sort(key=lambda q: (q[0], q[1] is None))
+        # (No row between two others closer than 2 cm to either, unless it ends the stone.)
+        rows = [q for n_, q in enumerate(rows) if q[1] is not None or all(abs(q[0] - o[0]) > 0.02 for o in rows[:n_])]
+        verts = []
+        for u, k, inset in rows:
+            verts.append([bm.verts.new((*at(u + (shift(k, v) if k is not None else 0.0), v), top + z)) for v, z in section(u, j, inset)])
+        m = len(verts[0])
+        for a, b2 in zip(verts, verts[1:]):
+            for i in range(m):
+                bm.faces.new((a[i], a[(i + 1) % m], b2[(i + 1) % m], b2[i]))
+        bm.faces.new(verts[0])
+        bm.faces.new(verts[-1][::-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = env.mesh("ledge", bm, mat)
+    env.shade(ob, _ledge_shade(start, along, into, top, joints, skews, gaps, stones, ground, seed))
+    if lod == 2:
+        return ob, []
+    grass = []
+    for u in tufts[::lod + 1]:
+        v = cliff(u)
+        if v - ends(u)[0] > 0.35 and v < depth:
+            p = at(u, v - 0.07)
+            grass.append(Vector((p.x, p.y, top - 0.02)))
+    return ob, grass
+
+
+def _ledge_shade(start, along, into, top, joints, skews, gaps, stones, ground, seed):
+    """COLOR_0 for a ledge: the worn top pale, catching the light (a pale edge is always a hold),
+    the front darker below its bedding line, the underside in shadow; each stone its own tone,
+    the joints dark, the top darkening where the cliff rises from it, and broad patches of
+    weathering."""
+    def fn(co, n):
+        q = co.xy - start
+        u, v, z = q.dot(along), q.dot(into), co.z - top
+        shifts = [max(-0.08, min(0.08, (v - 0.3) * k)) for k in skews]
+        j = min(max(sum(1 for x, sh in zip(joints, shifts) if x + sh <= u) - 1, 0), len(stones) - 1)
+        st = stones[j]
+        # How far into a joint's worn edges, 0 at the joint and 1 clear of them.
+        d = min([_smooth(0.0, g / 2 + c + 0.01, abs(u - x - sh)) for x, sh, (g, c) in zip(joints[1:-1], shifts[1:-1], gaps[1:-1])] or [1.0])
+        if n.z > 0.6:
+            k = 0.98
+            # Darker into the corner where the cliff rises from the top.
+            k *= 0.72 + 0.28 * _smooth(0.0, 0.3, top - ground(co.x, co.y))
+        elif n.z < -0.6:
+            k = 0.52
+        else:
+            k = 0.86 if z > -st["bed"] * st["t"] else 0.74
+        k *= 0.68 + 0.32 * d
+        k *= st["tone"] * (0.9 + 0.12 * _noise(co.x * 0.45 + co.y * 0.21, co.z * 0.6, seed + 3))
+        return k, k * 0.985, k * 0.95
+    return fn
+
+
 def _wall_shade(ground, seed, kind):
     """COLOR_0 for walling: darker and greener toward the damp ground, broad patches of
     weathering. A slab's worn top stays at full brightness, the lip you climb onto; the footings

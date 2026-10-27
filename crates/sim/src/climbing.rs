@@ -149,18 +149,22 @@ pub fn onto(kind: ForcedKind) -> Option<Hang> {
 }
 
 /// The top to stand on above the hands, if there's room for the body: the point to climb to.
+/// Not against a face too tall to step onto: a ledge with the next one overhanging it, too narrow
+/// to stand on, is only hung from.
 fn room_on_top(land: &Valley, hold: &Hold, at: f32, radius: f32) -> Option<Vec3> {
     let hands = hold.at(at);
     // Deep tops take the whole body; a thin wall's top is stood on in its middle.
     [radius + 0.1, 0.3, 0.15].into_iter().find_map(|d| {
         let p = hands.xz() - hold.out * d;
         let top = land.ground(p.x, p.y);
-        ((top - hands.y).abs() < 0.3 && !land.blocked(p, radius * 0.9)).then(|| Vec3::new(p.x, top, p.y))
+        let r = radius * 0.9;
+        ((top - hands.y).abs() < 0.3 && !land.blocked(p, r) && land.off_faces(p, r, top + CLIMB_HEIGHT) == p).then(|| Vec3::new(p.x, top, p.y))
     })
 }
 
 /// The nearest other hold the hands could reach `rise` metres up or down (within the range) and
-/// up to `side` to either side, on the same face: its index and where along it.
+/// up to `side` to either side, or that far in or out (a ledge set back up a sloping cliff), on
+/// the same face: its index and where along it.
 fn hold_beside(land: &Valley, current: u32, at: f32, rise: RangeInclusive<f32>, side: f32, radius: f32) -> Option<(u32, f32)> {
     let hold = land.holds.get(current);
     let hands = hold.at(at);
@@ -173,7 +177,7 @@ fn hold_beside(land: &Valley, current: u32, at: f32, rise: RangeInclusive<f32>, 
         let (s, off) = h.locate(hands.xz());
         let to = on_hold(s, h.len());
         let dy = h.at(to).y - hands.y;
-        if (s - to).abs() > side || off.abs() > 0.5 || !rise.contains(&dy) || !hangable(land, h, to, radius) {
+        if (s - to).abs() > side || off.abs() > side || !rise.contains(&dy) || !hangable(land, h, to, radius) {
             continue;
         }
         if best.is_none_or(|b| dy.abs() < b.0) {

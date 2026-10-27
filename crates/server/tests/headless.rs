@@ -90,3 +90,60 @@ fn the_headless_server_runs_a_realm_and_its_players_cross_borders() {
     let x = last.unit(client.player).expect("still in its own view after crossing").position.x;
     assert!(x < 0.0, "walked to x {x}, not across the border");
 }
+
+/// Polls `f` for up to `seconds`; whether it came true.
+fn eventually(seconds: u64, f: impl Fn() -> bool) -> bool {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    while std::time::Instant::now() < until {
+        if f() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    f()
+}
+
+#[test]
+fn a_character_is_still_there_after_the_server_restarts() {
+    let dir = std::env::temp_dir().join(format!("aldermoor-accounts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("accounts.db");
+    let db_arg = db.to_str().unwrap().to_string();
+
+    // A new account and character, walked north for a second, then logged out.
+    let (running, addr, certificate) = start("accounts-1", &["--seed", "7", "--accounts", &db_arg]);
+    let refused = server::net::Client::connect(addr.as_str(), &certificate, "Tester");
+    assert!(refused.is_err(), "a server with accounts let a plain hello in");
+    let mut client = server::net::Client::login(addr.as_str(), &certificate, "Chippy", "correct horse", "Brambleguard", true).unwrap();
+    client.next_view().unwrap();
+    client.send(Command::Move { direction: Vec2::new(0.0, -1.0), walk: false, sprint: false, face_yaw: None }).unwrap();
+    for _ in 0..20 {
+        client.next_view().unwrap();
+    }
+    client.send(Command::Move { direction: Vec2::ZERO, walk: false, sprint: false, face_yaw: None }).unwrap();
+    let mut left_at = Vec2::ZERO;
+    for _ in 0..10 {
+        let (v, _) = client.next_view().unwrap();
+        let p = v.unit(client.player).unwrap().position;
+        left_at = Vec2::new(p.x, p.z);
+    }
+    drop(client);
+    let store = server::accounts::Store::open(&db).unwrap();
+    assert!(
+        eventually(5, || store.load("Brambleguard").is_some_and(|r| (Vec2::from(r.at) - left_at).length() < 0.5)),
+        "the character wasn't saved where it left: {:?} against {left_at}",
+        store.load("Brambleguard").map(|r| r.at)
+    );
+    drop(running);
+
+    // The server comes back: the wrong password is refused, and the right one finds the
+    // character where it was.
+    let (_running, addr, certificate) = start("accounts-2", &["--seed", "7", "--accounts", &db_arg]);
+    assert!(server::net::Client::login(addr.as_str(), &certificate, "Chippy", "wrong password", "Brambleguard", false).is_err());
+    let mut client = server::net::Client::login(addr.as_str(), &certificate, "Chippy", "correct horse", "Brambleguard", false).unwrap();
+    let (v, _) = client.next_view().unwrap();
+    let p = v.unit(client.player).unwrap().position;
+    assert!((Vec2::new(p.x, p.z) - left_at).length() < 0.5, "back at {p}, left at {left_at}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

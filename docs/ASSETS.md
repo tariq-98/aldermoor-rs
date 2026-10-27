@@ -210,7 +210,7 @@ weights, so it can't separate from the shoulders. Only the chains swing, against
 
 ## Clips, curves and events
 
-The library is the Universal Animation Library's 84 clips, one swing cut from them, and 39 of
+The library is the Universal Animation Library's 84 clips, one swing cut from them, and 49 of
 our own, built by
 `art/blender/build_clips.py`. Ours are keyed in code on the broad frame's skeleton: each pose
 places the item and the hands follow their sockets, so on that body every grip is exact.
@@ -223,7 +223,8 @@ places the item and the hands follow their sockets, so on that body every grip i
 | Greatsword | `GreatSword_Idle_Loop`, `GreatSword_Slash`, `GreatSword_Swing`, `GreatSword_Overhead` |
 | Drawing | `Draw_Hip` / `Sheathe_Hip` (right hand, left hip), `Draw_Hip_L` / `Sheathe_Hip_L` (the mirror), `Draw_Side` / `Sheathe_Side` (right hand, right hip), `Draw_Back` / `Sheathe_Back` (blades over the right shoulder), `Draw_Pole` / `Sheathe_Pole` (poles over the right shoulder), `Draw_Bow` / `Sheathe_Bow` (the left hand, over the left shoulder) |
 | Robes | `Idle_Robe_Loop`: the idle with the arms held a little out, clear of a skirt |
-| Climbing | `Hang_Idle_Loop` (the braced hang), `Hang_Shimmy_L_Loop` / `Hang_Shimmy_R_Loop` (one step of each hand, 0.4 s at 1.2 m/s), `Hang_ClimbUp` (onto the top, 0.8 s), `Hang_Drop` (lowering over an edge to hang, 0.6 s), `Hang_Catch` (0.2 s), `Hang_Climb_Up` / `Hang_Climb_Down` (to a hold 0.8 m up or down, 0.4 s), `Hang_Hop_L` / `Hang_Hop_R` (across a gap, 0.3 s) |
+| Climbing | `Hang_Idle_Loop` (the braced hang), `Hang_Shimmy_L_Loop` / `Hang_Shimmy_R_Loop` (one step of each hand, 0.4 s at 1.2 m/s), `Hang_ClimbUp` (onto the top, 0.8 s), `Hang_Drop` (lowering over an edge to hang, 0.6 s), `Hang_Catch` (0.2 s), `Hang_Climb_Up` / `Hang_Climb_Down` (to a hold 0.8 m up or down, 0.4 s), `Hang_Hop_L` / `Hang_Hop_R` (across a gap, 0.3 s), `Hang_Leap_Up` (a climb leap to a hold 1.4 m up, 0.5 s), `Hang_Eject_L` / `Hang_Eject_R` (a side eject 2 m along, with a 0.35 m hop, 0.55 s), `Hang_Corner_Out_L` / `_R` and `Hang_Corner_In_L` / `_R` (round an outer corner onto the wall's side, or into an inner one turning where it hangs, 0.5 s), `Hang_Eject_Back` (kicking off the wall backwards into the falling loop, 0.5 s), `Wall_Run` (three steps 1.8 m up a wall, slowing, the hands reaching for the top, 0.5 s) |
+| Landing | `Roll_Land` (out of a fall, touching down and rolling 3 m in 0.45 s, then standing as `Roll` does; its `travel` is the 3 m) |
 
 **Climbing clips** are keyed on the sim's own numbers (docs/MOVEMENT.md, "Climbing"): the hands
 over an edge 1.9 m up and 0.4 m ahead of the root, the feet on the wall below. A move onto, off
@@ -249,6 +250,13 @@ later key wins. `assets::curve` implements this, and the workshop's `perform.js`
 | `reach` | The hand taking or stowing an item is pulled onto it where it rides |
 | `string` | The drawing hand holds the bowstring |
 | `arrow` | A nocked arrow shows |
+| `travel` | Not a weight: the share of a traversal move's path (a roll, a leap, a charge, a climb) covered by then, rising from 0 to 1. The game plays the clip by how far the body has come, so it reaches the last key as the move ends, and what follows plays after the move (CONTRACT.md, "Poses to animation") |
+
+The vendor's traversal clips have `travel` curves measured from their poses, set in
+`build_clips.py`'s `VENDOR_CURVES`: `Roll` dives at 0.1 s, its hands touch down at 0.43 (half the
+path) and its feet plant at 0.87; `Sword_Dash` and `Shield_Dash` lunge from 0.03 to 0.25 and 0.27;
+`ClimbUp_1m` and `NinjaJump_Start` travel throughout. The asset check refuses a `travel` curve that
+doesn't rise from 0 to 1.
 
 **Events** mark moments: `grab` (the item moves to the hand), `stow` (it moves back to where it
 rides), `release` (an arrow leaves: spawn the projectile), `hit` (a blow lands), `cast` (a
@@ -305,8 +313,9 @@ same kit the Swift village used, remade at the characters' quality.
   - `scatter` lists, by kind, the props for scattering: rocks, grass, flowers, bushes, riverbank
     reeds and forest pines. Where each one goes comes from Claude with the valley's dressing
     data (still to do); the renderer draws what it's given and doesn't place things itself.
-- **Masonry** (`kind` "masonry": the dry-stone field walls `wall.field.<n>` and the ruined hall
-  `ruin.hall`) stands where `world::Valley::masonry` puts it, at its `origin` turned by its
+- **Masonry** (`kind` "masonry": the dry-stone field walls `wall.field.<n>`, the ruined hall
+  `ruin.hall`, and the ledges up two cliffs, `terrace.ledges.west` and `terrace.ledges.mill`)
+  stands where `world::Valley::masonry` puts it, at its `origin` turned by its
   `yaw`, and adds that list's solids to the valley: boxes you climb onto (a `top`, which may rise
   along the box so a wall follows a slope) and masonry too tall to climb, which blocks. The
   `world` crate owns the list (`crates/world/src/masonry.rs`); `ground_fields` writes it out
@@ -533,7 +542,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Script | Builds | Writes |
 |---|---|---|
 | `build_humanoid.py` | The shared rig, both frames' bodies, hair, the Quaternius outfits | `humanoid/`, `catalog/humanoid.json` |
-| `build_clips.py` | The clip library: the 84 vendor clips (with their strikes measured), a swing cut from one, and our 29 | `humanoid/anims.glb`, the catalogue's `animations` |
+| `build_clips.py` | The clip library: the 84 vendor clips (with their strikes measured), a swing cut from one, and our 49 | `humanoid/anims.glb`, the catalogue's `animations` |
 | `build_races.py` | Elves, dwarves, foxfolk and goblins on both frames: every outfit and hairstyle refitted by bone-segment scaling; foxfolk's muzzle, ears, tail and fur (`aldermoor_art/fox.py`); the dwarven beard, grown as locks from each dwarf's face into two braids with bronze rings (`aldermoor_art/beard.py`) | `humanoid/<race>_<frame>/` |
 | `build_creatures.py` | Skeleton warrior, the Barrow King, stone golem: creature body types on the humanoid rig. The golem's hewn stones are fields (`aldermoor_art/golem.py`) painted with lichen, moss and glowing runes | `humanoid/skeleton/`, `barrow_king/`, `golem/` |
 | `build_gear.py` | Rigid weapons, shields, bows, quivers, casters and tools | `gear/`, `catalog/gear.json` |
@@ -580,7 +589,7 @@ tools/workshop/serve.sh  # the interactive workshop at http://localhost:8765/too
 | Tools | Smith's hammer, hoe, watering can, lantern |
 | Back | Traveller's cape and ranger's cloak on spring chains; travel pack with body-conforming straps |
 | Beasts | Grey wolf and dire wolf: muscled bodies with a sculpted mane, cheek ruffs, bib, breeches and bushy tail; grizzled coats with a dark saddle, shoulder bars, tawny legs, pale underparts and face, black lips and tail tip; almond eyes, nose leather, teeth and claws; idle, walk, run, attack (the jaw opens), hit, death, jump, howl |
-| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile; nine pieces of dry-stone field wall along the north road and a ruined hall on the hill (#160) |
+| Scenery | Three cottages, a shed, a windmill with turning sails, a stone bridge, three oaks, two pines, two bushes, four rocks, three grass tufts, four flower clumps, reeds, and a fence, lamp post, market stall, well, barrel, crate, hay bale, signpost, bench and woodpile; nine pieces of dry-stone field wall along the north road, a ruined hall on the hill (#160), and ledges of pale, jointed stone up two of the cliffs (#249) |
 | Ground, water, sky | Lush grass, meadow, packed earth and limestone, blended across the valley by its roads, slopes, river, trees and houses; river ripples; a fair-weather sky; the valley's light (25 October 2026) |
 | Clips | 84 library clips (locomotion, roll, sword combos, block, shield, spells, hits, deaths, farming, chopping, fixing, sitting, talking, zombie) plus our 29: archery, staves, spears, greatswords, drawing and sheathing from hip, side and back, and a robe idle |
 

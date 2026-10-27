@@ -96,8 +96,10 @@ pub struct BodyType {
 /// - `off_hand`: how far the off hand is pulled onto the main item's `grips.off_hand` (0..1);
 /// - `reach`: how far the drawing hand is pulled onto the stowed item (drawing and sheathing);
 /// - `string`: the drawing hand holds the bowstring, so the bow's `draw` morph follows it;
-/// - `arrow`: a nocked arrow shows (the bow's `arrow` morph).
-pub const CURVES: [&str; 4] = ["off_hand", "reach", "string", "arrow"];
+/// - `arrow`: a nocked arrow shows (the bow's `arrow` morph);
+/// - `travel`: the share of a traversal move's path a clip has covered (from 0, rising to 1), so
+///   it plays by how far the body has come (#213); what follows plays after the move.
+pub const CURVES: [&str; 5] = ["off_hand", "reach", "string", "arrow", "travel"];
 
 /// The moments a clip may mark: an item moves to the hand (`grab`) or back to where it rides
 /// (`stow`); an arrow leaves (`release`); a blow lands (`hit`); a spell leaves (`cast`); and in
@@ -557,6 +559,11 @@ impl Catalog {
                 }
                 if keys.iter().any(|k| k[0] < 0.0 || k[0] > c.seconds + 1e-3 || !(0.0..=1.0).contains(&k[1])) {
                     problem(format!("clip {}: curve {name} has a key outside the clip or outside 0..1", c.name));
+                }
+                let rises = keys.windows(2).all(|w| w[1][1] > w[0][1]);
+                let ends = keys.first().is_some_and(|k| k[1] == 0.0) && keys.last().is_some_and(|k| k[1] == 1.0);
+                if name == "travel" && !(rises && ends) {
+                    problem(format!("clip {}: its travel curve must rise from 0 to 1", c.name));
                 }
             }
             for e in &c.events {
