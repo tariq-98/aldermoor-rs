@@ -5,6 +5,7 @@
 //! client's built-in server for solo play) or over the network ([`net`], what the headless
 //! `server` binary serves). Both see exactly the same views.
 
+pub mod accounts;
 pub mod bots;
 pub mod net;
 pub mod regions;
@@ -114,14 +115,25 @@ struct Remote {
 
 enum Control {
     /// Adds a player (or, for a name already in the world, hands that character back) and
-    /// replies with its unit.
-    Join { name: String, viewer: Viewer, reply: Sender<UnitId> },
+    /// replies with its unit. A saved `record` (#88) puts the character back as it was kept.
+    Join { name: String, record: Option<Box<sim::CharacterRecord>>, viewer: Viewer, reply: Sender<UnitId> },
+    /// Every player character in the world as it stands (or just `only`), to keep (#88).
+    Records { only: Option<String>, reply: Sender<Vec<sim::CharacterRecord>> },
 }
 
 struct Shared {
     stats: Mutex<HostStats>,
     times: Mutex<Vec<TickTime>>,
     running: AtomicBool,
+}
+
+/// Asks the simulation thread for player characters as they stand (all, or the one named).
+fn records(control: &Sender<Control>, only: Option<String>) -> Vec<sim::CharacterRecord> {
+    let (reply, answer) = bounded(1);
+    if control.send(Control::Records { only, reply }).is_err() {
+        return Vec::new();
+    }
+    answer.recv().unwrap_or_default()
 }
 
 /// A running world on its own thread.
@@ -162,8 +174,13 @@ impl Server {
 
     fn join(&self, name: &str, viewer: Viewer) -> Option<UnitId> {
         let (reply, answer) = bounded(1);
-        self.control.send(Control::Join { name: name.to_string(), viewer, reply }).ok()?;
+        self.control.send(Control::Join { name: name.to_string(), record: None, viewer, reply }).ok()?;
         answer.recv().ok()
+    }
+
+    /// Every player character in the world as it stands now, to keep (#88).
+    pub fn records(&self) -> Vec<sim::CharacterRecord> {
+        records(&self.control, None)
     }
 
     /// A handle for queueing commands from any thread.
@@ -236,7 +253,23 @@ impl Host {
     /// Joins the server at `addr` (whose certificate is `certificate`) over the network, and
     /// returns once its first view has arrived.
     pub fn connect(addr: impl std::net::ToSocketAddrs, certificate: &net::CertificateDer<'_>, player_name: &str) -> std::io::Result<Host> {
-        let mut client = net::Client::connect(addr, certificate, player_name)?;
+        Host::over(net::Client::connect(addr, certificate, player_name)?)
+    }
+
+    /// Logs in to a server with accounts (#88) and plays `character` there, as [`Host::connect`].
+    pub fn login(
+        addr: impl std::net::ToSocketAddrs,
+        certificate: &net::CertificateDer<'_>,
+        account: &str,
+        password: &str,
+        character: &str,
+        create: bool,
+    ) -> std::io::Result<Host> {
+        Host::over(net::Client::login(addr, certificate, account, password, character, create)?)
+    }
+
+    /// Plays through `client`, a connection already welcomed in.
+    fn over(mut client: net::Client) -> std::io::Result<Host> {
         let latest = Arc::new(Latest::default());
         let (player, commands, closer, received) = (client.player, client.commands(), client.closer(), client.received());
         let into = latest.clone();
@@ -366,13 +399,25 @@ fn run(mut world: world::World, commands: Receiver<(UnitId, Command)>, control: 
             shared.stats.lock().unwrap().skipped += ((now - next).as_nanos() / STEP.as_nanos()) as u64;
             next = now;
         }
-        for Control::Join { name, mut viewer, reply } in control.try_iter() {
+        for c in control.try_iter() {
+            let (name, record, mut viewer, reply) = match c {
+                Control::Join { name, record, viewer, reply } => (name, record, viewer, reply),
+                Control::Records { only, reply } => {
+                    let kept = names.iter().filter(|(n, _)| only.as_ref().is_none_or(|o| o == *n)).filter_map(|(_, &id)| world.record(id)).collect();
+                    let _ = reply.send(kept);
+                    continue;
+                }
+            };
             let id = match names.get(&name) {
                 Some(&id) => id,
                 None => {
                     let at = SPAWN + glam::Vec2::new((names.len() % 8) as f32 * 1.5, (names.len() / 8 % 8) as f32 * 1.5);
                     // A realm with no room at the spawn point turns the player away.
-                    let Some(id) = world.spawn_player(&name, at, std::f32::consts::PI) else { continue };
+                    let spawned = match &record {
+                        Some(r) => world.spawn_record(r),
+                        None => world.spawn_player(&name, at, std::f32::consts::PI),
+                    };
+                    let Some(id) = spawned else { continue };
                     names.insert(name, id);
                     id
                 }

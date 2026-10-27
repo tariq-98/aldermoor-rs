@@ -1,9 +1,12 @@
 //! A windowed Metal client; the simulation remains entirely behind Host and protocol messages.
 mod bag;
 mod combat;
+mod course;
 mod craft;
+mod crowd;
 mod effects;
 mod gait;
+mod holds;
 mod hud;
 mod interpolate;
 mod latency;
@@ -13,15 +16,16 @@ mod perf_overlay;
 mod stage;
 use anyhow::{Context, Result, ensure};
 use glam::{Mat4, Vec2, Vec3};
-use protocol::{Command, Look, Pose, UnitState};
+use protocol::{Command, HitWeight, Look, Pose, UnitKind, UnitState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use render::{
     Camera, Renderer,
-    character::{Character, Draw},
+    character::{Character, Draw, Ground, HoldAt},
     model::{Model, ModelCache},
 };
 use std::{
     collections::{HashMap, HashSet},
+    f32::consts::{FRAC_PI_2, PI, TAU},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -49,6 +53,9 @@ struct Options {
     /// Play on a server across the network (`--connect ADDR`), trusting the certificate at
     /// `server_cert`, instead of the built-in one.
     connect: Option<String>,
+    /// Log in to this account on the server (#88); the password comes from ALDERMOOR_PASSWORD.
+    account: Option<String>,
+    new_account: bool,
     server_cert: PathBuf,
     /// The character's name on the server.
     name: String,
@@ -66,6 +73,9 @@ struct Options {
     sequence_step: u64,
     /// Plays the scripted run in `gait.rs` instead of taking input, for animation captures.
     gait: bool,
+    /// Plays the scripted course in `course.rs` instead of taking input, for traversal captures
+    /// (#213).
+    traverse: bool,
     inspect: Option<String>,
     warmup: u64,
     samples: usize,
@@ -81,12 +91,30 @@ struct Options {
     direct_drawable: bool,
     legacy_cpu: bool,
     look_churn: bool,
+    /// Staged blows (#218): see `Game::hit_churn`.
+    hit_churn: bool,
     reset_on_look: bool,
     /// Overrides the settings file's scheme.
     scheme: Option<controls::Scheme>,
     controls: Option<PathBuf>,
     /// How characters blend from one clip to the next (#210). The others are for comparisons.
     blend: anim::Method,
+    /// More characters round the player, to measure animation with a crowd in view (#215).
+    crowd: usize,
+    /// Whether characters' poses rebuild at the rates `anim::Crowd` gives them (#215), or all
+    /// every frame, to compare.
+    anim_tiers: bool,
+    /// Whether characters' feet go on the ground (#214), or stay as the clips have them, to
+    /// compare.
+    foot_ik: bool,
+    /// Whether characters lean with their acceleration (#217), or run upright, to compare.
+    lean: bool,
+    /// Whether blows tip characters and hitstops hold their poses (#218), or the hit clip plays
+    /// in full, to compare.
+    flinch: bool,
+    /// Whether characters play rolls, leaps, charges and climbs by how far they've come and
+    /// swimmers swim (#213), or the clips go by the clock and swimmers run, to compare.
+    traversal: bool,
 }
 impl Options {
     fn read() -> Result<Self> {
@@ -102,6 +130,8 @@ impl Options {
             showcase: false,
             smoke: false,
             connect: None,
+            account: None,
+            new_account: false,
             server_cert: PathBuf::from("aldermoor.der"),
             name: "Traveller".into(),
             effects_review: false,
@@ -111,6 +141,7 @@ impl Options {
             sequence: None,
             sequence_step: 1,
             gait: false,
+            traverse: false,
             inspect: None,
             warmup: 120,
             samples: 0,
@@ -128,10 +159,17 @@ impl Options {
             direct_drawable: true,
             legacy_cpu: false,
             look_churn: false,
+            hit_churn: false,
             reset_on_look: false,
             scheme: None,
             controls: None,
             blend: anim::Method::default(),
+            crowd: 0,
+            anim_tiers: true,
+            foot_ik: true,
+            lean: true,
+            flinch: true,
+            traversal: true,
         };
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
@@ -188,6 +226,7 @@ impl Options {
                 "--fps" => o.fps = Some(args.next().context("--fps needs a number")?.parse()?),
                 "--legacy-cpu" => o.legacy_cpu = true,
                 "--look-churn" => o.look_churn = true,
+                "--hit-churn" => o.hit_churn = true,
                 "--reset-on-look" => o.reset_on_look = true,
                 "--output-blit" => o.direct_drawable = false,
                 "--benchmark" => o.benchmark = true,
@@ -217,6 +256,8 @@ impl Options {
                     o.server_cert = args.next().context("--server-cert needs a file")?.into()
                 }
                 "--name" => o.name = args.next().context("--name needs a name")?,
+                "--account" => o.account = Some(args.next().context("--account needs a name")?),
+                "--new-account" => o.new_account = true,
                 "--effects-review" => {
                     o.effects_review = true;
                     o.showcase = true;
@@ -230,6 +271,7 @@ impl Options {
                     o.reel_from = args.next().context("--reel-from needs seconds")?.parse()?
                 }
                 "--gait" => o.gait = true,
+                "--traverse" => o.traverse = true,
                 "--scheme" => {
                     o.scheme = Some(match args.next().as_deref() {
                         Some("classic") => controls::Scheme::Classic,
@@ -248,13 +290,49 @@ impl Options {
                         _ => anyhow::bail!("--blend expects inertialize, dead or off"),
                     }
                 }
+                "--crowd" => o.crowd = args.next().context("--crowd needs a count")?.parse()?,
+                "--anim-tiers" => {
+                    o.anim_tiers = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--anim-tiers expects on or off"),
+                    }
+                }
+                "--foot-ik" => {
+                    o.foot_ik = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--foot-ik expects on or off"),
+                    }
+                }
+                "--lean" => {
+                    o.lean = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--lean expects on or off"),
+                    }
+                }
+                "--flinch" => {
+                    o.flinch = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--flinch expects on or off"),
+                    }
+                }
+                "--traversal" => {
+                    o.traversal = match args.next().as_deref() {
+                        Some("on") => true,
+                        Some("off") => false,
+                        _ => anyhow::bail!("--traversal expects on or off"),
+                    }
+                }
                 "--inspect" => {
                     o.inspect = Some(args.next().context("--inspect needs an art id")?);
                     o.showcase = true;
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait --traverse\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--traversal on|off: off plays rolls, leaps, charges and climbs by the clock and swimmers as runners, and climbers' clips by the clock with their hands and feet as the clips have them, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures; traverse rolls, climbs, swims, hangs, shimmies round corners, runs up a wall, ejects, leaps and lunges over a course for traversal captures."
                     );
                     std::process::exit(0)
                 }
@@ -357,6 +435,9 @@ struct Game {
     gpu: Vec<f64>,
     frame_times: Vec<f64>,
     intervals: Vec<f64>,
+    /// Ranks the characters each frame for how often their poses rebuild, inside the animation
+    /// budget (#215).
+    animation: anim::Crowd,
     finished_at: Instant,
     smoke_stage: usize,
     /// Sim tick the last smoke stage went out on.
@@ -367,6 +448,10 @@ struct Game {
     /// Sim tick the `--gait` run started on, and the leg it is on.
     gait_tick: Option<u64>,
     gait_leg: Option<usize>,
+    /// The `--traverse` course, the sim tick it started on, and the step last logged.
+    course: course::Course,
+    course_tick: Option<u64>,
+    course_step: Option<usize>,
     perf: perf_overlay::Overlay,
     hud_context: egui::Context,
     hud_input: Option<egui::RawInput>,
@@ -380,7 +465,11 @@ struct Game {
     aim_slot: Option<u8>,
     /// A ground skill's key held down with Hold to aim: it casts on release.
     held_ground: Option<u8>,
-    valley: world::Valley,
+    valley: Arc<world::Valley>,
+    /// The valley's ground, which characters put their feet on (#214), and the hold each climber
+    /// hangs from, which they put their hands on (#248).
+    ground: Ground,
+    holds: HoldAt,
     effects: Option<effects::Effects>,
     /// The effects' art, for each renderer to upload.
     effects_art: Option<render::fx::Library>,
@@ -401,13 +490,33 @@ impl Game {
                         options.server_cert.display()
                     )
                 })?;
-                server::Host::connect(
-                    addr.as_str(),
-                    &server::net::CertificateDer::from(cert),
-                    &options.name,
-                )
+                let cert = server::net::CertificateDer::from(cert);
+                match &options.account {
+                    None => server::Host::connect(addr.as_str(), &cert, &options.name),
+                    Some(account) => {
+                        let password = std::env::var("ALDERMOOR_PASSWORD")
+                            .context("set ALDERMOOR_PASSWORD to log in with --account")?;
+                        server::Host::login(
+                            addr.as_str(),
+                            &cert,
+                            account,
+                            &password,
+                            &options.name,
+                            options.new_account,
+                        )
+                    }
+                }
                 .with_context(|| format!("connecting to {addr}"))?
             }
+        };
+        let valley = Arc::new(world::Valley::new());
+        let ground: Ground = {
+            let valley = Arc::clone(&valley);
+            Arc::new(move |x, z| valley.ground(x, z))
+        };
+        let holds: HoldAt = {
+            let filed = holds::Holds::new(Arc::clone(&valley));
+            Arc::new(move |p| filed.hung_from(p))
         };
         let settings_path = options.controls.clone().unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
@@ -476,6 +585,7 @@ impl Game {
             gpu: Vec::new(),
             frame_times: Vec::new(),
             intervals: Vec::new(),
+            animation: anim::Crowd::default(),
             finished_at: Instant::now(),
             smoke_stage: 0,
             smoke_tick: None,
@@ -484,6 +594,9 @@ impl Game {
             smoke_checks: [false; 4],
             gait_tick: None,
             gait_leg: None,
+            course: course::Course::default(),
+            course_tick: None,
+            course_step: None,
             hud_context: egui::Context::default(),
             hud_input: None,
             platform_output: None,
@@ -494,7 +607,9 @@ impl Game {
             viewport: Vec2::new(1600., 1000.),
             aim_slot: None,
             held_ground: None,
-            valley: world::Valley::new(),
+            valley,
+            ground,
+            holds,
             effects,
             effects_art,
             stage: None,
@@ -512,7 +627,10 @@ impl Game {
             g.stage = Some(stage::Stage::default());
         }
         if g.options.showcase {
-            g.review = showcase(g.snaps.current.unit(g.host.player).unwrap().clone());
+            g.review = showcase(
+                g.snaps.current.unit(g.host.player).unwrap().clone(),
+                &g.valley,
+            );
             if let Some(goblin) = g
                 .snaps
                 .current
@@ -537,8 +655,10 @@ impl Game {
             g.snaps.current.units.clone()
         };
         for u in units {
-            g.characters
-                .insert(u.id, Character::load(&g.catalog, &mut g.cache, &u.look)?);
+            let mut c = Character::load(&g.catalog, &mut g.cache, &u.look)?;
+            c.set_ground(Arc::clone(&g.ground));
+            c.set_holds(Arc::clone(&g.holds));
+            g.characters.insert(u.id, c);
         }
         if let Some(path) = &g.options.hud_font {
             let mut fonts = egui::FontDefinitions::default();
@@ -947,10 +1067,10 @@ impl Game {
                     let (x, z, up, from) = stage::shot(self.reel_time).camera;
                     (x, z, up, Vec3::from(from))
                 }
-                1 => (-1.5, 24.2, 1.0, Vec3::new(3.2, 1.7, 6.8)),
-                2 => (5.6, 23.6, 1.0, Vec3::new(2.6, 1.8, 6.6)),
-                3 => (0.5, 25., 1.5, Vec3::new(1.6, 0.9, 7.5)),
-                _ => (2., 22., 1.25, Vec3::new(8., 3.5, 14.)),
+                1 => (-1.5, 25.7, 1.0, Vec3::new(3.2, 1.7, 6.8)),
+                2 => (5.6, 25.1, 1.0, Vec3::new(2.6, 1.8, 6.6)),
+                3 => (0.5, 26.5, 1.5, Vec3::new(1.6, 0.9, 7.5)),
+                _ => (2., LINEUP_Z, 1.25, Vec3::new(8., 3.5, 14.)),
             };
             let target = Vec3::new(x, world::height(x, z) + up, z);
             return Camera {
@@ -1176,10 +1296,110 @@ impl Game {
             if gait::draws(leg) {
                 self.host.send(Command::SetTarget(self.target(false)));
             }
+            if gait::jumps(leg) {
+                self.host.send(Command::Jump);
+            }
         }
         if self.last_move.as_ref() != Some(&command) {
             self.host.send(command.clone());
             self.last_move = Some(command);
+        }
+    }
+    /// Sends the `--traverse` course's commands for this frame (#213), and logs each step as it
+    /// starts so captures can be cut by frame.
+    fn traverse(&mut self) {
+        let start = *self.course_tick.get_or_insert(self.snaps.current.tick);
+        let now = self.snaps.current.tick.saturating_sub(start) as f32 / 60.;
+        let Some(me) = self.snaps.current.unit(self.host.player) else {
+            return;
+        };
+        let foes: Vec<_> = (self.snaps.current.units.iter())
+            .filter(|u| u.hostile && u.health > 0.)
+            .map(|u| (u.id, u.position))
+            .collect();
+        let above = me.position.y - self.valley.ground(me.position.x, me.position.z);
+        let commands = self.course.update(now, me.position, above, &foes);
+        if let Some((step, name)) = self.course.step()
+            && self.course_step != Some(step)
+        {
+            self.course_step = Some(step);
+            eprintln!("traverse: {name} from frame {}", self.frame);
+        }
+        for c in commands {
+            if let Command::Move { .. } = c {
+                if self.last_move.as_ref() == Some(&c) {
+                    continue;
+                }
+                self.last_move = Some(c.clone());
+            }
+            self.host.send(c);
+        }
+    }
+    /// `--hit-churn` (#218): staged blows, every 0.75 s, each held as `Pose::Hit` for a quarter of
+    /// a second, as the sim holds them. In the showcase the first character swings, and its blow
+    /// lands a quarter of a second in, holding the swing for the hitstop; as it lands, each of the
+    /// others takes one, from the front, behind or a side and light, heavy or big in turn. Out of
+    /// the showcase (with `--gait`, say), the player takes them on the move.
+    fn hit_churn(&mut self, units: &mut [UnitState]) {
+        // In frames, which are 1/60 s in the showcase: a round, the swing in it, when the blow
+        // lands and when those it lands on recover.
+        const ROUND: u64 = 45;
+        const SWING: u64 = 30;
+        const LANDS: u64 = 15;
+        const RECOVERS: u64 = 30;
+        // `content::combat::HITSTOP`'s, for blows struck in reach.
+        const BLOWS: [(HitWeight, f32); 3] = [
+            (HitWeight::Light, 0.04),
+            (HitWeight::Heavy, 0.08),
+            (HitWeight::Big, 0.12),
+        ];
+        // The way a blow travels, from the body's facing: from the front, from behind, and from
+        // each side.
+        const FROM: [f32; 4] = [PI, 0., -FRAC_PI_2, FRAC_PI_2];
+        let (round, f) = ((self.frame / ROUND) as usize, self.frame % ROUND);
+        let seconds = |frames: u64| frames as f32 / 60.;
+        if !self.options.showcase {
+            let Some(u) = units.iter_mut().find(|u| u.id == self.host.player) else {
+                return;
+            };
+            if (LANDS..RECOVERS).contains(&f) {
+                (u.pose, u.pose_time) = (Pose::Hit, seconds(f - LANDS));
+            }
+            if f == LANDS
+                && let Some(c) = self.characters.get_mut(&u.id)
+            {
+                let (weight, hitstop) = BLOWS[round % BLOWS.len()];
+                c.hit(u.yaw + FROM[round % FROM.len()], weight, hitstop);
+            }
+            return;
+        }
+        for (i, u) in units.iter_mut().enumerate() {
+            (u.pose, u.pose_time) = match (i, f) {
+                (0, ..SWING) => (Pose::Attack, seconds(f)),
+                (0, _) => (Pose::Idle, seconds(f - SWING)),
+                (_, ..LANDS) => (Pose::Idle, seconds(f + ROUND - RECOVERS)),
+                (_, ..RECOVERS) => (Pose::Hit, seconds(f - LANDS)),
+                _ => (Pose::Idle, seconds(f - RECOVERS)),
+            };
+        }
+        if let Some(first) = units.first_mut()
+            && !first.look.drawn
+        {
+            Arc::make_mut(&mut first.look).drawn = true;
+        }
+        if f != LANDS {
+            return;
+        }
+        for (i, u) in units.iter().enumerate() {
+            let Some(c) = self.characters.get_mut(&u.id) else {
+                continue;
+            };
+            let (weight, hitstop) = BLOWS[(round + i) % BLOWS.len()];
+            if i == 0 {
+                c.landed(hitstop);
+            } else {
+                c.hit(u.yaw + FROM[(round + i) % FROM.len()], weight, hitstop);
+            }
         }
     }
     fn draw(&mut self, r: &mut Renderer) -> Result<bool> {
@@ -1245,6 +1465,8 @@ impl Game {
             self.smoke()
         } else if self.options.gait {
             self.gait()
+        } else if self.options.traverse {
+            self.traverse()
         } else {
             self.controls(dt)
         }
@@ -1312,6 +1534,27 @@ impl Game {
             {
                 c.rallied();
             }
+            // Blows (#218): the victim tips away from the blow, and both bodies' poses hold for
+            // the hitstop. The showcase's characters aren't the sim's units.
+            if let protocol::Event::Hit {
+                attacker,
+                victim,
+                dir,
+                weight,
+                hitstop_ms,
+            } = &e
+                && !self.options.showcase
+            {
+                let hitstop = f32::from(*hitstop_ms) / 1000.;
+                if let Some(c) = self.characters.get_mut(victim) {
+                    c.hit(f32::from(*dir) * TAU / 256., *weight, hitstop);
+                }
+                if attacker != victim
+                    && let Some(c) = self.characters.get_mut(attacker)
+                {
+                    c.landed(hitstop);
+                }
+            }
             match &e {
                 protocol::Event::Jumped { unit } if *unit == self.host.player => {
                     self.smoke_checks[0] = true
@@ -1371,6 +1614,18 @@ impl Game {
                 } else {
                     vec![("main_hand".into(), "sword.great".into())]
                 };
+        }
+        if self.options.hit_churn {
+            self.hit_churn(&mut units);
+        }
+        if self.options.crowd > 0
+            && !self.options.showcase
+            && let Some(base) = units.iter().find(|u| u.id == self.host.player)
+        {
+            let time = self.start.elapsed().as_secs_f32();
+            let valley = &self.valley;
+            let others = crowd::units(base, self.options.crowd, time, |x, z| valley.ground(x, z));
+            units.extend(others);
         }
         let me = units
             .iter()
@@ -1434,46 +1689,108 @@ impl Game {
             }
         });
         let combat_index: HashMap<_, _> = self.fight.units.iter().map(|c| (c.id, c)).collect();
-        for u in &units {
+        // Where each character looks (#212): you where the crosshair points (the ground under
+        // it, or far along it into the sky), anyone with a target at its head, and townsfolk at a
+        // player close by.
+        let aim = self.aim_point();
+        let crosshair_at = (self.aiming() && !self.options.showcase).then(|| {
+            aim.unwrap_or(camera.eye + (camera.target - camera.eye).normalize_or_zero() * FAR_GAZE)
+        });
+        let heads: HashMap<u32, Vec3> = units
+            .iter()
+            .map(|u| {
+                let height = body_height(&self.characters, &self.catalog, u);
+                (u.id, u.position + Vec3::Y * EYES * height)
+            })
+            .collect();
+        let gaze = |u: &UnitState| -> Option<Vec3> {
+            if self.options.showcase {
+                return None;
+            }
+            if u.id == me.id && crosshair_at.is_some() {
+                return crosshair_at;
+            }
+            if let Some(target) = u.target.filter(|t| *t != u.id) {
+                return heads
+                    .get(&target)
+                    .copied()
+                    .filter(|at| at.distance(u.position) < GAZE_RANGE);
+            }
+            if u.kind != UnitKind::Npc {
+                return None;
+            }
+            units
+                .iter()
+                .filter(|v| v.kind == UnitKind::Player)
+                .map(|v| (v.position.distance_squared(u.position), v.id))
+                .filter(|(d, _)| *d < NPC_GAZE_RANGE * NPC_GAZE_RANGE)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .and_then(|(_, id)| heads.get(&id).copied())
+        };
+        let gazes: Vec<_> = units.iter().map(gaze).collect();
+        // How often each character's pose rebuilds (#215): the player, their target and whoever
+        // targets them first, then the nearest, as many at the higher rates as the budget allows.
+        let tiers: &[anim::Tier] = if self.options.anim_tiers && !self.options.showcase {
+            self.animation.assign(units.iter().map(|u| {
+                anim::Importance {
+                    involved: u.id == me.id || Some(u.id) == me.target || u.target == Some(me.id),
+                    distance: u.position.distance_squared(camera.eye),
+                    tier: self
+                        .characters
+                        .get(&u.id)
+                        .map_or(anim::Tier::Full, |c| c.tier()),
+                }
+            }))
+        } else {
+            &[]
+        };
+        let (mut posing, mut skinning, mut counts) = (Duration::ZERO, Duration::ZERO, [0; 3]);
+        for (i, u) in units.iter().enumerate() {
             let mut look = (*u.look).clone();
             look.drawn = false;
-            let height = self
-                .characters
-                .get(&u.id)
-                .map(|c| c.rig_height)
-                .or_else(|| {
-                    self.catalog
-                        .humanoid
-                        .body_types
-                        .get(&u.look.art)
-                        .map(|b| b.height)
-                })
-                .unwrap_or(1.5);
+            let height = body_height(&self.characters, &self.catalog, u);
             let depth = (u.position - camera.eye).dot((camera.target - camera.eye).normalize());
             let pixels = render::visibility::screen_height(height, depth, camera.fov, r.height);
             let lod = render::visibility::lod_for_height(
                 pixels,
                 self.characters.get(&u.id).map(|c| c.lod),
             );
-            let rebuild = self.characters.get(&u.id).is_none_or(|c| {
+            let changed = self.characters.get(&u.id).map(|c| {
                 let mut old = c.look.clone();
                 old.drawn = false;
                 old != look
             });
-            if rebuild {
-                if self.options.reset_on_look && self.characters.contains_key(&u.id) {
-                    r.reset_temporal_history();
+            match changed {
+                None => {
+                    let mut c = Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?;
+                    c.set_ground(Arc::clone(&self.ground));
+                    c.set_holds(Arc::clone(&self.holds));
+                    self.characters.insert(u.id, c);
                 }
-                self.characters.insert(
-                    u.id,
-                    Character::load_lod(&self.catalog, &mut self.cache, &u.look, lod)?,
-                );
+                // New gear or clothes go on in place, so the motion carries on (#239).
+                Some(true) => {
+                    if self.options.reset_on_look {
+                        r.reset_temporal_history();
+                    }
+                    let c = self.characters.get_mut(&u.id).unwrap();
+                    c.set_look(&self.catalog, &mut self.cache, &u.look)?;
+                }
+                Some(false) => {}
             }
             let c = self.characters.get_mut(&u.id).unwrap();
             c.partial_updates = !self.options.legacy_cpu;
             c.blender.set_method(self.options.blend);
+            c.foot_placement = self.options.foot_ik;
+            c.leaning = self.options.lean;
+            c.flinching = self.options.flinch;
+            c.traversing = self.options.traversal;
             c.set_lod(&self.catalog, &mut self.cache, lod)?;
-            c.update_combat(
+            let tier = tiers.get(i).copied().unwrap_or_default();
+            counts[tier as usize] += 1;
+            c.set_tier(tier);
+            c.look_at(gazes[i]);
+            let started = Instant::now();
+            c.animate(
                 u,
                 if self.options.showcase {
                     None
@@ -1481,25 +1798,38 @@ impl Game {
                     combat_index.get(&u.id).copied()
                 },
                 if self.options.showcase { 1. / 60. } else { dt },
+                self.frame,
             );
+            let posed = Instant::now();
             // Drawn at the body's yaw, which lags the sim's while turning on the spot (#211).
             draws.extend(c.draws(u.position, c.body_yaw()).into_iter().map(|mut d| {
                 d.instance |= (u.id as u64) << 32;
                 d
             }));
+            posing += posed - started;
+            skinning += posed.elapsed();
         }
+        let animation = perf_overlay::Animation {
+            pose_ms: posing.as_secs_f64() * 1000.,
+            palettes_ms: skinning.as_secs_f64() * 1000.,
+            tiers: counts,
+        };
+        self.animation.spent(animation.pose_ms as f32);
         let player = units
             .iter()
             .find(|u| u.id == self.host.player)
             .context("no local player in snapshot")?;
         self.frame += 1;
         // A smoke run also lasts until its schedule has played out, plus a second for the last
-        // events, so a short --frames or slow frames can't end it early; a gait run until its
-        // script has.
+        // events, so a short --frames or slow frames can't end it early; a gait run or a course
+        // until its script has.
         let done = self.options.frames.is_some_and(|n| self.frame >= n)
             && (!self.options.smoke || self.smoke_stage == 8 && self.smoke_wait() >= 1.)
             && (!self.options.gait
-                || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none());
+                || self.gait_tick.is_some() && gait::at(self.gait_time()).is_none())
+            && (!self.options.traverse || self.course.step().is_none());
+        self.perf
+            .animate(animation, self.frame > self.options.warmup && !done);
         let frame_file = self
             .options
             .sequence
@@ -1524,7 +1854,6 @@ impl Game {
         });
         let ctx = self.hud_context.clone();
         let mut actions = Vec::new();
-        let aim = self.aim_point();
         let radius = self
             .aim_slot
             .and_then(|i| self.snaps.current.player.as_ref()?.bar.get(i as usize))
@@ -1723,13 +2052,18 @@ impl Game {
         self.finished_at = finished;
         if self.frame.is_multiple_of(120) || done {
             eprintln!(
-                "frame={} gpu={:.2}ms draws={} triangles={} sim={:.3}ms units={}",
+                "frame={} gpu={:.2}ms draws={} triangles={} sim={:.3}ms units={} pose={:.3}ms palettes={:.3}ms tiers={}/{}/{}",
                 self.frame,
                 stats.gpu_ms,
                 stats.draw_calls,
                 stats.triangles,
                 self.host.stats().step_ms,
-                units.len()
+                units.len(),
+                animation.pose_ms,
+                animation.palettes_ms,
+                animation.tiers[0],
+                animation.tiers[1],
+                animation.tiers[2]
             );
         }
         if done {
@@ -1764,6 +2098,9 @@ impl Game {
             eprintln!(
                 "PACING judder_rms paced={paced:.3}ms by_arrival={by_arrival:.3}ms (sim time drawn vs refreshes shown)"
             );
+            if let Some(line) = self.perf.animation_report() {
+                eprintln!("{line}");
+            }
             let presentations = r.presentation_times(self.options.warmup as usize);
             if presentations.len() > 2 {
                 let mut intervals: Vec<_> = presentations
@@ -1842,7 +2179,10 @@ impl Game {
         Ok(done)
     }
 }
-fn showcase(mut base: UnitState) -> Vec<UnitState> {
+/// Where the showcase lineup stands (z), north of the field wall along z = 21.6.
+const LINEUP_Z: f32 = 23.5;
+
+fn showcase(mut base: UnitState, valley: &world::Valley) -> Vec<UnitState> {
     let outfits = [
         (
             "male",
@@ -1892,8 +2232,8 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
     let mut units = Vec::new();
     for (i, (art, pieces, weapon, shield, drawn)) in outfits.into_iter().enumerate() {
         base.id = first + i as u32;
-        base.position = Vec3::new(-4. + i as f32 * 2.8, 0., 22.);
-        base.position.y = world::height(base.position.x, base.position.z);
+        base.position = Vec3::new(-4. + i as f32 * 2.8, 0., LINEUP_Z);
+        base.position.y = valley.ground(base.position.x, base.position.z);
         base.yaw = 0.25;
         let mut look = Look {
             art: art.into(),
@@ -1927,7 +2267,7 @@ fn showcase(mut base: UnitState) -> Vec<UnitState> {
         ..Default::default()
     }
     .into();
-    base.position = Vec3::new(8., world::height(8., 24.), 24.);
+    base.position = Vec3::new(8., valley.ground(8., LINEUP_Z + 2.), LINEUP_Z + 2.);
     units.push(base);
     units
 }
@@ -2006,12 +2346,37 @@ fn paint_caption(ctx: &egui::Context, text: &str) {
     painter.rect_filled(plate, 6., egui::Color32::from_black_alpha(150));
     painter.galley(top, galley, egui::Color32::WHITE);
 }
+/// How tall `u` stands, in metres: its character's rig, or its body type's before it has one.
+fn body_height(
+    characters: &HashMap<u32, Character>,
+    catalog: &assets::Catalog,
+    u: &UnitState,
+) -> f32 {
+    characters
+        .get(&u.id)
+        .map(|c| c.rig_height)
+        .or_else(|| {
+            catalog
+                .humanoid
+                .body_types
+                .get(&u.look.art)
+                .map(|b| b.height)
+        })
+        .unwrap_or(1.5)
+}
 /// Mouse travel, in pixels, that turns a click into a drag.
 const DRAG_THRESHOLD: f64 = 4.;
 /// Your own character is drawn at the newest sim time rather than a step behind (#219).
 const OWN_AHEAD: bool = true;
 /// How often a held attack button presses the basic attack again, in seconds.
 const SWING_REPEAT: f32 = 0.1;
+/// Where characters look (#212): how far along the crosshair you look when it points at the sky,
+/// how far off a target may be and still be looked at, and how close a player comes before
+/// townsfolk look at them, in metres; and the eyes' height, as a share of the body's.
+const FAR_GAZE: f32 = 100.;
+const GAZE_RANGE: f32 = 40.;
+const NPC_GAZE_RANGE: f32 = 5.;
+const EYES: f32 = 0.93;
 /// A press of the left or right button, until both are up again.
 struct Drag {
     from: (f64, f64),
@@ -2519,7 +2884,7 @@ fn main() -> Result<()> {
                 } else if now - deadline > period {
                     deadline = now;
                 }
-            } else if game.options.smoke || game.options.gait {
+            } else if game.options.smoke || game.options.gait || game.options.traverse {
                 std::thread::sleep(Duration::from_millis(16).saturating_sub(start.elapsed()));
             }
         }
@@ -2602,6 +2967,23 @@ fn mouse_input(button: MouseButton) -> Option<controls::Input> {
 #[cfg(test)]
 mod catalog_defaults_tests {
     use super::*;
+    #[test]
+    fn the_showcase_lineup_stands_clear_of_the_valleys_solids() {
+        let valley = world::Valley::new();
+        // Any unit will do: the lineup takes its looks and places from showcase().
+        let mut host = server::Host::start(1, "Review");
+        let base = host.snapshot().unwrap().unit(host.player).unwrap().clone();
+        host.stop();
+        for u in showcase(base, &valley) {
+            let p = u.position;
+            assert!(
+                !valley.blocked(Vec2::new(p.x, p.z), 0.45),
+                "unit {} stands in a solid at {p}",
+                u.id
+            );
+            assert_eq!(p.y, valley.ground(p.x, p.z));
+        }
+    }
     #[test]
     fn reticle_follows_target_and_reach() {
         assert_eq!(reticle(None, None, 3.), Reticle::Free);

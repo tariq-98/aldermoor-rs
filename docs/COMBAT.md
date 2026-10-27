@@ -82,6 +82,14 @@ Health, power and armour are multipliers on the level's base numbers (below).
   which keep their own shapes and limits. **Monsters' blows** land on their target only; their
   big blows are warned of on the ground instead.
 
+## Charges (#349)
+
+An ability can hold more than one use (`charges` in its table, 1 by default). While it's below
+full, one charge comes back each `cooldown`, one after another, so two used back to back return
+a cooldown apart. With one charge it's an ordinary cooldown. The global cooldown still applies
+between uses as usual. The bar slot shows a pip per charge, filled for those ready
+(`Slot::charges`, `max_charges`, `next_charge`).
+
 ## Casts, wind-ups and channels
 
 - **Casts** take time, shown as a cast bar. Some can be cast on the move; the rest stop if you
@@ -108,6 +116,9 @@ Health, power and armour are multipliers on the level's base numbers (below).
   muscle memory.
 - **Piercing** missiles strike everything along their flight.
 - **Shield Wall** turns missiles back on whoever loosed them.
+- **Walls** (buildings, trunks, parapets, and wall tops or ground rising above the missile) stop
+  a missile where it first meets them, tested every 0.1 m along its flight, so even the fastest
+  arrow can't skip a thin wall between steps (#337). Nobody behind the wall is struck.
 
 ## On the ground
 
@@ -185,8 +196,11 @@ and a field's pulses send no `Hit` at all. The numbers live in `content::combat:
 - **Taunts** put the taunter on top for 3 s.
 - **Noticing:** a monster starts a fight with a player who comes within its notice radius
   (`aggro` in mobs.ron, 10 to 16 m) and is in sight: nothing solid stands between their chests,
-  neither a building, the mill or the shed, nor masonry too tall to climb standing above the
-  line between them (#311). Walls low enough to climb don't hide anyone. The same goes for
+  neither the mill, the shed, a tree or the bridge's parapets standing above the line between
+  them, nor masonry too tall to climb (#311). Each obstacle stands to a height (`Solid::roof`,
+  #338): the shed 5.6 m, the windmill 12 m, a tree its canopy, the parapets a metre over the
+  deck, so a look or a shot from high ground, or over a parapet, gets by. Walls low enough to
+  climb don't hide anyone. Missiles stop at the same obstacles, below the same heights. The same goes for
   skills aimed at a target ("Your target isn't in sight."). The radius is 1 m shorter for each level
   the player is above the monster and 1 m longer for each level below, from 4 m to twice its
   own (`sim::notice_radius`). A monster 10 or more levels below a player never starts a fight
@@ -214,6 +228,23 @@ and a field's pulses send no `Hit` at all. The numbers live in `content::combat:
 A necromancer's skeletons (and a boss's dead) fight at their summoner's level, on their side.
 They follow their summoner, fight what it fights, and crumble when their time is up or their
 summoner falls.
+
+## The Wilderness (#76)
+
+Banded ground where players may fight each other as well as monsters (`crates/sim/src/wilderness.rs`).
+A map lists its bands in the `wilderness::Wilderness` resource; Brambleford has none until its
+Wilderness region and art exist (#138).
+
+- **Bands:** each covers an area, has a level ceiling (the deepest has none) and a loot tier.
+  Crossing into, deeper into or out of a band tells you which band it is and its limit.
+- **Scaling down:** inside a band, a player above its ceiling fights at the ceiling's level
+  (health, power and armour, by the equipped specialty), keeping skills; back at their own level
+  on leaving or going deeper past the limit.
+- **Players fight players** only when both stand in the Wilderness: blows, areas and missiles
+  between players land there and nowhere else.
+- **Dying there drops everything you carry**, coins and all, in a pile where you fell that your
+  killer may loot (anyone, if no player killed you). Gear you wear isn't an item yet, so it stays.
+- **Richer loot:** a monster felled in a band rolls its loot table once per tier into one pile.
 
 ## Balance
 

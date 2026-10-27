@@ -89,6 +89,9 @@ pub enum ForcedKind {
     /// Running up a wall too tall to climb (Shift into it), catching a hold on the way; `away` is
     /// out of the wall.
     WallRun { away: Vec2 },
+    /// A burst through the air (Roll in a jump, #347): straight from `Forced::from` to `to`, with
+    /// gravity paused, keeping some of its speed when it ends.
+    AirDash,
 }
 
 /// Hanging from a hold (`world::Hold`, by its index in the valley's holds), with the hands `at`
@@ -149,6 +152,10 @@ pub struct Motion {
     pub catch_until: f64,
     /// Roll was pressed in the air: landing before this time rolls the fall off.
     pub landing_roll_until: f64,
+    /// The air dash and the double jump (#347), each unused since the feet or the hands last
+    /// touched the ground or a wall.
+    pub air_dash: bool,
+    pub air_jump: bool,
 }
 
 impl Motion {
@@ -172,6 +179,8 @@ impl Motion {
             released: None,
             catch_until: f64::NEG_INFINITY,
             landing_roll_until: f64::NEG_INFINITY,
+            air_dash: true,
+            air_jump: true,
         }
     }
 
@@ -273,7 +282,8 @@ pub struct Fighter {
     /// The basic attack that repeats while there's a target.
     pub auto: Option<AbilityId>,
     pub specialty: Option<Specialty>,
-    /// When each ability is ready again (simulation time).
+    /// When each ability has every charge back (simulation time); for a single-charge ability,
+    /// when it's ready again.
     pub cooldowns: Vec<(AbilityId, f64)>,
     pub gcd_until: f64,
     pub cast: Option<Cast>,
@@ -325,8 +335,22 @@ impl Fighter {
         }
     }
 
-    pub fn ready_at(&self, ability: AbilityId) -> f64 {
+    /// When `ability` has every charge back.
+    pub fn full_at(&self, ability: AbilityId) -> f64 {
         self.cooldowns.iter().find(|(a, _)| *a == ability).map_or(0.0, |(_, t)| *t)
+    }
+
+    /// When `ability` can next be used: when its first charge is back.
+    pub fn ready_at(&self, ability: AbilityId) -> f64 {
+        let def = crate::content::catalog().ability(ability);
+        self.full_at(ability) - (def.charges.max(1) - 1) as f64 * def.cooldown
+    }
+
+    /// `ability`'s charges at time `t`: how many are ready, and how long until the next comes
+    /// back (0 when all are).
+    pub fn charges(&self, ability: AbilityId, t: f64) -> (u8, f64) {
+        let def = crate::content::catalog().ability(ability);
+        charge_state(self.full_at(ability), t, def.charges, def.cooldown)
     }
 
     pub fn set_cooldown(&mut self, ability: AbilityId, until: f64) {
@@ -334,6 +358,55 @@ impl Fighter {
             Some(c) => c.1 = until,
             None => self.cooldowns.push((ability, until)),
         }
+    }
+}
+
+/// An ability with `max` charges, each taking `cooldown` to come back, that has them all back at
+/// `full_at`: how many are ready at `t`, and how long until the next returns (0 when all are).
+pub fn charge_state(full_at: f64, t: f64, max: u8, cooldown: f64) -> (u8, f64) {
+    let max = max.max(1);
+    let left = (full_at - t).max(0.0);
+    if left <= 0.0 || cooldown <= 0.0 {
+        return (max, 0.0);
+    }
+    let missing = ((left / cooldown) - 1e-9).ceil().clamp(1.0, max as f64) as u8;
+    (max - missing, left - (missing - 1) as f64 * cooldown)
+}
+
+/// When every charge is back after spending one at `t`, given they'd all be back at `full_at`.
+pub fn spend_charge(full_at: f64, t: f64, cooldown: f64) -> f64 {
+    full_at.max(t) + cooldown
+}
+
+#[cfg(test)]
+mod charge_tests {
+    use super::*;
+
+    #[test]
+    fn two_charges_go_back_to_back_and_return_one_cooldown_apart() {
+        let cd = 5.0;
+        let mut full = 0.0;
+        assert_eq!(charge_state(full, 0.0, 2, cd), (2, 0.0));
+        full = spend_charge(full, 0.0, cd);
+        assert_eq!(charge_state(full, 0.0, 2, cd), (1, 5.0));
+        full = spend_charge(full, 0.0, cd);
+        assert_eq!(charge_state(full, 0.0, 2, cd), (0, 5.0));
+        // The first is back after one cooldown, the second after another.
+        assert_eq!(charge_state(full, 5.0, 2, cd), (1, 5.0));
+        assert_eq!(charge_state(full, 7.0, 2, cd), (1, 3.0));
+        assert_eq!(charge_state(full, 10.0, 2, cd), (2, 0.0));
+        // Spent again with one ready, the next comes back a cooldown after the one recharging.
+        full = spend_charge(full, 6.0, cd);
+        assert_eq!(full, 15.0);
+        assert_eq!(charge_state(full, 6.0, 2, cd), (0, 4.0));
+    }
+
+    #[test]
+    fn one_charge_is_an_ordinary_cooldown() {
+        let full = spend_charge(0.0, 3.0, 2.0);
+        assert_eq!(full, 5.0);
+        assert_eq!(charge_state(full, 4.0, 1, 2.0), (0, 1.0));
+        assert_eq!(charge_state(full, 5.0, 1, 2.0), (1, 0.0));
     }
 }
 

@@ -19,6 +19,7 @@ mod crafting;
 mod loot;
 mod movement;
 mod net_view;
+mod persist;
 mod progress;
 mod queries;
 pub mod region;
@@ -27,6 +28,7 @@ mod rng;
 mod spatial;
 pub mod stats;
 mod vitals;
+pub mod wilderness;
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
@@ -41,6 +43,7 @@ pub use consumables::PotionCooldown;
 pub use content::Specialty;
 pub use crafting::{action_xp, Node, Nodes, Skills, Work, NODE_SEEN};
 pub use net_view::NetFrame;
+pub use persist::CharacterRecord;
 pub use loot::{roll, Inventory, Loot, Pile, Stack, PILE_LASTS, SLOTS};
 pub use rewind::{Trail, HISTORY, MAX_REWIND};
 pub use progress::{Credit, Progress, SHARE_FLOOR};
@@ -212,6 +215,7 @@ impl Sim {
                 combat::auras::refresh_control,
                 movement::move_units,
                 movement::after_moving,
+                wilderness::update,
                 rewind::record,
                 combat::abilities::land_charges,
                 combat::abilities::update,
@@ -425,7 +429,8 @@ impl Sim {
                 (rng.range(-half.x, half.x), rng.range(-half.y, half.y))
             };
             let p = center + Vec2::new(x, z);
-            if self.land().blocked(p, 0.6) || self.land().water_depth(p.x, p.y) > 0.0 {
+            let land = self.land();
+            if land.blocked(p, 0.6) || land.on_face(p, 0.6, land.surface(p.x, p.y) + movement::CLIMB_HEIGHT) || land.water_depth(p.x, p.y) > 0.0 {
                 continue;
             }
             let kind = if placed % 3 == 0 { MonsterKind::Goblin } else { MonsterKind::Wolf };

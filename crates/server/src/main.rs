@@ -1,7 +1,7 @@
 //! The headless server: the Brambleford valley stepping at 60 Hz with no window or GPU, serving
 //! players over the network (`server::net`).
 //!
-//! `cargo run -p server --release -- [--bind 0.0.0.0:7878] [--cert aldermoor.der] [--seed 1] [--crowd 0]`
+//! `cargo run -p server --release -- [--bind 0.0.0.0:7878] [--cert aldermoor.der] [--seed 1] [--crowd 0] [--accounts aldermoor.db]`
 //!
 //! Players connect over QUIC (UDP). `--cert FILE` is the server's certificate, made the first
 //! time with its private key beside it (`FILE` with a `.key` extension, readable only by its
@@ -10,6 +10,10 @@
 //! region on its own thread (#208); players cross between them as they walk. `--crowd N` adds N
 //! wandering monsters (shared out among the regions), to see how the step holds up. It prints
 //! where it listens and where the certificate is, then how it's keeping up every ten seconds.
+//!
+//! `--accounts FILE` keeps accounts and characters in that SQLite file (#88): players log in
+//! instead of just giving a name, and their characters are saved every ten seconds and when
+//! they leave, so a restart loses at most the last ten seconds.
 
 use std::time::Duration;
 
@@ -19,6 +23,7 @@ fn main() {
     let mut seed = 1u64;
     let mut crowd = 0usize;
     let mut regions = 1usize;
+    let mut accounts: Option<std::path::PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().unwrap_or_else(|| usage(&format!("{arg} needs a value")));
@@ -27,6 +32,7 @@ fn main() {
             "--cert" => cert = value().into(),
             "--seed" => seed = value().parse().unwrap_or_else(|_| usage("--seed takes a number")),
             "--crowd" => crowd = value().parse().unwrap_or_else(|_| usage("--crowd takes a number")),
+            "--accounts" => accounts = Some(value().into()),
             "--regions" => regions = value().parse().ok().filter(|n| [1, 2, 4].contains(n)).unwrap_or_else(|| usage("--regions takes 1, 2 or 4")),
             _ => usage(&format!("unknown argument {arg}")),
         }
@@ -42,7 +48,13 @@ fn main() {
         eprintln!("can't read or make the certificate {}: {e}", cert.display());
         std::process::exit(1)
     });
-    let listener = server::net::listen_as(&server, &bind, identity).unwrap_or_else(|e| {
+    let store = accounts.map(|path| {
+        std::sync::Arc::new(server::accounts::Store::open(&path).unwrap_or_else(|e| {
+            eprintln!("can't open the account database {}: {e}", path.display());
+            std::process::exit(1)
+        }))
+    });
+    let listener = server::net::listen_with(&server, &bind, identity, store.clone()).unwrap_or_else(|e| {
         eprintln!("can't listen on {bind}: {e}");
         std::process::exit(1)
     });
@@ -51,6 +63,16 @@ fn main() {
     println!("certificate {}", cert.display());
     loop {
         std::thread::sleep(Duration::from_secs(10));
+        if let Some(store) = &store {
+            for r in server.records() {
+                // Only characters someone logged in to belong to an account.
+                if let Some(account) = store.owner(&r.name)
+                    && let Err(e) = store.save(&account, &r)
+                {
+                    eprintln!("couldn't save {}: {e}", r.name);
+                }
+            }
+        }
         let s = server.stats();
         eprintln!("tick {}: step {:.2} ms, views {:.2} ms, {} players, {} steps skipped", s.ticks, s.step_ms, s.view_ms, s.players, s.skipped);
     }
@@ -89,6 +111,6 @@ fn realm(n: usize, seed: u64, crowd: usize) -> server::regions::Realm {
 }
 
 fn usage(why: &str) -> ! {
-    eprintln!("{why}\nusage: server [--bind ADDR] [--cert FILE] [--seed N] [--crowd N] [--regions 1|2|4]");
+    eprintln!("{why}\nusage: server [--bind ADDR] [--cert FILE] [--seed N] [--crowd N] [--regions 1|2|4] [--accounts FILE]");
     std::process::exit(2)
 }

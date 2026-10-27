@@ -2,8 +2,9 @@
 //! Facing one way, the player runs ahead, strafes left, backpedals and strafes right, sweeps the
 //! travel once round every direction, then walks, sprints and walks again. Then they turn round,
 //! draw a weapon and run the pattern again, mirrored so that it stays on the same side of the
-//! line they walked. Last they turn on the spot (#211): a small turn held, a long one, an about
-//! face and a spin, then they circle-strafe once round.
+//! line they walked. Then they turn on the spot (#211): a small turn held, a long one, an about
+//! face and a spin, then they circle-strafe once round. Last (#217) they jump standing, set off
+//! into a running jump and stop, and run round in a circle the way they face.
 use glam::Vec2;
 use protocol::Command;
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
@@ -59,7 +60,7 @@ const fn east(degrees: f32) -> f32 {
     EAST + degrees * PI / 180.
 }
 
-const LEGS: [Leg; 26] = [
+const LEGS: [Leg; 32] = [
     leg("stand", 1., WEST, [0., 0.], Pace::Stand),
     leg("run ahead", 1.2, WEST, [0., 0.], Pace::Run),
     leg("strafe left", 1.2, WEST, [90., 90.], Pace::Run),
@@ -96,6 +97,24 @@ const LEGS: [Leg; 26] = [
         ..leg("circle strafe", 4., 0., [-90., -90.], Pace::Run)
     },
     look("stand", 1., [east(-90.), east(-90.)]),
+    // Weight (#217): a jump standing, then setting off west along the line walked into a running
+    // jump, and stopping, each leaning the body; then running round, banking into the turn,
+    // heading west and turning right so the circle stays north of the line.
+    leg("jump", 1.2, east(-90.), [0., 0.], Pace::Stand),
+    Leg {
+        hold: false,
+        ..leg("run off", 0.6, WEST, [0., 0.], Pace::Run)
+    },
+    Leg {
+        hold: false,
+        ..leg("jump running", 1.1, WEST, [0., 0.], Pace::Run)
+    },
+    leg("stop", 1., WEST, [0., 0.], Pace::Stand),
+    Leg {
+        hold: false,
+        ..leg("run round", 4., WEST, [0., -360.], Pace::Run)
+    },
+    leg("stand", 1., WEST, [0., 0.], Pace::Stand),
 ];
 
 /// The leg the run is on `seconds` in, and the move it asks for then; `None` once it's over.
@@ -136,6 +155,11 @@ pub fn draws(i: usize) -> bool {
     LEGS[i].name == "draw"
 }
 
+/// Whether leg `i` jumps as it starts.
+pub fn jumps(i: usize) -> bool {
+    LEGS[i].name.starts_with("jump")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,7 +180,13 @@ mod tests {
                 break;
             };
             assert!(direction.length() < 1. + 1e-5);
-            assert_eq!(face_yaw.is_none(), name(i) == "turn round");
+            assert_eq!(
+                face_yaw.is_none(),
+                matches!(
+                    name(i),
+                    "turn round" | "run off" | "jump running" | "run round"
+                )
+            );
             // The facing turns smoothly, but for the about face: half round at once.
             if let (Some(was), Some(now)) = (last, face_yaw) {
                 let turned = ((now - was + PI).rem_euclid(TAU) - PI).abs();
@@ -173,5 +203,6 @@ mod tests {
         }
         assert_eq!(legs, (0..LEGS.len()).collect::<Vec<_>>());
         assert_eq!((0..LEGS.len()).filter(|&i| draws(i)).count(), 1);
+        assert_eq!((0..LEGS.len()).filter(|&i| jumps(i)).count(), 2);
     }
 }

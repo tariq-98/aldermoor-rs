@@ -15,6 +15,11 @@
 //! Clients trust exactly that certificate (the `.der` file, which is public; the key stays on
 //! the server), with ordinary TLS checks. Certificates from a real authority wait for accounts
 //! and a host name (#88).
+//!
+//! **Accounts.** A server started with an account store ([`listen_with`], `server --accounts
+//! FILE`) takes [`ClientMsg::Login`] instead of `Hello`: account name, password, character. The
+//! character comes back as it was last saved, and is saved again when its player leaves (and by
+//! the server every few seconds), so it outlasts a restart.
 
 use crate::{Server, Viewer};
 use protocol::wire::{Decoder, WireError, WireView};
@@ -52,6 +57,16 @@ pub enum ClientMsg {
     Command(Command),
     /// The client has decoded view `tick`, so later views may be deltas against it.
     Ack(u64),
+    /// The first message to a server with accounts (#88), in place of `Hello`: log in to
+    /// `account` (making it first when `create` is set) and play `character`, which is made
+    /// fresh if the account has no character of that name yet.
+    Login {
+        version: u32,
+        account: String,
+        password: String,
+        character: String,
+        create: bool,
+    },
 }
 
 // Views are nearly every message, so boxing them would only add an allocation.
@@ -193,6 +208,11 @@ pub fn listen(server: &Server, addr: impl ToSocketAddrs) -> io::Result<Listener>
 /// Starts accepting players into `server` on `addr` (UDP) as `identity`, on the network
 /// threads. Once the server stops, connections are turned away.
 pub fn listen_as(server: &Server, addr: impl ToSocketAddrs, identity: Identity) -> io::Result<Listener> {
+    listen_with(server, addr, identity, None)
+}
+
+/// As [`listen_as`], with players logging in to `accounts` when it's given (#88).
+pub fn listen_with(server: &Server, addr: impl ToSocketAddrs, identity: Identity, accounts: Option<Arc<crate::accounts::Store>>) -> io::Result<Listener> {
     let addr = addr.to_socket_addrs()?.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no address to listen on"))?;
     let certificate = identity.certificate.clone();
     let mut config =
@@ -208,9 +228,9 @@ pub fn listen_as(server: &Server, addr: impl ToSocketAddrs, identity: Identity) 
     let accepting = endpoint.clone();
     rt.spawn(async move {
         while let Some(incoming) = accepting.accept().await {
-            let (control, commands) = (control.clone(), commands.clone());
+            let (control, commands, accounts) = (control.clone(), commands.clone(), accounts.clone());
             tokio::spawn(async move {
-                let result = async { serve(incoming.await?, control, commands).await }.await;
+                let result = async { serve(incoming.await?, control, commands, accounts).await }.await;
                 if let Err(e) = result {
                     eprintln!("connection closed: {e}");
                 }
@@ -224,6 +244,7 @@ async fn serve(
     conn: quinn::Connection,
     control: crossbeam_channel::Sender<crate::Control>,
     commands: crossbeam_channel::Sender<(UnitId, Command)>,
+    accounts: Option<Arc<crate::accounts::Store>>,
 ) -> io::Result<()> {
     let peer = conn.remote_address();
     // A connection that doesn't say hello promptly isn't a client.
@@ -233,29 +254,50 @@ async fn serve(
         Ok::<_, io::Error>((send, recv, hello))
     });
     let (mut send, mut recv, hello) = hello.await.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "no hello"))??;
-    let name = match hello {
-        Some(ClientMsg::Hello { version, name }) if version == protocol::VERSION => name,
-        Some(ClientMsg::Hello { version, .. }) => {
-            let why = format!("this server speaks protocol {}, not {version}", protocol::VERSION);
+    // Who's playing: a name with no accounts, or an account's character with them (#88).
+    let checked: Result<(String, Option<String>), String> = match (hello, &accounts) {
+        (Some(ClientMsg::Hello { version, .. } | ClientMsg::Login { version, .. }), _) if version != protocol::VERSION => {
+            Err(format!("this server speaks protocol {}, not {version}", protocol::VERSION))
+        }
+        (Some(ClientMsg::Hello { name, .. }), None) => Ok((name, None)),
+        (Some(ClientMsg::Hello { .. }), Some(_)) => Err("this server needs an account: log in".into()),
+        (Some(ClientMsg::Login { .. }), None) => Err("this server has no accounts".into()),
+        (Some(ClientMsg::Login { account, password, character, create, .. }), Some(store)) => {
+            let store = store.clone();
+            // Hashing a password takes a while: off the network threads.
+            tokio::task::spawn_blocking(move || store.login(&account, &password, &character, create).map(|()| (character, Some(account))))
+                .await
+                .map_err(io::Error::other)?
+                .map_err(|r| r.0)
+        }
+        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "no hello first")),
+    };
+    let (name, account) = match checked {
+        Ok(who) => who,
+        Err(why) => {
             write(&mut send, &ServerMsg::Refused(why.clone())).await?;
             let _ = send.finish();
             let _ = send.stopped().await;
             return Err(io::Error::other(why));
         }
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "no hello first")),
     };
+    let record = account.as_ref().and(accounts.as_ref()).and_then(|s| s.load(&name)).map(Box::new);
     let (frames, outbox) = crossbeam_channel::bounded::<Vec<u8>>(BACKLOG);
     let (reply, answer) = crossbeam_channel::bounded(1);
     let acked = Arc::new(AtomicU64::new(0));
     let remote = crate::Remote { frames, acked: acked.clone(), encoder: protocol::wire::Encoder::new(), phase: 0 };
     control
-        .send(crate::Control::Join { name: name.clone(), viewer: Viewer::Remote(remote), reply })
+        .send(crate::Control::Join { name: name.clone(), record, viewer: Viewer::Remote(remote), reply })
         .map_err(|_| io::Error::other("the server has stopped"))?;
     let player = tokio::task::spawn_blocking(move || answer.recv())
         .await
         .map_err(io::Error::other)?
         .map_err(|_| io::Error::other("the server has stopped"))?;
     eprintln!("{name} joined from {peer} as unit {player}");
+    // A new character is saved at once, so its name is its account's from now on.
+    if let (Some(account), Some(store)) = (&account, &accounts) {
+        save(&control, store, account, &name).await;
+    }
     write(&mut send, &ServerMsg::Welcome { version: protocol::VERSION, player }).await?;
     // The sender hands views to QUIC until the connection or the server goes; the server drops
     // a connection that falls BACKLOG views behind by dropping its channel.
@@ -279,7 +321,7 @@ async fn serve(
             Ok(Some(ClientMsg::Ack(tick))) => {
                 acked.fetch_max(tick.wrapping_add(1), Ordering::AcqRel);
             }
-            Ok(Some(ClientMsg::Hello { .. })) => {
+            Ok(Some(ClientMsg::Hello { .. } | ClientMsg::Login { .. })) => {
                 break Err(io::Error::new(io::ErrorKind::InvalidData, "a second hello"));
             }
             Ok(None) => break Ok(()),
@@ -289,8 +331,24 @@ async fn serve(
     };
     // Closing the connection ends the sender, which drops the channel, and the server lets go.
     conn.close(0u32.into(), b"bye");
+    if let (Some(account), Some(store)) = (&account, &accounts) {
+        save(&control, store, account, &name).await;
+    }
     eprintln!("{name} left");
     result
+}
+
+/// Saves character `name` of `account` as it stands now.
+async fn save(control: &crossbeam_channel::Sender<crate::Control>, store: &Arc<crate::accounts::Store>, account: &str, name: &str) {
+    let (control, store, account, name) = (control.clone(), store.clone(), account.to_string(), name.to_string());
+    let saved = tokio::task::spawn_blocking(move || {
+        for r in crate::records(&control, Some(name.clone())) {
+            if let Err(e) = store.save(&account, &r) {
+                eprintln!("couldn't save {name}: {e}");
+            }
+        }
+    });
+    let _ = saved.await;
 }
 
 /// Sends one view frame (length and postcard, as `encode` made it): as a datagram when it
@@ -364,6 +422,24 @@ impl Client {
     /// Connects saying it speaks protocol `version`, for testing refusals.
     #[doc(hidden)]
     pub fn hello(addr: impl ToSocketAddrs, certificate: &CertificateDer<'_>, name: &str, version: u32) -> io::Result<Client> {
+        Client::open(addr, certificate, ClientMsg::Hello { version, name: name.to_string() })
+    }
+
+    /// Connects to a server with accounts (#88): logs in to `account` with `password` (making
+    /// the account first when `create` is set) and plays `character`. Fails with the server's
+    /// reason when it refuses.
+    pub fn login(addr: impl ToSocketAddrs, certificate: &CertificateDer<'_>, account: &str, password: &str, character: &str, create: bool) -> io::Result<Client> {
+        let first = ClientMsg::Login {
+            version: protocol::VERSION,
+            account: account.to_string(),
+            password: password.to_string(),
+            character: character.to_string(),
+            create,
+        };
+        Client::open(addr, certificate, first)
+    }
+
+    fn open(addr: impl ToSocketAddrs, certificate: &CertificateDer<'_>, first: ClientMsg) -> io::Result<Client> {
         let addr = addr.to_socket_addrs()?.next().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no address to connect to"))?;
         let rt = runtime()?;
         let local: SocketAddr = if addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" }.parse().expect("a valid wildcard address");
@@ -372,7 +448,6 @@ impl Client {
             quinn::Endpoint::client(local)?
         };
         endpoint.set_default_client_config(client_config(certificate)?);
-        let name = name.to_string();
         let (conn, send, mut recv, player) = rt.block_on(async {
             let conn = endpoint
                 .connect(addr, SERVER_NAME)
@@ -380,7 +455,7 @@ impl Client {
                 .await
                 .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
             let (mut send, mut recv) = conn.open_bi().await.map_err(io::Error::other)?;
-            write(&mut send, &ClientMsg::Hello { version, name }).await?;
+            write(&mut send, &first).await?;
             match read::<ServerMsg>(&mut recv).await? {
                 Some(ServerMsg::Welcome { player, .. }) => Ok((conn, send, recv, player)),
                 Some(ServerMsg::Refused(why)) => Err(io::Error::new(io::ErrorKind::ConnectionRefused, why)),
