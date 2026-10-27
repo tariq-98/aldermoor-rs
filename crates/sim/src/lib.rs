@@ -290,7 +290,16 @@ impl Sim {
     /// Adds a level-1 warrior at `at`, facing `yaw`: a farmhand with an arming sword and a round
     /// shield, and a greatsword to swap to.
     pub fn spawn_player(&mut self, name: &str, at: Vec2, yaw: f32) -> UnitId {
-        self.spawn_hero(name, Specialty::Warrior, 1, at, yaw)
+        // MAC CHECK PATCH: ALDER_SPECIALTY picks the player's specialty.
+        let specialty = match std::env::var("ALDER_SPECIALTY").as_deref() {
+            Ok("archer") => Specialty::Archer,
+            Ok("mage") => Specialty::Mage,
+            Ok("rogue") => Specialty::Rogue,
+            Ok("healer") => Specialty::Healer,
+            Ok("necromancer") => Specialty::Necromancer,
+            _ => Specialty::Warrior,
+        };
+        self.spawn_hero(name, specialty, 1, at, yaw)
     }
 
     /// Adds a player of `specialty` and `level`, with its default weapons and skills.
