@@ -343,6 +343,9 @@ impl Drop for Host {
     }
 }
 
+/// MAC CHECK PATCH: sim steps the client has handed out; -1 runs in real time.
+pub static MAC_LOCKSTEP_BUDGET: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
+
 fn run(mut world: world::World, commands: Receiver<(UnitId, Command)>, control: Receiver<Control>, shared: Arc<Shared>) {
     let mut viewers: Vec<(UnitId, Viewer)> = Vec::new();
     // Characters stay in the world when their player leaves, and joining with the same name
@@ -356,6 +359,16 @@ fn run(mut world: world::World, commands: Receiver<(UnitId, Command)>, control: 
     // Threads encoding views at once, this one among them: the cores left beside the sim's.
     let encoders = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1)).clamp(1, MAX_ENCODERS);
     while shared.running.load(Ordering::Acquire) {
+        // MAC CHECK PATCH: lockstep with the client's frames when it hands out steps.
+        let lock = MAC_LOCKSTEP_BUDGET.load(Ordering::Acquire);
+        if lock == 0 {
+            std::thread::sleep(Duration::from_micros(200));
+            continue;
+        }
+        if lock > 0 {
+            MAC_LOCKSTEP_BUDGET.fetch_sub(1, Ordering::AcqRel);
+            next = Instant::now();
+        }
         let now = Instant::now();
         if now < next {
             std::thread::sleep(next - now);
@@ -370,7 +383,8 @@ fn run(mut world: world::World, commands: Receiver<(UnitId, Command)>, control: 
             let id = match names.get(&name) {
                 Some(&id) => id,
                 None => {
-                    let at = SPAWN + glam::Vec2::new((names.len() % 8) as f32 * 1.5, (names.len() / 8 % 8) as f32 * 1.5);
+                    let spawn = std::env::var("ALDER_SPAWN").ok().map(|s| { let v: Vec<f32> = s.split(',').map(|x| x.parse().unwrap()).collect(); glam::Vec2::new(v[0], v[1]) }).unwrap_or(SPAWN); // MAC CHECK PATCH
+                    let at = spawn + glam::Vec2::new((names.len() % 8) as f32 * 1.5, (names.len() / 8 % 8) as f32 * 1.5);
                     // A realm with no room at the spawn point turns the player away.
                     let Some(id) = world.spawn_player(&name, at, std::f32::consts::PI) else { continue };
                     names.insert(name, id);
