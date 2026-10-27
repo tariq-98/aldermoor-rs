@@ -1,6 +1,20 @@
-use protocol::{Snapshot, UnitId, UnitState};
+use glam::Vec3;
+use protocol::{Snapshot, Traversal, UnitId, UnitState};
+use std::collections::{HashMap, VecDeque};
 use std::{sync::Arc, time::Instant};
-/// One tick of interpolation delay, with at most 100 ms of bounded extrapolation.
+
+/// Snapshots kept to blend between: enough for a couple of send intervals at 20 Hz.
+const KEPT: usize = 8;
+/// Furthest a unit is carried on past the newest snapshot when the next is late.
+const EXTRAPOLATE: f64 = 0.1;
+/// How fast a unit eases back onto its path after a correction (a late snapshot that
+/// disagreed with where it was carried), per second.
+const CATCH_UP: f32 = 15.;
+
+/// Snapshots in arrival order, blended at a steady sim time (#198): Hermite curves through
+/// each unit's positions and velocities, a little behind the newest snapshot (about two send
+/// intervals over the network, one step locally), carried on at most 100 ms when one is late
+/// and eased back onto the path rather than snapped when the next arrives.
 pub struct Snapshots {
     pub previous: Arc<Snapshot>,
     pub current: Arc<Snapshot>,
@@ -8,15 +22,29 @@ pub struct Snapshots {
     /// The sim time this frame draws (`pacing::SimClock`). Without it, time is measured from
     /// when the newest snapshot arrived, which jitters with arrival.
     pub draw_time: Option<f64>,
+    kept: VecDeque<Arc<Snapshot>>,
+    /// Sim seconds between snapshots, smoothed: a step locally, a send interval over the
+    /// network.
+    interval: f64,
+    /// Where each unit was drawn last frame, and when, for easing out corrections.
+    shown: HashMap<UnitId, (Vec3, f64)>,
 }
 impl Snapshots {
     pub fn new(s: Arc<Snapshot>) -> Self {
         Self {
             previous: s.clone(),
-            current: s,
+            current: s.clone(),
             received: Instant::now(),
             draw_time: None,
+            kept: VecDeque::from([s]),
+            interval: 1. / 60.,
+            shown: HashMap::new(),
         }
+    }
+    /// The extra delay over the one step `pacing::DRAW_DELAY` already gives, so there are
+    /// about two send intervals of snapshots ahead of what's drawn.
+    fn extra_delay(&self) -> f64 {
+        (2. * self.interval - 2. / 60.).max(0.)
     }
     /// How far past the previous snapshot this frame draws, in seconds: a step's length when
     /// it shows the newest one.
@@ -28,23 +56,140 @@ impl Snapshots {
     }
     pub fn push(&mut self, s: Arc<Snapshot>) {
         if s.tick > self.current.tick {
+            let gap = s.time - self.current.time;
+            if gap > 0. && gap < 1. {
+                self.interval += (gap - self.interval) * 0.1;
+            }
             self.previous = self.current.clone();
-            self.current = s;
+            self.current = s.clone();
             self.received = Instant::now();
+            self.kept.push_back(s);
+            while self.kept.len() > KEPT {
+                self.kept.pop_front();
+            }
         }
     }
     /// Everyone a step behind the newest sim time, so there's a later state to blend
     /// towards, except `own` (the player's character), drawn at the newest time so its
     /// response to the keys shows a step sooner (#219).
-    pub fn units(&self, indexed: bool, own: Option<UnitId>) -> Vec<UnitState> {
-        interpolate(
-            &self.previous,
-            &self.current,
-            self.since(),
-            indexed,
-            own.map(|id| (id, crate::pacing::DRAW_DELAY as f32)),
-        )
+    pub fn units(&mut self, indexed: bool, own: Option<UnitId>) -> Vec<UnitState> {
+        let Some(draw) = self.draw_time else {
+            return interpolate(
+                &self.previous,
+                &self.current,
+                self.since(),
+                indexed,
+                own.map(|id| (id, crate::pacing::DRAW_DELAY as f32)),
+            );
+        };
+        let others = draw - self.extra_delay();
+        let mine = draw + crate::pacing::DRAW_DELAY;
+        let (a, b) = self.around(others);
+        let (oa, ob) = self.around(mine);
+        let (ia, ib) = (index(&a), index(&b));
+        let mut out = Vec::with_capacity(self.current.units.len());
+        for u in &self.current.units {
+            let is_own = own == Some(u.id);
+            let (t, a, b, ia, ib) = if is_own {
+                (mine, &oa, &ob, None, None)
+            } else {
+                (others, &a, &b, Some(&ia), Some(&ib))
+            };
+            let ua = ia.map_or_else(|| a.unit(u.id), |m| m.get(&u.id).copied());
+            let ub = ib.map_or_else(|| b.unit(u.id), |m| m.get(&u.id).copied());
+            let mut v = blend(ua, ub.unwrap_or(u), a.time, b.time, t);
+            // Ease out a jump that isn't the unit's own motion (a correction after a late
+            // snapshot); teleports (10 m or more) and owner's body go straight there.
+            if let Some(&(was, at)) = self.shown.get(&u.id) {
+                let dt = (t - at).clamp(0., 0.1) as f32;
+                let expected = was + v.velocity * dt;
+                let off = v.position - expected;
+                if !is_own && off.length() > 0.02 && off.length() < 10. && dt > 0. {
+                    v.position = expected + off * (1. - (-CATCH_UP * dt).exp());
+                }
+            }
+            self.shown.insert(u.id, (v.position, t));
+            out.push(v);
+        }
+        let here: std::collections::HashSet<UnitId> =
+            self.current.units.iter().map(|u| u.id).collect();
+        self.shown.retain(|id, _| here.contains(id));
+        out
     }
+    /// The kept snapshots either side of sim time `t` (the newest twice past the end, the
+    /// oldest twice before the start).
+    fn around(&self, t: f64) -> (Arc<Snapshot>, Arc<Snapshot>) {
+        let after = self.kept.iter().position(|s| s.time > t);
+        match after {
+            Some(0) => (self.kept[0].clone(), self.kept[0].clone()),
+            Some(i) => (self.kept[i - 1].clone(), self.kept[i].clone()),
+            None => {
+                let last = self
+                    .kept
+                    .back()
+                    .cloned()
+                    .unwrap_or_else(|| self.current.clone());
+                (last.clone(), last)
+            }
+        }
+    }
+}
+
+fn index(s: &Snapshot) -> HashMap<UnitId, &UnitState> {
+    s.units.iter().map(|u| (u.id, u)).collect()
+}
+
+/// A unit at sim time `t`, between its state `a` (at `ta`, if it was there) and `b` (at
+/// `tb`): a Hermite curve through both positions with their velocities, linear for forced
+/// moves (their speed changes sharply), a snap for a teleport, and past `b` carried on along
+/// its velocity for at most [`EXTRAPOLATE`].
+fn blend(a: Option<&UnitState>, b: &UnitState, ta: f64, tb: f64, t: f64) -> UnitState {
+    let mut out = b.clone();
+    let span = tb - ta;
+    let Some(a) = a.filter(|a| span > 1e-6 && a.position.distance(b.position) < 10.) else {
+        let extra = (t - tb).clamp(0., EXTRAPOLATE) as f32;
+        out.position += b.velocity * extra;
+        out.pose_time += extra;
+        return out;
+    };
+    let s = ((t - ta) / span).clamp(0., 1.) as f32;
+    let d = span as f32;
+    let forced =
+        matches!(a.traversal, Traversal::Forced(_)) || matches!(b.traversal, Traversal::Forced(_));
+    if forced {
+        out.position = a.position.lerp(b.position, s);
+        out.velocity = (b.position - a.position) / d;
+    } else {
+        let (s2, s3) = (s * s, s * s * s);
+        let (h00, h10, h01, h11) = (
+            2. * s3 - 3. * s2 + 1.,
+            s3 - 2. * s2 + s,
+            -2. * s3 + 3. * s2,
+            s3 - s2,
+        );
+        out.position =
+            a.position * h00 + a.velocity * d * h10 + b.position * h01 + b.velocity * d * h11;
+        let (d00, d10, d01, d11) = (
+            6. * s2 - 6. * s,
+            3. * s2 - 4. * s + 1.,
+            -6. * s2 + 6. * s,
+            3. * s2 - 2. * s,
+        );
+        out.velocity =
+            (a.position * d00 + b.position * d01) / d + a.velocity * d10 + b.velocity * d11;
+    }
+    let dy = (b.yaw - a.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
+    out.yaw = a.yaw + dy * s;
+    if a.pose == b.pose {
+        out.pose_time = a.pose_time + (b.pose_time - a.pose_time) * s;
+    }
+    if t > tb {
+        let extra = (t - tb).min(EXTRAPOLATE) as f32;
+        out.position += b.velocity * extra;
+        out.pose_time += extra;
+    }
+    out
 }
 fn interpolate(
     previous: &Snapshot,
@@ -171,5 +316,40 @@ mod tests {
             .position
             .x;
         assert!(own > others, "own {own} others {others}");
+    }
+    #[test]
+    fn a_steady_walker_moves_steadily_through_jittery_30_hz_views() {
+        // A walker at 1.5 m/s, a view every second step (30 Hz) arriving 50 ms late give or take
+        // 20 ms, drawn at 60 frames a second: its drawn speed holds within 0.05 m/s (#198).
+        let speed = 1.5;
+        let view = |tick: u64| {
+            let mut s = snap(tick, speed * tick as f32 / 60., 0.);
+            s.units[0].velocity = Vec3::new(speed, 0., 0.);
+            Arc::new(s)
+        };
+        let jitter =
+            |tick: u64| ((tick.wrapping_mul(2654435761) % 1000) as f64 / 1000. - 0.5) * 0.04;
+        let mut snaps = Snapshots::new(view(0));
+        let mut clock = crate::pacing::SimClock::default();
+        let mut next = 2;
+        let mut last: Option<f32> = None;
+        let mut worst: f32 = 0.;
+        for frame in 0..(60 * 4) {
+            let local = frame as f64 / 60.;
+            while next as f64 / 60. + 0.05 + jitter(next) <= local {
+                snaps.push(view(next));
+                clock.observe(next as f64 / 60., next as f64 / 60. + 0.05 + jitter(next));
+                next += 2;
+            }
+            snaps.draw_time = clock.draw_time(local);
+            let x = snaps.units(true, None)[0].position.x;
+            if let Some(was) = last
+                && frame > 60
+            {
+                worst = worst.max(((x - was) * 60. - speed).abs());
+            }
+            last = Some(x);
+        }
+        assert!(worst < 0.05, "speed strayed by {worst} m/s");
     }
 }

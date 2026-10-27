@@ -13,12 +13,27 @@ pub const DRAW_DELAY: f64 = 1. / 60. + 0.002;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SimClock {
     offset: Option<f64>,
+    /// The sim time last observed, so a step seen again doesn't count twice.
+    last: f64,
 }
 
 impl SimClock {
     /// A step at `sim_time` was due at `due` (seconds on the client's own clock).
+    ///
+    /// Locally every step agrees, so the offset is exact. Over the network `due` is when the
+    /// view arrived, which jitters, so each new step moves the offset only a little (#198); a
+    /// jump of a quarter second or more (the sim dropped a backlog, the network stalled) is
+    /// taken at once.
     pub fn observe(&mut self, sim_time: f64, due: f64) {
-        self.offset = Some(sim_time - due);
+        if self.offset.is_some() && sim_time == self.last {
+            return;
+        }
+        self.last = sim_time;
+        let sample = sim_time - due;
+        self.offset = Some(match self.offset {
+            Some(o) if (sample - o).abs() < 0.25 => o + (sample - o) * 0.02,
+            _ => sample,
+        });
     }
 
     /// The sim time to draw at `local` seconds on the client's clock.
