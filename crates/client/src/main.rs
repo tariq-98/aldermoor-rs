@@ -453,6 +453,8 @@ struct Game {
     /// The last frame's clock reading and the sim times it drew, by this pacing and by
     /// arrival time as before #223, for the judder comparison printed at exit.
     judder: Option<(f64, f64, f64)>,
+    /// How far past the newest combat view warnings and casts are drawn (#197).
+    ahead: f32,
     /// Press-to-photon times for jumps, rolls and skills (#219).
     latency: latency::Latency,
     /// Seconds per frame when frames come from the display's refresh (capped by `--fps`).
@@ -610,6 +612,7 @@ impl Game {
             pacing: pacing::Stats::default(),
             paced: None,
             judder: None,
+            ahead: 0.,
             latency: latency::Latency::default(),
             frame_period: None,
             frame: 0,
@@ -1459,6 +1462,15 @@ impl Game {
                 .observe(sim_time, seconds_between(self.epoch, due));
         }
         self.snaps.draw_time = self.sim_clock.draw_time(frame_time);
+        // Warnings and casts run on the server's clock, as far on as an input pressed now
+        // would land (#197); over the network that's half a round trip past the server's
+        // time, which is itself half a round trip past the newest view.
+        let rtt = self.host.rtt().as_secs_f64();
+        self.ahead = match self.sim_clock.now(frame_time) {
+            Some(now) => (protocol::telegraph_time(now + rtt / 2., rtt) - self.snaps.current.time)
+                .max(0.) as f32,
+            None => self.snaps.since(),
+        };
         let tick = self.snaps.current.tick;
         if let Some((last_time, last_tick)) = self.paced {
             self.pacing
@@ -1924,6 +1936,7 @@ impl Game {
                 } else {
                     self.snaps.since()
                 },
+                ahead: if staged.is_some() { 0. } else { self.ahead },
                 time: staged.as_ref().map_or(scene_time, |f| f.clock),
                 aim: staged.as_ref().map_or(aim.zip(radius), |f| f.aim),
             });
@@ -1965,7 +1978,14 @@ impl Game {
             if self.options.reel {
                 paint_caption(ctx, stage::shot(self.reel_time).caption);
             } else {
-                actions = hud::draw(ctx, &self.snaps.current, &self.fight, aim, &keys);
+                // Enemies' cast bars on the same clock as the warnings (#197).
+                let mut timed = (*self.fight).clone();
+                for u in timed.units.iter_mut().filter(|u| u.id != self.host.player) {
+                    if let Some(c) = &mut u.cast {
+                        c.elapsed = (c.elapsed + self.ahead).min(c.duration);
+                    }
+                }
+                actions = hud::draw(ctx, &self.snaps.current, &timed, aim, &keys);
                 hud::messages(ctx, &self.messages);
                 if let Some(banner) = &self.level_up {
                     hud::level_up(ctx, banner);

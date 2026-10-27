@@ -73,6 +73,14 @@ pub enum Command {
     Aim { pitch: i8 },
 }
 
+/// The server time a client draws warnings, cast bars and wind-ups at (#197), given its
+/// estimate of the server's time now and the round trip: when an input pressed now would
+/// reach the server, a step early, so a roll pressed as a warning's fill completes lands in
+/// time. Bodies are drawn behind instead (interpolated), so this is only for timing.
+pub fn telegraph_time(server_now: f64, rtt: f64) -> f64 {
+    server_now + rtt / 2. + 1. / 60.
+}
+
 /// An aim pitch in radians (up positive, clamped to a right angle either way) as one byte, in
 /// steps of about 0.7 degrees.
 pub fn aim_pitch_byte(pitch: f32) -> i8 {

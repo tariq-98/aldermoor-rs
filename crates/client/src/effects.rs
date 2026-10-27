@@ -169,8 +169,11 @@ pub struct Scene<'a> {
     pub height: &'a dyn Fn(u32) -> f32,
     /// The walkable surface at (x, z).
     pub ground: &'a dyn Fn(f32, f32) -> f32,
-    /// Seconds since the combat view was taken, to carry missiles and casts forward.
+    /// Seconds since the combat view was taken, to carry missiles forward.
     pub since: f32,
+    /// Seconds past the combat view that warnings, casts and wind-ups are drawn at: the
+    /// server time an input pressed now would land (#197).
+    pub ahead: f32,
     /// Seconds, steadily increasing: drives every animation.
     pub time: f32,
     /// A ground skill being aimed: where, and its radius.
@@ -628,7 +631,7 @@ impl Effects {
                 && let Some(effect) = self.table.casts.get(&cast.ability).cloned()
                 && let Some(look) = self.look(&effect)
             {
-                let elapsed = cast.elapsed + s.since;
+                let elapsed = cast.elapsed + s.ahead;
                 let mut anchor = Anchor::at(feet, turn, elapsed, hash(u.id ^ 0x5eed));
                 anchor.scale = h;
                 anchor.ground = under;
@@ -698,7 +701,7 @@ fn area_anchor(a: &AreaView, s: &Scene) -> Anchor {
     let mut anchor = Anchor::at(
         Vec3::new(a.center.x, y, a.center.z),
         turn,
-        a.elapsed + s.since,
+        a.elapsed + s.ahead,
         hash(a.id ^ 0xa4ea),
     );
     anchor.scale = reach;
@@ -706,7 +709,7 @@ fn area_anchor(a: &AreaView, s: &Scene) -> Anchor {
     // Marks on an area reach a little past it (a field's burn, a warning's glow).
     anchor.ground = Ground::fit(a.center, reach * 1.2, s.ground);
     if a.warning {
-        anchor.progress = ((a.elapsed + s.since) / a.duration.max(0.001)).clamp(0., 1.);
+        anchor.progress = ((a.elapsed + s.ahead) / a.duration.max(0.001)).clamp(0., 1.);
     }
     anchor
 }
@@ -1215,6 +1218,7 @@ mod tests {
             height: &|_| 1.8,
             ground: &|_, _| 0.,
             since: 0.,
+            ahead: 0.,
             time,
             aim: None,
         })

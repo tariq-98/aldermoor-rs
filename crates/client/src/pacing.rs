@@ -36,6 +36,12 @@ impl SimClock {
         });
     }
 
+    /// The sim's newest time as of `local` seconds on the client's clock (over the network,
+    /// as of when its views arrive).
+    pub fn now(&self, local: f64) -> Option<f64> {
+        self.offset.map(|o| local + o)
+    }
+
     /// The sim time to draw at `local` seconds on the client's clock.
     pub fn draw_time(&self, local: f64) -> Option<f64> {
         self.offset.map(|o| local + o - DRAW_DELAY)

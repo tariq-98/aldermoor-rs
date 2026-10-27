@@ -568,6 +568,11 @@ impl Client {
     pub fn closer(&self) -> Closer {
         Closer(self.conn.clone())
     }
+
+    /// QUIC's estimate of the round trip to the server.
+    pub fn rtt(&self) -> Duration {
+        self.conn.rtt()
+    }
 }
 
 /// Closes a [`Client`]'s connection from elsewhere.

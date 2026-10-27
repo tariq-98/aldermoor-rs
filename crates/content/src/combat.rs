@@ -37,6 +37,9 @@ pub const UNARMED_SWING: f32 = 1.4;
 /// away from, short enough to feel quick. The tables write it as `cast: 0.4`.
 pub const WINDUP: f64 = 0.4;
 
+/// The least warning a monster's warned blow gives, in seconds (#197).
+pub const MIN_WARNING: f64 = 0.6;
+
 /// How long the client freezes poses when a blow reaches its victim, by weight, in ms. The sim
 /// never pauses; this rides on `Event::Hit`. Conditions ticking get none.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -915,6 +918,13 @@ impl Catalog {
             }
             if a.charges == 0 {
                 out.push(format!("ability {}: charges must be at least 1", a.key));
+            }
+            // A warned blow gives at least 0.6 s to see it and get out (#197).
+            if a.telegraph && a.cast.max(a.impact_delay) < MIN_WARNING - 1e-9 {
+                out.push(format!(
+                    "ability {}: a warned blow needs at least {MIN_WARNING} s of warning",
+                    a.key
+                ));
             }
         }
         let mut seen = std::collections::HashSet::new();

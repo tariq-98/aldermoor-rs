@@ -230,6 +230,8 @@ struct Link {
     commands: net::Commands,
     closer: net::Closer,
     received: Arc<std::sync::atomic::AtomicU64>,
+    /// The round trip to the server, in microseconds, as of the latest view.
+    rtt: Arc<std::sync::atomic::AtomicU64>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -273,9 +275,12 @@ impl Host {
         let latest = Arc::new(Latest::default());
         let (player, commands, closer, received) = (client.player, client.commands(), client.closer(), client.received());
         let into = latest.clone();
+        let rtt = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let rtt_in = rtt.clone();
         let thread = std::thread::Builder::new().name("Aldermoor connection".into()).spawn(move || loop {
             match client.next_view() {
                 Ok((snapshot, combat)) => {
+                    rtt_in.store(client.rtt().as_micros() as u64, Ordering::Relaxed);
                     into.events.lock().unwrap().extend(snapshot.events.iter().cloned());
                     *into.combat.lock().unwrap() = Some(Arc::new(combat));
                     // Arrival stands in for the server's schedule, so this clock has the
@@ -289,7 +294,7 @@ impl Host {
                 }
             }
         })?;
-        let host = Host { backend: Backend::Remote(Link { commands, closer, received, thread: Some(thread) }), latest, player };
+        let host = Host { backend: Backend::Remote(Link { commands, closer, received, rtt, thread: Some(thread) }), latest, player };
         let start = Instant::now();
         while host.snapshot().is_none() {
             if start.elapsed() > Duration::from_secs(10) {
@@ -336,6 +341,15 @@ impl Host {
     /// schedule. Sim time at any other instant is that time plus the instants' difference.
     pub fn clock(&self) -> Option<(f64, Instant)> {
         *self.latest.clock.lock().unwrap()
+    }
+
+    /// The round trip to the server: nothing for the built-in one, QUIC's estimate over the
+    /// network.
+    pub fn rtt(&self) -> Duration {
+        match &self.backend {
+            Backend::Local(_) => Duration::ZERO,
+            Backend::Remote(link) => Duration::from_micros(link.rtt.load(Ordering::Relaxed)),
+        }
     }
 
     /// Events since the last call, in order (snapshots only carry their own tick's events).
