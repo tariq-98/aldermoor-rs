@@ -44,7 +44,7 @@ struct Options {
     assets: PathBuf,
     width: u32,
     height: u32,
-    scale: f32,
+    scale: Option<f32>,
     capture: Option<PathBuf>,
     frames: Option<u64>,
     offscreen: bool,
@@ -123,7 +123,7 @@ impl Options {
             assets: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
             width: 1600,
             height: 1000,
-            scale: 0.8,
+            scale: None,
             capture: None,
             frames: None,
             offscreen: false,
@@ -183,7 +183,9 @@ impl Options {
                     o.width = w.parse()?;
                     o.height = h.parse()?;
                 }
-                "--scale" => o.scale = args.next().context("--scale needs a number")?.parse()?,
+                "--scale" => {
+                    o.scale = Some(args.next().context("--scale needs a number")?.parse()?)
+                }
                 "--capture" => {
                     o.capture = Some(PathBuf::from(
                         args.next().context("--capture needs a .png path")?,
@@ -332,7 +334,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait --traverse\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--traversal on|off: off plays rolls, leaps, charges and climbs by the clock and swimmers as runners, and climbers' clips by the clock with their hands and feet as the clips have them, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures; traverse rolls, climbs, swims, hangs, shimmies round corners, runs up a wall, ejects, leaps and lunges over a course for traversal captures."
+                        "Aldermoor Metal client\nMouse looks and turns you (crosshair) · WASD run and strafe · hold Ctrl for the pointer\nShift sprint (out of combat) · / walk · Space jump · Alt, V or mouse 4 roll · Tab target · T or Num Lock autorun\nLeft click attack (hold to keep swinging) · right click guard · 1–9/0 skills · F also guards · ` swap · G revive · R respawn · Esc controls (rebind keys, quit)\n--scheme classic: WoW-style instead (A/D turn, Q/E strafe, left-drag look, right-drag steer, both buttons run)\n\n--size WIDTHxHEIGHT --scale 0.25..1 (fixed; interactive default adapts 0.55..0.75, captures/scripted runs use 0.75) --assets PATH\n--capture FILE.png --frames N --offscreen --showcase --inspect ART --smoke --effects-review --gait --traverse\n--effects-reel (each effect close up and captioned, from the end of --warmup; --frames for all of it: warmup + 60 × the seconds it prints) --reel-from SECONDS\n--view 0..3 (showcase camera) --sequence DIR (every frame after --warmup) --sequence-step N\n--fullscreen --aa taa|metalfx|none|msaa --fps N --benchmark --warmup N --in-flight 1..3\n--look-settings FILE --surface-assets FILE --hud-font FILE --scheme classic|action --controls FILE.json (default ~/Library/Application Support/Aldermoor/controls.json)\n--connect HOST:PORT --server-cert FILE --name NAME: play on a server over the network (QUIC), trusting its certificate (the server's --cert file, default aldermoor.der)\n--blend inertialize|dead|off: how characters blend between clips (dead blending and cuts are for comparisons)\n--crowd N: N more characters round you, standing, walking, running and fighting, to measure animation\n--anim-tiers on|off: off rebuilds every character's pose every frame, to compare with the rates by importance\n--foot-ik on|off: off leaves characters' feet as the clips have them (sliding, and level on slopes), to compare\n--lean on|off: off keeps characters upright setting off, stopping and turning, to compare\n--flinch on|off: off plays the hit clip in full on every blow, without the hitstop, to compare\n--traversal on|off: off plays rolls, leaps, charges and climbs by the clock and swimmers as runners, and climbers' clips by the clock with their hands and feet as the clips have them, to compare\n--hit-churn: staged blows every 0.75 s, from every side, light, heavy and big in turn: in the showcase the first character swings and the rest take them; with --gait the player takes them on the move\nF3 performance overlay; --perf-overlay starts visible; --no-gpu-counters disables timestamps\n--gpu-profile-scene separates scene timings (diagnostic); --counter-overhead alternates sampling\nLook and surfaces default to the selected asset root’s catalog/look.json and catalog/surfaces.json when present.\nShowcase is a catalogue review scene; effects review stages a fight in it showing every combat effect; smoke sends movement/jump/dodge/combat commands; gait runs, strafes, backpedals, walks and sprints for animation captures; traverse rolls, climbs, swims, hangs, shimmies round corners, runs up a wall, ejects, leaps and lunges over a course for traversal captures."
                     );
                     std::process::exit(0)
                 }
@@ -343,6 +345,30 @@ impl Options {
             o.width > 0 && o.height > 0 && o.width <= 8192 && o.height <= 8192,
             "size must be between 1 and 8192 pixels"
         );
+        ensure!(
+            o.scale
+                .is_none_or(|scale| scale.is_finite() && (0.25..=1.).contains(&scale)),
+            "--scale must be a finite number between 0.25 and 1"
+        );
+        // Review captures and scripted measurements must not depend on shared GPU load.
+        // Leave None only for interactive on-screen play; explicit scales always win.
+        if o.scale.is_none()
+            && (o.capture.is_some()
+                || o.offscreen
+                || o.sequence.is_some()
+                || o.smoke
+                || o.gait
+                || o.traverse
+                || o.hit_churn
+                || o.showcase
+                || o.effects_review
+                || o.reel
+                || o.inspect.is_some()
+                || o.benchmark)
+        {
+            o.scale = Some(render::settings::DynamicResolution::MAX_SCALE);
+        }
+        o.perf.adaptive_scale = o.scale.is_none();
         if o.offscreen && o.frames.is_none() {
             o.frames = Some(120)
         }
@@ -439,6 +465,7 @@ struct Game {
     /// budget (#215).
     animation: anim::Crowd,
     finished_at: Instant,
+    resolution: Option<render::settings::DynamicResolution>,
     smoke_stage: usize,
     /// Sim tick the last smoke stage went out on.
     smoke_tick: Option<u64>,
@@ -540,6 +567,10 @@ impl Game {
         let smoke_start = first.unit(host.player).unwrap().position;
         let mut g = Self {
             perf: perf_overlay::Overlay::new(&options.perf),
+            resolution: options
+                .scale
+                .is_none()
+                .then(render::settings::DynamicResolution::default),
             options,
             host,
             snaps: interpolate::Snapshots::new(first),
@@ -2032,6 +2063,35 @@ impl Game {
             r.wait()?;
             stats = r.stats;
         }
+        // Completion IDs prevent the same delayed GPU result steering more than once.
+        // Frames already submitted at the old scale are skipped by ID, without a drain.
+        if let Some(controller) = &mut self.resolution
+            && let Some(sample) = stats.completed
+            && sample.frame >= self.options.warmup as usize
+            && let Some(scale) = controller.observe(
+                sample.frame,
+                self.start.elapsed().as_secs_f64(),
+                sample.gpu_ms,
+            )
+        {
+            let from = r.scale;
+            let resize = Instant::now();
+            r.set_render_scale(scale)?;
+            self.perf.scale_step(
+                sample.frame,
+                from,
+                scale,
+                resize.elapsed().as_secs_f64() * 1000.,
+            );
+            controller.resize_completed(
+                r.last_submitted_frame().unwrap_or(sample.frame),
+                self.start.elapsed().as_secs_f64(),
+            );
+            eprintln!(
+                "RESOLUTION frame={} scale={scale:.3} gpu_ms={:.3}",
+                sample.frame, sample.gpu_ms
+            );
+        }
         let finished = Instant::now();
         self.perf.collect(
             r,
@@ -2039,6 +2099,8 @@ impl Game {
             self.options.warmup,
             self.options.benchmark,
         );
+        self.perf
+            .frame_interval((finished - self.finished_at).as_secs_f64() * 1000.);
         if self.frame > self.options.warmup && !done {
             self.gpu.push(stats.gpu_ms);
             self.intervals
@@ -2581,7 +2643,10 @@ impl ApplicationHandler for App {
             let mut r = Renderer::with_samples(
                 size.width,
                 size.height,
-                self.game.options.scale,
+                self.game
+                    .options
+                    .scale
+                    .unwrap_or(render::settings::DynamicResolution::MAX_SCALE),
                 self.game.options.samples,
             )?;
             if let RawWindowHandle::AppKit(h) = w.window_handle()?.as_raw() {
@@ -2591,6 +2656,9 @@ impl ApplicationHandler for App {
                 anyhow::bail!("Aldermoor requires macOS")
             };
             r.set_frames_in_flight(self.game.options.in_flight)?;
+            if self.game.resolution.is_some() {
+                r.reserve_render_scales(render::settings::DynamicResolution::MAX_SCALE)?;
+            }
             perf_overlay::Overlay::configure(&mut r, &self.game.options.perf);
             r.enable_metalfx(self.game.options.metalfx)?;
             if let Some(path) = &self.game.options.look_settings {
@@ -2852,10 +2920,15 @@ fn main() -> Result<()> {
         let mut renderer = Renderer::with_samples(
             game.options.width,
             game.options.height,
-            game.options.scale,
+            game.options
+                .scale
+                .unwrap_or(render::settings::DynamicResolution::MAX_SCALE),
             game.options.samples,
         )?;
         renderer.set_frames_in_flight(game.options.in_flight)?;
+        if game.resolution.is_some() {
+            renderer.reserve_render_scales(render::settings::DynamicResolution::MAX_SCALE)?;
+        }
         perf_overlay::Overlay::configure(&mut renderer, &game.options.perf);
         renderer.enable_metalfx(game.options.metalfx)?;
         if let Some(path) = &game.options.look_settings {

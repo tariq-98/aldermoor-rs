@@ -12,13 +12,30 @@ pub struct Options {
     pub visible: bool,
     pub split_scene: bool,
     pub overhead_check: bool,
+    /// Interactive play adapts the render scale; explicit --scale and scripted runs fix it.
+    pub adaptive_scale: bool,
+}
+/// Frame intervals logged on each side of a render-scale step, so a resize hitch shows.
+const STEP_WINDOW: usize = 30;
+struct ScaleStep {
+    frame: usize,
+    from: f32,
+    to: f32,
+    resize_ms: f64,
+    before: Vec<f64>,
+    after: Vec<f64>,
 }
 #[derive(Default)]
 pub struct Overlay {
     visible: bool,
+    adaptive_scale: bool,
     cpu_ms: f64,
     frames: Vec<GpuFrame>,
     latest: Option<GpuFrame>,
+    /// Render scale and internal target size, as `Renderer::resize` rounds them.
+    render: (f32, u32, u32),
+    recent: std::collections::VecDeque<f64>,
+    steps: Vec<ScaleStep>,
     /// This frame's character animation, and every recorded frame's.
     animation: Animation,
     animations: Vec<Animation>,
@@ -54,6 +71,7 @@ impl Overlay {
     pub fn new(options: &Options) -> Self {
         Self {
             visible: options.visible,
+            adaptive_scale: options.adaptive_scale,
             ..Default::default()
         }
     }
@@ -89,6 +107,12 @@ impl Overlay {
     }
     pub fn collect(&mut self, renderer: &mut Renderer, cpu_ms: f64, warmup: u64, record: bool) {
         self.cpu_ms = cpu_ms;
+        let internal = |size: u32| (size as f32 * renderer.scale).round().max(1.) as u32;
+        self.render = (
+            renderer.scale,
+            internal(renderer.width),
+            internal(renderer.height),
+        );
         for sample in renderer.take_completed_frames() {
             if self.latest.is_none_or(|last| sample.frame > last.frame) {
                 self.latest = Some(sample);
@@ -97,6 +121,34 @@ impl Overlay {
                 self.frames.push(sample);
             }
         }
+    }
+    /// Call after a render-scale change, before that frame's interval is recorded.
+    pub fn scale_step(&mut self, frame: usize, from: f32, to: f32, resize_ms: f64) {
+        self.steps.push(ScaleStep {
+            frame,
+            from,
+            to,
+            resize_ms,
+            before: self.recent.iter().copied().collect(),
+            after: Vec::with_capacity(STEP_WINDOW),
+        });
+    }
+    /// Wall-clock interval of every frame; logs each step's window once it has filled.
+    pub fn frame_interval(&mut self, ms: f64) {
+        if self.recent.len() == STEP_WINDOW {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(ms);
+        for step in &mut self.steps {
+            step.after.push(ms);
+        }
+        self.steps.retain(|step| {
+            if step.after.len() < STEP_WINDOW {
+                return true;
+            }
+            eprintln!("RESOLUTION_WINDOW {}", step_report(step));
+            false
+        });
     }
     pub fn draw(
         &self,
@@ -113,6 +165,15 @@ impl Overlay {
             .default_pos([12., 220.])
             .resizable(false)
             .show(ctx, |ui| {
+                let (scale, w, h) = self.render;
+                ui.label(format!(
+                    "Render scale {scale:.2} · {w}×{h} ({})",
+                    if self.adaptive_scale {
+                        "adaptive"
+                    } else {
+                        "fixed"
+                    }
+                ));
                 ui.label(format!("CPU encode + slot wait: {:.3} ms", self.cpu_ms));
                 ui.label(format!("Sim step (rolling mean): {sim_ms:.3} ms"));
                 let (mean, spread) = pacing.interval_ms();
@@ -223,6 +284,26 @@ impl Overlay {
         );
     }
 }
+fn step_report(step: &ScaleStep) -> Value {
+    let summary = |values: &[f64]| {
+        let mut sorted = values.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        json!({
+            "median_ms": sorted.get(sorted.len() / 2),
+            "max_ms": sorted.last(),
+        })
+    };
+    let before = summary(&step.before);
+    let after = summary(&step.after);
+    let median = before["median_ms"].as_f64();
+    let worst = after["max_ms"].as_f64();
+    json!({
+        "frame": step.frame, "from": step.from, "to": step.to, "resize_ms": step.resize_ms,
+        "before": before, "after": after,
+        "worst_over_median": median.zip(worst).map(|(m, w)| w / m.max(1e-3)),
+        "intervals_before_ms": step.before, "intervals_after_ms": step.after,
+    })
+}
 fn counter_sampled(frame: u64) -> bool {
     matches!(frame % 4, 1 | 2) ^ ((frame / 4).count_ones() % 2 == 1)
 }
@@ -321,6 +402,37 @@ fn report(frames: &[GpuFrame], counters_enabled: bool, overlay_visible: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scale_steps_report_the_intervals_on_each_side_once() {
+        let mut overlay = Overlay::default();
+        for _ in 0..40 {
+            overlay.frame_interval(16.);
+        }
+        overlay.scale_step(500, 0.75, 0.65, 4.5);
+        let step = &overlay.steps[0];
+        assert_eq!(step.before, vec![16.; STEP_WINDOW]);
+        overlay.frame_interval(40.);
+        for _ in 1..STEP_WINDOW {
+            assert_eq!(overlay.steps.len(), 1);
+            overlay.frame_interval(17.);
+        }
+        assert!(
+            overlay.steps.is_empty(),
+            "a full window is logged and dropped"
+        );
+        let report = step_report(&ScaleStep {
+            frame: 500,
+            from: 0.75,
+            to: 0.65,
+            resize_ms: 4.5,
+            before: vec![16.; STEP_WINDOW],
+            after: [40.].into_iter().chain([17.; STEP_WINDOW - 1]).collect(),
+        });
+        assert_eq!(report["before"]["median_ms"], 16.0_f64);
+        assert_eq!(report["after"]["max_ms"], 40.0_f64);
+        assert_eq!(report["worst_over_median"], 2.5_f64);
+        assert_eq!(report["to"], 0.65f32 as f64);
+    }
     #[test]
     fn overhead_blocks_balance_sampling_across_jitter_phases() {
         for block in 0..32 {
