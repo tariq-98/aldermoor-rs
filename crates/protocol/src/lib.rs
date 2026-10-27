@@ -497,6 +497,11 @@ pub struct Slot {
     pub radius: f32,
     /// True when it repeats on its own while you have a target (the basic attack).
     pub auto: bool,
+    /// Uses ready now, of `max_charges` (#349); for most skills 1 of 1, or 0 while cooling down.
+    pub charges: u8,
+    pub max_charges: u8,
+    /// Seconds until the next charge comes back; 0 when all are.
+    pub next_charge: f32,
 }
 
 /// A cast or channel in progress.

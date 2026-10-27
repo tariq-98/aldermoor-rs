@@ -179,7 +179,12 @@ fn fly(world: &mut World, p: &mut Projectile) -> bool {
     if p.combo.is_none() && catalog().ability(p.ability).finisher == Some(Finisher::Projectile) {
         p.combo = effects::field_at(world, to, p.src.faction);
     }
+    // The first wall, trunk or face along the step, however thin: nobody behind it is struck.
+    let wall = wall_along(&world.resource::<Land>().0, from, to);
     for (te, s) in struck(world, p, from, to) {
+        if wall.is_some_and(|w| s > w) {
+            break;
+        }
         let at = from + step * s;
         match land(world, p, te, at) {
             Landed::Through => continue,
@@ -197,9 +202,8 @@ fn fly(world: &mut World, p: &mut Projectile) -> bool {
             }
         }
     }
-    let land = &world.resource::<Land>().0;
-    if land.blocked(Vec2::new(to.x, to.z), 0.05) || to.y < land.ground(to.x, to.z) - 0.05 {
-        p.pos = to;
+    if let Some(w) = wall {
+        p.pos = from + step * w;
         end(world, p, None);
         return false;
     }
@@ -211,6 +215,21 @@ fn fly(world: &mut World, p: &mut Projectile) -> bool {
     }
     true
 }
+
+/// Where along the step from `from` to `to` (0 to 1) a missile first meets something solid: a
+/// building, trunk or parapet below its roof (#338), or the ground or a wall's top rising above it
+/// (#337). Sampled every 0.1 m, so even a fast arrow can't skip a thin wall between one step's end
+/// and the next.
+fn wall_along(land: &world::Valley, from: Vec3, to: Vec3) -> Option<f32> {
+    let n = ((to - from).length() / WALL_SAMPLE).ceil().max(1.0) as u32;
+    (1..=n).map(|i| i as f32 / n as f32).find(|&k| {
+        let at = from + (to - from) * k;
+        land.blocked_at(Vec2::new(at.x, at.z), 0.05, at.y) || at.y < land.ground(at.x, at.z) - 0.05
+    })
+}
+
+/// How finely a missile's step is tested against the land, in metres.
+const WALL_SAMPLE: f32 = 0.1;
 
 /// Units the missile passes through between `from` and `to`, nearest first, with how far along
 /// the step each is met.

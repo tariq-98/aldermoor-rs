@@ -1273,3 +1273,23 @@ fn masonry_too_tall_to_climb_blocks_sight_and_low_walls_do_not() {
     f.step();
     assert!(f.force(archer, "goblin_shot", Some(hero)), "a field wall hid the hero");
 }
+
+#[test]
+fn arrows_stop_at_a_thin_wall_wherever_their_steps_fall() {
+    // A wall 0.3 m thick and 1.4 m tall across the road: low enough to see over (so the shot is
+    // loosed), high enough to stop an arrow flying at chest height. A fast arrow covers about
+    // 0.9 m a step, so moving the archer back 0.1 m at a time puts the step ends on every side
+    // of the wall. None may get through (#337).
+    for back in 0..10 {
+        let mut f = Fight::new();
+        let wall_at = ROAD + Vec2::new(0.0, 6.0);
+        let ground = f.sim.land().ground(wall_at.x, wall_at.y);
+        f.sim.land_mut().add_solid(world::Solid { center: wall_at, half: Vec2::new(4.0, 0.15), yaw: 0.0, top: Some(ground + 1.4), rise: 0.0, roof: None });
+        let archer = f.hero(Specialty::Warrior, 10, ROAD - Vec2::new(0.0, back as f32 * 0.1), 0.0);
+        let target = f.dummy("skeleton", ROAD + Vec2::new(0.0, 12.0), PI);
+        f.step();
+        assert!(f.force(archer, "longbow_shot", Some(target)), "the shot wasn't loosed from {back}");
+        f.run(1.0);
+        assert!(f.blows_on(target).is_empty(), "an arrow went through the wall with the archer {} m back", back as f32 * 0.1);
+    }
+}

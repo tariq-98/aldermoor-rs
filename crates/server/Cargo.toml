@@ -17,3 +17,6 @@ rustls.workspace = true
 rcgen.workspace = true
 tokio.workspace = true
 bytes.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
+argon2 = "0.5"
+password-hash = { version = "0.5", features = ["getrandom"] }

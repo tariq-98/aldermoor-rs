@@ -134,7 +134,7 @@ pub fn solids(house: &Placement) -> impl Iterator<Item = Solid> + '_ {
     let base = height(house.position.x, house.position.y);
     of(house).blocks().into_iter().map(move |b| {
         let c = place(house, Vec3::new(b.center.x, 0.0, b.center.y));
-        Solid { center: Vec2::new(c.x, c.z), half: b.half * house.scale, yaw: house.yaw + b.yaw, top: b.top.map(|t| base + t * house.scale), rise: b.rise }
+        Solid { center: Vec2::new(c.x, c.z), half: b.half * house.scale, yaw: house.yaw + b.yaw, top: b.top.map(|t| base + t * house.scale), rise: b.rise, roof: None }
     })
 }
 

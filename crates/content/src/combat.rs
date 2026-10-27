@@ -353,6 +353,9 @@ pub struct AbilityDef {
     pub ticks: u8,
     pub gcd: bool,
     pub cooldown: f64,
+    /// Uses held at once (#349): while below full, one comes back each `cooldown`. 1 is an
+    /// ordinary cooldown.
+    pub charges: u8,
     pub cost: f32,
     /// Resource the user gains (builders: rage and essence).
     pub generates: f32,
@@ -408,6 +411,7 @@ impl AbilityDef {
             ticks: 0,
             gcd: true,
             cooldown: 0.0,
+            charges: 1,
             cost: 0.0,
             generates: 0.0,
             movable: true,
@@ -908,6 +912,9 @@ impl Catalog {
         for a in &self.abilities {
             if !seen.insert(a.key) {
                 out.push(format!("ability {} is defined twice", a.key));
+            }
+            if a.charges == 0 {
+                out.push(format!("ability {}: charges must be at least 1", a.key));
             }
         }
         let mut seen = std::collections::HashSet::new();

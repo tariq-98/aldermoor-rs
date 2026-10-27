@@ -160,7 +160,9 @@ fn a_jump_pressed_just_before_landing_goes_off_as_you_land() {
 
 /// Runs east off the west terraces' 16 m face and presses jump `late` seconds after the feet
 /// leave the top: whether it jumped.
-fn jump_off_the_edge(late: f32) -> bool {
+/// Jumps `late` seconds after running off an edge: how fast it rises, and whether the double jump
+/// is left.
+fn jump_off_the_edge(late: f32) -> (f32, bool) {
     let mut sim = Sim::new(7);
     let id = sim.spawn_player("Hero", Vec2::new(-50.0, -30.0), std::f32::consts::FRAC_PI_2);
     sim.step();
@@ -175,14 +177,20 @@ fn jump_off_the_edge(late: f32) -> bool {
     sim.run_for(late);
     sim.command(id, Command::Jump);
     sim.step();
-    sim.get::<Motion>(id).unwrap().vel.y > 0.0
+    let m = sim.get::<Motion>(id).unwrap();
+    (m.vel.y, m.air_jump)
 }
 
 #[test]
 fn a_jump_just_after_running_off_an_edge_still_works() {
-    assert!(jump_off_the_edge(0.0), "no jump as the feet left the edge");
-    assert!(jump_off_the_edge(0.07), "no jump 0.07 s after leaving the edge");
-    assert!(!jump_off_the_edge(0.2), "jumped in mid-air 0.2 s after leaving the edge");
+    // A full jump from the ground, with the double jump still to come.
+    for late in [0.0, 0.07] {
+        let (vy, air_jump) = jump_off_the_edge(late);
+        assert!(vy > 6.0 && air_jump, "no ground jump {late} s after leaving the edge: {vy} m/s");
+    }
+    // Later it's the double jump (#347): lower, and only once.
+    let (vy, air_jump) = jump_off_the_edge(0.2);
+    assert!(vy > 4.5 && vy < 6.0 && !air_jump, "0.2 s after leaving the edge: {vy} m/s, double jump left {air_jump}");
 }
 
 fn go(sim: &mut Sim, id: u32, direction: Vec2, sprint: bool) {
@@ -334,7 +342,7 @@ fn at_a_wall(rise: f32) -> (Sim, u32, f32) {
     let at = Vec2::new(5.0, 12.0);
     let wall = at + Vec2::new(3.0, 0.0);
     let top = sim.land().ground(wall.x, wall.y) + rise;
-    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.4, 2.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
     let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
     sim.step();
     go(&mut sim, id, Vec2::X, false);
@@ -361,7 +369,7 @@ fn at_wall(rise: f32, depth: f32, walk: bool, jump: Option<f32>, seconds: f32) -
     let at = Vec2::new(5.0, 10.0);
     let wall = at + Vec2::new(3.0, 0.0);
     let top = sim.land().ground(wall.x, wall.y) + rise;
-    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(depth / 2.0, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(depth / 2.0, 2.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
     let id = sim.spawn_player("Hero", at, std::f32::consts::FRAC_PI_2);
     sim.step();
     sim.command(id, Command::Move { direction: Vec2::X, walk, sprint: false, face_yaw: None });
@@ -423,11 +431,11 @@ fn walking_at_a_low_wall_or_running_at_a_deep_or_tall_one_doesnt_vault() {
 fn no_vault_onto_ground_that_isnt_clear() {
     let mut sim = Sim::new(7);
     // A shed right behind the wall.
-    sim.land_mut().add_solid(world::Solid { center: Vec2::new(9.6, 10.0), half: Vec2::new(0.5, 2.0), yaw: 0.0, top: None, rise: 0.0 });
+    sim.land_mut().add_solid(world::Solid { center: Vec2::new(9.6, 10.0), half: Vec2::new(0.5, 2.0), yaw: 0.0, top: None, rise: 0.0, roof: None });
     let (kinds, ..) = {
         let wall = Vec2::new(8.0, 10.0);
         let top = sim.land().ground(wall.x, wall.y) + 1.0;
-        sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.2, 2.0), yaw: 0.0, top: Some(top), rise: 0.0 });
+        sim.land_mut().add_solid(world::Solid { center: wall, half: Vec2::new(0.2, 2.0), yaw: 0.0, top: Some(top), rise: 0.0, roof: None });
         let id = sim.spawn_player("Hero", Vec2::new(5.0, 10.0), std::f32::consts::FRAC_PI_2);
         sim.step();
         go(&mut sim, id, Vec2::X, false);
