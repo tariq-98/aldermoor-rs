@@ -184,6 +184,65 @@ are triplanar normal/colour/roughness layer blending, scrolling water normals, d
 Fresnel sky reflection and an equirectangular sky. Claude’s delivered inputs now exercise all
 three surface types and the sky radiance prefilter. Foam, refractive scene sampling and atmosphere art are not fabricated here.
 
+### Optional screen-space river water (#325)
+
+`water.screen_space` is an optional object. All booleans default to `false`, all numbers to
+zero; this is a neutral contract for Claude-authored settings, not a new look preset.
+
+| Setting | Meaning / validation |
+| --- | --- |
+| `enabled` | Quality gate; off preserves the original combined scene pass and water shader. |
+| `reflections` | Enable opaque-scene SSR; misses retain existing sky reflection. |
+| `refraction` | Enable normal-offset riverbed sampling with foreground-depth rejection. |
+| `shoreline` | Enable depth-faded opacity and procedural foam using existing shallow colour. |
+| `ray_distance` | SSR maximum world distance in metres; positive when reflections are on. |
+| `thickness` | SSR view-depth hit tolerance / normal origin offset, metres; positive for SSR. |
+| `edge_fade` | SSR fade width in normalised screen coordinates, (0, 0.5] for SSR. |
+| `refraction_metres` | World-space horizontal normal offset; positive for refraction. |
+| `shore_depth` | Vertical water-to-bed distance over which opacity fades; positive for shoreline. |
+| `foam_strength` | Procedural band mix with existing `shallow_colour`, [0, 1]. |
+| `foam_scale` | Procedural band spatial frequency in inverse metres; positive for shoreline. |
+
+All numeric inputs must be finite and nonnegative, including disabled features. Unknown keys
+are rejected. Each feature switch independently leaves that feature's legacy contribution in
+place. With `enabled` off, or all three features off, no new targets, copies or passes run.
+The quality gate defaults off pending authored tuning, cost measurement and visual acceptance.
+
+Enabled single-sample rendering draws sky/opaque, copies HDR colour and depth, draws water
+against those immutable copies, then draws remaining transparency/decals before the existing
+upscaler. SSR uses 20 steps and five binary refinements, fading near the screen edge and ray
+limit; only opaque geometry is reflected/refracted. Refraction rejects foreground banks,
+missing depth and off-screen offsets. Shore opacity uses reconstructed vertical bed depth;
+absorption uses optical path length. No new texture or asset is required.
+
+TAA, MetalFX and no-AA modes support this path. MSAA keeps legacy water, because its
+multisample depth has no single-sample copy here. Targets resize with internal resolution.
+`water_screen_space` timestamps cover drawing; `water_input_copies` covers the two blits
+(vertex/fragment fields are zero for that blit). Other elapsed pass spans can overlap; do not
+sum them. Paired whole-frame timings include the extra encoder load/store and copy costs.
+Compare at 2560x1600 / 75%, with river visible, against the 0.6 ms incremental water budget
+and the 12 ms whole-GPU budget. Offscreen timings do not establish on-screen presentation.
+
+Claude's Mac check must compare main and the exact PR head from bridge/bank, low/high camera
+angles and a pan: screen-edge reflection transitions, bank refraction bleed, shoreline bands,
+and TAA shimmer. Codex does not generate capture image files.
+
+The ignored `metal::temporal_tests::river_reference_benchmark` provides a repeatable static
+river view through the existing renderer/scenery APIs, without a client camera change. It loads
+the authored valley and look, uses the water regression camera, renders 2560x1600 / 75% TAA,
+one frame in flight, and records 360 frames after 120 warmup frames. There is no crowd or HUD;
+these are offscreen diagnostic timings, not a full-scene or ten-minute budget acceptance.
+`ALDER_WATER_QUALITY=on` reuses the unit-test parameter fixture (20 m ray, 0.1 m tolerance,
+0.1 edge fade, 1 m refraction offset, 0.1 m shore depth, foam strength/frequency 1). These are
+explicit engineering test inputs, not new authored defaults. Omit it for legacy water.
+`ALDER_WATER_SPLIT=1` separates sky/opaque timings. `ALDER_WATER_REPORT` names a temporary JSON
+report. Build the test executable through `aldermoor-build-slot cargo test --release -p render
+--locked --no-run`, then run that executable with `metal::temporal_tests::river_reference_benchmark --ignored --exact`. Hold the shared GPU lock throughout the timed run,
+write its owner immediately, and set `ALDER_WATER_BENCH_LOCK_OWNER` to that owner line. The test
+refuses to run without a matching owner. Release the lock on exit, including failures. The
+benchmark creates only a numeric JSON report, including a SHA-256 of the final framebuffer
+computed through a pipe; no image or model files.
+
 ## Earlier baseline measurements (24 October 2026)
 
 ```sh

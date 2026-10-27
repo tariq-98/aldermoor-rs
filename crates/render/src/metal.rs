@@ -189,7 +189,7 @@ struct GpuMesh {
     shadow_vertices: Obj<dyn MTLBuffer>,
     shadow_layout: [u32; 2],
 }
-pub const GPU_PASS_NAMES: [&str; 15] = [
+pub const GPU_PASS_NAMES: [&str; 17] = [
     "shadow_0",
     "shadow_1",
     "shadow_2",
@@ -205,7 +205,11 @@ pub const GPU_PASS_NAMES: [&str; 15] = [
     "bloom_horizontal_half",
     "bloom_vertical_half",
     "post_apply",
+    "water_screen_space",
+    "water_input_copies",
 ];
+const WATER_SCREEN_SPACE_PASS: usize = 15;
+const WATER_INPUT_COPIES_PASS: usize = 16;
 const PASS_COUNT: usize = GPU_PASS_NAMES.len();
 const SAMPLE_COUNT: usize = PASS_COUNT * 4;
 
@@ -220,7 +224,7 @@ pub struct GpuFrame {
     pub frame: usize,
     pub counters_sampled: bool,
     /// Passes deliberately omitted by scheduling, independent of counter availability.
-    pub skipped_pass_mask: u16,
+    pub skipped_pass_mask: u32,
     /// Seconds since renderer creation, at command-buffer submission (not completion).
     pub elapsed_seconds: f64,
     pub gpu_ms: f64,
@@ -289,7 +293,7 @@ impl PassCounters {
     }
     fn resolve(
         &self,
-        mask: u16,
+        mask: u32,
         start: (u64, u64),
         end: (u64, u64),
     ) -> [Option<PassTiming>; PASS_COUNT] {
@@ -321,7 +325,12 @@ impl PassCounters {
                 let offset = (i * 4 + j) * 8;
                 u64::from_ne_bytes(bytes[offset..offset + 8].try_into().unwrap())
             });
-            *timing = decode_pass(t, ms_per_tick);
+            *timing = if i == WATER_INPUT_COPIES_PASS {
+                // The water input blit records only encoder start/end, not render stages.
+                decode_pass([t[0], t[0], t[1], t[1]], ms_per_tick)
+            } else {
+                decode_pass(t, ms_per_tick)
+            };
         }
         result
     }
@@ -349,7 +358,7 @@ struct Slot {
     pending: Option<Obj<dyn MTLCommandBuffer>>,
     counters: Option<PassCounters>,
     measured: GpuFrame,
-    pass_mask: u16,
+    pass_mask: u32,
     clock_start: (u64, u64),
 }
 struct Previous {
@@ -364,6 +373,9 @@ enum DrawPass {
     Scene,
     Opaque,
     Transparent,
+    OpaqueWithoutWater,
+    TransparentWithoutWater,
+    Water,
 }
 struct Prepared {
     uniform: usize,
@@ -415,6 +427,8 @@ pub struct Renderer {
     queue: Obj<dyn MTLCommandQueue>,
     opaque: Obj<dyn MTLRenderPipelineState>,
     blend: Obj<dyn MTLRenderPipelineState>,
+    water_pipeline: Obj<dyn MTLRenderPipelineState>,
+    water_inputs: Option<(Obj<dyn MTLTexture>, Obj<dyn MTLTexture>)>,
     shadow_pipeline: Obj<dyn MTLRenderPipelineState>,
     shadow_mask_pipeline: Obj<dyn MTLRenderPipelineState>,
     taa: Obj<dyn MTLRenderPipelineState>,
@@ -784,6 +798,14 @@ impl Renderer {
             true,
             true,
         )?;
+        let water_pipeline = pipeline(
+            "scene_vertex",
+            Some("water_fragment"),
+            samples,
+            &scene_formats,
+            true,
+            true,
+        )?;
         // Opaque casters need only depth. Keep discard confined to masked casters.
         let shadow_pipeline = pipeline("shadow_vertex", None, 1, &[], true, false)?;
         let shadow_mask_pipeline = pipeline(
@@ -991,6 +1013,8 @@ impl Renderer {
             layer: None,
             opaque,
             blend,
+            water_pipeline,
+            water_inputs: None,
             shadow_pipeline,
             shadow_mask_pipeline,
             taa,
@@ -1059,6 +1083,7 @@ impl Renderer {
             u.flags[0] = t.layers.len() as u32;
         }
         if let Some(w) = inputs.water {
+            w.screen_space.pack(&mut u);
             self.surface_maps[3] = self.image(&*Texture::load(&root.join(w.normal))?, false)?;
             u.water_deep = [
                 w.deep_colour[0],
@@ -1090,6 +1115,7 @@ impl Renderer {
             self.prefilter_sky()?;
         }
         self.surface_uniform = u;
+        self.resize_water_inputs()?;
         self.reset_temporal_history();
         Ok(())
     }
@@ -1267,6 +1293,42 @@ impl Renderer {
         view.setLayer(Some(&layer));
         self.layer = Some(layer);
     }
+    fn screen_water_enabled(&self) -> bool {
+        self.samples == 1
+            && self.surface_uniform.flags[1] != 0
+            && self.surface_uniform.water_features[0] != 0
+            && self.surface_uniform.water_features[1..]
+                .iter()
+                .any(|v| *v != 0)
+    }
+    fn resize_water_inputs(&mut self) -> Result<()> {
+        self.water_inputs = if self.screen_water_enabled() {
+            Some((
+                texture(
+                    &self.device,
+                    self.hdr.width(),
+                    self.hdr.height(),
+                    MTLPixelFormat::RGBA16Float,
+                    1,
+                    MTLTextureUsage::ShaderRead,
+                )?,
+                texture(
+                    &self.device,
+                    self.depth.width(),
+                    self.depth.height(),
+                    MTLPixelFormat::Depth32Float,
+                    1,
+                    MTLTextureUsage::ShaderRead,
+                )?,
+            ))
+        } else {
+            None
+        };
+        Ok(())
+    }
+    fn is_water(&self, draw: &Draw) -> bool {
+        draw.model.primitives[draw.primitive].material.name == "__water_placeholder"
+    }
     pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
         self.resize_at_scale(width, height, self.scale)
     }
@@ -1357,6 +1419,8 @@ impl Renderer {
         self.motion_msaa = motion_msaa;
         self.depth = depth;
         self.history = history;
+        // Opt-in screen-space water copies stay device allocations, outside the target heaps.
+        self.resize_water_inputs()?;
         if let Some(output) = output {
             self.output = output;
         }
@@ -1777,8 +1841,8 @@ impl Renderer {
             .map(|_| clock_pair(&self.device))
             .unwrap_or_default();
         let submitted_at = self.started.elapsed().as_secs_f64();
-        let mut pass_mask = 0u16;
-        let mut skipped_pass_mask = 0u16;
+        let mut pass_mask = 0u32;
+        let mut skipped_pass_mask = 0u32;
         for cascade in 0..3 {
             if cascade == 2 && !refresh_far {
                 skipped_pass_mask |= 1 << cascade;
@@ -1820,9 +1884,59 @@ impl Renderer {
             !split_scene || self.samples == 1,
             "split scene profiling requires single-sample rendering"
         );
-        for scene_part in 0..if split_scene { 3 } else { 1 } {
+        let water_active = self.water_inputs.is_some()
+            && prepared
+                .iter()
+                .any(|p| p.scene && self.is_water(&draws[p.draw]));
+        // Disabled quality retains the original encoder and draw ordering exactly.
+        let parts: &[(usize, Option<DrawPass>, bool)] = match (split_scene, water_active) {
+            (false, false) => &[(3, Some(DrawPass::Scene), true)],
+            (true, false) => &[
+                (7, None, false),
+                (8, Some(DrawPass::Opaque), false),
+                (9, Some(DrawPass::Transparent), true),
+            ],
+            (false, true) => &[
+                (3, Some(DrawPass::OpaqueWithoutWater), false),
+                (WATER_SCREEN_SPACE_PASS, Some(DrawPass::Water), false),
+                (9, Some(DrawPass::TransparentWithoutWater), true),
+            ],
+            (true, true) => &[
+                (7, None, false),
+                (8, Some(DrawPass::OpaqueWithoutWater), false),
+                (WATER_SCREEN_SPACE_PASS, Some(DrawPass::Water), false),
+                (9, Some(DrawPass::TransparentWithoutWater), true),
+            ],
+        };
+        for (scene_part, &(pass_index, selection, decals)) in parts.iter().enumerate() {
             let first_scene_pass = scene_part == 0;
-            let pass_index = if split_scene { 7 + scene_part } else { 3 };
+            if matches!(selection, Some(DrawPass::Water)) {
+                let (colour, depth) = self.water_inputs.as_ref().unwrap();
+                let blit_pass = MTLBlitPassDescriptor::new();
+                if let Some(c) = counters {
+                    unsafe {
+                        let a = blit_pass
+                            .sampleBufferAttachments()
+                            .objectAtIndexedSubscript(0);
+                        a.setSampleBuffer(Some(&c.buffer));
+                        a.setStartOfEncoderSampleIndex(WATER_INPUT_COPIES_PASS * 4);
+                        a.setEndOfEncoderSampleIndex(WATER_INPUT_COPIES_PASS * 4 + 1);
+                    }
+                    pass_mask |= 1 << WATER_INPUT_COPIES_PASS;
+                }
+                let blit = cb
+                    .blitCommandEncoderWithDescriptor(&blit_pass)
+                    .context("opaque water input copies")?;
+                for (source, destination) in [(&self.hdr, colour), (&self.depth, depth)] {
+                    unsafe {
+                        blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                            source, 0, 0, MTLOrigin {x:0,y:0,z:0},
+                            MTLSize {width:source.width(),height:source.height(),depth:1},
+                            destination, 0, 0, MTLOrigin {x:0,y:0,z:0});
+                    }
+                }
+                blit.endEncoding();
+            }
             let pass = MTLRenderPassDescriptor::new();
             if let Some(c) = counters {
                 c.attach(&pass, pass_index);
@@ -1893,24 +2007,18 @@ impl Renderer {
                 calls += 1;
             }
 
-            if !split_scene || scene_part != 0 {
+            if let Some(selection) = selection {
                 calls += self.encode(
                     &enc,
                     draws,
                     &prepared,
                     (&bones, &uniform_buffer, &mut uniform_used),
                     &f,
-                    if !split_scene {
-                        DrawPass::Scene
-                    } else if scene_part == 1 {
-                        DrawPass::Opaque
-                    } else {
-                        DrawPass::Transparent
-                    },
+                    selection,
                 )?;
             }
             // Ground marks go last in the scene, over whatever they lie on.
-            if !split_scene || scene_part == 2 {
+            if decals {
                 calls += self.fx_pass.decals(&enc, &fx, &f);
             }
             enc.endEncoding();
@@ -2126,7 +2234,7 @@ impl Renderer {
         frame: &Frame,
         post: &PostUniform,
         counters: Option<&PassCounters>,
-        mask: &mut u16,
+        mask: &mut u32,
     ) -> Result<usize> {
         let targets = self.post_targets.as_ref().expect("active post targets");
         let mut calls = 0;
@@ -2235,11 +2343,25 @@ impl Renderer {
                 }
             }
         }
+        if matches!(selection, DrawPass::Water) {
+            let (colour, depth) = self.water_inputs.as_ref().context("missing water inputs")?;
+            unsafe {
+                enc.setFragmentTexture_atIndex(Some(colour), 13);
+                enc.setFragmentTexture_atIndex(Some(depth), 14);
+            }
+        }
         let mut count = 0;
         let mut visible: Vec<_> = prepared
             .iter()
             .filter(|p| cascade.map_or(p.scene, |c| p.shadows[c]))
             .filter(|p| match selection {
+                DrawPass::Water => self.is_water(&draws[p.draw]),
+                DrawPass::OpaqueWithoutWater => {
+                    !self.is_water(&draws[p.draw]) && !self.blended(&draws[p.draw])
+                }
+                DrawPass::TransparentWithoutWater => {
+                    !self.is_water(&draws[p.draw]) && self.blended(&draws[p.draw])
+                }
                 DrawPass::Opaque => !self.blended(&draws[p.draw]),
                 DrawPass::Transparent => self.blended(&draws[p.draw]),
                 _ => true,
@@ -2289,7 +2411,8 @@ impl Renderer {
             let d = &draws[p.draw];
             let g = &self.meshes[&(d.model.id, d.primitive)];
             let m = &g.material;
-            let blended = self.blended(d);
+            let water_pass = matches!(selection, DrawPass::Water);
+            let blended = water_pass || self.blended(d);
             if cascade.is_some() && (blended || m.name == "__water_placeholder") {
                 continue;
             }
@@ -2307,7 +2430,13 @@ impl Renderer {
                 }
             }
             if cascade.is_none() && last_pipeline != Some(blended) {
-                enc.setRenderPipelineState(if blended { &self.blend } else { &self.opaque });
+                enc.setRenderPipelineState(if water_pass {
+                    &self.water_pipeline
+                } else if blended {
+                    &self.blend
+                } else {
+                    &self.opaque
+                });
                 enc.setDepthStencilState(Some(if blended {
                     &self.read_depth
                 } else {
@@ -2869,6 +2998,250 @@ mod temporal_tests {
             std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), size).to_vec()
         }
     }
+    /// Run the compiled test binary under the shared GPU lock, never via an unlocked test run.
+    /// The enabled mode reuses the numerical regression fixture, not an authored look preset.
+    #[test]
+    #[ignore = "reference-size timed water diagnostic; needs GPU lock and output path"]
+    fn river_reference_benchmark() {
+        let expected =
+            std::env::var("ALDER_WATER_BENCH_LOCK_OWNER").expect("GPU lock owner required");
+        assert_eq!(
+            std::fs::read_to_string("/tmp/aldermoor-gpu.lock/owner")
+                .unwrap()
+                .trim_end(),
+            expected.trim_end()
+        );
+        assert!(expected.starts_with("codex lane A pid ") && expected.contains(" issue #325 "));
+        let output =
+            std::env::var("ALDER_WATER_REPORT").expect("temporary JSON report path required");
+        let quality = std::env::var("ALDER_WATER_QUALITY").as_deref() == Ok("on");
+        let mut r = Renderer::new(2560, 1600, 0.75).unwrap();
+        r.scene_time = Some(0.);
+        r.set_frames_in_flight(1).unwrap();
+        r.set_gpu_counters(true).unwrap();
+        r.profile_scene = std::env::var("ALDER_WATER_SPLIT").as_deref() == Ok("1");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        r.look = LookSettings::load(&root.join("catalog/look.json")).unwrap();
+        r.load_surface_assets(&root.join("catalog/surfaces.json"), &root)
+            .unwrap();
+        // BEGIN screen-water test inputs (the baseline harness omits this new-setting block).
+        if quality {
+            r.surface_uniform.water_screen = [20., 0.1, 0.1, 1.];
+            r.surface_uniform.water_shore = [0.1, 1., 1., 0.];
+            r.surface_uniform.water_features = [1; 4];
+            r.resize_water_inputs().unwrap();
+        }
+        // END screen-water test inputs.
+        let terrain = crate::terrain::valley();
+        let mut draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let target = Vec3::new(0., world::WATER_LEVEL, world::river_z(0.));
+        let camera = Camera {
+            eye: target + Vec3::new(8., 8., 18.),
+            target,
+            fov: 1.,
+        };
+        let catalog = assets::Catalog::load(&root).unwrap();
+        let mut cache = crate::model::ModelCache::default();
+        let mut scenery = crate::scenery::Scenery::new(&catalog, &mut cache).unwrap();
+        draws.extend(
+            scenery
+                .draws(&catalog, &mut cache, camera, 1600, 0.)
+                .unwrap(),
+        );
+        let mut frames = Vec::new();
+        for frame in 0..480 {
+            r.draw(camera, &draws, None).unwrap();
+            r.wait().unwrap();
+            for sample in r.take_completed_frames() {
+                if frame >= 120 {
+                    frames.push(sample);
+                }
+            }
+        }
+        assert_eq!(frames.len(), 360);
+        // Hash the final framebuffer through a pipe; never create an image file.
+        use std::io::Write;
+        let mut hash = std::process::Command::new("/usr/bin/shasum")
+            .args(["-a", "256"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        hash.stdin
+            .take()
+            .unwrap()
+            .write_all(&output_bytes(&r))
+            .unwrap();
+        let hash = hash.wait_with_output().unwrap();
+        assert!(hash.status.success());
+        let hash = String::from_utf8(hash.stdout).unwrap();
+        let output_sha256 = hash.split_whitespace().next().unwrap();
+        let report = serde_json::json!({
+            "scene": "static authored valley at the river regression camera; no crowd or HUD",
+            "quality_fixture": quality, "profile_scene": r.profile_scene,
+            "output": [2560,1600], "scale": 0.75, "aa": "taa", "warmup": 120,
+            "eye": camera.eye.to_array(), "target": camera.target.to_array(), "fov": camera.fov,
+            "pass_names": GPU_PASS_NAMES, "frames": frames, "output_sha256": output_sha256,
+        });
+        std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn screen_water_lifecycle_and_disabled_pixels() {
+        let mut r = Renderer::with_samples(256, 256, 1., 1).unwrap();
+        r.scene_time = Some(0.);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        r.load_surface_assets(&root.join("catalog/surfaces.json"), &root)
+            .unwrap();
+        let terrain = crate::terrain::valley();
+        let draws: Vec<_> = terrain
+            .primitives
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Draw {
+                dye: None,
+                base_map: None,
+                instance: i as u64,
+                model: terrain.clone(),
+                primitive: i,
+                transform: Mat4::IDENTITY,
+                palette: Arc::from([]),
+                hidden: 0,
+                base: [1.; 4],
+                morph: [0.; 2],
+            })
+            .collect();
+        let target = Vec3::new(0., -0.78, world::river_z(0.));
+        let camera = Camera {
+            eye: target + Vec3::new(8., 8., 18.),
+            target,
+            fov: 1.,
+        };
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let legacy = output_bytes(&r);
+        assert!(r.water_inputs.is_none());
+        // Nonzero tuning has no effect while the master gate is off.
+        r.surface_uniform.water_screen = [20., 0.1, 0.1, 1.];
+        r.surface_uniform.water_shore = [0.1, 1., 1., 0.];
+        r.surface_uniform.water_features = [0, 1, 1, 1];
+        r.resize_water_inputs().unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(legacy, output_bytes(&r));
+        assert!(r.water_inputs.is_none());
+        // Master on with every feature off is also exactly the legacy path.
+        r.surface_uniform.water_features = [1, 0, 0, 0];
+        r.resize_water_inputs().unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(legacy, output_bytes(&r));
+        let counters = counter_device_or_verify_fallback(&mut r);
+        if counters {
+            r.set_gpu_counters(true).unwrap();
+        }
+        for features in [[1, 1, 0, 0], [1, 0, 1, 0], [1, 0, 0, 1], [1, 1, 1, 1]] {
+            r.surface_uniform.water_features = features;
+            r.resize_water_inputs().unwrap();
+            r.draw(camera, &draws, None).unwrap();
+            r.wait().unwrap();
+            let pixels = output_bytes(&r);
+            assert!(
+                pixels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[..3] != [0, 0, 0])
+            );
+            if features[2] != 0 || features[3] != 0 {
+                assert_ne!(
+                    legacy, pixels,
+                    "bed/shore features must change visible river pixels"
+                );
+            }
+            if counters {
+                let frame = r.stats.completed.unwrap();
+                assert!(
+                    frame.passes[WATER_SCREEN_SPACE_PASS].is_some(),
+                    "water must actually draw"
+                );
+                assert!(
+                    frame.passes[WATER_INPUT_COPIES_PASS].is_some(),
+                    "input copies must be measured"
+                );
+            }
+        }
+        // Exercise the water path with the fog fixture supplied in Claude's #319 Mac check.
+        let clear_water = output_bytes(&r);
+        r.look.fog_density = 0.004;
+        r.look.height_fog = crate::settings::HeightFogSettings {
+            enabled: true,
+            base_height: 0.,
+            height_falloff: 0.08,
+            sky_distance: 600.,
+        };
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_ne!(clear_water, output_bytes(&r));
+        r.surface_uniform.water_features = [0; 4];
+        r.resize_water_inputs().unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        let legacy_fog = output_bytes(&r);
+        r.surface_uniform.water_features = [1, 0, 0, 0];
+        r.resize_water_inputs().unwrap();
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        assert_eq!(legacy_fog, output_bytes(&r));
+        r.surface_uniform.water_features = [1; 4];
+        r.resize_water_inputs().unwrap();
+        r.set_frames_in_flight(3).unwrap();
+        r.resize(128, 96).unwrap();
+        let (colour, depth) = r.water_inputs.as_ref().unwrap();
+        assert_eq!((colour.width(), colour.height()), (128, 96));
+        assert_eq!((depth.width(), depth.height()), (128, 96));
+        for _ in 0..4 {
+            r.draw(camera, &draws, None).unwrap();
+        }
+        r.wait().unwrap();
+        r.temporal = true;
+        r.reset_temporal_history();
+        for _ in 0..3 {
+            r.draw(camera, &draws, None).unwrap();
+        }
+        r.wait().unwrap();
+        if r.enable_metalfx(true).unwrap() {
+            for _ in 0..3 {
+                r.draw(camera, &draws, None).unwrap();
+            }
+            r.wait().unwrap();
+        }
+        r.surface_uniform.water_features[0] = 0;
+        r.resize_water_inputs().unwrap();
+        assert!(r.water_inputs.is_none());
+        r.draw(camera, &draws, None).unwrap();
+        r.wait().unwrap();
+        if counters {
+            assert!(r.stats.completed.unwrap().passes[WATER_SCREEN_SPACE_PASS].is_none());
+        }
+    }
+
     #[test]
     fn post_toggles_skip_work_and_half_targets_resize_for_each_aa_mode() {
         let camera = Camera {
